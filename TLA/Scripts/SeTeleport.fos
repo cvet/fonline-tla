@@ -1,0 +1,275 @@
+// FOS Server
+// Author: rifleman17
+/* Специальный энкаунтер "Телепортатор".
+   Положить в шкаф некоторое количество предметов и обменять их на что-то случайное такого же веса.
+   Если в шкафу - игрок, он обменяется координатами со случайным игроком в одном из городов.
+   Если в шкафу - нпц, нпц будет удален, вместо него появится агрессивный робот, Мистер Handy
+
+   42/63 - координаты телепорта
+ */
+
+#include "Tla"
+
+#pragma property Critter PrivateServer uint SETeleportEatId
+
+#pragma content Critter MrHandy   // Прототип нпц-робота (мистер Хенди), который будет помещен в телепорте, если пересылается нпц
+
+#define LIMIT_WEIGHT    ( 10000 ) // Ограничение на вес при передаче предметов
+#define MAX_WEIGHT      ( 50000 ) // Максимальный вес телепортируемых предметов
+
+#define STR_FIRST       ( 2500 )  // Случайный гав-гав собаки
+#define STR_LAST        ( 2507 )
+
+import void QuakeScreen( Map& map ) from "Effects";
+
+uint CountWeight( Map@ map, uint16 x, uint16 y )                          // Подсчет веса итемов, лежащих на некоей карте в указанных координатах
+{
+    if( !valid( map ) )
+        return 0;
+    Item@[] items;
+    map.GetItems( x, y, items );
+    uint weight = 0;
+    for( uint i = 0, l = items.length(); i < l; i++ )
+    {
+        weight += items[ i ].Weight;
+    }
+    DeleteItems( items );   // удаление всех итемов
+    return CLAMP( weight, 0, MAX_WEIGHT );
+}
+
+void AddRandomItems( Map @map, uint16 x, uint16 y, uint maxWeight )       // добавление случайного набора итемов на карту в указанные координаты
+{
+    if( !valid( map ) )
+        return;
+    hash[] pids;
+    // Сбор всех массивов в один
+    MergeArrays( pids, Pids_WeaponSmallGuns );
+    MergeArrays( pids, Pids_WeaponMelee );
+    MergeArrays( pids, Pids_WeaponEnergo );
+    MergeArrays( pids, Pids_WeaponBigGuns );
+    MergeArrays( pids, Pids_ArmorLight );
+    MergeArrays( pids, Pids_ArmorMedium );
+    MergeArrays( pids, Pids_ArmorHeavy );
+    MergeArrays( pids, Pids_Ammo );
+    MergeArrays( pids, Pids_Ammo );   // удвоенный шанс
+    MergeArrays( pids, Pids_AllDrugs );
+    MergeArrays( pids, Pids_MiscExplosions );
+    MergeArrays( pids, Pids_MiscPartsBasic );
+    MergeArrays( pids, Pids_MiscPartsBasic );
+    MergeArrays( pids, Pids_MiscPartsBasic ); // 4х шанс
+    MergeArrays( pids, Pids_MiscAllTools );
+    MergeArrays( pids, Pids_MiscOther );
+    MergeArrays( pids, Pids_MiscOther );      // удвоенный шанс
+    uint        curWeight = 0;
+    int16       triesNum = 150;               // максимум 150 попыток
+    uint        idx = 0;
+    hash        pid = 0;
+    const Item@ proto;
+    uint        len = pids.length();
+    uint        weight = 0;
+    uint        itemCount = 0;
+    while( triesNum > 0 && curWeight < maxWeight )
+    {
+        triesNum--;
+        itemCount = 1;
+        len = pids.length();                  // Длина массива могла измениться
+        idx = Random( 0, len - 1 );
+        pid = pids[ idx ];
+        if( Present( pid, Pids_ArmorHeavy ) ) // Тяжелая броня только в единственном экземпляре, не зависимо от прототипа и факта, влезет или нет
+        {
+            for( uint i = 0, l = Pids_ArmorHeavy.length(); i < l; i++ )
+            {
+                pids.removeAt( FindInArray( pids, Pids_ArmorHeavy[ i ] ) );
+            }
+        }
+        @ proto = GetProtoItem( pid );
+        weight = CLAMP( proto.Weight, 200, proto.Weight ); // Если предмет ничего не весит, считаем, что он весит 200 грамм
+        if( Present( pid, Pids_Ammo ) )
+        {
+            itemCount = Random( 1, 120 );                  // Патроны не должны быть в количестве = 1
+            weight *= itemCount;
+        }
+        if( curWeight + weight <= maxWeight )              // Подходит по весу
+        {
+            pids.removeAt( FindInArray( pids, pid ) );     // Предметы только по одному разу попадаются
+            curWeight += weight;
+            map.AddItem( x, y, pid, itemCount );
+        }
+    }
+}
+
+Critter@ GetCritterInPlace( Critter& player, int x, int y )                     // Поиск криттера на гексе карты
+{
+    Map@ map  = player.GetMap();
+    if( !valid( map ) )
+        return null;
+    return map.GetCritter( x, y );
+}
+
+Critter@ GetRandomPlayer()                                                     // Случайный игрок на произвольной карте с pid от Content::Location::den до Content::Location::replication_hell
+{
+    int       tries = 20;
+    uint      locPid = 0;
+    Map@[] maps;
+    Location@ loc;
+    Critter@[] players;
+    Critter@  player;
+    while( tries > 0 )
+    {
+        tries--;         // Счетчик для сокращения числа циклов
+
+        locPid = Random( Content::Location::den, Content::Location::replication_hell );
+        @ loc = GetLocationByPid( locPid, 0 );
+        if( !valid( loc ) )
+            continue;
+
+        maps.clear();
+        loc.GetMaps( maps );
+        players.clear();
+        for( uint i = 0; i < maps.length(); i++ )
+            maps[ i ].GetCritters( 0, FIND_LIFE | FIND_ONLY_PLAYERS, players );
+
+        if( players.length() > 0 )
+            return players[ Random( 0, players.length() - 1 ) ];
+    }
+    return null;
+}
+
+bool d_CheckIsPlayerInPlace( Critter& player, Critter@ npc, int x, int y )         // На карте с игроком в указанных координатах есть другой игрок
+{
+    Critter@ cr = GetCritterInPlace( player, x, y );
+    if( !valid( cr ) )
+        return false;
+    return cr.IsPlayer();
+}
+
+bool d_CheckIsNpcInPlace( Critter& player, Critter@ npc, int x, int y )             // В указанном месте есть НПЦ
+{
+    Critter@ cr = GetCritterInPlace( player, x, y );
+    if( !valid( cr ) )
+        return false;
+    return cr.IsNpc();
+}
+
+bool d_CheckIsNotAnyCritterInPlace( Critter& player, Critter@ npc, int x, int y )    // В указанном месте нет никого
+{
+    if( !valid( player.GetMap() ) )
+        return false;
+    return ( !d_CheckIsNpcInPlace( player, npc, x, y ) && !d_CheckIsPlayerInPlace( player, npc, x, y ) );
+}
+
+void r_ChangeItems( Critter& cr, Critter@ npc, int hexX, int hexY, int canOverweight ) // Замена итемов на некоем гексе карты на случайные итемы такого же веса
+{
+    Map@ map = cr.GetMap();
+    if( !valid( map ) )
+        return;
+    uint weight = CountWeight( map, hexX, hexY );
+    if( canOverweight < 1 )
+        weight = CLAMP( weight, 0, LIMIT_WEIGHT );
+    QuakeScreen( map );         // Спецэффекты
+    AddRandomItems( map, hexX, hexY, weight );
+}
+
+// Обмен координатами между игроком в указанных координатах и случайным другим игроком. Либо удаление нпц и добавление агрессивного боевого робота, если в координатах нпц.
+// Внимание - нет проверки, что нпц=мерк. Могут пропадать в неизвестном направлении.
+void r_SwapCritters( Critter& player, Critter@ npc, int hexX, int hexY )
+{
+    if( d_CheckIsNotAnyCritterInPlace( player, npc, hexX, hexY ) )
+        return;
+    Critter@ cr = GetCritterInPlace( player, hexX, hexY );
+    if( !valid( cr ) )
+        return;
+    Map@ map = cr.GetMap();
+    if( !valid( map ) )
+        return;
+    if( cr.IsNpc() )
+    {
+        DeleteNpc( cr );
+        Critter@ enemy = map.AddNpc( Content::Critter::MrHandy, hexX, hexY, 1, null, null );
+        if( valid( enemy ) )
+        {
+            Critter@[] players;
+            map.GetCritters( 0, FIND_LIFE | FIND_ONLY_PLAYERS, players );
+            for( uint i = 0, l = players.length(); i < l; i++ )
+            {
+                enemy.AddEnemyToStack( players[ i ].Id );
+            }
+        }
+    }
+    else
+    {
+        Critter@ newPlayer = GetRandomPlayer();
+        if( !valid( newPlayer ) )
+            return;
+        Map@ map2 = newPlayer.GetMap();
+        if( !valid( map2 ) )
+            return;
+        uint16 hexX2 = newPlayer.HexX;
+        uint16 hexY2 = newPlayer.HexY;
+        newPlayer.TransitToGlobal( false );
+        cr.TransitToMap( map2.Id, hexX2, hexY2, cr.Dir );
+        newPlayer.TransitToMap( map.Id, hexX, hexY, newPlayer.Dir );
+    }
+}
+
+// Скрипт собаки, которая будет подбирать съедобные итемы (полностью скопировано из den_poorman.fos)
+// Собака нужна для того, чтобы ее можно было провести в телепортатор
+
+// Cъедобные для собаки итемы
+const uint[] EatPid =
+{
+    Content::Item::iguana_on_a_stick, Content::Item::meat_on_a_stick,
+    Content::Item::box_of_noodles, Content::Item::frozen_dinner,
+    Content::Item::meat_jerky, Content::Item::cheezy_poofs, Content::Item::cookie,
+    Content::Item::smitty_meal, Content::Item::meat
+};
+
+void _DogInit( Critter& dog, bool firstTime )
+{
+    dog.IsNoHome = true;
+    dog.SetEvent( CRITTER_EVENT_SHOW_ITEM_ON_MAP, "_DogShowItemOnMap" );
+    dog.SetEvent( CRITTER_EVENT_HIDE_ITEM_ON_MAP, "_DogHideItemOnMap" );
+    dog.SETeleportEatId = 0; // Тут будет хранится Id итема, который мы хотим съесть.
+}
+
+void _DogShowItemOnMap( Critter& poorman, Item& item, bool added, Critter@ dropper )
+{
+    // Можем ли мы сейчас подойти.
+    if( poorman.SETeleportEatId != 0 )
+        return;
+    if( not poorman.IsNoPlanes() )
+        return;
+
+    // Смотрим, съедобен ли итем.
+    for( uint i = 0; i < EatPid.length(); i++ )
+    {
+        if( item.ProtoId != EatPid[ i ] )
+            continue;
+
+        poorman.SayMsg( SAY_NORM_ON_HEAD, TEXTMSG_TEXT, Random( STR_FIRST, STR_LAST ) );
+        AddPickPlane( poorman, 0, item, 0, true );
+        poorman.SETeleportEatId = item.Id;
+    }
+}
+
+void _DogHideItemOnMap( Critter& poorman, Item& item, bool deleted, Critter@ picker )
+{
+    // Проверим, может кто-то поднял нашу еду.
+    if( poorman.SETeleportEatId != item.Id )
+        return;
+    poorman.SETeleportEatId = 0;
+    if( not valid( picker ) )
+        return;
+    if( picker.Id != poorman.Id )
+    {
+        _NpcEraseAllPlanesPick( poorman );
+        poorman.Wait( 3000 );
+    }
+    // Это мы сами подняли, едим.
+    else
+    {
+        poorman.DeleteItem( item.ProtoId, item.Count );
+        poorman.Say( SAY_NORM_ON_HEAD, "Гав!" );
+        poorman.Wait( 3000 );
+    }
+}

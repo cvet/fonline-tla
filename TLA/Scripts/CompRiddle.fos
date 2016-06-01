@@ -1,0 +1,279 @@
+// FOS Server
+
+// Скрипт взлома компьютеров
+// Генерится последовательность из 4 неповторяющихся цифр, игроку дается от 4 до 6 попыток угадать последовательность
+
+#include "Tla"
+
+#pragma property Critter PrivateServer uint CompRiddleMapId // Переменная ид карты, на которой стоит сценери
+#pragma property Critter PrivateServer uint CompRiddleHexX  // Переменная с координатой сценери по оси X
+#pragma property Critter PrivateServer uint CompRiddleHexY  // Переменная с координатой сценери по оси Y
+
+#pragma property Map PrivateServer dict< uint, uint8[] > CompRiddleData
+
+#define STR_INFO           ( 400 )                          // Для взлома компьютера нужно правильно подобрать последовательность из 4 неповторяющихся цифр.\nСимвол "*" означает, что цифра присутствует в коде, но неверно указано ее положение.\nСимвол "-" означает, что цифра не используется в коде.\nДо блокировки осталось@lex num@ попыток.
+#define STR_BLOCKED        ( 401 )                          // Активирована защита от взлома. Система заблокирована
+#define STR_SOLVED         ( 402 )                          // Вам удалось обойти систему защиты!
+#define STR_HEADER         ( 403 )                          // Система авторизации. Введите код доступа.
+#define STR_ANSWER         ( 404 )                          // Ответ системы: @lex code@.
+#define STR_CAMERA         ( 405 )                          // Вы подключились к спутнику связи Poseidon NET.
+#define _GetNumbers        { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9 }
+#define _GetXP             # (player) ( player.SkillScience * player.Level / 5 )
+#define MAX_CODE_LENGTH    ( 4 )
+#define MAX_SOLVE_TRIES    ( Random( 4, 6 ) )
+#define TIME_RESET         ( 60 * 60 * 24 ) // 24 часа. После этого компьютер можно снова попробовать взломать - генерится новый код или удаляется запись, если карта не существует.
+
+uint MakeDataKey( uint16 hexX, uint16 hexY )
+{
+    return ( hexX << 16 ) | hexY;
+}
+
+ComputerRiddleInfo@ GetRiddleInfo( Critter& player )
+{
+    uint mapId = player.CompRiddleMapId;
+    uint hexX = player.CompRiddleHexX;
+    uint hexY = player.CompRiddleHexY;
+    if( mapId == 0 || !valid( player.GetMap() ) || mapId != player.GetMap().Id ||
+        hexY == 0 || hexY == 0 || GetDistantion( player.HexX, player.HexY, hexX, hexY ) > 3 )
+        return null;
+    return GetRiddleInfo( mapId, hexX, hexY );
+}
+
+ComputerRiddleInfo@ GetRiddleInfo( int mapId, uint16 hexX, uint16 hexY )
+{
+    uint key = MakeDataKey( hexX, hexY );
+    uint8[] data = GetMap( mapId ).CompRiddleData.get( key, array< uint8 >() );
+    if( data.length() > 0 )
+        return ComputerRiddleInfo( mapId, hexX, hexY );
+    return null;
+}
+
+class ComputerRiddleInfo
+{
+    uint   MapId;
+    uint16 HexX;
+    uint16 HexY;
+    uint[] Code;
+    uint8  TriesLeft;
+
+    ComputerRiddleInfo( uint mapId, uint16 hx, uint16 hy )
+    {
+        MapId = mapId;
+        HexX = hx;
+        HexY = hy;
+        Load();
+    }
+
+    ComputerRiddleInfo( Map & map, Item & computer )
+    {
+        MapId = map.Id;
+        HexX = computer.HexX;
+        HexY = computer.HexY;
+        Load();
+    }
+
+    string SCode()
+    {
+        string code = "";
+        for( uint i = 0, l = Code.length(); i < l; i++ )
+            code += Code[ i ];
+        return code;
+    }
+
+    // Сериализация
+    void Save()
+    {
+        Serializator save;
+        save.Set( MapId );
+        save.Set( HexX );
+        save.Set( HexY );
+        save.Set( Code );
+        save.Set( TriesLeft );
+        uint key = MakeDataKey( HexX, HexY );
+        Map@ map = GetMap( MapId );
+        auto compRiddleData = map.CompRiddleData;
+        compRiddleData[ key ] = save.GetData();
+        map.CompRiddleData = compRiddleData;
+    }
+
+    void Load()
+    {
+        Serializator load;
+        uint         key = MakeDataKey( HexX, HexY );
+        if( load.SetData( GetMap( MapId ).CompRiddleData.get( key, array< uint8 >() ) ) > 0 )
+        {
+            load.Get( MapId );
+            load.Get( HexX );
+            load.Get( HexY );
+            load.Get( Code );
+            load.Get( TriesLeft );
+        }
+        else
+        {
+            GenerateCode();
+            Save();
+            uint[] values = { MapId, HexX, HexY };
+            SavedDeferredCall( GAME_SECOND_TO_TICK( TIME_RESET ), ResetRiddle, values );
+        }
+    }
+
+    void Erase()
+    {
+        uint key = MakeDataKey( HexX, HexY );
+        Map@ map = GetMap( MapId );
+        auto compRiddleData = map.CompRiddleData;
+        compRiddleData.remove( key );
+        map.CompRiddleData = compRiddleData;
+    }
+
+    void GenerateCode()     // Генерирует новый код и сбрасывает число оставшихся попыток
+    {
+        uint[] numbers = _GetNumbers;
+        uint index = 0;
+        Code.clear();
+        while( Code.length() < MAX_CODE_LENGTH )
+        {
+            index = Random( 0, numbers.length() - 1 );
+            Code.insertLast( numbers[ index ] );
+            numbers.removeAt( index );
+        }
+        TriesLeft = MAX_SOLVE_TRIES;
+    }
+
+    // Попытка угадать пароль
+    // Возвращает true - если пароль угадан, false - если нет
+    // Правильно угаданный символ отображается как есть
+    // Неправильно угаданный - отображается минус
+    // Позиция не угадана, угадана цифра - отображается звезда
+    bool TrySolveRiddle( Critter& player, string codePlayer, string& codeAnswer )
+    {
+        if( TriesLeft < 1 )
+        {
+            player.SayMsg( SAY_NETMSG, TEXTMSG_TEXT, STR_BLOCKED );
+            return false;
+        }
+        string charPlayer = "";
+        string charReal = "";
+        string codeReal = SCode();
+        bool   charFound = false;
+        codeAnswer = "";
+
+        for( uint i = 0, l = codePlayer.length(); i < MAX_CODE_LENGTH && i < l; i++ )
+        {
+            charFound = false;
+            charPlayer = codePlayer[ i ];
+            for( uint j = 0, len = codeReal.length(); j < MAX_CODE_LENGTH && j < len && !charFound; j++ )
+            {
+                charReal = codeReal[ j ];
+                if( charReal == charPlayer )
+                {
+                    charFound = true;
+                    if( i == j )
+                        codeAnswer += Code[ j ];
+                    else
+                        codeAnswer += "*";
+                }
+            }
+            if( !charFound )
+                codeAnswer += "-";
+        }
+
+        TriesLeft--;
+        Save();
+
+        if( codeReal == codeAnswer )
+        {
+            TriesLeft = 0;
+            Save();
+            return true;
+        }
+        return false;
+    }
+}
+
+void ResetRiddle( uint[]& values )
+{
+    ComputerRiddleInfo@ riddle = GetRiddleInfo( values[ 0 ], values[ 1 ], values[ 2 ] );
+    if( valid( riddle ) )
+    {
+        if( valid( GetMap( values[ 0 ] ) ) )
+        {
+            riddle.GenerateCode();
+            riddle.Save();
+            SavedDeferredCall( GAME_SECOND_TO_TICK( TIME_RESET ), ResetRiddle, values );
+        }
+        else
+        {
+            riddle.Erase();
+        }
+    }
+}
+
+bool s_Use( Critter& player, const Item& scenery, CritterProperty skill, Item@ item )
+{
+    if( skill == SkillScience && !valid( item ) )
+    {
+        player.Wait( 1000 );
+
+        ComputerRiddleInfo@ info = ComputerRiddleInfo( player.GetMap(), scenery );
+        if( !valid( info ) )
+            return false;
+
+        if( info.TriesLeft == 0 )
+        {
+            player.SayMsg( SAY_NETMSG, TEXTMSG_TEXT, STR_BLOCKED );
+            return true;
+        }
+        player.SayMsg( SAY_NETMSG, TEXTMSG_TEXT, STR_INFO, "$num" + info.TriesLeft );
+
+        player.CompRiddleMapId = player.GetMap().Id;
+        player.CompRiddleHexX = scenery.HexX;
+        player.CompRiddleHexY = scenery.HexY;
+        player.ShowScreen( SCREEN_SAY, 0, "answer_TrySolve" );
+        player.SayMsg( SAY_SAY_TITLE, TEXTMSG_TEXT, STR_HEADER );
+        player.Say( SAY_SAY_TEXT, "????" );
+        return true;
+    }
+    return false;
+}
+
+void answer_TrySolve( Critter& player, uint answerI, string& answerS )
+{
+    ComputerRiddleInfo@ info = GetRiddleInfo( player );
+    if( valid( info ) )
+    {
+        string code = "";
+        bool   solved = info.TrySolveRiddle( player, answerS, code );
+        player.SayMsg( SAY_NETMSG, TEXTMSG_TEXT, STR_ANSWER, "$pcode" + answerS + "$code" + code );
+        if( solved )
+        {
+            player.SayMsg( SAY_NETMSG, TEXTMSG_TEXT, STR_SOLVED );
+            player.Experience += _GetXP( player );
+            player.SayMsg( SAY_NETMSG, TEXTMSG_TEXT, STR_CAMERA );
+            DeferredCall( 500, ShowCamera, player.Id );
+        }
+    }
+}
+
+void ShowCamera( uint value )
+{
+    Critter@ cr = GetCritter( value );
+    if( valid( cr ) )
+    {
+        Location@[] locations;
+        if( GetLocations( cr.WorldX, cr.WorldY, 300, locations ) > 0 )
+        {
+            Location@ loc = locations[ Random( 0, locations.length() - 1 ) ];
+            if( valid( loc ) )
+            {
+                Map@ map = loc.GetMapByIndex( 0 );
+                if( valid( map ) )
+                {
+                    uint16 hx = 0, hy = 0;
+                    if( map.GetEntireCoords( 0, 0, hx, hy ) )
+                        cr.ViewMap( map, 50, hx, hy, 5 );
+                }
+            }
+        }
+    }
+}

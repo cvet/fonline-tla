@@ -1,0 +1,359 @@
+// FOS Server
+// Author: rifleman17
+// Скрипты для квестовой линии "Гвардеец Города-Убежища"
+
+#include "Tla"
+#include "SquadMarch"
+
+#pragma property Critter Protected     uint8 VCHartmanMarch      Group = Quests, Quest = 8823, Max = 4
+#pragma property Critter Protected     uint8 VCHartmannClearCave Group = Quests, Quest = 8832, Max = 4
+#pragma property Critter PrivateServer uint8 VCDeadAllyCounter Max = 10
+#pragma property Critter PrivateServer uint8 VCGuardRank       Max = 4
+#pragma property Critter PrivateServer uint  VCReconCaveId
+#pragma property Critter PrivateServer uint  VCGuardsmanTriggerPlayerId
+#pragma property Global  PrivateServer bool  VCHartmanMarchStatus
+
+import void SetDeterioration( Item& item, int deteriorationProcent )  from "Repair";
+import int  GetDeteriorationProcent( Item& item ) from "Repair";
+import bool SetKnownLoc( Critter& cr, bool byId, uint locNum ) from "Location";
+
+// Квест "Самоделкин":
+//  Тренировка по надлежащему уходу за оружием
+//  Выдача двух сломанных Штурмовых винтовок
+void r_GiveWearItems( Critter& player, Critter@ npc, int pid, int count, int deteriorationPercent )
+{
+    Item@ item;
+    for( int i = 0; i < count; i++ )
+    {
+        @item = player.AddItem( pid, 1 );
+        if( !valid( item ) )
+            continue;
+        SetDeterioration( item, deteriorationPercent );
+    }
+}
+
+bool d_CheckWear( Critter& player, Critter@ npc, int pid, int count, int deteriorationPercent )
+{
+    if( count == 0 )
+        return false;
+    Item@ item;
+    Item@[] items;
+    if( player.GetItems( -1, items ) == 0 )
+        return false;
+    int num = 0;
+    for( uint i = 0, l = items.length(); i < l; i++ )
+    {
+        @item = items[ i ];
+        if( !valid( item ) || int(item.ProtoId) != pid )
+            continue;
+        if( GetDeteriorationProcent( item ) <= deteriorationPercent )
+            num++;
+    }
+    return ( num >= count );
+}
+
+// Квест "Строевая подготовка":
+//  Персонаж должен встать в одну линию с НПЦ-гвардейцами и повторять их движения по команде капитана Хартманна
+#define ROLE_MARCH             ( 91 )        // Номер роли НПЦ, которые принимают участие в марше
+#define ROLE_COMMANDER         ( 92 )        // Хартманн
+#define STR_RIGHT_POSITION     ( 5915 )      // Вы в правильной позиции. Оставайтесь на месте до первой команды. Равнение на середину!
+#define STR_WRONG_POSITION     ( 5916 )      // Да сколько можно? Стать в строй, черт тебя дери! Иначе отправлю к мамочке!
+#define STR_MARCH_FAILED       ( 9 )         // Это чучело безнадеждно. Я так и думал.
+#define STR_MARCH_COMPLETED    ( 10 )        // Неплохо... Неплохо. Не ожидал.
+#define STR_LOOSE              ( 5917 )      // Вы что-то сделали не так. Задание провалено.
+#define POS_X                  ( 65 )        // Позиция игрока в начале квеста
+#define POS_Y                  ( 132 )
+#define LAST_ORDER             ( 7 )         // Последний приказ
+
+// Обработка наступания игроком на триггер перед началом тренировки
+// Служит сигналом к началу
+void t_Enter( Critter& player, const Item& trigger, bool entered, uint8 dir )
+{
+    if( !player.IsPlayer() || !entered )
+        return;
+    if( player.VCHartmanMarch != 1 || Globals.VCHartmanMarchStatus )
+        return;
+    player.Wait( 0 );
+    player.SayMsg( SAY_NETMSG, TEXTMSG_TEXT, STR_RIGHT_POSITION );
+    Map@     map = player.GetMap();
+    Critter@ cr = map.GetNpc( ROLE_COMMANDER, FIND_LIFE | FIND_ONLY_NPC, 0 );
+    if( !valid( cr ) || cr.VCGuardsmanTriggerPlayerId > 0 )
+        return;
+    uint[] values = { cr.Id, player.Id, 0 };
+    cr.VCGuardsmanTriggerPlayerId = player.Id;    // Сохранение кода игрока, чтобы нпц не спамил свои реплики при многократных входах-выходах на гекс
+    player.VCHartmanMarch = 2;
+    DeferredCall( SECOND_TICKS( 3 ), TimeToStart, values );
+    SavedDeferredCall( MINUTE_TICKS( 15 ), ResetCommander, values );
+}
+
+// Контрольная очистка переменных через 15 реальных минут, если что-то пошло не так, и все данные не удалились
+void ResetCommander( uint[]& values )
+{
+    Critter@ cr = GetCritter( values[ 0 ] );
+    uint     idPlayer = values[ 1 ];
+    if( !valid( cr ) || cr.VCGuardsmanTriggerPlayerId != idPlayer )
+        return;         // Если уже другой персонаж занимается строевой подготовкой, для него будет персональный эвент
+    SquadCommander@ cmdr = SquadCommander( cr );
+    if( valid( cmdr ) )
+    {
+        cmdr.Load();
+        cmdr.Erase();
+    }
+    ResetCommander( cr );
+}
+
+// Сброс глобальной переменной и переменных командира
+void ResetCommander( Critter& cr )
+{
+    cr.VCGuardsmanTriggerPlayerId = 0;
+    Globals.VCHartmanMarchStatus = false;
+}
+
+// Проверка, что игрок в нужной позиции и запуск очереди приказов
+void TimeToStart( uint[]& values )
+{
+    Critter@ npc    = GetCritter( values[ 0 ] );
+    Critter@ player = GetCritter( values[ 1 ] );
+    if( !valid( npc ) || !valid( player ) )
+        return;
+    if( player.HexX != POS_X || player.HexY != POS_Y ) // Игрок не находится в нужной позиции
+    {
+        if( values[ 2 ] > 5 )                          // Максимум 5 проверок, потом заново
+        {
+            ResetCommander( npc );
+            return;
+        }
+        values[ 2 ]++;
+        npc.SayMsg( SAY_SHOUT_ON_HEAD, TEXTMSG_TEXT, STR_WRONG_POSITION );
+        DeferredCall( SECOND_TICKS( 5 ), TimeToStart, values );
+        return;
+    }
+    if( Globals.VCHartmanMarchStatus )
+    {
+        ResetCommander( npc );
+        return;
+    }
+    Globals.VCHartmanMarchStatus = true;
+    Map@            map = npc.GetMap(); // Поиск нпц-гвардейцев
+    Critter@[] critters;
+    uint            num = map.GetNpcCount( ROLE_MARCH, FIND_LIFE | FIND_ONLY_NPC );
+    uint[] values_new = { 0, npc.Id, player.Id };
+    SquadCommander@ cmdr = SquadCommander( npc );
+    cmdr.Squad.insertLast( player.Id );
+    for( uint i = 0; i < num; i++ )
+    {
+        Critter@ cr = map.GetNpc( ROLE_MARCH, FIND_LIFE | FIND_ONLY_NPC, i );
+        if( valid( cr ) )
+        {
+            MarchQueue@ q = MarchQueue( cr );
+            q.Erase();
+            q.AddOrder( DefineDirection( 5, 0, 0 ) );
+            q.AddOrder( DefineMove( 3, 5, false, 0, 0 ) );
+            q.AddOrder( DefineDirection( 2, 0, 0 ) );
+            q.AddOrder( DefineArmWeapon( true, 0, 0 ) );
+            q.AddOrder( DefineArmWeapon( false, 0, 0 ) );
+            q.AddOrder( DefineMove( 5, 2, true, 0, 0 ) );
+            q.AddOrder( DefineDirection( 5, 0, 0 ) );
+            q.AddOrder( DefineMove( 2, 5, false, 0, 0 ) );
+            q.Save();
+            cmdr.Squad.insertLast( cr.Id );
+        }
+    }
+    cmdr.Save();
+    MarchQueue@ q = MarchQueue( player );
+    q.Erase();
+    q.AddOrder( DefineDirection( 5, 0, 0 ) );
+    q.AddOrder( DefineMove( 3, 5, false, 0, 0 ) );
+    q.AddOrder( DefineDirection( 2, 0, 0 ) );
+    q.AddOrder( DefineArmWeapon( true, 0, 0 ) );
+    q.AddOrder( DefineArmWeapon( false, 0, 0 ) );
+    q.AddOrder( DefineMove( 5, 2, true, 0, 0 ) );
+    q.AddOrder( DefineDirection( 5, 0, 0 ) );
+    q.AddOrder( DefineMove( 2, 5, false, 0, 0 ) );
+    q.Save();
+    DeferredCall( SECOND_TICKS( 3 ), NextGuardOrder, values_new );
+}
+
+// Время отдавать новый приказ
+void NextGuardOrder( uint[]& values )
+{
+    Critter@ cr = GetCritter( values[ 1 ] );
+    if( !valid( cr ) )
+        return;
+
+    SquadCommander@ cmdr = SquadCommander( cr );
+    cmdr.Load();
+    if( cmdr.CheckCommandExecuted() )
+    {
+        cmdr.Command( values[ 0 ] );
+        values[ 0 ]++;
+    }
+    else
+    {
+        cr.SayMsg( SAY_NORM, TEXTMSG_DLG, DLGSTR( cr.DialogId, STR_MARCH_FAILED ) );
+        ResetCommander( cr );
+        cmdr.Erase();
+        return;
+    }
+
+    if( values[ 0 ] == LAST_ORDER )
+    {
+        cr.SayMsg( SAY_NORM, TEXTMSG_DLG, DLGSTR( cr.DialogId, STR_MARCH_COMPLETED ) );
+        ResetCommander( cr );
+        cmdr.Erase();
+        Critter@ player = GetCritter( values[ 2 ] );
+        if( valid( player ) && player.VCHartmanMarch == 2 )
+            player.VCHartmanMarch = 3;
+        return;
+    }
+
+    DeferredCall( SECOND_TICKS( 6 ), NextGuardOrder, values );
+}
+
+// Бонусы Гвардии для игроков
+#define CTE_ID_SALARY        ( 224 )
+#define GAME_DAY             # (days) ( days * 24 * 60 * 60 )
+#define PRIVATE_MONEY        ( 68 )     // Жалование рядового
+#define JSERGEANT_MONEY      ( 98 )     // Жалование младшего сержанта
+#define SSERGEANT_MONEY      ( 151 )    // Жалование старшего сержанта
+#define LEUTENANT_MONEY      ( 360 )    // Жалование лейтенанта
+#define RANK_NONE            ( 0 )
+#define RANK_PRIVATE         ( 1 )
+#define RANK_JUN_SERGEANT    ( 2 )
+#define RANK_SEN_SERGEANT    ( 3 )
+#define RANK_LEUTENANT       ( 4 )
+
+// Ежедневное жалование
+void r_SetGuardSalary( Critter& player, Critter@ npc )
+{
+    player.AddTimeEvent( "cte_GuardsmanSalary", GAME_DAY( 1 ), CTE_ID_SALARY );
+}
+
+uint8 GetRank( Critter& cr )
+{
+    return cr.VCGuardRank;
+}
+
+uint cte_GuardsmanSalary( Critter& cr, int identifier, uint& rate )
+{
+    uint8 rank = GetRank( cr );
+    uint  money = 0;
+    switch( rank )
+    {
+    case RANK_PRIVATE:
+        money = PRIVATE_MONEY;
+        break;
+    case RANK_JUN_SERGEANT:
+        money = JSERGEANT_MONEY;
+        break;
+    case RANK_SEN_SERGEANT:
+        money = SSERGEANT_MONEY;
+        break;
+    case RANK_LEUTENANT:
+        money = LEUTENANT_MONEY;
+        break;
+    default:
+        break;
+    }
+    Map@ map = cr.GetMap();
+    if( valid( map ) && map.ProtoId >= Content::Map::repl_bank_den && map.ProtoId <= Content::Map::repl_ground4 )
+    {
+        return GAME_DAY( 5 );
+    }
+    cr.ReplicationMoney += money;
+    return GAME_DAY( 1 );
+}
+
+// Квест Пойди туда - не знаю куда
+void _MutantsCaveInit( Map& map, bool firstTime )
+{
+    map.SetEvent( MAP_EVENT_IN_CRITTER, "_CaveInCritter" );
+}
+
+void _CaveInCritter( Map& map, Critter& cr )
+{
+    Location@ loc = map.GetLocation();
+    if( valid( loc ) )
+        loc.AutoGarbage = true;
+    Critter@[] mutants;
+    if( map.GetCritters( 0, FIND_LIFE_AND_KO | FIND_ONLY_NPC, mutants ) > 0 )
+    {
+        for( uint i = 0, l = mutants.length(); i < l; i++ )
+        {
+            Critter@ npc = mutants[ i ];
+            if( !valid( npc ) )
+                continue;
+            if( !npc.CheckEnemyInStack( cr.Id ) )
+                npc.AddEnemyToStack( cr.Id );
+        }
+    }
+    if( cr.VCHartmannRecon == 2 )
+        cr.VCHartmannRecon = 3;
+}
+
+void _MutantsOutGroundInit( Map& map, bool firstTime )
+{
+    map.SetEvent( MAP_EVENT_IN_CRITTER, "_OutGroundInCritter" );
+    Location@ loc = map.GetLocation();
+    if( valid( loc ) )
+        SavedDeferredCall( DAY_TICKS( 3 ), DeleteQuestLocation, loc.Id );
+}
+
+void DeleteQuestLocation( uint value )
+{
+    Location@ loc = GetLocation( value );
+    if( valid( loc ) )
+        loc.AutoGarbage = true;
+}
+
+void _OutGroundInCritter( Map& map, Critter& cr )
+{
+    if( !cr.IsPlayer() )
+        return;
+    if( cr.VCHartmannRecon != 2 )
+        return;
+    Location@ loc = map.GetLocation();
+    if( valid( loc ) && cr.VCReconCaveId == 0 )
+    {
+        cr.VCReconCaveId = loc.Id;
+        loc.AutoGarbage = false;
+        SetKnownLoc( cr, true, loc.Id );
+    }
+}
+
+// Опасная Охота
+
+import void r_ShowLocation( Critter& player, Critter@ npc, int qVar, int counterVar, int locPid, int locX, int locY ) from "HostileLocationQuest";
+import void r_ShowLocation2( Critter& player, Critter@ npc, int qVar, int counterVar, int locPid, int locX, int locY ) from "HostileLocationQuest";
+
+void r_ShowCave( Critter& player, Critter@ npc )
+{
+    if( player.VCReconCaveId == 0 )
+        return;
+
+    Location@ loc = GetLocation( player.VCReconCaveId );
+    if( valid( loc ) && loc.ProtoId == Content::Location::vc_recon_mutants )
+    {
+        uint16 x = loc.WorldX;
+        uint16 y = loc.WorldY;
+        DeleteLocation( loc.Id );
+        r_ShowLocation( player, npc, int(CritterProperty::VCHartmannClearCave), int(CritterProperty::VCDeadAllyCounter), Content::Location::vc_recon, x, y );
+    }
+    else
+    {
+        uint16 x = 1168;
+        uint16 y = 418;
+        r_ShowLocation2( player, npc, int(CritterProperty::VCHartmannClearCave), int(CritterProperty::VCDeadAllyCounter), Content::Location::vc_recon, x, y );
+    }
+}
+
+// Нанимаемый мутант
+
+void _CharleyInit( Critter& cr, bool firstTime )
+{
+    cr.MaxLifeBase = 600;
+    cr.CurrentHp = cr.MaxLife;
+    cr.SkillBarter = 1;
+    cr.ActionPointsBase = 12;
+    cr.SkillBigGuns = 250;
+}

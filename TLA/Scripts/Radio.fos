@@ -1,0 +1,487 @@
+// FOS Server Client
+// Author: cvet
+// Server and client stuff for radio
+
+#include "Tla"
+
+// / Server
+#ifndef __CLIENT
+
+void EditRadioSettings( Critter& player, Item& radio ) // Export
+{
+    player.RunClientScript( "ShowEditScreen", radio.Id, 0, 0, null, null );
+}
+
+void unsafe_ChangeChannel( Critter& player, int radioId, int radioChannel, int, string@, int[] @ )
+{
+    Item@ radio = player.GetItemById( radioId );
+    if( not valid( radio ) || not radio.IsRadio )
+        return;
+    if( FLAG( radio.RadioFlags, RADIO_DISABLE_SHIFT_CHANNEL ) )
+        return;
+
+    radio.RadioChannel = CLAMP( radioChannel, 0, 0xFFFF );
+}
+
+void unsafe_ChangeActivity( Critter& player, int radioId, int isSend, int, string@, int[] @ )
+{
+    Item@ radio = player.GetItemById( radioId );
+    if( not valid( radio ) || not radio.IsRadio )
+        return;
+
+    if( isSend != 0 )
+    {
+        if( not FLAG( radio.RadioFlags, RADIO_DISABLE_SHIFT_SEND ) )
+            radio.RadioFlags ^= RADIO_DISABLE_SEND;
+    }
+    else
+    {
+        if( not FLAG( radio.RadioFlags, RADIO_DISABLE_SHIFT_RECV ) )
+            radio.RadioFlags ^= RADIO_DISABLE_RECV;
+    }
+}
+
+void unsafe_ChangeBroadcast( Critter& player, int radioId, int broadcastSend, int broadcastRecv, string@, int[] @ )
+{
+    Item@ radio = player.GetItemById( radioId );
+    if( not valid( radio ) || not radio.IsRadio )
+        return;
+
+    // Change send
+    if( not FLAG( radio.RadioFlags, RADIO_DISABLE_SHIFT_BC_SEND ) )
+    {
+        if( broadcastSend == RADIO_BROADCAST_WORLD || broadcastSend == RADIO_BROADCAST_LOCATION ||
+            broadcastSend == RADIO_BROADCAST_MAP || broadcastSend == RADIO_BROADCAST_ZONE( 2 ) ||
+            broadcastSend == RADIO_BROADCAST_ZONE( 5 ) )
+        {
+            radio.RadioBroadcastSend = broadcastSend;
+        }
+    }
+
+    // Change recv
+    if( not FLAG( radio.RadioFlags, RADIO_DISABLE_SHIFT_BC_RECV ) )
+    {
+        if( broadcastRecv == RADIO_BROADCAST_WORLD || broadcastRecv == RADIO_BROADCAST_LOCATION ||
+            broadcastRecv == RADIO_BROADCAST_MAP || broadcastRecv == RADIO_BROADCAST_ZONE( 2 ) ||
+            broadcastRecv == RADIO_BROADCAST_ZONE( 5 ) )
+        {
+            radio.RadioBroadcastRecv = broadcastRecv;
+        }
+    }
+}
+
+void SetInHand( Critter& player, int flags, int broadcastSend, int broadcastRecv )
+{
+    Item@ item = player.GetItem( 0, SLOT_HAND1 );
+    if( not valid( item ) )
+        return;
+
+    item.IsRadio = true;
+    item.RadioFlags = uint8( flags );
+    item.RadioBroadcastSend = uint8( broadcastSend );
+    item.RadioBroadcastRecv = uint8( broadcastRecv );
+}
+
+void UnsetInHand( Critter& player, int, int, int )
+{
+    Item@ item = player.GetItem( 0, SLOT_HAND1 );
+    if( valid( item ) )
+        item.IsRadio = false;
+}
+
+#endif // !__CLIENT
+
+// / Client
+#ifdef __CLIENT
+class ScreenMain : GUIScreen
+{
+    TextboxChannel@ Channel;
+    ButtonSendRecv@ Send;
+    ButtonSendRecv@ Recv;
+    ButtonBroadcast@[] BroadcastSend;
+    ButtonBroadcast@[] BroadcastRecv;
+    int BroadcastSendType;
+    int BroadcastRecvType;
+
+    int RadioId;
+    int RadioChannel;
+    int RadioBroadcastSend;
+    int RadioBroadcastRecv;
+    int RadioFlags;
+
+    void OnShow( dictionary@ params ) override
+    {
+        // Store data
+        RadioId = int(params[ "ItemId" ]);
+        RadioChannel = int(params[ "RadioChannel" ]);
+        RadioBroadcastSend = int(params[ "RadioBroadcastRecv" ]);
+        RadioBroadcastRecv = int(params[ "RadioBroadcastSend" ]);
+        RadioFlags = int(params[ "RadioFlags" ]);
+
+        // Set actual GUI states
+        Channel.SetChannel( RadioChannel );
+
+        Send.SetState( not FLAG( RadioFlags, RADIO_DISABLE_SEND ) );
+        Recv.SetState( not FLAG( RadioFlags, RADIO_DISABLE_RECV ) );
+
+        BroadcastSendType = 0;
+        if( RadioBroadcastSend == RADIO_BROADCAST_WORLD )
+            BroadcastSendType = 1;
+        else if( RadioBroadcastSend == RADIO_BROADCAST_ZONE( 5 ) )
+            BroadcastSendType = 2;
+        else if( RadioBroadcastSend == RADIO_BROADCAST_ZONE( 2 ) )
+            BroadcastSendType = 3;
+        else if( RadioBroadcastSend == RADIO_BROADCAST_LOCATION )
+            BroadcastSendType = 4;
+        else if( RadioBroadcastSend == RADIO_BROADCAST_MAP )
+            BroadcastSendType = 5;
+        for( uint i = 0; i < BroadcastSend.length(); i++ )
+            BroadcastSend[ i ].SetState( false );
+        if( BroadcastSendType != 0 )
+            BroadcastSend[ BroadcastSendType - 1 ].SetState( true );
+
+        BroadcastRecvType = 0;
+        if( RadioBroadcastRecv == RADIO_BROADCAST_WORLD )
+            BroadcastRecvType = 1;
+        else if( RadioBroadcastRecv == RADIO_BROADCAST_ZONE( 5 ) )
+            BroadcastRecvType = 2;
+        else if( RadioBroadcastRecv == RADIO_BROADCAST_ZONE( 2 ) )
+            BroadcastRecvType = 3;
+        else if( RadioBroadcastRecv == RADIO_BROADCAST_LOCATION )
+            BroadcastRecvType = 4;
+        else if( RadioBroadcastRecv == RADIO_BROADCAST_MAP )
+            BroadcastRecvType = 5;
+        for( uint i = 0; i < BroadcastRecv.length(); i++ )
+            BroadcastRecv[ i ].SetState( false );
+        if( BroadcastRecvType != 0 )
+            BroadcastRecv[ BroadcastRecvType - 1 ].SetState( true );
+    }
+
+    void ChangeChannel()
+    {
+        if( RadioChannel == int(Channel.RadioChannel) )
+            return;
+        RadioChannel = Channel.RadioChannel;
+        RunServerScriptUnsafe( "unsafe_ChangeChannel", RadioId, RadioChannel, 0, null, null );
+        Message( TEXTMSG_GAME, STR_RADIO_CHANNEL_CHANGED );
+    }
+
+    void ChangeActivity( bool isSend )
+    {
+        int  shiftFlag = ( isSend ? RADIO_DISABLE_SHIFT_SEND : RADIO_DISABLE_SHIFT_RECV );
+        int  disabledFlag = ( isSend ? RADIO_DISABLE_SEND : RADIO_DISABLE_RECV );
+        uint cantShiftStr = ( isSend ? STR_RADIO_CANT_SHIFT_SEND : STR_RADIO_CANT_SHIFT_RECV );
+        uint beginStr = ( isSend ? STR_RADIO_BROADCAST_SEND_BEGIN : STR_RADIO_BROADCAST_RECV_BEGIN );
+        uint endStr = ( isSend ? STR_RADIO_BROADCAST_SEND_END : STR_RADIO_BROADCAST_RECV_END );
+
+        if( not FLAG( RadioFlags, shiftFlag ) )
+        {
+            RadioFlags ^= disabledFlag;
+            RunServerScriptUnsafe( "unsafe_ChangeActivity", RadioId, isSend ? 1 : 0, 0, null, null );
+
+            if( not FLAG( RadioFlags, disabledFlag ) )
+                Message( TEXTMSG_GAME, beginStr );
+            else
+                Message( TEXTMSG_GAME, endStr );
+        }
+        else
+        {
+            Message( TEXTMSG_GAME, cantShiftStr );
+        }
+
+        if( isSend )
+            Send.SetState( not FLAG( RadioFlags, disabledFlag ) );
+        else
+            Recv.SetState( not FLAG( RadioFlags, disabledFlag ) );
+    }
+
+    void ChangeBroadcast( bool isSend, int type )
+    {
+        int  shiftFlag = ( isSend ? RADIO_DISABLE_SHIFT_BC_SEND : RADIO_DISABLE_SHIFT_BC_RECV );
+        uint cantShiftStr = ( isSend ? STR_RADIO_CANT_SHIFT_BC_SEND : STR_RADIO_CANT_SHIFT_BC_RECV );
+        uint changeStr = ( isSend ? STR_RADIO_BROADCAST_SEND_CHANGE : STR_RADIO_BROADCAST_RECV_CHANGE );
+
+        if( ( RadioFlags & shiftFlag ) != 0 )
+        {
+            Message( TEXTMSG_GAME, cantShiftStr );
+            return;
+        }
+
+        if( isSend )
+            BroadcastSendType = type;
+        else
+            BroadcastRecvType = type;
+
+        int newBroadcastSend = RADIO_BROADCAST_WORLD;
+        if( BroadcastSendType == 2 )
+            newBroadcastSend = RADIO_BROADCAST_ZONE( 5 );
+        else if( BroadcastSendType == 3 )
+            newBroadcastSend = RADIO_BROADCAST_ZONE( 2 );
+        else if( BroadcastSendType == 4 )
+            newBroadcastSend = RADIO_BROADCAST_LOCATION;
+        else if( BroadcastSendType == 5 )
+            newBroadcastSend = RADIO_BROADCAST_MAP;
+        else
+            BroadcastSendType = 1;
+        int newBroadcastRecv = RADIO_BROADCAST_WORLD;
+        if( BroadcastRecvType == 2 )
+            newBroadcastRecv = RADIO_BROADCAST_ZONE( 5 );
+        else if( BroadcastRecvType == 3 )
+            newBroadcastRecv = RADIO_BROADCAST_ZONE( 2 );
+        else if( BroadcastRecvType == 4 )
+            newBroadcastRecv = RADIO_BROADCAST_LOCATION;
+        else if( BroadcastRecvType == 5 )
+            newBroadcastRecv = RADIO_BROADCAST_MAP;
+        else
+            BroadcastRecvType = 1;
+
+        if( RadioBroadcastSend == newBroadcastSend && RadioBroadcastRecv == newBroadcastRecv )
+            return;
+
+        RadioBroadcastSend = newBroadcastSend;
+        RadioBroadcastRecv = newBroadcastRecv;
+        RunServerScriptUnsafe( "unsafe_ChangeBroadcast", RadioId, RadioBroadcastSend, RadioBroadcastRecv, null, null );
+        Message( TEXTMSG_GAME, changeStr );
+
+        for( uint i = 0; i < BroadcastSend.length(); i++ )
+            BroadcastSend[ i ].SetState( false );
+        BroadcastSend[ BroadcastSendType - 1 ].SetState( true );
+        for( uint i = 0; i < BroadcastRecv.length(); i++ )
+            BroadcastRecv[ i ].SetState( false );
+        BroadcastRecv[ BroadcastRecvType - 1 ].SetState( true );
+    }
+}
+
+class TextboxChannel : GUITextInput
+{
+    ScreenMain@ Instance;
+    uint16      RadioChannel;
+
+    TextboxChannel( ScreenMain & instance )
+    {
+        @Instance = instance;
+        @Instance.Channel = this;
+    }
+
+    void OnInput( uint8 key ) override
+    {
+        string@ t = Text;
+
+        if( ( Instance.RadioFlags & RADIO_DISABLE_SHIFT_CHANNEL ) == 0 )
+        {
+            if( t.length() > 0 && t[ -1 ] == "\n" )
+                t[ -1 ] = "";
+
+            int channel = 0;
+            StrToInt( t, channel );
+            channel = CLAMP( channel, 0, 0xFFFF );
+            t = "" + channel;
+
+            RadioChannel = channel;
+            if( key == DIK_RETURN || key == DIK_NUMPADENTER )
+                Instance.ChangeChannel();
+        }
+        else
+        {
+            t = "" + RadioChannel;
+            Message( TEXTMSG_GAME, STR_RADIO_CANT_SHIFT_CHANNEL );
+        }
+    }
+
+    void SetChannel( uint16 channel )
+    {
+        RadioChannel = channel;
+        SetText( "" + channel, FONT_FALLOUT, FT_CENTERX | FT_CENTERY );
+        SetTextColor( COLOR_GREEN );
+    }
+}
+
+class ButtonRefresh : GUIButton
+{
+    ScreenMain@ Instance;
+
+    ButtonRefresh( ScreenMain & instance )
+    {
+        @Instance = instance;
+    }
+
+    void OnMouseClick( int click ) override
+    {
+        if( ( Instance.RadioFlags & RADIO_DISABLE_SHIFT_CHANNEL ) == 0 )
+            Instance.ChangeChannel();
+        else
+            Message( TEXTMSG_GAME, STR_RADIO_CANT_SHIFT_CHANNEL );
+    }
+}
+
+class ButtonSendRecv : GUIButton
+{
+    ScreenMain@ Instance;
+    bool        IsSend;
+
+    ButtonSendRecv( ScreenMain & instance, bool isSend )
+    {
+        @Instance = instance;
+        IsSend = isSend;
+        if( IsSend )
+            @Instance.Send = this;
+        else
+            @Instance.Recv = this;
+    }
+
+    void OnMouseClick( int click ) override
+    {
+        if( click == MOUSE_BUTTON_LEFT )
+            Instance.ChangeActivity( IsSend );
+    }
+
+    void SetState( bool state )
+    {
+        SetSwitch( state );
+    }
+}
+
+class ButtonBroadcast : GUIButton
+{
+    ScreenMain@ Instance;
+    bool        IsSend;
+    int         Type;
+
+    ButtonBroadcast( ScreenMain & instance, bool isSend, int type )
+    {
+        @Instance = instance;
+        IsSend = isSend;
+        Type = type;
+        if( isSend )
+            @Instance.BroadcastSend[ type - 1 ] = this;
+        else
+            @Instance.BroadcastRecv[ type - 1 ] = this;
+    }
+
+    void OnMouseClick( int click ) override
+    {
+        if( click == MOUSE_BUTTON_LEFT )
+            Instance.ChangeBroadcast( IsSend, Type );
+    }
+
+    void SetState( bool state )
+    {
+        SetSwitch( state );
+    }
+}
+
+void InitRadioScreen() // Export
+{
+    GUI_RegisterScreen( CLIENT_SCREEN_RADIO, CreateRadioScreen );
+}
+
+GUIScreen@ CreateRadioScreen()
+{
+    // Main screen
+    ScreenMain screen();
+    screen.SetBackgroundImage( GetIfaceIniStr( "RadioMainPic" ) );
+    screen.SetCloseOnMiss( true );
+
+    GUIText mainText();
+    mainText.Init( screen );
+    mainText.SetPosition( "RadioMainText" );
+    mainText.SetText( GetMsgStr( TEXTMSG_GAME, STR_RADIO_MAIN ), FONT_FALLOUT, FT_CENTERX | FT_CENTERY | FT_BORDERED );
+    mainText.SetTextColor( COLOR_SAND );
+
+    // Channel textbox
+    TextboxChannel textboxChannel( screen );
+    textboxChannel.Init( screen );
+    textboxChannel.SetPosition( "RadioChannel" );
+    textboxChannel.SetInputLength( 5 );
+
+    GUIText channelText();
+    channelText.Init( screen );
+    channelText.SetPosition( "RadioChannelText" );
+    channelText.SetText( GetMsgStr( TEXTMSG_GAME, STR_RADIO_CHANNEL ), FONT_FALLOUT, FT_CENTERX | FT_CENTERY | FT_BORDERED );
+    channelText.SetTextColor( COLOR_SAND );
+
+    // Refresh radio channel
+    ButtonRefresh buttonRefresh( screen );
+    buttonRefresh.Init( screen );
+    buttonRefresh.SetPosition( "RadioRefresh" );
+    buttonRefresh.SetPressedImage( GetIfaceIniStr( "RadioRefreshPicDn" ) );
+
+    GUIText refreshText();
+    refreshText.Init( screen );
+    refreshText.SetPosition( "RadioRefreshText" );
+    refreshText.SetText( GetMsgStr( TEXTMSG_GAME, STR_RADIO_REFRESH ), FONT_FALLOUT, FT_CENTERX | FT_CENTERY | FT_BORDERED );
+    refreshText.SetTextColor( COLOR_SAND );
+
+    // Broadcast
+    GUIText broadcastSendText();
+    broadcastSendText.Init( screen );
+    broadcastSendText.SetPosition( "RadioBroadcastSendText" );
+    broadcastSendText.SetText( GetMsgStr( TEXTMSG_GAME, STR_RADIO_BROADCAST_SEND ), FONT_FALLOUT, FT_CENTERY | FT_BORDERED );
+    broadcastSendText.SetTextColor( COLOR_SAND );
+    GUIText broadcastRecvText();
+    broadcastRecvText.Init( screen );
+    broadcastRecvText.SetPosition( "RadioBroadcastRecvText" );
+    broadcastRecvText.SetText( GetMsgStr( TEXTMSG_GAME, STR_RADIO_BROADCAST_RECV ), FONT_FALLOUT, FT_CENTERR | FT_CENTERY | FT_BORDERED );
+    broadcastRecvText.SetTextColor( COLOR_SAND );
+
+    ButtonSendRecv buttonSend( screen, true );
+    buttonSend.Init( screen );
+    buttonSend.SetPosition( "RadioBroadcastSend" );
+    buttonSend.SetPressedImage( GetIfaceIniStr( "RadioBroadcastSendPicDn" ) );
+
+    ButtonSendRecv buttonRecv( screen, false );
+    buttonRecv.Init( screen );
+    buttonRecv.SetPosition( "RadioBroadcastRecv" );
+    buttonRecv.SetPressedImage( GetIfaceIniStr( "RadioBroadcastRecvPicDn" ) );
+
+    screen.BroadcastSend.resize( 5 );
+    screen.BroadcastRecv.resize( 5 );
+    for( uint i = 1; i <= 5; i++ )
+    {
+        ButtonBroadcast buttonBroadcastSend( screen, true, i );
+        buttonBroadcastSend.Init( screen );
+        buttonBroadcastSend.SetPosition( "RadioBroadcastSend" + i );
+        buttonBroadcastSend.SetPressedImage( GetIfaceIniStr( "RadioBroadcastSend" + i + "PicDn" ) );
+
+        ButtonBroadcast buttonBroadcastRecv( screen, false, i );
+        buttonBroadcastRecv.Init( screen );
+        buttonBroadcastRecv.SetPosition( "RadioBroadcastRecv" + i );
+        buttonBroadcastRecv.SetPressedImage( GetIfaceIniStr( "RadioBroadcastRecv" + i + "PicDn" ) );
+
+        GUIText broadcastText();
+        broadcastText.Init( screen );
+        broadcastText.SetPosition( "RadioBroadcast" + i + "Text" );
+        broadcastText.SetText( GetMsgStr( TEXTMSG_GAME, STR_RADIO_BROADCAST1 + i - 1 ), FONT_FALLOUT, FT_CENTERX | FT_CENTERY | FT_BORDERED );
+        broadcastText.SetTextColor( COLOR_SAND );
+    }
+
+    return screen;
+}
+
+void ShowEditScreen( int itemId, int, int, string@, int[] @ )
+{
+    Critter@ chosen = GetChosen();
+    if( not valid( chosen ) )
+        return;
+
+    Item@[] items;
+    uint count = chosen.GetItems( -1, items );
+    for( uint i = 0, j = items.length(); i < j; i++ )
+    {
+        Item@ item = items[ i ];
+        if( item.Id == uint( itemId ) )
+        {
+            dictionary params =
+            {
+                { "ItemId", item.Id },
+                { "RadioChannel", item.RadioChannel },
+                { "RadioBroadcastRecv", item.RadioBroadcastRecv },
+                { "RadioBroadcastSend", item.RadioBroadcastSend },
+                { "RadioFlags", item.RadioFlags }
+            };
+            ShowScreen( CLIENT_SCREEN_RADIO, params );
+        }
+    }
+}
+
+#endif // __CLIENT

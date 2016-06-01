@@ -1,0 +1,147 @@
+// FOS Server
+
+// Author: rifleman17
+// Квесты Брокен Хиллс
+#include "Tla"
+
+// Квест "Рога изобилия".
+
+#pragma property Critter PrivateServer uint8 BHHubHoloRemembered Max = 1
+#pragma property Critter PrivateServer uint8 BHUranDiscount      Max = 1
+
+#define STR_KILL_SABOTEUR    ( 5900 )
+#define HOLO_MSG_ID          ( 56 )
+#define STR_LOW_SCIENCE      ( 5901 )
+#define STR_HIGH_SCIENCE     ( 5902 )
+#define MIN_SCIENCE          ( 120 )
+#define URANIUM_DISCOUNT     ( 25 )                    // Скидка в процентах на уран для выполнившего квест
+
+import void _TraderInit( Critter& trader, bool firstTime ) from "Trader";
+import void _NpcInit( Critter& npc, bool firstTime ) from "EncounterNpc";
+import void _NpcDead( Critter& npc, Critter@ killer ) from "EncounterNpc";
+
+// Подсчет убитых саботажников для квеста
+void CountDeadSaboteurs( Critter& cr, Map@ map, Critter@ killer )
+{
+    if( !valid( map ) || !valid( killer ) || cr.IsPlayer() )
+        return;
+
+    uint pid = cr.ProtoId;
+    if( pid != Content::Critter::PressGangMale && pid != Content::Critter::PressGangFemale )
+        return;
+
+    if( killer.IsNpc() )
+        return;
+
+    Critter@[] grp;
+    Critter@ leader = killer.GetFollowLeader();
+    if( !valid( leader ) )
+        @leader = killer;
+
+    grp.insertLast( @leader );
+    leader.GetFollowGroup( FIND_LIFE, grp );
+    for( uint i = 0, l = grp.length(); i < l; i++ )
+    {
+        Critter@ player = grp[ i ];
+        if( !valid( player ) )
+            continue;
+        if( !player.IsPlayer() )
+            continue;
+
+        if( player.BHSuperNewTechnology != 2 )
+            continue;
+
+        if( player.BHDeadSaboteursCounter == 39 )
+            player.BHSuperNewTechnology = 3;
+
+        player.BHDeadSaboteursCounter += 1;
+        player.SayMsg( SAY_NETMSG, TEXTMSG_TEXT, STR_KILL_SABOTEUR, "$dead" + player.BHDeadSaboteursCounter );
+    }
+}
+
+void r_WriteHolodisk( Critter& player, Critter@ npc )
+{
+    Item@ holo = player.AddItem( Content::Item::holodisk, 1 );
+    if( !valid( holo ) )
+        return;
+
+    holo.SetScript( "_HoloInit" );
+}
+
+void _HoloInit( Item& holo, bool firstTime )
+{
+    holo.HolodiskNum = HOLO_MSG_ID;
+    holo.SetEvent( ITEM_EVENT_USE, "_HoloUse" );
+    holo.SetEvent( ITEM_EVENT_SKILL, "_HoloSkill" );
+}
+
+bool _HoloSkill( Item& item, Critter& cr, CritterProperty skill )
+{
+    return true;
+}
+
+bool _HoloUse( Item& item, Critter& cr, Critter@ onCritter, Item@ onItem, Item@ onScenery )
+{
+    if( valid( onItem ) || valid( onScenery ) )
+        return true;
+
+    if( cr.SkillScience >= MIN_SCIENCE )
+    {
+        cr.SayMsg( SAY_NETMSG, TEXTMSG_TEXT, STR_HIGH_SCIENCE );
+        if( cr.BHHubHoloRemembered == 0 )
+            cr.BHHubHoloRemembered = 1;
+    }
+    else
+    {
+        cr.SayMsg( SAY_NETMSG, TEXTMSG_TEXT, STR_LOW_SCIENCE );
+    }
+    return true;
+}
+
+void r_GrantPlayer( Critter& cr, Critter@ npc )
+{
+    cr.RadiationResistanceBase += 5;
+}
+
+void _GhoulTraderInit( Critter& cr, bool firstTime )
+{
+    _TraderInit( cr, firstTime );
+    cr.SetEvent( CRITTER_EVENT_BARTER, "_GhoulBarter" );
+}
+
+bool _GhoulBarter( Critter& cr, Critter& player, bool attach, uint barterCount )
+{
+    bool setDisc = false;
+    if( attach )
+    {
+        if( barterCount < 2 )
+        {
+            if( player.BHUranDiscount == 1 )
+                setDisc = true;
+        }
+    }
+    SedUraniumCost( cr, ( setDisc ? 100 - URANIUM_DISCOUNT : 100 ) );
+    return true;
+}
+
+void SedUraniumCost( Critter& cr, uint8 percent )
+{
+
+    Item@ ore = cr.GetItem( Content::Item::refined_ore, -1 );
+    if( !valid( ore ) )
+        return;
+    uint newCost = uint( ore.Cost * percent / 100 );
+    ore.Cost = newCost;
+}
+
+void _SaboteurInit( Critter& npc, bool firstTime )
+{
+    _NpcInit( npc, firstTime );
+    npc.SetEvent( CRITTER_EVENT_DEAD, "_SaboteurDead" );
+}
+
+void _SaboteurDead( Critter& npc, Critter@ killer )
+{
+    CountDeadSaboteurs( npc, npc.GetMap(), killer );
+    _NpcDead( npc, killer );
+}

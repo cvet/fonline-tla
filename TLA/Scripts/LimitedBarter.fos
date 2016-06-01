@@ -1,0 +1,83 @@
+// FOS Server
+// Author: rifleman17
+// Бартер с ограничениями. Нпц покупает или продает вещи только из ограниченного списка.
+
+#include "Tla"
+
+#pragma property Critter PrivateServer uint8[] LimitedBarterData
+
+class BarterLimit
+{
+    int CrId;               // Код криттера, к которому применяются ограничения
+    hash[] AllowedPidsSale; // Коды предметов, которые НПЦ продает
+    hash[] AllowedPidsBuy;  // Коды предметов, которые НПЦ покупает
+
+    BarterLimit( int crId )
+    {
+        CrId = crId;
+    }
+
+    bool BartedAllowed( int itemPid, bool isSale )
+    {
+        return ( isSale ? ( AllowedPidsSale.length() == 0 ||
+                            AllowedPidsSale.find( itemPid ) >= 0 ) :
+                 ( AllowedPidsBuy.length() == 0 ||
+                   AllowedPidsBuy.find( itemPid ) >= 0 ) );
+    }
+
+    void Load()
+    {
+        Serializator load;
+        if( load.SetData( GetCritter( CrId ).LimitedBarterData ) > 0 )
+        {
+            load.Get( AllowedPidsSale );
+            load.Get( AllowedPidsBuy );
+        }
+    }
+
+    void Save()
+    {
+        Serializator save;
+        save.Set( AllowedPidsSale );
+        save.Set( AllowedPidsBuy );
+        GetCritter( CrId ).LimitedBarterData = save.GetData();
+    }
+}
+
+void SaveBarterLimit( uint crId, hash[] sellLimits, hash[] buyLimits )
+{
+    BarterLimit bl = BarterLimit( crId );
+    GetCritter( crId ).LimitedBarterData = array< uint8 >();
+    if( sellLimits.length() > 0 )
+    {
+        bl.AllowedPidsSale.clear();
+        bl.AllowedPidsSale = sellLimits;
+    }
+    if( buyLimits.length() > 0 )
+    {
+        bl.AllowedPidsBuy.clear();
+        bl.AllowedPidsBuy = buyLimits;
+    }
+    bl.Save();
+}
+
+bool BarterAllowed( int crId, Item@[]& buyItems,  Item@[]& saleItems )
+{
+    if( GetCritter( crId ).LimitedBarterData.length() > 0 )
+    {
+        BarterLimit bl = BarterLimit( crId );
+        for( uint i = 0, l = buyItems.length(); i < l; i++ )
+        {
+            Item@ item = buyItems[ i ];
+            if( valid( item ) && !bl.BartedAllowed( item.ProtoId, false ) )
+                return false;
+        }
+        for( uint i = 0, l = saleItems.length(); i < l; i++ )
+        {
+            Item@ item = saleItems[ i ];
+            if( valid( item ) && !bl.BartedAllowed( item.ProtoId, false ) )
+                return false;
+        }
+    }
+    return true;
+}

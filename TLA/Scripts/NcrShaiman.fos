@@ -1,0 +1,204 @@
+// FOS Server
+
+#include "Tla"
+
+#pragma property Critter Protected     uint8 NcrShaimanProtest Group = Quests, Quest = 4269, Max = 7
+#pragma property Critter PrivateServer uint  NcrShaimanStringNum
+
+#define NOP_INFO             ( 2 )                                          // смещение, по которому хранится описание и заголовок предмета "нота протеста"
+#define BOSA_INFO            ( 2 )                                          // смещение, по которому хранится описание предемета "кейс с ответом братства"
+
+#define LOCKPICK_NEEDED      ( 150 )                                        // скил отмычек, необходимый чтобы открыть сейф
+#define MAX_RANDOM           ( 15 )                                         // верхний предел рандомайзера при определении шанса "открыл нет"
+
+#define STR_FAIL_LOCKPICK    ( 2960 )                                       // текст для чата при провале взлома
+#define STR_SUCC_LOCKPICK    ( 2961 )                                       // текст для чата при успешном взломе кейса
+
+#define HOLO_INFO_NUM        ( 54 )                                         // номер записи в FOHOLO для сохранения в архив игроку текста "письма паладинов" при взломе сейфа.
+
+#define BOS_SEARCH_RADIUS    ( 20 )                                         // радиус поиска дружественных нпц, которые подключаются к разговору
+
+#define STR_FIRST_CONF       ( 6 )                                          // первая строка разговора Братьев стали при написании письма
+#define STR_LAST_CONF        ( 22 )                                         // последняя строка
+
+#define BOS_COME_PRIORITY    ( 41 )                                         // приоритет плана "подойти к главному"
+#define BOS_WAIT_PRIORITY    ( 40 )                                         // приоритет плана "подождать у главного к главному"
+// NoteOfProtest - игроку выдается нота протеста, которую нужно отнести в убежище 15
+
+import bool GetFreeHex( Map& map, uint radius, uint16& hx, uint16& hy ) from "Caravan";
+import void AddHolodiskInfo( Critter& cr, uint holoNum ) from "Holodisk";
+
+void r_GiveNoP( Critter& player, Critter@ npc )
+{
+    Item@ item = player.AddItem( Content::Item::elron_field_rep, 1 );
+    if( !valid( item ) )
+        return;
+
+    item.Info = NOP_INFO;
+}
+
+void r_GiveBOSAnswer( Critter& player, Critter@ npc )
+{
+    Item@ item = player.AddItem( Content::Item::ramirez_box_closed, 1 );
+    if( !valid( item ) )
+        return;
+
+    item.SetScript( "_BOSAnswerInit" );
+}
+
+void _BOSAnswerInit( Item& item, bool firstTime )
+{
+    item.Info = BOSA_INFO;
+    item.SetEvent( ITEM_EVENT_SKILL, "e_BOSAnswerSkill" );
+}
+
+// комментарий одного из рядом стоящих НПЦ
+// strNum - номер строки с текстом
+// radius - радиус поиска нпц, который скажет реплику
+// sayType - тип разговора, которым будет сказана реплика
+// maxTalkers - максимальное число говорящих нпц
+void r_NpcCommentT( Critter& player, Critter@ npc, int strNum, int radius, int sayType, int maxTalkers )
+{
+    if( !valid( npc ) )
+        return;
+
+    if( sayType == 0 )
+        sayType = Random( 1, 3 );
+
+    Map @map = npc.GetMap();
+    if( !valid( map ) )
+        return;
+
+    Critter@[] critters;
+    map.GetCrittersHex( npc.HexX, npc.HexY, uint( radius ), FIND_LIFE | FIND_ONLY_NPC, critters );
+    if( critters.length() == 0 )
+        return;
+
+    uint talkers = Random( 1, maxTalkers );
+    if( talkers == 1 )
+    {
+        critters[ Random( 0, critters.length() - 1 ) ].SayMsg( uint( sayType ), TEXTMSG_DLG, DLGSTR( npc.DialogId, strNum ) );
+    }
+    else
+    {
+        for( uint i = 0; i < critters.length(); i++ )
+        {
+            if( critters[ i ].Id == npc.Id )
+                continue;
+            critters[ i ].SayMsg( uint( sayType ), TEXTMSG_DLG, DLGSTR( npc.DialogId, strNum ) );
+
+            if( i == talkers )
+                break;
+        }
+    }
+
+}
+void r_NpcComment( Critter& player, Critter@ npc, int strNum, int radius, int sayType )
+{
+    r_NpcCommentT( player, npc, strNum, radius, sayType, 3 );
+}
+
+void r_BeginConference( Critter& player, Critter@ npc )
+{
+    if( !valid( npc ) )
+        return;
+
+    npc.NcrShaimanStringNum = STR_FIRST_CONF;
+
+    Map@ map = npc.GetMap();
+    if( !valid( map ) )
+        return;
+
+    // собираем всех соседних братьев стали
+    Critter@[] critters;
+    map.GetCrittersHex( npc.HexX, npc.HexY, BOS_SEARCH_RADIUS, FIND_LIFE | FIND_ONLY_NPC, critters );
+    uint16 hX = npc.HexX;
+    uint16 hY = npc.HexY;
+
+    for( uint i = 0; i < critters.length(); i++ )
+    {
+        if( critters[ i ].Id == npc.Id )
+            continue;
+        if( !GetFreeHex( npc.GetMap(), 2, hX, hY ) )
+            continue;
+
+        AddWalkPlane( critters[ i ], BOS_COME_PRIORITY, hX, hY, GetDirection( hX, hY, npc.HexX, npc.HexY ), false, 0 );
+        AddMiscPlane( critters[ i ], BOS_WAIT_PRIORITY, __FullSecond + ( STR_LAST_CONF * 2 ) * 60, "NcrShaiman@plane_Misc" );
+    }
+
+    AddMiscPlane( npc, BOS_WAIT_PRIORITY, __FullSecond + 4 * 60, "NcrShaiman@plane_NextWisp" );
+}
+
+// говорим следующую фразу
+void plane_NextWisp( Critter& cr )
+{
+    r_NpcCommentT( cr, cr, cr.NcrShaimanStringNum, BOS_SEARCH_RADIUS, SAY_WHISP_ON_HEAD, 1 );
+    if( cr.NcrShaimanStringNum < STR_LAST_CONF )
+    {
+        AddMiscPlane( cr, BOS_WAIT_PRIORITY, __FullSecond + 60, "NcrShaiman@plane_NextWisp" );
+        cr.NcrShaimanStringNum += 1;
+    }
+    else
+    {
+        cr.NcrShaimanStringNum = 0;
+    }
+}
+
+bool d_CruzBusy( Critter& player, Critter@ cr )
+{
+    if( !valid( cr ) )
+        return false;
+
+    return cr.NcrShaimanStringNum != 0;
+}
+
+bool d_NotCruzBusy( Critter& player, Critter@ cr )
+{
+    if( !valid( cr ) )
+        return true;
+
+    return cr.NcrShaimanStringNum == 0;
+}
+
+void plane_Misc( Critter& cr )
+{
+    // nothing
+}
+
+// ~setvar 4269 0 1 0 3
+bool e_BOSAnswerSkill( Item& item, Critter& cr, CritterProperty skill )
+{
+    if( !cr.IsPlayer() )
+        return false;
+
+    if( skill != SkillLockpick )
+        return false;
+
+    if( cr.NcrShaimanProtest != 4 )
+        return false;
+
+    if( IS_TIMEOUT( cr.TimeoutSkLockpick ) )
+    {
+        cr.SayMsg( SAY_NETMSG, TEXTMSG_GAME, STR_SKILL_WEARINESS );
+        return true;
+    }
+
+    cr.TimeoutSkLockpick = LOCKPICK_TIMEOUT( cr );
+
+    if( cr.SkillLockpick >= LOCKPICK_NEEDED && cr.LuckBase > Random( 2, MAX_RANDOM ) )
+    {
+        cr.NcrShaimanProtest = 5;
+        DeleteItem( item );
+        cr.SayMsg( SAY_NETMSG, TEXTMSG_TEXT, STR_SUCC_LOCKPICK );
+        Item@ item1 = cr.AddItem( Content::Item::ramirez_box_open, 1 );
+        item1.Info = BOSA_INFO;
+        AddHolodiskInfo( cr, HOLO_INFO_NUM );
+        cr.Experience += 5000;
+        return true;
+    }
+    else
+    {
+        // без подсказок) cr.SayMsg(SAY_NETMSG, TEXTMSG_TEXT, STR_FAIL_LOCKPICK);
+        return false;
+    }
+}

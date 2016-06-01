@@ -1,0 +1,235 @@
+// FOS Server
+
+#include "PatternCommon"
+
+/*
+   Рукопашник/боец с холоднмы оружием
+
+   PE_BETTER_CRITICALS
+   PE_SILENT_DEATH
+   PE_SILENT_RUNNING
+   PE_SLAYER
+
+   ---------------------------|-------------|-------------|-------------|-------------|
+   Уровень         0          |  1          |  2          |  3          |  4          |
+   ---------------------------|-------------|-------------|-------------|-------------|
+   ХО/РБ           120..150   |  150..180   |  160..200   |  200..250   |  240..300   |
+   Скрытность      150..200   |  200..240   |  220..260   |  220..290   |  250..300   |
+   MeleeDmg        8          |  12         |  16         |  22         |  25         |
+   HP              120        |  150        |  190        |  220        |  260        |
+   Resist          30..50     |  40..55     |  40..60     |  50..60     |  50..80     |
+   AP              10         |  12         |  16         |  20         |  22         |
+   ---------------------------|-------------|-------------|-------------|-------------|
+
+ */
+const int[] slayerStats_ =
+{
+//     MeleeMin,    MeleeMax,   SnMin,   SnMax,   MDmg,   HP,    ResMin,   ResMax, AP
+    160,         190,        190,     220,     12,     220,   30,       40,     10,
+    180,         200,        200,     240,     14,     250,   40,       55,     12,
+    190,         220,        220,     260,     16,     290,   40,       60,     13,
+    200,         250,        220,     290,     22,     320,   45,       60,     15,
+    240,         300,        250,     300,     25,     360,   45,       80,     18
+};
+#define LvlCount              ( 5 )
+#define ColumnsCount( 9 )    // Индекс первой колонки=0
+#define _SlayerCell           # ( lvl, column )( slayerStats_[ ( lvl < LvlCount ? lvl : 0 ) * ColumnsCount + ( column < ColumnsCount ? column : 0 ) ] )
+#define _SlayerMeleeSkill     # (lvl) ( Random( _SlayerCell( lvl, 0 ), _SlayerCell( lvl, 1 ) ) )
+#define _SlayerSneakSkill     # (lvl) ( Random( _SlayerCell( lvl, 2 ), _SlayerCell( lvl, 3 ) ) )
+#define _SlayerMeleeDamage    # (lvl) ( _SlayerCell( lvl, 4 ) )
+#define _SlayerHP             # (lvl) ( _SlayerCell( lvl, 5 ) )
+#define _SlayerResist         # (lvl) ( Random( _SlayerCell( lvl, 6 ), _SlayerCell( lvl, 7 ) ) )
+#define _SlayerAP             # (lvl) ( _SlayerCell( lvl, 8 ) )
+#define ATTACK_DIST           ( 10 )
+
+class SlayerPattern : CommonPattern
+{
+    // При начале любого плана нпц уходит в бег, если нет таймаута битвы
+    // Также включает сник, если позволяет таймаут сника
+    int _PlaneBegin( Critter& cr, NpcPlane& plane, int reason, Critter@ someCr, Item@ someItem )
+    {
+        _SetRun( plane, cr );
+        _SetSneak( cr );
+
+        if( plane.Type == AI_PLANE_ATTACK )
+            DeferredCall( GAME_SECOND_TO_TICK( SNEAK_TIMEOUT( cr ) - __FullSecond ), SneakWhileAttack, cr.Id );
+
+        return PLANE_RUN_GLOBAL;
+    }
+
+    void _SetSneak( Critter& cr )
+    {
+        if( !IS_TIMEOUT( cr.TimeoutSneak ) && !cr.IsHide )
+            cr.IsHide = true;
+    }
+
+    void _SetRun( NpcPlane& plane, Critter& cr )
+    {
+        if( !IS_TIMEOUT( cr.TimeoutBattle ) )
+            plane.Run = true;
+        else
+            plane.Run = __RunOnCombat;
+    }
+
+    // Если позволяет таймаут, при выполнении любого плана слеер стремится уйти в сник
+    int _PlaneRun( Critter& cr, NpcPlane& plane, int reason, uint& result0, uint& result1, uint& result2 )
+    {
+        _SetRun( plane, cr );
+        _SetSneak( cr );
+        return PLANE_RUN_GLOBAL;
+    }
+
+    void _Idle( Critter& cr )
+    {
+        _SetSneak( cr );
+
+        Map @map = cr.GetMap();
+        Critter@[] critters;
+
+        if( map.GetCrittersHex( cr.HexX, cr.HexY, ATTACK_DIST, FIND_LIFE_AND_KO | FIND_ONLY_PLAYERS, critters ) > 0 )
+        {
+            for( uint i = 0, l = critters.length(); i < l; i++ )
+            {
+                Critter@player = critters[ i ];
+                if( cr.IsSee( player ) )
+                {
+                    AddAttackPlane( cr, 0, player );
+                    break;
+                }
+            }
+        }
+    }
+
+    bool _Attack( Critter& cr, Critter& target )
+    {
+        if( target.IsNpc() )
+            return false;
+
+        NpcPlane@ plane = cr.GetCurPlane();
+        _SetRun( plane, cr );
+
+        if( target.IsKnockout() )
+            return false;
+
+        const Item@ weapon = cr.GetSlotItem( SLOT_HAND1 );
+        if( !valid( weapon ) )
+            return false;
+        if( weapon.Type != Weapon )
+            return false;
+        if( weapon.Weapon_Skill_0 != SkillMeleeWeapons && weapon.Weapon_Skill_0 != SkillUnarmed )
+            return false;
+
+        Item@ weap = _CritGetItemHand( cr );
+        if( !valid( weap ) )
+            return false;
+
+        const Item@ ammo = GetProtoItem( weap.AmmoPid );
+
+        // Скопировано из основного обработчика
+        cr.TimeoutAggressor = __FullSecond + REAL_MINUTE( 1 );
+        CombatAttack( cr, target, weapon, _WeaponModeMake( 0, HIT_LOCATION_EYES ), ammo );
+
+        return true;
+    }
+
+    void SetEvents( Critter& cr )
+    {
+        cr.SetEvent( CRITTER_EVENT_ATTACK, "_SlayerAttack" );
+        cr.SetEvent( CRITTER_EVENT_PLANE_RUN, "_SlayerPlaneRun" );
+        cr.SetEvent( CRITTER_EVENT_PLANE_BEGIN, "_SlayerPlaneBegin" );
+        cr.SetEvent( CRITTER_EVENT_ATTACKED, "_SlayerAttacked" );
+        cr.SetEvent( CRITTER_EVENT_IDLE, "_SlayerIdle" );
+        cr.SetEvent( CRITTER_EVENT_DEAD, "_SlayerDead" );
+    }
+}
+
+#ifndef _NoBaseInstance
+SlayerPattern pattern; // Для наследников нужно определить _NoBaseInstance
+#endif
+
+void _SlayerDead( Critter& cr, Critter@ killer )
+{
+    pattern._Dead( cr, killer );
+}
+
+void _SlayerInit( Critter& cr, bool firstTime )
+{
+    _CritterInit( cr, firstTime );
+}
+
+void SetSlayerStats( Critter& cr, uint8 lvl )
+{
+    lvl = CLAMP( lvl, 0, LvlCount - 1 );
+    if( lvl < 1 )
+        return;
+    if( lvl > 2 )
+        cr.PerkBetterCriticals = 1;
+    cr.PerkSilentDeath = 1;
+    if( lvl > 2 )
+        cr.PerkSlayer = 1;
+    cr.PerkSilentRunning = 1;
+
+    cr.MeleeDamageBase = _SlayerMeleeDamage( lvl );
+    cr.StrengthBase = 10;
+    cr.MaxLifeBase = _SlayerHP( lvl );
+    cr.CurrentHp = cr.MaxLife;
+    cr.ActionPointsBase = _SlayerAP( lvl );
+
+    for( uint i = 0; i < CritterPropertyResistsBase.length(); i++ )
+        if( CritterPropertyResistsBase[ i ] != EmpResistanceBase )
+            cr.SetAsInt( CritterPropertyResistsBase[ i ], _SlayerResist( lvl ) );
+
+    cr.SkillMeleeWeapons = _SlayerMeleeSkill( lvl );
+    cr.SkillUnarmed = _SlayerMeleeSkill( lvl );
+    cr.SkillSneak = _SlayerSneakSkill( lvl );
+}
+
+// При начале любого плана нпц уходит в бег, если нет таймаута битвы
+// Также включает сник, если позволяет таймаут сника
+int _SlayerPlaneBegin( Critter& cr, NpcPlane& plane, int reason, Critter@ someCr, Item@ someItem )
+{
+    return pattern._PlaneBegin( cr, plane, reason, someCr, someItem );
+}
+
+// регулярные попытки уйти в сник
+void SneakWhileAttack( uint value )
+{
+    Critter@ cr = GetCritter( value );
+    if( !valid( cr ) )
+        return;
+
+    pattern._SetSneak( cr );
+    if( cr.IsCurPlane( AI_PLANE_ATTACK ) )
+        DeferredCall( GAME_SECOND_TO_TICK( SNEAK_TIMEOUT( cr ) - __FullSecond ), SneakWhileAttack, value );
+}
+
+// Если позволяет таймаут, при выполнении любого плана слеер стремится уйти в сник
+int _SlayerPlaneRun( Critter& cr, NpcPlane& plane, int reason, uint& result0, uint& result1, uint& result2 )
+{
+    return pattern._PlaneRun( cr, plane, reason, result0, result1, result2 );
+}
+
+// Снайпер атакован
+bool _SlayerAttacked( Critter& sniper, Critter& attacker )
+{
+    return pattern._Attacked( sniper, attacker );
+}
+
+void _SlayerIdle( Critter& cr )
+{
+    pattern._Idle( cr );
+}
+
+bool _SlayerAttack( Critter& cr, Critter& target )
+{
+    return pattern._Attack( cr, target );
+}
+
+void testSlayer( Critter& cr, int lvl, int team, int bag )
+{
+// ~run PatternSlayer testSlayer 0 0 0
+// ~run test SetStat 1 72 10000
+    int[] props = { CritterProperty::BagId, bag, CritterProperty::TeamId, team };
+    Critter@ npc = cr.GetMap().AddNpc( Content::Critter::VaultCityPatrolMale, cr.HexX - 5, cr.HexY - 5, 0, props, "_CritterInit" );
+    SetSlayerStats( npc, lvl );
+}

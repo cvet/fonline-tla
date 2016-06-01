@@ -1,0 +1,143 @@
+// FOS Server
+// Author: cvet, heX, Tab10id
+
+#include "Tla"
+
+#define AI_PLANE_ATTACK_PRIORITY_MARK    ( AI_PLANE_ATTACK_PRIORITY + 1 )
+
+void t_Warn( Critter& player, const Item& trigger, bool entered, uint8 dir )
+{
+    int npcRole = trigger.SceneryParams[ 0 ];
+    Warn( player, npcRole );
+}
+
+void t_Attack( Critter& player, const Item& trigger, bool entered, uint8 dir )
+{
+    if( not player.IsPlayer() )
+        return;
+
+    int  npcRole = trigger.SceneryParams[ 0 ];
+    Map@ map = player.GetMap();
+    uint count = map.GetNpcCount( npcRole, FIND_LIFE_AND_KO | FIND_ONLY_NPC );
+    for( uint i = 0; i < count; i++ )
+        AddAttackPlane( map.GetNpc( npcRole, FIND_LIFE_AND_KO | FIND_ONLY_NPC, i ), AI_PLANE_ATTACK_PRIORITY_MARK, player );
+}
+
+void t_AttackStop( Critter& player, const Item& trigger, bool entered, uint8 dir )
+{
+    if( not player.IsPlayer() )
+        return;
+
+    int  npcRole = trigger.SceneryParams[ 0 ];
+    Map@ map = player.GetMap();
+    uint npcCount = map.GetNpcCount( npcRole, FIND_LIFE_AND_KO | FIND_ONLY_NPC );
+    NpcPlane@[] planes;
+    for( uint i = 0; i < npcCount; i++ )
+    {
+        Critter@ npc = map.GetNpc( npcRole, FIND_LIFE_AND_KO | FIND_ONLY_NPC, i );
+        planes.clear();
+        uint     count = npc.GetPlanes( planes );
+        // проходимся по списку планов в поисках маркированного плана
+        for( uint j = 0; j < count; j++ )
+            if( ( planes[ j ].Attack_TargId == player.Id ) and
+                ( planes[ j ].Priority == AI_PLANE_ATTACK_PRIORITY_MARK ) )
+                if( npc.ErasePlane( j ) )
+                    npc.EraseEnemyFromStack( player.Id );
+    }
+}
+
+void t_Kill( Critter& player, const Item& trigger, bool entered, uint8 dir )
+{
+    int type = trigger.SceneryParams[ 0 ];
+    Kill( player, type );
+}
+
+void t_Damage( Critter& player, const Item& trigger, bool entered, uint8 dir )
+{
+    int dmg = trigger.SceneryParams[ 0 ];
+    int type = trigger.SceneryParams[ 1 ];
+    Damage( player, dmg, type, dir );
+}
+
+void t_DoorOpen( Critter& player, const Item& trigger, bool entered, uint8 dir )
+{
+    int entireNum = trigger.SceneryParams[ 0 ];
+    DoorControl( player, entireNum, true );
+}
+
+void door_open( Critter& player, const Item& trigger, bool entered, uint8 dir )
+{
+    t_DoorOpen( player, trigger, entered, dir );
+}
+
+void t_DoorClose( Critter& player, const Item& trigger, bool entered, uint8 dir )
+{
+    int entireNum = trigger.SceneryParams[ 0 ];
+    DoorControl( player, entireNum, false );
+}
+
+void door_close( Critter& player, const Item& trigger, bool entered, uint8 dir )
+{
+    t_DoorClose( player, trigger, entered, dir );
+}
+
+import void ShowElevator( Critter& player, uint8 elevatorType, uint[] mapPids, uint entireNum ) from "Elevator";
+
+// лифт, всего существуют 8 типов лифтов. Максимум - 4 этажа
+// для четырехэтажного отдельный триггер
+// 1ый параметр - номер гекса, на который попадет игрок
+// остальные параметры - коды прототипов карт
+void t_Elevator4( Critter& player, const Item& trigger, bool entered, uint8 dir )
+{
+    auto params = trigger.SceneryParams;
+    int  entireExit = params[ 0 ];
+    int  map1Pid = params[ 1 ];
+    int  map2Pid = params[ 2 ];
+    int  map3Pid = params[ 3 ];
+    int  map4Pid = params[ 4 ];
+    uint[] pids = { uint( map1Pid ), uint( map2Pid ), uint( map3Pid ), uint( map4Pid ) };
+    ShowElevator( player, 0, pids, entireExit );
+}
+
+// лифт, в котором меньше чем 4 этажа
+// 1ый параметр - номер гекса, на который попадет игрок
+// 2о1 параметр - типа лифта (от 1 до 8. см. _defines.fos, секцию // Elevators)
+// 3ий..5ый параметры - коды протоипов карт
+void t_Elevator( Critter& player, const Item& trigger, bool entered, uint8 dir )
+{
+    if( entered )
+    {
+        auto params = trigger.SceneryParams;
+        int  entireExit = params[ 0 ];
+        int  elevatorType = params[ 1 ];
+        int  map1Pid = params[ 2 ];
+        int  map2Pid = params[ 3 ];
+        int  map3Pid = params[ 4 ];
+
+        if( IS_TIMEOUT( player.TimeoutTransfer ) )
+        {
+            player.SayMsg( SAY_NETMSG, TEXTMSG_GAME, STR_TIMEOUT_TRANSFER_WAIT );
+        }
+        else if( IS_TIMEOUT( player.TimeoutBattle ) )
+        {
+            player.SayMsg( SAY_NETMSG, TEXTMSG_GAME, STR_TIMEOUT_BATTLE_WAIT );
+        }
+        else
+        {
+            uint[] pids = { uint( map1Pid ) };
+            if( map2Pid > 0 )
+                pids.insertLast( uint( map2Pid ) );
+            if( map3Pid > 0 )
+                pids.insertLast( uint( map3Pid ) );
+            ShowElevator( player, elevatorType, pids, entireExit );
+        }
+    }
+}
+
+// Диалог с НПЦ рядом с триггером,  с определенной ролью. 1 параметр - роль НПЦ.
+void t_DialogNpc( Critter& player, const Item& trigger, bool entered, uint8 dir )
+{
+    int npcRole = trigger.SceneryParams[ 0 ];
+    player.Wait( 0 );
+    DialogNpc( player, npcRole );
+}

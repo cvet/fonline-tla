@@ -1,0 +1,130 @@
+// FOS Server
+// Author: Sufir
+
+#include "Tla"
+
+#pragma property Global PrivateServer uint EndingV13DclawSaved
+
+// Defines
+#define QUEST_TIMEOUT    ( 1 )          // Переодичность, в игровых сутках, с которой квест "Яйцо" дается игрокам.
+uint QuestAllowTime = 0;
+
+/* =================== Диалоги =================== */
+
+bool d_QuestCheck( Critter& player, Critter@ npc )
+{
+    // Проверяем как давно квест брался другими игроками
+    if( QuestAllowTime < __FullSecond )
+        return true;
+    return false;
+}
+
+bool d_QuestNotCheck( Critter& player, Critter@ npc )
+{
+    // Проверяем как давно квест брался другими игроками
+    if( !d_QuestCheck( player, npc ) )
+        return true;
+    return false;
+}
+
+// Проверяем в броне ли игрок.
+bool d_ArmorCheck( Critter& player, Critter@ npc )
+{
+    Item@[] PlayerArmor;
+    if( player.GetItems( SLOT_ARMOR, PlayerArmor ) <= 0 )
+        return false;
+    if( PlayerArmor.length() == 1 )
+    {
+        if( !valid( PlayerArmor[ 0 ] ) )
+            return false;
+        if( PlayerArmor[ 0 ].ProtoId == Content::Item::advanced_power_armor || PlayerArmor[ 0 ].ProtoId == Content::Item::advanced_power_armor_mk2 )
+        {
+            return true;
+        }
+        else
+        {
+            return false;
+        }
+    }
+    return false;
+}
+
+// Проверяем в броне ли игрок.
+bool d_ArmorNotCheck( Critter& player, Critter@ npc )
+{
+    if( !d_ArmorCheck( player, npc ) )
+        return true;
+    return false;
+}
+
+//
+void r_AddEgg( Critter& player, Critter@ npc )
+{
+    Item@ Egg = player.AddItem( Content::Item::easter_egg, 1 );
+    if( !valid( Egg ) )
+        return;
+    Egg.SetScript( "ItemV13Egg@_EggInit" );
+    Egg.V13GorisEggPlayerId = player.Id;
+
+    /*int[] ChangeStages = { 0, 3, 5 };
+       SetGroupQuestStage( player, ChangeStages, 1 );*/
+
+    // Устанавливаем таймаут для квеста. Квест не может быть взят другими игроками ранее чем через QUEST_TIMEOUT суток.
+    QuestAllowTime = __FullSecond + ( 60 * 60 * 24 * QUEST_TIMEOUT );
+}
+
+void r_StartDclawRebirth( Critter& player, Critter@ prof )
+{
+    if( !valid( prof ) )
+        return;
+
+    Map@ map = prof.GetMap();
+    uint[] args = { map.Id, 0 };
+
+    switch( Globals.EndingV13DclawSaved )
+    {
+    case 0:
+        Globals.EndingV13DclawSaved = 1;
+        args[ 1 ] = 251;
+        SavedDeferredCall( GAME_SECOND_TO_TICK( 60 * 60 * 24 * Random( 7, 9 ) ), DclawKidBorn, args );
+        break;
+    case 1:
+        Globals.EndingV13DclawSaved = 2;
+        args[ 1 ] = 252;
+        SavedDeferredCall( GAME_SECOND_TO_TICK( 60 * 60 * 24 * Random( 7, 9 ) ), DclawKidBorn, args );
+        break;
+    case 2:
+        Globals.EndingV13DclawSaved = 3;
+        args[ 1 ] = 253;
+        SavedDeferredCall( GAME_SECOND_TO_TICK( 60 * 60 * 24 * Random( 7, 9 ) ), DclawKidBorn, args );
+        break;
+    default:
+        break;
+    }
+}
+
+void DclawKidBorn( uint[]& values )
+{
+    // Log( " MapID = " + values[0] + " Entire " + values[1] );
+    Map@ map = GetMap( values[ 0 ] );
+    if( !valid( map ) )
+        return;
+    DclawKid( map, values[ 1 ] );
+}
+
+Critter@ DclawKid( Map& map, uint EntSpawn )
+{
+    uint16 x = 0, y = 0;
+    if( !map.GetEntireCoords( EntSpawn, 0, x, y ) )
+        return null;
+
+    int[] props =
+    {
+        CritterProperty::DialogId, Content::Dialog::mob_int_deathclaw, CritterProperty::BagId, BAG_Empty,
+        CritterProperty::ReplicationTime, 60 * 24 * 7 /*репликация раз в неделю*/,
+        CritterProperty::MaxLife, 180, CritterProperty::ActionPoints, 8,
+        CritterProperty::Intellect, 8, CritterProperty::KillExperience, 100
+    };
+    Critter@ cr = map.AddNpc( Content::Critter::SmToughDeathclaw, x, y, Random( 1, 4 ), props, null );
+    return cr;
+}

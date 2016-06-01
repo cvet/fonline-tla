@@ -1,0 +1,119 @@
+// FOS Server
+
+#include "Tla"
+
+// Делает локацию видимой для криттера.
+// byId Если указано значение true, то locNum расценивается как уникальный идентификатор локации; если false – то как номер прототипа.
+// locNum Номер прототипа локации или уникальный идентификатор локации.
+bool SetKnownLoc( Critter& cr, bool byId, uint locNum )
+{
+    if( locNum == 0 )
+        return false;
+
+    uint locId;
+    if( !byId )
+    {
+        Location@ loc = GetLocationByPid( locNum, 0 );
+        if( loc is null )
+            return false;
+        locId = loc.Id;
+    }
+    else
+    {
+        locId = locNum;
+    }
+
+    uint[] knownLocs = cr.KnownLocations;
+    if( knownLocs.exists( locId ) )
+        return false;
+    knownLocs.insertLast( locId );
+    cr.KnownLocations = knownLocs;
+    return true;
+}
+
+// Позволяет определить, знает ли игрок об указанной локации или нет.
+bool IsKnownLoc( Critter& cr, bool byId, uint locNum )
+{
+    if( locNum == 0 )
+        return false;
+
+    uint locId;
+    if( !byId )
+    {
+        Location@ loc = GetLocationByPid( locNum, 0 );
+        if( loc is null )
+            return false;
+        locId = loc.Id;
+    }
+    else
+    {
+        locId = locNum;
+    }
+
+    return cr.KnownLocations.exists( locId );
+}
+
+// Делает локацию невидимой для криттера.
+bool UnsetKnownLoc( Critter& cr, bool byId, uint locNum )
+{
+    if( locNum == 0 )
+        return false;
+
+    uint locId;
+    if( !byId )
+    {
+        Location@ loc = GetLocationByPid( locNum, 0 );
+        if( loc is null )
+            return false;
+        locId = loc.Id;
+    }
+    else
+    {
+        locId = locNum;
+    }
+
+    uint[] knownLocs = cr.KnownLocations;
+    int index = knownLocs.find( locId );
+    if( index == -1 )
+        return false;
+    knownLocs.removeAt( locId );
+    cr.KnownLocations = knownLocs;
+    return true;
+}
+
+// Локация, которая автоматически удаляется через определенное время.
+// Установка даты удаления локации в переменную. Внимание, одной установки переменной недостаточно для удаления локации.
+// Location - локация, для которой назначается переменная
+// time - игровое время в секундах,
+void SetLocationDeleteTime( Location& loc, uint time )
+{
+    SavedDeferredCall( GAME_SECOND_TO_TICK( time ), DeferredDeleteLocation, loc.Id );
+}
+
+void DeferredDeleteLocation( uint value )
+{
+    Location@ loc = GetLocation( value );
+    if( loc !is null )
+        loc.AutoGarbage = true;
+}
+
+// Создание видимой для игрока локации и запоминание ее Id  в переменную, если номер переменной > 0.
+// player - персонаж, для которого будет сохранена локация
+// locPid - код прототипа локации
+// worldX, worldY - координаты локации на глобальной карте
+// delta - максимальное смещение локации относительно указанных координат
+// varNum - номер переменной игрока в которую сохраняется код Id локации
+Location@ CreateLocationForCritter( Critter& player, int locPid, int worldX, int worldY, int delta, uint varNum )
+{
+    uint locId = CreateLocation( locPid, worldX + Random( -1 * delta, delta ), worldY + Random( -1 * delta, delta ), null );
+    if( locId == 0 )
+        return null;
+    Location@ loc = GetLocation( locId );
+    if( !valid( loc ) )
+        return null;
+    loc.AutoGarbage = false;
+    player.SetKnownLoc( true, loc.Id );
+    if( varNum > 0 )
+        player.SetAsInt( CritterProperty( varNum ), loc.Id );
+    return loc;
+}

@@ -1,0 +1,590 @@
+// FOS Server
+// Author: rifleman17
+// Скрипт для реализации нпц-путешественников. (Beta)
+// НПЦ перемещаются между различными городами по глобальной карте в случайном порядке.
+// НПЦ либо честно идет по глобальной карте по прямой, и при заходе на энкаунтер разбирается с мобами, затем продолжает движение
+// Либо просто телепортируется в следующую точку маршрута.
+// НПЦ находится в каждом городе определенное время.
+// Список точек маршрута и настройки нпц сохраняются в TravellerRoute для каждого нпц.
+// Следующая точка маршрута выбирается в момент достижения предыдущей.
+// Существует проблема: путешественник может застрять в некоем месте, например, на береговой линии, если пойдет из СФ в ароййо
+// Поэтому при отправлении засекаем время начала движения, и назначаем время телепорта путешественника в точку назначения через 1 игровой месяц
+
+#include "Tla"
+
+#pragma property Critter PrivateServer uint8[] TravellerRoute
+
+#define TYPE_TRANSIT      ( 0 )
+#define TYPE_TRAVEL       ( 1 )
+#define NEXT_TRY          ( REAL_MINUTE( 10 ) )
+#define CTE_FOUND_LOC     ( 11 )
+#define CTE_NEW_TRAVEL    ( 12 )
+#define CTE_CHECK         ( 17 )                                      // Событие проверки, достиг ли НПЦ точки назначения
+#define CTE_SHOW_LOC      ( 18 )                                      // Подсветка энкаунтеров Илая на глобальной карте
+#define TIME_CHECK        ( 7 * 24 * 60 * 60 )                        // Время проверки в секундах
+#define TIME_SHOWLOC      ( 60 )                                      // отображение локации через игровую минуту
+#define DIST_MAX          ( 10 )                                      // Минимальная дистанция в гексах до криттера, находясь на которой игрок попадет ему в группу при начале путешествия
+#define LOC_NAME          # (locPid)      ( ( locPid + 100 ) * 1000 ) // поиск названия локации в файле FOGM.msg
+
+// #define DL #(s) (Log("traveller: " + s))
+#define DL                # ( s )
+
+import string DateTimeToString( uint gameTime ) from "Time";
+
+// Присваевает скрипт для НПЦ и запускает его выполнение
+// crId - Id нпц
+// isTransit - признак, нпц перемещается телепортом
+// entireNum - номер гекса, на который будет перемещаться нпц при заходе в локацию
+// timeWaitLoc - время ожидания на локации до следующего путешествия
+// timeWaitEnc - время ожидания на энкаунтере после завершения боя до продолжения путешествия
+// locPids - массив кодов протоипов локаций, на которые может зайти НПЦ
+void SetTraveller( uint crId, bool isTransit, uint entireNum, uint timeWaitLoc, uint timeWaitEnc, hash[] locPids, bool visibleEncounters ) // Export
+{
+    Critter@ cr = GetCritter( crId );
+    if( !valid( cr ) )
+        return;
+    cr.IsGeck = true;
+    Traveller@ t = Traveller( crId );
+    t.TravelType = ( isTransit ? TYPE_TRANSIT : TYPE_TRAVEL );
+    t.EntireTo = entireNum;
+    t.TimeWaitLocation = timeWaitLoc;
+    t.TimeWaitEncounter = timeWaitEnc;
+    t.VisibleEncounters = visibleEncounters;
+    for( uint i = 0, l = locPids.length(); i < l; i++ )
+    {
+        t.AddLocPid( locPids[ i ] );
+    }
+    t.Save();
+    if( valid( cr.GetMap() ) )
+    {
+        t.SheduleChooseLocation();
+        t.SheduleTravel( true );
+    }
+    if( t.TravelType == TYPE_TRAVEL )
+    {
+        cr.SetEvent( CRITTER_EVENT_GLOBAL_INVITE, "_GlobalInvite" );
+        cr.SetEvent( CRITTER_EVENT_GLOBAL_PROCESS, "_GlobalProcess" );
+    }
+}
+
+void CancelTraveller( uint crId )
+{
+    Traveller@ ti = Traveller( crId );
+    ti.Erase();
+    Critter@   cr = GetCritter( crId );
+    if( !valid( cr ) )
+        return;
+    if( cr.GetTimeEvents( CTE_FOUND_LOC, null, null, null ) != 0 )
+        cr.EraseTimeEvents( CTE_FOUND_LOC );
+    if( cr.GetTimeEvents( CTE_NEW_TRAVEL, null, null, null ) != 0 )
+        cr.EraseTimeEvents( CTE_NEW_TRAVEL );
+}
+
+class Traveller
+{
+    Traveller( uint crId )
+    {
+        CritterId = crId;
+    }
+
+    uint  CritterId;              // Id нпц-путешественника
+    uint8 TravelType;             // Тип перемещений.(Телепорт или путешествие через глобал)
+    uint  MapIdTo;                // Id карты на которую направляется НПЦ
+    uint  EntireTo;               // Номер гекса, на котором будет стоять НПЦ
+    uint  TimeWaitLocation;       // Время ожидания в игровых секундах на локации перед следующим путешествием
+    uint  TimeWaitEncounter;      // Время ожидания в игровых секундах на энкаунтере во время путешествия
+    bool  VisibleEncounters;      // Признак - делать ли энкаунтер видимым, если на него зашел НПЦ
+    uint  TimeLastStart;          // Время последнего отправления НПЦ из локации
+    uint  TimeNextRoute;          // Время следующего отправления НПЦ из локации
+    hash[] LocationPids;          // Массив кодов прототипов локаций, на которые может отправиться НПЦ
+    uint[]   Followers;           // Массив Id спутников путешественника, может быть как игроки, так и нпц
+
+    void AddLocPid( hash locPid )
+    {
+        for( uint i = 0, l = LocationPids.length(); i < l; i++ )
+        {
+            if( locPid == LocationPids[ i ] )
+                return;
+        }
+        LocationPids.insertLast( locPid );
+    }
+
+    void AddFollower( uint crId )
+    {
+        for( uint i = 0, l = Followers.length(); i < l; i++ )
+        {
+            if( crId == Followers[ i ] )
+                return;
+        }
+        Followers.insertLast( crId );
+        Save();
+    }
+
+    // Сериализация
+
+    void Save()
+    {
+        Serializator save;
+        save.Set( CritterId );
+        save.Set( TravelType );
+        save.Set( MapIdTo );
+        save.Set( EntireTo );
+        save.Set( TimeWaitLocation );
+        save.Set( TimeWaitEncounter );
+        save.Set( VisibleEncounters );
+        save.Set( TimeLastStart );
+        save.Set( TimeNextRoute );
+        save.Set( LocationPids );
+        save.Set( Followers );
+        GetTraveller().TravellerRoute = save.GetData();
+    }
+
+    void Load()
+    {
+        Serializator load;
+        if( load.SetData( GetTraveller().TravellerRoute ) == 0 )
+            return;
+        load.Get( CritterId );
+        load.Get( TravelType );
+        load.Get( MapIdTo );
+        load.Get( EntireTo );
+        load.Get( TimeWaitLocation );
+        load.Get( TimeWaitEncounter );
+        load.Get( VisibleEncounters );
+        load.Get( TimeLastStart );
+        load.Get( TimeNextRoute );
+        load.Get( LocationPids );
+        load.Get( Followers );
+    }
+
+    void Erase()
+    {
+        GetTraveller().TravellerRoute = array< uint8 >();
+    }
+
+    Critter@ GetTraveller()
+    {
+        if( CritterId == 0 )
+            return null;
+        return GetCritter( CritterId );
+    }
+
+    // Попытка найти новую точку перемещения
+    bool TryFoundNewLocation()
+    {
+        int  tries = 20;
+        uint idx = 0;
+        uint len = LocationPids.length();
+        uint maps = 0;
+        if( len == 0 )
+            return false;
+        Critter@ cr = GetTraveller();
+        if( !valid( cr ) )
+            return false;
+        uint mapId = 0;
+        Map@ mapCr = cr.GetMap();
+        if( valid( mapCr ) )
+            mapId = mapCr.Id;
+        while( tries > 0 )
+        {
+            idx = Random( 0, len - 1 );
+            Location@[] locations;
+            GetAllLocations( LocationPids[ idx ], locations );
+            if( locations.length() > 0 )
+            {
+                idx = Random( 0, locations.length() - 1 );
+                Location@ loc = locations[ idx ];
+                if( valid( loc ) )
+                {
+                    maps = loc.GetMapCount();
+                    for( uint i = 0; i < maps; i++ )
+                    {
+                        Map@ map = loc.GetMapByIndex( i );
+                        if( valid( map ) && ( map.CountEntire( EntireTo ) > 0 ) && map.Id != mapId )
+                        {
+                            DL( "Target point found. Id = " + map.Id + "; ProtoMap = " + map.ProtoId );
+                            MapIdTo = map.Id;
+                            Save();
+                            return true;
+                        }
+                    }
+                }
+            }
+            tries--;
+        }
+        DL( "Travel point not found" );
+        return false;
+    }
+
+    bool TransitToLocation()
+    {
+        Critter@ cr = GetTraveller();
+        if( !valid( cr ) || MapIdTo == 0 )
+            return false;
+        Map@ map = GetMap( MapIdTo );
+        if( !valid( map ) || map.CountEntire( EntireTo ) == 0 )
+            return false;
+        if( cr.TransitToMap( MapIdTo, EntireTo ) )
+        {
+            cr.HomeMapId = MapIdTo;
+            cr.HomeHexX = cr.HexX;
+            cr.HomeHexY = cr.HexY;
+            cr.HomeDir = cr.Dir;
+            return true;
+        }
+        return false;
+    }
+
+    // Собирает группу желающих и выходит на глобал
+    // Если человек, желающий сопровождать нпц находится дальше DIST_MAX от нпц, в группу не попадает
+    bool BeginTravelToLocation()
+    {
+        Critter@ cr = GetTraveller();
+        if( !valid( cr ) )
+            return false;
+        Map@ map = cr.GetMap();
+        if( !valid( map ) )
+            return false;
+        Critter@[] grp;
+        uint[] confirmedIds;
+        grp.insertLast( @cr );
+        uint ch = cr.Charisma;
+        for( uint i = 0, l = Followers.length(); i < l && confirmedIds.length() < ch; i++ )
+        {
+            Critter@ follower = GetCritter( Followers[ i ] );
+            if( valid( follower ) && follower.IsLife() && valid( follower.GetMap() ) && ( follower.GetMap().Id == map.Id ) && ( GetCrittersDistantion( cr, follower ) <= DIST_MAX ) )
+            {
+                grp.insertLast( @follower );
+                confirmedIds.insertLast( follower.Id );
+            }
+        }
+        Followers.clear();
+        for( uint i = 0, l = confirmedIds.length(); i < l; i++ )
+        {
+            Followers.insertLast( confirmedIds[ i ] );
+        }
+        cr.TransitToGlobal( grp );
+        TimeLastStart = __FullSecond;
+        Save();
+        return true;
+    }
+
+    void SheduleChooseLocation()
+    {
+        Critter@ cr = GetTraveller();
+        if( !valid( cr ) )
+            return;
+        if( cr.GetTimeEvents( CTE_FOUND_LOC, null, null, null ) == 0 )
+            cr.AddTimeEvent( "cte_ChooseTravelPoint", 0, CTE_FOUND_LOC );
+    }
+
+    void SheduleTravel( bool fromLoc )
+    {
+        Critter@ cr = GetTraveller();
+        if( !valid( cr ) )
+            return;
+        if( fromLoc && cr.GetTimeEvents( CTE_CHECK, null, null, null ) != 0 )
+            cr.EraseTimeEvents( CTE_CHECK );           // В точку назначения прибыли, удаляем события проверки застрял/не застрял
+        if( cr.GetTimeEvents( CTE_NEW_TRAVEL, null, null, null ) == 0 )
+        {
+            cr.AddTimeEvent( "cte_Travel", ( fromLoc ? TimeWaitLocation : TimeWaitEncounter ), CTE_NEW_TRAVEL );
+            TimeNextRoute = __FullSecond + ( fromLoc ? TimeWaitLocation : TimeWaitEncounter );
+            DL( "time: " + TimeNextRoute + " or: " + DateTimeToString( TimeNextRoute ) );
+        }
+        Save();
+    }
+
+    // Проверка маршрута и уточнение координат конечной точки маршрута
+    // Актуально только для TYPE_TRAVEL
+    bool ValidateRoute( float& worldX, float& worldY )
+    {
+        if( MapIdTo == 0 )
+            return false;
+        Map@ map = GetMap( MapIdTo );
+        if( !valid( map ) )
+            return false;
+        Location@ loc = map.GetLocation();
+        if( !valid( loc ) )
+            return false;
+        worldX = loc.WorldX;
+        ;
+        worldY = loc.WorldY;
+        return true;
+    }
+
+    // Проверка, что нпц не застрял на глобале
+    void SetCheck()
+    {
+        Critter@ cr = GetTraveller();
+        if( !valid( cr ) )
+            return;
+        uint[] indexes;
+        if( cr.GetTimeEvents( CTE_CHECK, indexes, null, null ) == 0 )
+        {
+            cr.AddTimeEvent( "cte_Check", TIME_CHECK, CTE_CHECK );
+        }
+        else
+        {
+            // Если событие уже существует, не отменяем
+            // cr.ChangeTimeEvent(indexes[0], TIME_CHECK, 0);
+        }
+    }
+}
+
+Traveller@ TravellerFromCritter( uint crId )
+{
+    if( GetCritter( crId ).TravellerRoute.length() == 0 )
+        return null;
+    Traveller@ t = Traveller( crId );
+    t.Load();
+    return t;
+}
+
+// Начало путешествия. Либо телепорт, либо переход по глобалу
+uint cte_Travel( Critter& cr, int identifier, uint& rate )
+{
+    if( !cr.IsNoPlanes() || !valid( cr.GetMap() ) )
+        return NEXT_TRY;
+    Traveller@ t = TravellerFromCritter( cr.Id );
+    DL( "travel started!" + "time next: " + t.TimeNextRoute + ":" + DateTimeToString( __FullSecond ) );
+    if( valid( t ) )
+    {
+        if( t.TravelType == TYPE_TRANSIT )
+        {
+            if( !t.TransitToLocation() )
+            {
+                DL( "Error, can't transit to new location" );
+                return NEXT_TRY;
+            }
+            else
+            {
+                t.SheduleChooseLocation();
+                t.SheduleTravel( true );
+            }
+        }
+        else
+        {
+            if( !t.BeginTravelToLocation() )
+            {
+                DL( "Error, can't begin travel to new location" );
+                return NEXT_TRY;
+            }
+            else
+            {
+                t.SetCheck();
+            }
+        }
+    }
+    return 0;
+}
+
+// Проверка, достиг ли НПЦ последней точки назначения в отведенное время
+// если нет, переносится c  помощью TransitToMap
+uint cte_Check( Critter& cr, int identifier, uint& rate )
+{
+    Map@ map = cr.GetMap();
+    if( valid( map ) && valid( map.GetLocation() ) && !map.GetLocation().AutoGarbage )
+    {
+        return 0;
+    }
+    Traveller@ t = TravellerFromCritter( cr.Id );
+    if( valid( t ) )
+    {
+        if( !t.TransitToLocation() )
+        {
+            DL( "Error, can't transit to new location" );
+            return NEXT_TRY;
+        }
+        else
+        {
+            t.Followers.clear();
+            t.Save();
+            t.SheduleChooseLocation();
+            t.SheduleTravel( true );
+        }
+    }
+    return 0;
+}
+
+// Поиск новой точки маршрута нпц, производится при заходе в локацию
+uint cte_ChooseTravelPoint( Critter& cr, int identifier, uint& rate )
+{
+    DL( "Sheduled" );
+    Traveller@ t = TravellerFromCritter( cr.Id );
+    if( valid( t ) )
+    {
+        if( !t.TryFoundNewLocation() )
+        {
+            DL( "cannot foun new location" );
+            return NEXT_TRY;
+        }
+    }
+    return 0;
+}
+
+uint cte_ShowLoc( Critter& cr, int identifier, uint& rate )
+{
+    Map@ map = cr.GetMap();
+    if( valid( map ) )
+    {
+        Location@ loc = map.GetLocation();
+        if( valid( loc ) && loc.Hidden )
+        {
+            loc.Hidden = false;
+            return 0;
+        }
+    }
+    return TIME_SHOWLOC;
+}
+
+// Обработка событий
+bool _GlobalProcess( Critter& cr, int type, Item@ car, float& x, float& y, float& toX, float& toY, float& speed, uint& encounterDescriptor, bool& waitForAnswer )
+{
+    // DL("type: " + type + "; coords " + x + ":" + y + "; pointTo " + toX + ":" + toY + "cr.Id" + cr.Id + "; speed" + speed);
+    Traveller@ t = TravellerFromCritter( cr.Id );
+    if( encounterDescriptor != 0 )
+    {
+        return false;         // Энкаунтер
+    }
+    if( valid( t ) && type != GLOBAL_PROCESS_MOVE )
+    {
+        if( t.ValidateRoute( toX, toY ) )
+        {
+            if( toX == x && toY == y )           // Добрались до точки назначения
+            {
+                if( cr.TransitToMap( t.MapIdTo, t.EntireTo, true ) )
+                {
+                    cr.HomeMapId = t.MapIdTo;
+                    cr.HomeHexX = cr.HexX;
+                    cr.HomeHexY = cr.HexY;
+                    cr.HomeDir = cr.Dir;
+                    t.Followers.clear();
+                    t.Save();
+                    t.SheduleChooseLocation();
+                    t.SheduleTravel( true );
+                    // Сброс проверок на застревание при достижении точки назначения
+                    uint[] indexes;
+                    if( cr.GetTimeEvents( CTE_CHECK, indexes, null, null ) != 0 )
+                        cr.EraseTimeEvents( CTE_CHECK );
+                    return true;
+                }
+            }
+            else
+            {
+                speed = 2 * GLOBAL_MAP_BASE_SPEED;
+                return true;
+            }
+        }
+        else
+        {
+            t.SheduleChooseLocation();
+        }
+    }
+    waitForAnswer = false;
+    return false;
+}
+
+bool _GlobalInvite( Critter& cr, Item@ car, uint encounterDescriptor, int combatMode, uint& mapId, uint16& hexX, uint16& hexY, uint8& dir )
+{
+    DL( "global invite" );
+    Traveller@ t = TravellerFromCritter( cr.Id );
+    if( valid( t ) )
+    {
+        t.SheduleTravel( false );
+        if( cr.GetTimeEvents( CTE_SHOW_LOC, null, null, null ) == 0 )
+        {
+            cr.AddTimeEvent( "cte_ShowLoc", TIME_SHOWLOC, CTE_SHOW_LOC );
+        }
+    }
+    return false;
+}
+
+// Диалоги
+void r_AddFollower( Critter& player, Critter@ npc )
+{
+    if( !valid( npc ) )
+        return;
+    Traveller@ t = TravellerFromCritter( npc.Id );
+    if( !valid( t ) )
+        return;
+    if( valid( t ) )
+    {
+        t.AddFollower( player.Id );
+    }
+}
+
+// Проверка, находится ли нпц на энкаунтере или в одной из локаций маршрута
+bool d_OnEncounter( Critter& player, Critter@ npc )
+{
+    if( !valid( npc ) )
+        return false;
+    Traveller@ t = TravellerFromCritter( npc.Id );
+    if( valid( t ) )
+    {
+        Map@ map = npc.GetMap();
+        if( !valid( map ) )
+            return false;
+        Location@ loc = map.GetLocation();
+        if( !valid( loc ) )
+            return false;
+        return loc.AutoGarbage;
+    }
+    return false;
+}
+
+bool d_NotOnEncounter( Critter& player, Critter@ npc )
+{
+    if( !valid( npc ) )
+        return false;
+    Traveller@ t = TravellerFromCritter( npc.Id );
+    if( valid( t ) )
+    {
+        Map@ map = npc.GetMap();
+        if( !valid( map ) )
+            return false;
+        Location@ loc = map.GetLocation();
+        if( !valid( loc ) )
+            return false;
+        return !loc.AutoGarbage;
+    }
+    return false;
+}
+
+void r_BeginTravel( Critter& player, Critter@ npc )
+{
+    if( !valid( npc ) )
+        return;
+    Traveller@ t = TravellerFromCritter( npc.Id );
+    if( valid( t ) )
+    {
+        if( t.BeginTravelToLocation() )
+            t.SetCheck();
+    }
+}
+
+// Генерация лексем: куда и когда отправится путешественник
+void dlg_WhereAndWhen( Critter& player, Critter@ npc, string@ lexems )
+{
+    if( !IS_DIALOG_GENERATED( lexems ) )
+        return;
+    if( !valid( npc ) )
+        return;
+    Traveller@ t = TravellerFromCritter( npc.Id );
+    if( !valid( t ) )
+        return;
+    lexems = "";
+    if( t.MapIdTo != 0 )
+    {
+        Map@ map = GetMap( t.MapIdTo );
+        if( valid( map ) )
+        {
+            Location@ loc = map.GetLocation();
+            if( valid( loc ) )
+                lexems = "$where@msg GM " + LOC_NAME( loc.ProtoId ) + "@";
+        }
+    }
+    if( t.TimeNextRoute != 0 )
+    {
+        lexems += "$when" + DateTimeToString( t.TimeNextRoute );
+    }
+}

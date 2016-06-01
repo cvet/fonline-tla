@@ -1,0 +1,191 @@
+// FOS Server
+
+// Author: rifleman17
+// Mобы на нижнем уровне танкера. Унаследованный мобскрипт, за исключением того, что мобы не атакуют персонажа, у которого нет убийств гуманоидов, чужих, кентавров и флоатеров
+// если заходит "чистюля" (далее, человек без киллов всех вышеперечисленных) мобы собираются со всего танкера и cледут за ним. Если зайдет кто-то другой - обычный скрипт, и чистюле тоже достанется
+// твари следуют за игроком - для этого используется переменная MapSFTankerBicycleId - пока не увидят кого то другого, тогда они стриают чистюлю из памяти и действуют по старой схеме
+// чистюля может быть только один, если заходит второй - он стирается, его атакуют и второго тоже
+// в независимости взят квест или нет, поведение не меняется
+
+#include "Tla"
+#include "Mob.fos"
+
+#define KILL_MEN        ( 260 )
+#define KILL_WOMEN      ( 261 )
+#define KILL_FLOATER    ( 268 )
+#define KILL_CENTAUR    ( 269 )
+#define KILL_ALIEN      ( 276 )
+
+#pragma property Critter Protected     uint8 SFRonKillBeasts Group = Quests, Quest = 4416, Max = 4
+#pragma property Critter Protected     uint8 SFRonFindbodies Group = Quests, Quest = 4417, Max = 6
+#pragma property Critter PrivateServer uint8 SFTankerCentaurNoticed Max = 1
+#pragma property Critter PrivateServer uint8 SFTankerFloaterNoticed Max = 1
+#pragma property Critter PrivateServer uint  MapSFTankerBicycleId
+
+import bool GetFreeHex( Map& map, uint radius, uint16& hx, uint16& hy ) from "Caravan";
+
+void TankerMapInit( Map& map, bool firstTime )
+{
+    map.SetEvent( MAP_EVENT_IN_CRITTER, "_TankerInCritter" );
+}
+
+void _TankerMobInit( Critter& cr, bool firstTime )
+{
+    _MobInit( cr, firstTime );
+    cr.SetEvent( CRITTER_EVENT_SHOW_CRITTER_1, "_TankerShowCritter1" );
+    cr.SetEvent( CRITTER_EVENT_IDLE, "_TankerIdle" );
+    cr.SetEvent( CRITTER_EVENT_DEAD, "_TankerDead" );
+    cr.SetEvent( CRITTER_EVENT_SMTH_DEAD, "_TankerDeath" );
+    // Aтака, вне зависимости от того, чистюля персонаж или нет
+    cr.ShowCritterDist2 = 1;
+    cr.SetEvent( CRITTER_EVENT_SHOW_CRITTER_2, "_TankerShowCritter2" );
+}
+
+void _TankerShowCritter2( Critter& cr, Critter& player )
+{
+    if( not player.IsPlayer() )
+        return;
+    if( cr.MapSFTankerBicycleId == 0 )
+        return;                         // Это ловушка для чистюль исключительно
+
+    AddAttackPlane( cr, AI_PLANE_ATTACK_PRIORITY + 1, player );
+}
+
+void _TankerDeath( Critter& cr, Critter& fromCrit, Critter@ killer )
+{
+    cr.MapSFTankerBicycleId = 0;
+    _Death( cr, fromCrit, killer );
+}
+
+void _TankerShowCritter1( Critter& cr, Critter& player )
+{
+    if( !player.IsPlayer() )
+        return;
+    if( player.Id == cr.MapSFTankerBicycleId && IsCleanMan( player ) )
+        return;
+
+    _ShowPlayer( cr, player );
+}
+
+void _TankerDead( Critter& cr, Critter@ killer )
+{
+    _MyDeath( cr, killer );
+    if( valid( killer ) && killer.IsPlayer() && killer.SFRonKillBeasts == 1 )
+        killer.SFRonKillBeasts = 2;
+
+    Map@ map = cr.GetMap();
+    if( !valid( map ) )
+        return;
+
+    // Остались живые мобы? TODO: сделать фильтр по бодитайпам нужным.
+    Critter@[] players;
+    Critter@ player;
+    for( uint i = 0, l = map.GetCritters( 0, FIND_LIFE_AND_KO | FIND_ONLY_PLAYERS, players ); i < l; i++ )
+    {
+        @player = players[ i ];
+        if( not valid( player ) )
+            continue;
+        if( player.SFRonKillBeasts == 2 )
+            player.SFRonKillBeasts = 3;
+
+    }
+}
+
+void _TankerIdle( Critter& cr )
+{
+    if( !cr.IsLife() )
+        return;
+
+    if( cr.MapSFTankerBicycleId != 0 )
+    {
+        // Одновременно на танкере может быть только один чистюля
+        Critter@ player = GetCritter( cr.MapSFTankerBicycleId );
+        if( valid( player ) )
+        {
+            // Проверка, что персонаж никого из своих не убил
+            if( player.IsLife() && IsCleanMan( player ) )
+            {
+                if( cr.IsSee( player ) && GetCrittersDistantion( cr, player ) < 8 )
+                {
+                    Map@ map = cr.GetMap();
+                    if( valid( map ) )
+                    {
+                        uint16 hX = player.HexX;
+                        uint16 hY = player.HexY;
+                        if( GetFreeHex( map, 2, hX, hY ) )
+                            AddWalkPlane( cr, 0, hX, hY, 6, false, 0 );
+                    }
+                }
+                return;                 // Запоминание чистюли не сбито
+            }
+        }
+    }
+    cr.MapSFTankerBicycleId = 0; // Либо чистюля ушел, либо что-то еще, сбиваем запоминание
+    _Idle( cr );
+}
+
+void _TankerInCritter( Map& map, Critter& cr )
+{
+    if( !cr.IsPlayer() )
+        return;
+    if( !IsCleanMan( cr ) )
+        return;
+
+    Critter@[] critters;
+    map.GetCritters( 0, FIND_ALL | FIND_ONLY_NPC, critters );
+    for( uint i = 0, j = critters.length(); i < j; i++ )
+    {
+        Critter@ mob = critters[ i ];
+        mob.MapSFTankerBicycleId = cr.Id;
+    }
+}
+
+// Проверка - персонаж не подлежит атаке.
+bool IsCleanMan( Critter& player )
+{
+    if( !player.IsPlayer() )
+        return false;
+
+    uint[] kills = player.Kills;
+    return player.Level > 10 && kills[ BT_MEN ] == 0 && kills[ BT_WOMEN ] == 0 &&
+           kills[ BT_FLOATER ] == 0 && kills[ BT_CENTAUR ] == 0 && kills[ BT_ALIEN ] == 0;
+}
+
+// ДИАЛОГ: Динамическая награда, зависит от уровня игрока
+void r_GrantPlayer( Critter& player, Critter@ npc )
+{
+    uint lvl = player.Level;
+    uint koef = lvl % 10 + 1;
+    player.Experience += ( koef * 100 ) * player.Level; // 1 ур = 100, 50 ур = 30 000
+}
+
+// Квестовые мертвые панки
+void _DeadsInit( Critter& cr, bool firstTime )
+{
+    if( !cr.IsDead() )
+        cr.ToDead( ANIM2_DEAD_FRONT, null );
+    cr.ReplicationTime = -1;
+    cr.SetEvent( CRITTER_EVENT_SMTH_USE_SKILL, "_SmthUseSkill" );
+}
+
+void _SmthUseSkill( Critter& cr, Critter& fromCr, CritterProperty skill, Critter@ onCritter, Item@ onItem, Item@ onScenery )
+{
+    if( fromCr.IsNpc() || skill != SkillScience || not valid( onCritter ) || onCritter.Id != cr.Id )
+        return;
+
+    if( fromCr.SFRonFindbodies > 0 && fromCr.SFRonFindbodies < 5 )
+    {
+        auto npcStory = cr.NpcStory;
+        if( !npcStory.get( fromCr.Id, false ) )
+        {
+            fromCr.SFRonFindbodies += 1;
+            npcStory[ fromCr.Id ] = true;
+            cr.NpcStory = npcStory;
+
+            if( fromCr.SFTankerCentaurNoticed == 0 && Random( 1, 150 ) < fromCr.SkillScience )
+                fromCr.SFTankerCentaurNoticed = 1;
+            if( fromCr.SFTankerFloaterNoticed == 0 && Random( 1, 150 ) < fromCr.SkillDoctor )
+                fromCr.SFTankerFloaterNoticed = 1;
+        }
+    }
+}

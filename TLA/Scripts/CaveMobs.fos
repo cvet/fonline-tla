@@ -1,0 +1,441 @@
+// FOS Server
+
+// Author: rifleman17
+// Скрипт генератора мобов в пещерах, аналог оригинальному из Ф2
+
+#include "Tla"
+
+#pragma content Item chest
+
+#define ENTIRE_SPAWN       ( 99 )
+#define ENTIRE_CHEST       ( 98 )
+
+#define SCRIPT_GECKO       ( "Mob@_MobInit" )
+#define SCRIPT_SCORP       ( "Mob@_MobInit" )
+#define SCRIPT_DCLAW       ( "Mob@_MobInit" )
+#define SCRIPT_ECRAT       ( "Mob@_MobInit" )
+#define SCRIPT_ROBBER      ( "_CaveNpcInit" )
+#define MESSAGE_ATTACK     ( 32 )                   // Сообщение от игрока "атакуйте меня". Отсылается всем видимым мобам, см. EncounterNpc.fos
+#define ENTIRE_DIST        ( Random( 2, 5 ) )       // Дистанция от контрольного гекса до точки установки Криттера
+#define AI_ROBBERS         ( AIPACKET_MERC_RAIDER ) // Общий аи пакет для рейдеров в пещерах
+#define SEE_PLAYER_FROM    ( 12020 )                // начало строк "увидел игрока
+#define SEE_PLAYER_TO      ( 12038 )                // конец строк "увидел игрока"
+
+import void _NpcInit( Critter& npc, bool firstTime ) from "EncounterNpc";
+
+class CCaveMobInfo
+{
+    hash   Pid;
+    string Script;
+    uint16 Bag;
+    uint16 AI;
+    uint16 Team;
+
+    void Set( hash pid, string script, uint16 bag, uint16 ai, uint16 team )
+    {
+        Pid = pid;
+        Script = script;
+        Bag = bag;
+        AI = ai;
+        Team = team;
+    }
+
+    Critter@ TryPlaceMob( Entire@ entire, Map@ map, uint8 dir )
+    {
+        if( !valid( entire ) || !valid( map ) )
+            return null;
+
+        uint16 crX = entire.HexX;
+        uint16 crY = entire.HexY;
+        map.MoveHexByDir( crX, crY, dir, ENTIRE_DIST );
+
+        if( map.GetPathLength( crX, crY, entire.HexX, entire.HexY, 0 ) > 0 && map.IsHexPassed( crX, crY ) )
+        {
+            dict< CritterProperty, int > props =
+            {
+                { AiId, AI },
+                { TeamId, Team },
+                { BagId, Bag }
+            };
+            // int[] props = { CritterProperty::AiId, AI, CritterProperty::TeamId, Team, CritterProperty::BagId, Bag };
+            // Critter@ mob = map.AddNpc( Pid, crX, crY, GetDirection( crX, crY, entire.HexX, entire.HexY ), props, Script );
+            // if( valid( mob ) )
+            //    return mob;
+        }
+        return null;
+    }
+}
+class CCaveItemInfo
+{
+    hash  Pid;
+    uint8 Min;
+    uint8 Max;
+
+    void Set( hash pid, uint8 min, uint8 max )
+    {
+        Pid = pid;
+        Min = min;
+        Max = max;
+    }
+
+    void AddToChect( Item@ chest )
+    {
+        if( !valid( chest ) )
+            return;
+
+        uint num = Random( Min, Max );
+        if( num == 0 )
+            return;
+
+        chest.AddItem( Pid, num, 0 );
+    }
+}
+
+class CCaveContainerInfo
+{
+    hash  Pid;
+    uint  Entire;
+    uint8 TrapValue;
+    uint8 LockerComplexity;
+
+    CCaveItemInfo[] Items;
+
+    void Set( hash pid, uint entire, uint8 trapValue, uint8 lockerCompl )
+    {
+        Pid = pid;
+        Entire = entire;
+        TrapValue = trapValue;
+        LockerComplexity = lockerCompl;
+    }
+
+    void PlaceCont( Map@ map )
+    {
+        if( !valid( map ) )
+            return;
+
+        Entire[] entires;
+        uint len = ParseEntires( map, entires, ENTIRE_CHEST );
+        if( len > 0 )
+        {
+            bool filled = false;
+            uint tries = 0;
+            int  maxChests = Random( 2, 3 );
+            while( maxChests > 0 && tries < 10 )
+            {
+                Entire@ ent = entires[ Random( 0, len - 1 ) ];
+                if( map.GetItems( ent.HexX, ent.HexY, null ) == 0 )
+                {
+                    maxChests--;
+                    Item@ chest = map.AddItem( ent.HexX, ent.HexY, Content::Item::chest, 1 );
+                    if( valid( chest ) && !filled )
+                    {
+                        filled = true;
+                        for( uint i = 0, l = Items.length(); i < l; i++ )
+                            Items[ i ].AddToChect( chest );
+                    }
+                }
+                tries++;
+            }
+        }
+    }
+}
+
+class CCaveEncounterInfo
+{
+    bool               IsSpecial;
+    uint8              MobsNum;
+    CCaveMobInfo[] Mobs;
+    CCaveContainerInfo Container;
+    Map@               CaveMap;
+
+    CCaveEncounterInfo()
+    {
+        IsSpecial = false;
+    }
+
+    void AddCaveMobInfo( hash pid, string script, uint16 bag, uint16 ai, uint16 team )
+    {
+        Mobs.grow( 1 );
+        Mobs.last().Set( pid, script, bag, ai, team );
+    }
+
+    void AddCaveChestInfo( hash pid, uint entire, uint8 trapValue, uint8 lockerCompl )
+    {
+        Container = CCaveContainerInfo();
+        Container.Set( pid, entire, trapValue, lockerCompl );
+    }
+
+    void AddCaveItemInfo( hash pid, uint8 min, uint8 max )
+    {
+        if( !valid( Container ) )
+            return;
+
+        Container.Items.grow( 1 );
+        Container.Items.last().Set( pid, min, max );
+    }
+
+    void FillMap( Map@ map, Critter@[] @ group )
+    {
+        if( !valid( map ) )
+            return;
+
+        if( IsSpecial && valid( Container ) )
+            Container.PlaceCont( map );
+
+        Entire[] entires;
+        uint len = ParseEntires( map, entires, ENTIRE_SPAWN );
+        if( len > 0 )
+        {
+            int tries = 0;
+            for( uint i = 0; i < len; i++ )
+            {
+                for( uint k = 0; k < MobsNum; k++ )
+                {
+                    tries = 10;
+                    Critter@ mob;
+                    while( !valid( mob ) && tries > 0 )
+                    {
+                        CCaveMobInfo@ mInfo = Mobs[ Random( 0, Mobs.length() - 1 ) ];
+                        if( valid( mInfo ) )
+                        {
+                            @mob = mInfo.TryPlaceMob( entires[ i ], map, Random( 0, 5 ) );
+                        }
+                        tries--;
+                    }
+                    if( valid( mob ) )
+                    {
+                        for( uint j = 0, l = group.length(); j < l; j++ )
+                        {
+                            Critter@ target = group[ j ];
+                            if( valid( target ) && !target.IsDead() && target.IsPlayer() )
+                            {
+                                mob.AddEnemyToStack( target.Id );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+CCaveEncounterInfo@ SetupEncounterCave( Map@ map, Critter@[] group )
+{
+    if( !valid( group ) )
+        return null;
+
+    int maxLevel = 0;
+    int minLuck = 10;
+    int minLevel = 30;
+    for( uint i = 0, l = group.length(); i < l; i++ )
+    {
+        if( group[ i ].Level > maxLevel )
+            maxLevel = group[ i ].Level;
+        if( group[ i ].Luck < minLuck )
+            minLuck = group[ i ].Luck;
+        if( group[ i ].Level < minLevel )
+            minLevel = group[ i ].Level;
+    }
+
+    CCaveEncounterInfo@ eInfo = CCaveEncounterInfo();
+    SetupMobs( eInfo, maxLevel );
+    SetupChest( eInfo, minLuck, minLevel );
+    return eInfo;
+}
+
+
+const hash[] CavePids_TreasureLow = { Content::Item::zip_gun, Content::Item::_10mm_pistol, Content::Item::molotov_cocktail, Content::Item::flare, Content::Item::spear, Content::Item::brass_knuckles, Content::Item::leather_jacket };
+const hash[] CavePids_TreasureMid = { Content::Item::_10mm_smg, Content::Item::sawed_off_shotgun, Content::Item::frag_grenade, Content::Item::combat_knife, Content::Item::crowbar, Content::Item::leather_armor };
+const hash[] CavePids_TreasureHigh = { Content::Item::hunting_rifle, Content::Item::assault_rifle, Content::Item::minigun, Content::Item::plasma_grenade, Content::Item::wakizashi_blade, Content::Item::wrench, Content::Item::power_fist, Content::Item::metal_armor };
+const hash[] CavePids_Ammo = { Content::Item::_7_62mm_ammo, Content::Item::_5mm_ap, Content::Item::_14mm_ap, Content::Item::small_energy_cell, Content::Item::_223_fmj, Content::Item::shotgun_shells, Content::Item::shotgun_shells, Content::Item::shotgun_shells, Content::Item::shotgun_shells, Content::Item::_45_caliber_ammo, Content::Item::small_energy_cell, Content::Item::_10mm_jhp, Content::Item::_2mm_ec_ammo, Content::Item::_10mm_jhp, Content::Item::_10mm_jhp };
+
+void SetupChest( CCaveEncounterInfo& eInfo, uint8 minLuck, uint8 minLevel )
+{
+    if( !eInfo.IsSpecial )
+        return;
+
+    uint8 lockCompl = 0;    // ToDO
+    uint8 trapVal = 0;      // ToDO
+    int   numSpecial = CLAMP( uint( minLuck / 3 ), 1, 3 );
+    eInfo.AddCaveChestInfo( Content::Item::chest, ENTIRE_CHEST, trapVal, lockCompl );
+
+    if( Random( 1, 2 ) == 1 )
+        eInfo.AddCaveItemInfo( Content::Item::stimpak, 1, 5 );
+
+    if( Random( 1, 4 ) == 1 )
+    {
+        eInfo.AddCaveItemInfo( CavePids_TreasureLow[ Random( 0, CavePids_TreasureLow.length() - 1 ) ], 1, 1 );
+        numSpecial--;
+        if( minLevel > 9 && numSpecial > 0 )
+        {
+            numSpecial--;
+            eInfo.AddCaveItemInfo( CavePids_TreasureMid[ Random( 0, CavePids_TreasureMid.length() - 1 ) ], 1, 1 );
+        }
+        if( minLevel >= 20 && numSpecial > 0 )
+        {
+            numSpecial--;
+            eInfo.AddCaveItemInfo( CavePids_TreasureHigh[ Random( 0, CavePids_TreasureHigh.length() - 1 ) ], 1, 1 );
+        }
+    }
+
+    if( CLAMP( Random( 1, 11 - minLuck ), 1, 2 ) == 1 )
+        eInfo.AddCaveItemInfo( CavePids_Ammo[ Random( 0, CavePids_Ammo.length() - 1 ) ], minLevel, minLevel * 5 );
+    eInfo.AddCaveItemInfo( Content::Item::bottle_caps, minLuck * 20, minLuck * minLuck * 20 );
+}
+
+void SetupMobs( CCaveEncounterInfo& eInfo, uint8 maxLevel )
+{
+    uint8         val = Random( 1, 13 );
+    CCaveMobInfo@ mInfo;
+    switch( val )
+    {
+    case 1:
+        eInfo.MobsNum = Random( 3, 5 );
+        if( maxLevel < 10 )
+            eInfo.AddCaveMobInfo( Content::Critter::SmallSilverGecko, SCRIPT_GECKO, BAG_Empty, AIPACKET_GECKO, TEAM_Mob0 );
+        if( maxLevel > 9 && maxLevel < 16 )
+            eInfo.AddCaveMobInfo( Content::Critter::ToughSilverGecko, SCRIPT_GECKO, BAG_Empty, AIPACKET_GECKO, TEAM_Mob0 );
+        if( maxLevel > 15 && maxLevel < 21 )
+            eInfo.AddCaveMobInfo( Content::Critter::FireGecko, SCRIPT_GECKO, BAG_Empty, AIPACKET_GECKO, TEAM_Mob0 );
+        if( maxLevel > 20 )
+            eInfo.AddCaveMobInfo( Content::Critter::ToughFireGecko, SCRIPT_GECKO, BAG_Empty, AIPACKET_GECKO, TEAM_Mob0 );
+        break;
+    case 2:
+        eInfo.MobsNum = Random( 3, 5 );
+        if( maxLevel < 10 )
+            eInfo.AddCaveMobInfo( Content::Critter::GoldenGecko, SCRIPT_GECKO, BAG_Empty, AIPACKET_GECKO, TEAM_Mob0 );
+        if( maxLevel > 9 && maxLevel < 16 )
+            eInfo.AddCaveMobInfo( Content::Critter::ToughGoldenGecko, SCRIPT_GECKO, BAG_Empty, AIPACKET_GECKO, TEAM_Mob0 );
+        if( maxLevel > 15 && maxLevel < 21 )
+            eInfo.AddCaveMobInfo( Content::Critter::FireGecko, SCRIPT_GECKO, BAG_Empty, AIPACKET_GECKO, TEAM_Mob0 );
+        if( maxLevel > 20 )
+            eInfo.AddCaveMobInfo( Content::Critter::ToughFireGecko, SCRIPT_GECKO, BAG_Empty, AIPACKET_GECKO, TEAM_Mob0 );
+        break;
+    case 3:
+        eInfo.MobsNum = Random( 3, 5 );
+        eInfo.AddCaveMobInfo( Content::Critter::SmallRadscorpion, SCRIPT_SCORP, BAG_Empty, AIPACKET_SCORPION, TEAM_Mob0 );
+        break;
+    case 4:
+        eInfo.MobsNum = Random( 3, 5 );
+        eInfo.AddCaveMobInfo( Content::Critter::LargeRadscorpion, SCRIPT_SCORP, BAG_Empty, AIPACKET_SCORPION, TEAM_Mob0 );
+        break;
+    case 5:
+        eInfo.MobsNum = Random( 3, 5 );
+        eInfo.AddCaveMobInfo( Content::Critter::SmDeathclaw, SCRIPT_DCLAW, BAG_Empty, AIPACKET_DEATHCLAW, TEAM_Mob0 );
+        break;
+    case 6:
+        eInfo.MobsNum = 5;
+        eInfo.AddCaveMobInfo( Content::Critter::Deathclaw, SCRIPT_DCLAW, BAG_Empty, AIPACKET_DEATHCLAW, TEAM_Mob0 );
+        break;
+    case 7:
+        eInfo.MobsNum = Random( 3, 5 );
+        eInfo.AddCaveMobInfo( Content::Critter::MutatedMolerat, SCRIPT_ECRAT, BAG_Empty, AIPACKET_RAT, TEAM_Mob0 );
+        break;
+    case 8:
+        eInfo.MobsNum = Random( 4, 5 );
+        eInfo.AddCaveMobInfo( Content::Critter::ToughPigRat, SCRIPT_ECRAT, BAG_Empty, AIPACKET_RAT, TEAM_Mob0 );
+    case 9:
+        if( maxLevel < 10 )
+        {
+            eInfo.AddCaveMobInfo( Content::Critter::SmallSilverGecko, SCRIPT_GECKO, BAG_Empty, AIPACKET_GECKO, TEAM_Mob0 );
+            eInfo.AddCaveMobInfo( Content::Critter::GoldenGecko, SCRIPT_GECKO, BAG_Empty, AIPACKET_GECKO, TEAM_Mob0 );
+            eInfo.MobsNum = Random( 3, 5 );
+        }
+        else
+        {
+            eInfo.AddCaveMobInfo( Content::Critter::ToughSilverGecko, SCRIPT_GECKO, BAG_Empty, AIPACKET_GECKO, TEAM_Mob0 );
+            eInfo.AddCaveMobInfo( Content::Critter::ToughGoldenGecko, SCRIPT_GECKO, BAG_Empty, AIPACKET_GECKO, TEAM_Mob0 );
+            eInfo.MobsNum = 5;
+            if( maxLevel > 9 && maxLevel < 20 )
+                eInfo.AddCaveMobInfo( Content::Critter::FireGecko, SCRIPT_GECKO, BAG_Empty, AIPACKET_GECKO, TEAM_Mob0 );
+            else
+                eInfo.AddCaveMobInfo( Content::Critter::ToughFireGecko, SCRIPT_GECKO, BAG_Empty, AIPACKET_GECKO, TEAM_Mob0 );
+        }
+        break;
+    case 10:
+        eInfo.MobsNum = Random( 3, 5 );
+        eInfo.AddCaveMobInfo( Content::Critter::SmallRadscorpion, SCRIPT_SCORP, BAG_Empty, AIPACKET_SCORPION, TEAM_Mob0 );
+        eInfo.AddCaveMobInfo( Content::Critter::LargeRadscorpion, SCRIPT_SCORP, BAG_Empty, AIPACKET_SCORPION, TEAM_Mob0 );
+        break;
+    case 11:
+        eInfo.AddCaveMobInfo( Content::Critter::SmDeathclaw, SCRIPT_DCLAW, BAG_Empty, AIPACKET_DEATHCLAW, TEAM_Mob0 );
+        eInfo.AddCaveMobInfo( Content::Critter::Deathclaw, SCRIPT_DCLAW, BAG_Empty, AIPACKET_DEATHCLAW, TEAM_Mob0 );
+        eInfo.MobsNum = 5;
+        break;
+    case 12:
+        eInfo.AddCaveMobInfo( Content::Critter::MutatedMolerat, SCRIPT_ECRAT, BAG_Empty, AIPACKET_RAT, TEAM_Mob0 );
+        eInfo.AddCaveMobInfo( Content::Critter::ToughPigRat, SCRIPT_ECRAT, BAG_Empty, AIPACKET_RAT, TEAM_Mob0 );
+        eInfo.MobsNum = 5;
+        break;
+    case 13:
+        eInfo.IsSpecial = true;
+        if( maxLevel < 10 )
+        {
+            eInfo.AddCaveMobInfo( Content::Critter::CaveRobber_male_1, SCRIPT_ROBBER, BAG_CaveBanditLvl1, AI_ROBBERS, TEAM_Bandit );
+            eInfo.AddCaveMobInfo( Content::Critter::CaveRobber_female_1, SCRIPT_ROBBER, BAG_CaveBanditLvl1, AI_ROBBERS, TEAM_Bandit );
+            eInfo.MobsNum = Random( 2, 3 );
+            break;
+        }
+        if( maxLevel > 9 && maxLevel < 21 )
+        {
+            eInfo.AddCaveMobInfo( Content::Critter::CaveRobber_male_2, SCRIPT_ROBBER, BAG_CaveBanditLvl2, AI_ROBBERS, TEAM_Bandit );
+            eInfo.AddCaveMobInfo( Content::Critter::CaveRobber_female_2, SCRIPT_ROBBER, BAG_CaveBanditLvl2, AI_ROBBERS, TEAM_Bandit );
+            eInfo.MobsNum = Random( 3, 4 );
+            break;
+        }
+        if( maxLevel > 20 )
+        {
+            eInfo.AddCaveMobInfo( Content::Critter::CaveRobber_male_3, SCRIPT_ROBBER, BAG_VaultCity_Guard, AI_ROBBERS, TEAM_Bandit );
+            eInfo.AddCaveMobInfo( Content::Critter::CaveRobber_female_3, SCRIPT_ROBBER, BAG_VaultCity_Guard, AI_ROBBERS, TEAM_Bandit );
+            eInfo.MobsNum = Random( 3, 4 );
+            break;
+        }
+    default:
+        return;
+    }
+}
+
+void GenerateCavernEncounter( Map@ map, Critter@[] @ critters )
+{
+    if( !valid( map ) || !valid( critters ) )
+        return;
+
+    CCaveEncounterInfo@ eInfo = SetupEncounterCave( map, critters );
+    if( valid( eInfo ) )
+    {
+        eInfo.FillMap( map, critters );
+        map.SetEvent( MAP_EVENT_IN_CRITTER, "_CaveInCritter" );
+    }
+}
+
+void _CaveInCritter( Map& map, Critter& cr )
+{
+    if( cr.IsPlayer() )
+        DeferredCall( SECOND_TICKS( 8 ), PlayerHere, cr.Id );
+}
+
+void PlayerHere( uint value )
+{
+    Critter@ cr = GetCritter( value );
+    if( valid( cr ) && cr.IsPlayer() )
+    {
+        cr.SendMessage( MESSAGE_ATTACK, cr.Id, MESSAGE_TO_WHO_SEES_ME );
+        cr.SendMessage( MESSAGE_ATTACK, cr.Id, MESSAGE_TO_I_SEE );
+    }
+}
+
+void _CaveNpcInit( Critter& cr, bool firstTime )
+{
+    _NpcInit( cr, firstTime );
+    cr.SetEvent( CRITTER_EVENT_SHOW_CRITTER, "_CaveNpcShowCritter" );
+}
+
+void _CaveNpcShowCritter( Critter& cr, Critter& showCrit )
+{
+    if( showCrit.IsPlayer() )
+    {
+        if( Random( 0, 50 ) < 100 )
+            cr.SayMsg( SAY_NORM_ON_HEAD, TEXTMSG_COMBAT, Random( SEE_PLAYER_FROM, SEE_PLAYER_TO ) * 10 );
+        AddAttackPlane( cr, 0, showCrit, __RunOnCombat );
+    }
+}

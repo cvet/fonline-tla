@@ -54,6 +54,37 @@ import bool Item_Weapon_IsHtHAttack( const Item& item, uint8 mode ) from "Parame
 import void ReadHolodisk( Critter& cr, Item& holo ) from "Holodisk";
 import void AddHolodiskInfo( Critter& cr, uint holoNum ) from "Holodisk";
 
+void ModuleInit()
+{
+    __EventInit.Subscribe( init );
+    __EventStart.Subscribe( start );
+    __EventGenerateWorld.Subscribe( generate_world );
+    __EventCritterAttack.Subscribe( critter_attack );
+    __EventCritterAttacked.Subscribe( critter_attacked );
+    __EventCritterStealing.Subscribe( critter_stealing );
+    __EventCritterUseItem.Subscribe( critter_use_item );
+    __EventCritterUseSkill.Subscribe( critter_use_skill );
+    __EventCritterReloadWeapon.Subscribe( critter_reload_weapon );
+    __EventCritterInit.Subscribe( critter_init );
+    __EventCritterFinish.Subscribe( critter_finish );
+    __EventCritterIdle.Subscribe( critter_idle );
+    __EventCritterDead.Subscribe( critter_dead ); 
+    __EventCritterRespawn.Subscribe( critter_respawn );
+    __EventMapCritterIn.Subscribe( map_critter_in );
+    __EventMapCritterOut.Subscribe( map_critter_out );
+    __EventMapCheckLook.Subscribe( check_look );
+    __EventMapCheckTrapLook.Subscribe( check_trap_look );
+    __EventItemsBarter.Subscribe( items_barter );
+    __EventMapTurnBasedBegin.Subscribe( turn_based_begin );
+    __EventMapTurnBasedProcess.Subscribe( turn_based_process );
+    __EventMapTurnBasedSequence.Subscribe( turn_based_sequence );
+    __EventWorldSave.Subscribe( world_save );
+    __EventPlayerRegistration.Subscribe( player_registration );
+    __EventPlayerLogin.Subscribe( player_login );
+    __EventPlayerGetAccess.Subscribe( player_getaccess );
+    __EventPlayerAllowCommand.Subscribe( player_allowcommand );
+}
+    
 // //////////////////////////////////////////////////////////////////////////////////////////////////
 // Called before world generation.
 void init()
@@ -92,7 +123,9 @@ bool start()
 // day               1      31
 // hour              0      23
 // minute            0      59
-void get_start_time( uint16& multiplier, uint16& year, uint16& month, uint16& day, uint16& hour, uint16& minute )
+// //////////////////////////////////////////////////////////////////////////////////////////////////
+// Call on world generation.
+bool generate_world( uint16& multiplier, uint16& year, uint16& month, uint16& day, uint16& hour, uint16& minute )
 {
     multiplier = 20;
     year = 2246;
@@ -100,12 +133,7 @@ void get_start_time( uint16& multiplier, uint16& year, uint16& month, uint16& da
     day = 30;
     hour = 1;
     minute = 0;
-}
 
-// //////////////////////////////////////////////////////////////////////////////////////////////////
-// Call on world generation.
-bool generate_world()
-{
     Log( "Generate world..." );
     if( CreateLocation( Content::Location::den, 475, 275, null ) == 0 ||
         CreateLocation( Content::Location::klamath, 375, 125, null ) == 0 ||
@@ -139,19 +167,6 @@ bool generate_world()
     }
     Log( "Generate world complete." );
     return true;
-}
-
-// //////////////////////////////////////////////////////////////////////////////////////////////////
-// Call on finish server.
-void finish()
-{}
-
-// //////////////////////////////////////////////////////////////////////////////////////////////////
-// Call every returned value, in milliseconds.
-// Return next call in milliseconds or zero to disable loop.
-uint loop()
-{
-    return 0;     // Disable
 }
 
 // //////////////////////////////////////////////////////////////////////////////////////////////////
@@ -871,7 +886,7 @@ void critter_init( Critter& cr, bool firstTime )
             AddHolodiskInfo( cr, 42 );                       // Journalist's research
 
             // Default skin
-            cr.ChangeCrType( cr.Gender == GENDER_MALE ? CRTYPE_DEFAULT_M : CRTYPE_DEFAULT_F );
+            cr.ModelNameBase = ( cr.Gender == GENDER_MALE ? CRTYPE_DEFAULT_M : CRTYPE_DEFAULT_F );
         }
 
         if( cr.TagSkill1 != CritterProperty::Invalid && CritterPropertySkills.find( cr.TagSkill1 ) == -1 )
@@ -907,7 +922,7 @@ void critter_init( Critter& cr, bool firstTime )
         }
         else
         {
-            cr.ChangeCrType( cr.BaseCrType );
+            cr.ModelName = cr.ModelNameBase;
             if( cr.Level != 0 )
                 NpcProcessLevel( cr );
         }
@@ -922,11 +937,11 @@ void critter_init( Critter& cr, bool firstTime )
         Item@ armor = cr.GetItem( 0, SLOT_ARMOR );
         if( not valid( armor ) )
         {
-            uint crType = cr.BaseCrType;
-            if( crType == 0 )
-                crType = ( cr.Gender == GENDER_MALE ? CRTYPE_DEFAULT_M : CRTYPE_DEFAULT_F );
-            if( cr.CrType != crType )
-                cr.ChangeCrType( crType );
+            uint modelName = cr.ModelNameBase;
+            if( modelName == 0 )
+                modelName = ( cr.Gender == GENDER_MALE ? CRTYPE_DEFAULT_M : CRTYPE_DEFAULT_F );
+            if( cr.ModelName != modelName )
+                cr.ModelName = modelName;
         }
 
         // Clear timeouts if too long (happens when saves got removed)
@@ -1151,7 +1166,7 @@ void map_critter_in( Map& map, Critter& cr )
 
 // //////////////////////////////////////////////////////////////////////////////////////////////////
 // Call on something critter out from map.
-void map_critter_out( Map& map, Critter& cr )
+void map_critter_out( const Map& map, const Critter& cr )
 {
     OnCritterMapOut( cr, map );
 }
@@ -1171,7 +1186,7 @@ void karma_voting( Critter& crFrom, Critter& crTo, bool valUp )
 // To start working set flag LOOK_CHECK_SCRIPT to __LookChecks global var.
 // Return true to allow see one critter another, false to disallow.
 // Note: CRITTER_EVENT_SHOW_CRITTER_X, CRITTER_EVENT_HIDE_CRITTER_X is not processed.
-bool check_look( Map& map, Critter& cr, Critter& opponent )
+bool check_look( const Map& map, const Critter& critter, const Critter& target )
 {
     return true;
 }
@@ -1179,18 +1194,9 @@ bool check_look( Map& map, Critter& cr, Critter& opponent )
 // //////////////////////////////////////////////////////////////////////////////////////////////////
 // Call to determine visibility of items with ITEM_TRAP flag.
 // To start working set flag LOOK_CHECK_SCRIPT to __LookChecks global var.
-bool check_trap_look( Map& map, Critter& cr, Item& trap )
+bool check_trap_look( const Map& map, const Critter& critter, const Item& item )
 {
     return true;
-}
-
-// //////////////////////////////////////////////////////////////////////////////////////////////////
-// Call to determine cost of single item.
-// To allow function set __CustomItemCost to true.
-// Don't forgot specify this function in client script.
-uint item_cost( Item& item, Critter& cr, Critter& npc, bool sell )
-{
-    return sell ? 1 : 2;
 }
 
 // //////////////////////////////////////////////////////////////////////////////////////////////////
@@ -1219,80 +1225,6 @@ bool items_barter( Item@[]& saleItems, uint[]& saleItemsCount, Item@[]& buyItems
     }
 
     return true;
-}
-
-// //////////////////////////////////////////////////////////////////////////////////////////////////
-// Call on something player craft some items.
-// Resources have None accessory and will be deleted after this function if no will be added to some place.
-void items_crafted( Item@[]& items, uint[]& itemsCount, Item@[]& resources, Critter& crafter )
-{
-    // Find max deterioration value
-    int maxDeterioration = 0;
-    for( uint i = 0, j = resources.length(); i < j; i++ )
-    {
-        Item@ item = resources[ i ];
-        int   deterioration = GetDeteriorationProcent( item );
-        if( deterioration > maxDeterioration )
-            maxDeterioration = deterioration;
-    }
-
-    for( uint i = 0, j = items.length(); i < j; i++ )
-    {
-        // Unload weapons
-        Item@ item = items[ i ];
-        if( item.Type == ItemType::Weapon && item.Weapon_MaxAmmoCount > 0 )
-            item.AmmoCount = 0;
-
-        // Set max deterioration value
-        SetDeterioration( item, maxDeterioration );
-    }
-}
-
-// //////////////////////////////////////////////////////////////////////////////////////////////////
-// Levelup callback.
-void player_levelup( Critter& player, CritterProperty skill, uint skillUp, CritterProperty perk )
-{
-    if( player.UnspentSkillPoints > 0 && CritterPropertySkills.find( skill ) != -1 )
-    {
-        for( ; skillUp != 0; skillUp-- )
-        {
-            int skillVal = player.GetAsInt( skill );
-            if( skillVal >= MAX_SKILL_VAL )
-                break;
-
-            int needPoints = 1;
-            if( skillVal > __SkillModAdd6 )
-                needPoints = 6;
-            else if( skillVal > __SkillModAdd5 )
-                needPoints = 5;
-            else if( skillVal > __SkillModAdd4 )
-                needPoints = 4;
-            else if( skillVal > __SkillModAdd3 )
-                needPoints = 3;
-            else if( skillVal > __SkillModAdd2 )
-                needPoints = 2;
-
-            if( player.UnspentSkillPoints < needPoints )
-                break;
-
-            skillVal++;
-            if( player.TagSkills.find( skill ) != -1 && skillVal < MAX_SKILL_VAL )
-                skillVal++;
-
-            player.SetAsInt( skill, skillVal );
-            player.UnspentSkillPoints -= needPoints;
-        }
-    }
-    else if( player.UnspentPerks > 0 && CritterPropertyPerks.find( perk ) != -1 )
-    {
-        if( PerkCheck( player, perk ) )
-        {
-            player.SetAsInt( perk, player.GetAsInt( perk ) + 1 );
-            player.UnspentPerks -= 1;
-        }
-    }
-
-    player.ReplicationCost = player.Level * 100;
 }
 
 // //////////////////////////////////////////////////////////////////////////////////////////////////
@@ -1325,12 +1257,6 @@ void turn_based_begin( Map& map )
         if( not continueBattle )
             map.EndTurnBased();
     }
-}
-
-// Call on end turn-based battle
-void turn_based_end( Map& map )
-{
-    //
 }
 
 // Call on every begin and end turn

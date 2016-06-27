@@ -12,6 +12,13 @@ import int  RawToHit( const Critter& cr, const Critter& target, const Item@ weap
 #pragma content Item default_weapon
 #pragma content Item unarmed_kick
 
+void ModuleInit()
+{
+    __EventNpcPlaneBegin.Subscribe( npc_plane_begin );
+    __EventNpcPlaneEnd.Subscribe( npc_plane_end );
+    __EventNpcPlaneRun.Subscribe( npc_plane_run );
+}
+
 // //////////////////////////////////////////////////////////////////////////////////////////////////
 // Called on some plane added.
 // Return true to allow plane, false to disallow.
@@ -79,7 +86,7 @@ bool npc_plane_end( Critter& npc, NpcPlane& plane, int reason, Critter@ someCr, 
     {
         if( valid( someItem ) )
         {
-            if( someItem.Type == ItemType::Door && !FLAG( someItem.LockerCondition, LOCKER_ISOPEN ) &&
+            if( someItem.Type == ItemType::Door && !someItem.Opened &&
                 AI_CAN_OPEN_DOORS( npc.AiId ) && IsKeyAviable( npc, someItem.LockerId ) )
             {
                 NpcPlane@ child = CreatePlane();
@@ -148,7 +155,7 @@ bool npc_plane_end( Critter& npc, NpcPlane& plane, int reason, Critter@ someCr, 
         for( uint i = 0; i < count; i++ )
         {
             Item@ item = items[ i ];
-            if( _ItemIsBroken( item ) )
+            if( item.IsBroken )
             {
                 SetDeterioration( item, 0 );
                 break;
@@ -642,46 +649,39 @@ int ChooseAim( Critter& cr, Critter& target, const Item@ weapon, uint8 mode, con
     int             ap = valid( weapon ) ? _WeaponApCost( weapon, mode ) : 3;
     CritterProperty skill = valid( weapon ) ? _WeaponSkill( weapon, mode ) : CritterProperty::Invalid;
     int             pendiv = valid( weapon ) ? ( skill == CritterProperty::SkillMeleeWeapons || skill == CritterProperty::SkillUnarmed ? 2 : 1 ) : 2;
-    bool            isTB = cr.GetMap().IsTurnBasedAviable;
-    int             maxap = isTB ? cr.CurrentAp / AP_DIVIDER : cr.ActionPoints;
+    int             maxap = cr.ActionPoints;
 
     int[] val( 6 ); // none, eyes, groin, head, arms, legs
 
     int th = tohit;
     int aps = ap;
     val[ 0 ] = 1000 * CLAMP( th, 5, 95 );
-    if( !isTB )
-        val[ 0 ] /= aps;
+    val[ 0 ] /= aps;
 
     aps = ap + __ApCostAimEyes;
     th = tohit - __HitAimEyes / pendiv;
     val[ 1 ] = aps <= maxap && ( ( cr.Dir + 3 ) % 6 == target.Dir ) ? 2500 * CLAMP( th, 5, 95 ) : 0;
-    if( !isTB )
-        val[ 1 ] /= aps;
+    val[ 1 ] /= aps;
 
     th = tohit - __HitAimGroin / pendiv;
     aps = ap + __ApCostAimGroin;
     val[ 2 ] = aps <= maxap ? 2000 * CLAMP( th, 5, 95 ) : 0;
-    if( !isTB )
-        val[ 2 ] /= aps;
+    val[ 2 ] /= aps;
 
     th = tohit - __HitAimHead / pendiv;
     aps = ap + __ApCostAimHead;
     val[ 3 ] = aps  <= maxap ? 2000 * CLAMP( th, 5, 95 ) : 0;
-    if( !isTB )
-        val[ 3 ] /= aps;
+    val[ 3 ] /= aps;
 
     th = tohit - __HitAimArms / pendiv;
     aps = ap + __ApCostAimArms;
     val[ 4 ] = aps <= maxap ? 1600 * CLAMP( th, 5, 95 ) : 0;
-    if( !isTB )
-        val[ 4 ] /= aps;
+    val[ 4 ] /= aps;
 
     th = tohit - __HitAimLegs / pendiv;
     aps = ap + __ApCostAimLegs;
     val[ 5 ] = aps  <= maxap ? 1300 * CLAMP( th, 5, 95 ) : 0;
-    if( !isTB )
-        val[ 5 ] /= aps;
+    val[ 5 ] /= aps;
 
     // find best shot, with 1/3 chance for taking second-best shot
     int max = 0, next = 0;
@@ -768,7 +768,7 @@ bool ValidateBurst( const Critter& cr, const Critter& target, const Item@ weapon
         return false;                 // force normal shot, for a little diversity
 
     const Map@ map = cr.GetMap();
-    if( ( map.IsTurnBasedAviable ? cr.CurrentAp / AP_DIVIDER : cr.ActionPoints ) < int( _WeaponApCost( weapon, mode ) ) )
+    if( cr.ActionPoints < int( _WeaponApCost( weapon, mode ) ) )
         return false;
 
     uint     maxDist = _WeaponMaxDist( weapon, mode );
@@ -854,7 +854,7 @@ bool CheckBattleWeapon( Critter& npc, Item& weapon )
         return false;
     if( not IsCritterAnim1( npc, weapon.Weapon_Anim1 ) )
         return false;
-    if( _ItemIsBroken( weapon ) )
+    if( weapon.IsBroken )
         return false;
     if( weapon.Weapon_IsTwoHanded && ( npc.IsDamagedLeftArm || npc.IsDamagedRightArm ) )
         return false;

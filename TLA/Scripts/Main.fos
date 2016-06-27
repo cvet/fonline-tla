@@ -75,9 +75,6 @@ void ModuleInit()
     __EventMapCheckLook.Subscribe( check_look );
     __EventMapCheckTrapLook.Subscribe( check_trap_look );
     __EventItemsBarter.Subscribe( items_barter );
-    __EventMapTurnBasedBegin.Subscribe( turn_based_begin );
-    __EventMapTurnBasedProcess.Subscribe( turn_based_process );
-    __EventMapTurnBasedSequence.Subscribe( turn_based_sequence );
     __EventWorldSave.Subscribe( world_save );
     __EventPlayerRegistration.Subscribe( player_registration );
     __EventPlayerLogin.Subscribe( player_login );
@@ -566,8 +563,6 @@ bool critter_use_skill( Critter& cr, CritterProperty skill, Critter@ targetCr, I
         {
             if( IS_TIMEOUT( cr.TimeoutSneak ) )
                 cr.SayMsg( SAY_NETMSG, TEXTMSG_GAME, STR_TIMEOUT_SNEAK_WAIT );
-            else if( IS_TURN_BASED_TIMEOUT( cr ) )
-                cr.SayMsg( SAY_NETMSG, TEXTMSG_GAME, STR_TIMEOUT_BATTLE_WAIT );
             else
                 cr.IsHide = true;
         }
@@ -1225,141 +1220,6 @@ bool items_barter( Item@[]& saleItems, uint[]& saleItemsCount, Item@[]& buyItems
     }
 
     return true;
-}
-
-// //////////////////////////////////////////////////////////////////////////////////////////////////
-// Turn based callbacks.
-// Called on every round begin, return false to disable turn-based
-void turn_based_begin( Map& map )
-{
-    // Try end battle
-    if( map.TurnBasedRound > 0 )
-    {
-        uint[] crittersIds;
-        map.GetTurnBasedSequence( crittersIds );
-
-        bool continueBattle = false;
-        if( crittersIds.length() >= 2 )
-        {
-            for( uint i = 0, j = crittersIds.length(); i < j; i++ )
-            {
-                Critter@ cr = ::GetCritter( crittersIds[ i ] );
-                if( !( not valid( cr ) || cr.IsDead() ||
-                       ( cr.IsNpc() && cr.GetPlanes( AI_PLANE_ATTACK, null ) == 0 ) ||
-                       ( cr.IsPlayer() && ( cr.IsEndCombat || cr.CurrentHp < 1 ) ) ) )
-                {
-                    continueBattle = true;
-                    break;
-                }
-            }
-        }
-
-        if( not continueBattle )
-            map.EndTurnBased();
-    }
-}
-
-// Call on every begin and end turn
-void turn_based_process( Map& map, Critter& cr, bool beginTurn )
-{
-    if( beginTurn )
-    {
-        cr.MoveAp = cr.MaxMoveAp;
-        cr.TurnBasedAc = 0;
-    }
-    else
-    {
-        bool hthEvade = false;
-        if( cr.PerkHthEvade != 0 )
-        {
-            // In hands only HtH weapons
-            Item@ hand1 = cr.GetItem( 0, SLOT_HAND1 );
-            Item@ hand2 = cr.GetItem( 0, SLOT_HAND2 );
-            if( ( not valid( hand1 ) || hand1.Type != ItemType::Weapon || not Item_Weapon_IsHtHAttack( hand1, 0 ) ) &&
-                ( not valid( hand1 ) || hand1.Type != ItemType::Weapon || not Item_Weapon_IsHtHAttack( hand1, 0 ) ) )
-            {
-                hthEvade = true;
-            }
-        }
-
-        cr.TurnBasedAc = cr.CurrentAp / AP_DIVIDER * ( hthEvade ? 2 : 1 );
-        if( cr.TurnBasedAc < 0 )
-            cr.TurnBasedAc = 0;
-        if( hthEvade && cr.SkillUnarmed > 0 )
-            cr.TurnBasedAc += cr.SkillUnarmed / 12;
-        cr.MoveAp = 0;
-    }
-}
-
-// Call when need generate turns sequence
-void turn_based_sequence( Map& map, Critter@[]& critters, Critter@ firstTurnCrit )
-{
-    // Check first turn critter
-    if( valid( firstTurnCrit ) && ( firstTurnCrit.IsDead() || firstTurnCrit.CurrentAp / AP_DIVIDER <= 0 ) )
-        @firstTurnCrit = null;
-
-    // Collect critters
-    SequenceCritter[] sequenceCritters;
-    for( uint i = 0, j = critters.length(); i < j; i++ )
-    {
-        Critter@ cr = critters[ i ];
-        if( valid( firstTurnCrit ) && firstTurnCrit.Id == cr.Id )
-            continue;
-        if( cr.IsDead() )
-            continue;
-        sequenceCritters.resize( sequenceCritters.length() + 1 );
-        @sequenceCritters.last().critter = cr;
-    }
-
-    // Sort sequence, see SequenceCritter::opCmp below
-    SequenceCritterRandom = Random( 0, 1 );
-    sequenceCritters.sortDesc();
-
-    // Fill result
-    critters.clear();
-    if( valid( firstTurnCrit ) )
-        critters.insertLast( firstTurnCrit );
-    for( uint i = 0, j = sequenceCritters.length(); i < j; i++ )
-        critters.insertLast( sequenceCritters[ i ].critter );
-}
-
-// Sequence sorter for turn_based_sequence
-int   SequenceCritterRandom = 0;
-class SequenceCritter
-{
-    Critter@ critter;
-    int opCmp( SequenceCritter& in other )
-    {
-        bool     result;
-        Critter@ cr1 = critter;
-        Critter@ cr2 = other.critter;
-        int      seq1 = cr1.Sequence;
-        int      seq2 = cr2.Sequence;
-        if( seq1 == seq2 )
-        {
-            int ag1 = cr1.Agility;
-            int ag2 = cr2.Agility;
-            if( ag1 == ag2 )
-            {
-                int lk1 = cr1.Luck;
-                int lk2 = cr2.Luck;
-                if( lk1 == lk2 )
-                {
-                    if( SequenceCritterRandom == 0 )
-                        result = cr1.Id > cr2.Id;
-                    else
-                        result = cr1.Id < cr2.Id;
-                }
-                else
-                    result = lk1 > lk2;
-            }
-            else
-                result = ag1 > ag2;
-        }
-        else
-            result = seq1 > seq2;
-        return result ? int(1) : int(-1);
-    }
 }
 
 // Call on world saving

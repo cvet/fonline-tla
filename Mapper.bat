@@ -1,1 +1,1 @@
-cd "%~dp0" & start "" "%~dp0FOnline\Binaries\Mapper\Mapper.exe" %*
+cd "%~dp0" & start "" "%~dp0FOnlineSDK\Binaries\Mapper\Mapper.exe" %*

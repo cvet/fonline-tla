@@ -1,1 +1,1 @@
-cd "%~dp0" & start "" "%~dp0FOnline\Binaries\Client\FOnline.exe" %*
+cd "%~dp0" & start "" "%~dp0FOnlineSDK\Binaries\Client\FOnline.exe" %*

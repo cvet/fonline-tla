@@ -1,1 +1,1 @@
-cd "%~dp0" & start "" "%~dp0FOnline\Binaries\InterfaceEditor\InterfaceEditor.exe" %*
+cd "%~dp0" & start "" "%~dp0FOnlineSDK\Binaries\InterfaceEditor\InterfaceEditor.exe" %*

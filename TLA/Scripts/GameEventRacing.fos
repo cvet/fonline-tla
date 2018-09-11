@@ -1,0 +1,914 @@
+// FOS Server
+
+#include "Tla"
+
+#pragma property Critter PrivateServer uint8  RacingCheckPoints Max = 14
+#pragma property Critter PrivateServer uint   RacingCheckpointLocId
+#pragma property Critter PrivateServer uint16 GERacingCritterHx
+#pragma property Critter PrivateServer uint16 GERacingCritterHy
+#pragma property Critter PrivateServer uint8  GERacingCritterDir
+#pragma property Critter PrivateServer uint   GERacingNpcRole
+#pragma property Critter PrivateServer uint   GERacingOpeningPhrases
+
+#pragma property Location PrivateServer uint8 RacingCheckpointNumber Max = 14
+
+#pragma property Global PrivateServer uint8 RacingWinnersFound     Max = 2
+#pragma property Global PrivateServer uint  RacingWinner
+
+#pragma content Dialog den_bishop_bill
+#pragma content Dialog den_bishop_bodyguard
+#pragma content Dialog den_bishop_guard
+#pragma content Critter Bill
+#pragma content Critter Guard
+#pragma content Critter Bodyguard
+
+#define DL #(s) (Log("GameEventRacing: " + s))
+//#define DL                                 # ( s )
+#define STR_ANNOUNCE                       ( 3853 )
+#define ROLE_BRAHMIN                       ( 221 )
+#define ROLE_BILL                          ( 222 )
+#define ROLE_GUARD                         ( 223 )
+#define ROLE_BODYGUARD                     ( 224 )
+#define ROLE_SPECTATOR                     ( 225 )
+#define ENTIRE_BILL_PREPARE                ( 222 )
+#define ENTIRE_BODYGUARD_PREPARE           ( 223 )
+#define ENTIRE_GUARD                       ( 224 )
+#define ENTIRE_BILL                        ( 225 )
+#define ENTIRE_BODYGUARD                   ( 226 )
+#define ENTIRE_SPECTATORS                  ( 227 )
+#define ENTIRE_LOOK_TO                     ( 228 )
+
+#define CTE_RUN_START_EVENT                ( 223 )
+#define CTE_COMMENT                        ( 224 )
+#define CTE_OPENNING                       ( 225 )
+
+#define EVENT_RACING_PREPARE               ( 1 ) // Предварительные рассказы о гонке
+#define EVENT_RACING_BEGIN                 ( 2 ) // Начало гонок - сбор НПЦ и администрации на старте, прием заявок на участие
+#define EVENT_RACING_RUN                   ( 3 ) // Начало гонок
+#define EVENT_RACING_STOP                  ( 4 ) // Конец гонок, найден победитель
+#define EVENT_RACING_CLEAR                 ( 5 ) // Удаление нпц и энкаунтеров
+
+#define STATUS_NEVER_OCCURED               ( 0 )
+#define STATUS_RUNNING                     ( 1 )
+#define STATUS_OCCURED                     ( 2 )
+#define STATUS_ENDED                       ( 3 )
+
+#define STR_1PHASE_COMMENT_MALE_FIRST      ( 3800 )
+#define STR_1PHASE_COMMENT_MALE_LAST       ( 3806 )
+#define STR_1PHASE_COMMENT_FEMALE_FIRST    ( 3804 )
+#define STR_1PHASE_COMMENT_FEMALE_LAST     ( 3808 )
+
+#define GAME_MONTH                         # (mon)                 ( GAME_MONTH_TO_TICK (mon))
+
+#define _Phase1Comment                     # (cr) ( cr.BodyType == BT_WOMEN ? Random( STR_1PHASE_COMMENT_FEMALE_FIRST, STR_1PHASE_COMMENT_FEMALE_LAST ) : Random( STR_1PHASE_COMMENT_MALE_FIRST, STR_1PHASE_COMMENT_MALE_LAST ) )
+
+import bool   CheckEventStatus( uint idx, uint status ) from "GameEvent";
+import uint   GetEventOccurenceTime( uint idx ) from "GameEvent";
+import void   RunGameEvent( uint idx ) from "GameEvent";
+import void   StopGameEvent( uint idx ) from "GameEvent";
+import string DateTimeToString( uint gameTime ) from "Time";
+import void   _GuardInit( Critter& cr, bool firstTime ) from "MapBarterGround";
+import bool   GetFreeHex( Map& map, uint radius, uint16& hx, uint16& hy ) from "Caravan";
+import bool   SetKnownLoc( Critter& cr, bool byId, uint locNum ) from "Location";
+
+// ******************* Предварительный этап. Билл и телохранители рассказывают о гонках ********************
+
+void RunPreparePhase()
+{
+    PrepareRacing();
+}
+
+void PrepareRacing()
+{
+    Map@ map = GetMapByPid( Content::Map::den_carstop, 0 );
+    Globals.RacingEvent = 0;
+    Globals.RacingWinner = 0;
+    Globals.RacingWinnersFound = 0;
+    if( !valid( map ) )
+        return;
+
+    int[] propsBill =
+    {
+        CritterProperty::CharismaBase, 10, CritterProperty::NpcRole, ROLE_BILL, CritterProperty::IsInvulnerable, 1,
+        CritterProperty::AiId, AIPACKET_TOUGH_CITIZEN, CritterProperty::BagId, 28, CritterProperty::TeamId, TEAM_CityElite,
+        CritterProperty::DialogId, Content::Dialog::den_bishop_bill
+    };
+    int[] propsBodyGuard =
+    {
+        CritterProperty::IsNoLoot, 1, CritterProperty::IsNoKnock, 1, CritterProperty::NpcRole, ROLE_BODYGUARD,
+        CritterProperty::IsInvulnerable, 1, CritterProperty::AiId, AIPACKET_TOUGH_GUARD,
+        CritterProperty::BagId, 93, CritterProperty::TeamId, TEAM_CityElite, CritterProperty::DialogId, Content::Dialog::den_bishop_bodyguard,
+        CritterProperty::PerkBetterCriticals, 1, CritterProperty::PerkSniper, 1, CritterProperty::IsNoSteal, 1,
+        CritterProperty::PerkSlayer, 1, CritterProperty::EnduranceBase, 10, CritterProperty::CharismaBase, 10,
+        CritterProperty::StrengthBase, 10, CritterProperty::MaxLifeBase, 500, CritterProperty::ActionPointsBase, 30,
+        CritterProperty::MeleeDamageBase, 50, CritterProperty::BonusLook, 1000
+    };
+
+    uint16 hX = 0, hY = 0;
+
+    Entire[] entires;
+    if( GetNearEntire( map, ENTIRE_BILL_PREPARE, hX, hY ) )
+    {
+        map.AddNpc( Content::Critter::Bill, hX, hY, 2, propsBill, null );
+    }
+    else
+        return;
+    if( ParseEntires( map, entires, ENTIRE_BODYGUARD_PREPARE ) > 0 )
+    {
+        for( uint i = 0, l = entires.length(); i < l; i++ )
+        {
+            map.AddNpc( Content::Critter::Bodyguard, entires[ i ].HexX, entires[ i ].HexY, 2, propsBodyGuard, null );
+        }
+    }
+    SavedDeferredCall( MINUTE_TICKS( 20 ), AnnounceRadio );
+}
+
+void AnnounceRadio()
+{
+    DL( "Radio announce" );
+    if( CheckEventStatus( EVENT_RACING_BEGIN, STATUS_RUNNING ) )
+    {
+        RadioMessageMsg( 0, TEXTMSG_TEXT, STR_ANNOUNCE );
+        uint time = GetEventOccurenceTime( EVENT_RACING_BEGIN );
+        if( time > 0 && time > __FullSecond )
+            RadioMessage( 0, DateTimeToString( time ) );
+        SavedDeferredCall( MINUTE_TICKS( 25 ), AnnounceRadio );
+    }
+}
+
+// ******************* Начальный этап. Билл и телохранители идут к месту начала гонок, окружающие нпц собираются ********************
+void RunBeginPhase()
+{
+    BeginRacing();
+}
+
+void dlg_RacingWhen( Critter& player, Critter@ npc, string@ lexems )
+{
+    if( !IS_DIALOG_GENERATED( lexems ) )
+        return;
+    lexems = "$whenНикогда";
+    uint time = GetEventOccurenceTime( EVENT_RACING_BEGIN );
+    if( time == 0 )
+        time = GetEventOccurenceTime( EVENT_RACING_RUN );
+    lexems = "$when" + DateTimeToString( time );
+}
+
+void BeginRacing()
+{
+    Map@ map = GetMapByPid( Content::Map::den_carstop, 0 );
+    if( !valid( map ) )
+        return;
+    Critter@ cr;
+    uint16   hX = 0, hY = 0;
+    @cr = map.GetNpc( ROLE_BILL, FIND_ALL | FIND_ONLY_NPC, 0 );
+    if( valid( cr ) && GetNearEntire( map, ENTIRE_BILL, hX, hY ) )
+    {
+        cr.HomeMapId = map.Id;
+        cr.HomeHexX = hX;
+        cr.HomeHexY = hY;
+        cr.HomeDir = 2;
+        cr.GERacingCritterHx = hX;
+        cr.GERacingCritterHy = hY;
+        cr.AddTimeEvent( "cte_RunStartEvent", REAL_MINUTE( 5 ), CTE_RUN_START_EVENT );
+        Critter@[] bodyguards;
+        Entire[] entires;
+        uint enCount = ParseEntires( map, entires, ENTIRE_BODYGUARD );
+        uint bgCount = map.GetNpcCount( ROLE_BODYGUARD, FIND_ALL | FIND_ONLY_NPC );
+        for( uint i = 0; i < bgCount && i < enCount; i++ )
+        {
+            @cr = map.GetNpc( ROLE_BODYGUARD, FIND_ALL | FIND_ONLY_NPC, i );
+            if( valid( cr ) )
+            {
+                cr.HomeMapId = map.Id;
+                cr.HomeHexX = entires[ i ].HexX;
+                cr.HomeHexY = entires[ i ].HexY;
+                cr.HomeDir = 2;
+            }
+        }
+        entires.clear();
+        if( ParseEntires( map, entires, ENTIRE_GUARD ) > 0 )
+        {
+            int[] props =
+            {
+                CritterProperty::IsNoLoot, 1, CritterProperty::IsNoKnock, 1, CritterProperty::NpcRole, ROLE_BODYGUARD,
+                CritterProperty::IsInvulnerable, 1, CritterProperty::AiId, AIPACKET_TOUGH_GUARD,
+                CritterProperty::BagId, 93, CritterProperty::TeamId, TEAM_CityElite,
+                CritterProperty::DialogId, Content::Dialog::den_bishop_guard,
+                CritterProperty::PerkBetterCriticals, 1, CritterProperty::PerkSniper, 1, CritterProperty::IsNoSteal, 1,
+                CritterProperty::PerkSlayer, 1, CritterProperty::EnduranceBase, 10, CritterProperty::CharismaBase, 10,
+                CritterProperty::StrengthBase, 10, CritterProperty::MaxLifeBase, 500, CritterProperty::ActionPointsBase, 30,
+                CritterProperty::MeleeDamageBase, 50, CritterProperty::BonusLook, 1000
+            };
+            for( uint i = 0, l = entires.length(); i < l; i++ )
+            {
+                map.AddNpc( Content::Critter::Guard, entires[ i ].HexX, entires[ i ].HexY, 6, props, "_DenGuardInit" );
+            }
+        }
+        Critter@[] npc;
+        entires.clear();
+        uint16  hXlook = 0, hYlook = 0;
+        uint8   dir = 2;
+        Entire@ entire;
+        map.GetEntireCoords( ENTIRE_LOOK_TO, 0, hXlook, hYlook );
+        if( map.GetCritters( 0, FIND_LIFE | FIND_ONLY_NPC, npc ) > 0 && ParseEntires( map, entires, ENTIRE_SPECTATORS ) > 0 )
+        {
+            uint countNpc = 0;
+            for( uint i = 0, l = npc.length(); i < l && countNpc < 25; i++ )
+            {
+                @cr = npc[ i ];
+                if( valid( cr ) && cr.GERacingCritterHx == 0 && cr.GERacingCritterHy == 0 && cr.GERacingCritterDir == 0 )
+                {
+                    if( ( cr.NpcRole == 0 && cr.BodyType != BT_BRAHMIN && cr.BodyType != BT_DOG ) ||
+                        ( cr.BodyType != BT_BRAHMIN && cr.NpcRole == ROLE_BRAHMIN ) )
+                    {
+                        @entire = entires[ Random( 0, entires.length() - 1 ) ];
+                        hX = entire.HexX;
+                        hY = entire.HexY;
+                        if( valid( entire ) && GetFreeHex( map, 4, hX, hY ) && map.GetPathLength( cr, hX, hY, 0 ) > 0 )
+                        {
+                            cr.GERacingCritterHx = cr.HomeHexX;
+                            cr.GERacingCritterHy = cr.HomeHexY;
+                            cr.GERacingCritterDir = cr.HomeDir;
+                            cr.GERacingNpcRole = cr.NpcRole;
+                            cr.NpcRole = ROLE_SPECTATOR;
+                            dir = GetDirection( hX, hY, hXlook, hYlook );
+                            cr.HomeMapId = map.Id;
+                            cr.HomeHexX = hX;
+                            cr.HomeHexY = hY;
+                            cr.HomeDir = dir;
+                            cr.AddTimeEvent( "cte_Npc2HomePos", GAME_MONTH( 3 ), CTE_RUN_START_EVENT );
+                            __EventCritterTalk.SubscribeToCritter( cr, _SpectatorTalk );
+                            countNpc++;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    else
+    {
+        return;
+    }
+
+}
+
+bool _SpectatorTalk( Critter& cr, Critter& player, bool attach, uint talkCount )
+{
+    if( !CheckEventStatus( EVENT_RACING_BEGIN, STATUS_RUNNING ) &&
+        !CheckEventStatus( EVENT_RACING_STOP, STATUS_RUNNING ) &&
+        !CheckEventStatus( EVENT_RACING_RUN, STATUS_RUNNING ) )
+        return true;
+
+    auto npcStory = player.NpcStory;
+    bool f = npcStory.get( cr.Id, false );
+    if( attach )
+    {
+        if( !f )
+        {
+            npcStory[ cr.Id ] = true;
+            player.NpcStory = npcStory;
+        }
+        else
+        {
+            return true;
+        }
+        RunDialog( player, cr, 189, false );
+        return false;
+    }
+    else
+    {
+        if( f )
+        {
+            npcStory[ cr.Id ] = false;
+            player.NpcStory = npcStory;
+        }
+    }
+    return true;
+}
+
+uint cte_Npc2HomePos( Critter& cr, int identifier, uint& stage )
+{
+    if( CheckEventStatus( EVENT_RACING_BEGIN, STATUS_RUNNING ) || CheckEventStatus( EVENT_RACING_STOP, STATUS_RUNNING ) )
+        return REAL_MINUTE( 5 );
+    if( cr.GERacingCritterHx == 0 || cr.GERacingCritterHy == 0 )
+        return 0;
+
+    cr.HomeMapId = cr.GetMap().Id;
+    cr.HomeHexX = cr.GERacingCritterHx;
+    cr.HomeHexY = cr.GERacingCritterHy;
+    cr.HomeDir = cr.GERacingCritterDir;
+    cr.GERacingCritterHx = 0;
+    cr.GERacingCritterHy = 0;
+    cr.GERacingCritterDir = 0;
+    cr.GERacingOpeningPhrases = 0;
+    cr.NpcRole = cr.GERacingNpcRole;
+	__EventCritterTalk.UnsubscribeFromCritter( cr, _SpectatorTalk );
+
+    return 0;
+}
+
+void _DenGuardInit( Critter& cr, bool firstTime )
+{
+    _GuardInit( cr, firstTime );
+    __EventCritterSomeCritterUseSkill.SubscribeToCritter( cr, _GuardSmthSkill );
+}
+
+void _GuardSmthSkill( Critter& cr, Critter& fromCr, CritterProperty skill, Critter@ onCritter, Item@ onItem,const Item@ onScenery )
+{
+    if( valid( onItem ) && skill == CritterProperty::SkillLockpick )
+    {
+        fromCr.Wait( 0 );
+        AddAttackPlane( cr, 0, fromCr );
+    }
+}
+
+uint cte_RunStartEvent( Critter& cr, int identifier, uint& stage )
+{
+    if( cr.HexX == cr.GERacingCritterHx && cr.HexY == cr.GERacingCritterHy && cr.IsLife() )
+    {
+        RunGameEvent( EVENT_RACING_RUN );
+        cr.AddTimeEvent( "cte_Comment", REAL_SECOND( 30 ), CTE_COMMENT );
+        return 0;
+    }
+    return REAL_MINUTE( 1 );
+}
+// _Phase1Comment(cr)
+uint cte_Comment( Critter& cr, int identifier, uint& stage )
+{
+    if( !CheckEventStatus( EVENT_RACING_RUN, STATUS_RUNNING ) )
+        return 0;
+    Critter@[] critters;
+    Map@ map = cr.GetMap();
+    if( !valid( map ) )
+        return 0;
+    uint spectators = map.GetNpcCount( ROLE_SPECTATOR, FIND_LIFE | FIND_ONLY_NPC );
+    if( spectators > 0 )
+    {
+        Critter@ cr1;
+        Critter@ cr2;
+        int      str1 = 0;
+        int      str2 = 0;
+        int      counter = 10;
+        while( counter > 0 && ( str1 == str2 || ( str1 == 0 || str2 == 0 ) || !valid( cr1 ) || !valid( cr2 ) || cr1.Id == cr2.Id ) )
+        {
+            @cr1 = map.GetNpc( ROLE_SPECTATOR, FIND_LIFE | FIND_ONLY_NPC, Random( 0, spectators - 1 ) );
+            if( valid( cr1 ) && cr1.BodyType != BT_BRAHMIN )
+                str1 = _Phase1Comment( cr1 );
+            @cr2 = map.GetNpc( ROLE_SPECTATOR, FIND_LIFE | FIND_ONLY_NPC, Random( 0, spectators - 1 ) );
+            if( valid( cr2 ) && cr2.BodyType != BT_BRAHMIN )
+                str2 = _Phase1Comment( cr1 );
+        }
+        if( valid( cr1 ) && str1 > 0 )
+            cr1.AddTimeEvent( "cte_Talk", REAL_SECOND( 5 ), CTE_COMMENT, str1 );
+        if( valid( cr2 ) && str2 > 0 )
+            cr2.AddTimeEvent( "cte_Talk", REAL_SECOND( Random( 2, 20 ) ), CTE_COMMENT, str2 );
+    }
+    return REAL_SECOND( 20 );
+}
+
+uint cte_Talk( Critter& cr, int identifier, uint& rate )
+{
+    cr.SayMsg( SAY_NORM, TEXTMSG_TEXT, rate );
+    return 0;
+}
+
+// ******************* Начало гонок. Билл произносит приветственную речь и открываются энкаунтеры для участников ********************
+
+
+void RunRacingPhase()
+{
+    RunRacing();
+    DL( "RACING NOW" );
+}
+
+void RunRacing()
+{
+    Map@ map = GetMapByPid( Content::Map::den_carstop, 0 );
+    if( !valid( map ) )
+        return;
+    Critter@ cr;
+    @cr = map.GetNpc( ROLE_BILL, FIND_ALL | FIND_ONLY_NPC, 0 );
+    cr.AddTimeEvent( "cte_Opening", REAL_SECOND( 5 ), CTE_OPENNING, 0 );
+}
+
+uint cte_Opening( Critter& cr, int identifier, uint& rate )
+{
+    Map@ map = cr.GetMap();
+    if( !valid( map ) )
+        return 0;
+    if( rate == 12 )
+    {
+        Start();
+    }
+    if( rate >= OpeningPhrases.length() )
+    {
+        return 0;
+    }
+    cr.SayMsg( SAY_SHOUT, TEXTMSG_TEXT, OpeningPhrases[ rate ][ 0 ][ 0 ] );
+    Critter@npc;
+    bool talkAlready = true;
+    int  tries = 0;
+    uint spectators = map.GetNpcCount( ROLE_SPECTATOR, FIND_LIFE | FIND_ONLY_NPC );
+    for( uint i = 0, l = OpeningPhrases[ rate ][ 2 ].length(); i < l && i < spectators; i++ )
+    {
+        talkAlready = true;
+        tries = 10;
+        while( tries > 0 && talkAlready )
+        {
+            tries--;
+            @npc = map.GetNpc( ROLE_SPECTATOR, FIND_LIFE | FIND_ONLY_NPC, Random( 0, spectators - 1 ) );
+            if( valid( npc ) && OpeningPhrases[ rate ][ 2 ].find( npc.GERacingOpeningPhrases ) == -1 )
+            {
+                npc.GERacingOpeningPhrases = OpeningPhrases[ rate ][ 2 ][ i ];
+                talkAlready = false;
+            }
+        }
+        if( valid( npc ) && npc.GERacingOpeningPhrases > 0 && !talkAlready )
+        {
+            npc.AddTimeEvent( "cte_Shout", REAL_SECOND( i ) + REAL_SECOND( 1 ) / 2, CTE_COMMENT, npc.GERacingOpeningPhrases );
+        }
+    }
+    for( uint i = 0, l = OpeningPhrases[ rate ][ 3 ].length(); i < l && i < spectators; i++ )
+    {
+        talkAlready = true;
+        tries = 10;
+        while( tries > 0 && talkAlready )
+        {
+            tries--;
+            @npc = map.GetNpc( ROLE_SPECTATOR, FIND_LIFE | FIND_ONLY_NPC, Random( 0, spectators - 1 ) );
+            if( valid( npc ) && OpeningPhrases[ rate ][ 2 ].find( npc.GERacingOpeningPhrases ) == -1 && npc.BodyType == BT_WOMEN && OpeningPhrases[ rate ][ 3 ].find( npc.GERacingOpeningPhrases ) == -1 )
+            {
+                npc.GERacingOpeningPhrases = OpeningPhrases[ rate ][ 3 ][ i ];
+                talkAlready = false;
+            }
+        }
+        if( valid( npc ) && npc.GERacingOpeningPhrases > 0 && !talkAlready )
+        {
+            npc.AddTimeEvent( "cte_Shout", REAL_SECOND( i ) + REAL_SECOND( 1 ) / 2, CTE_COMMENT, npc.GERacingOpeningPhrases );
+        }
+    }
+    if( OpeningPhrases[ rate ][ 4 ][ 0 ] > 0 )
+    {
+        for( uint i = 0; i < 2; i++ )
+        {
+            @npc = map.GetNpc( ROLE_BODYGUARD, FIND_LIFE | FIND_ONLY_NPC, i );
+            if( valid( npc ) )
+                npc.AddTimeEvent( "cte_Talk", REAL_SECOND( 1 ) + i * 5, CTE_COMMENT, 3854 );
+        }
+    }
+    rate++;
+    return REAL_SECOND( OpeningPhrases[ rate - 1 ][ 1 ][ 0 ] / 10 );
+}
+
+uint cte_Shout( Critter& cr, int identifier, uint& rate )
+{
+    cr.SayMsg( SAY_NORM_ON_HEAD, TEXTMSG_TEXT, rate );
+    return 0;
+}
+
+void Start()
+{
+    Critter@[] players;
+    Map@ map = GetMapByPid( Content::Map::den_carstop, 0 );
+    if( !valid( map ) )
+        return;
+    if( map.GetCritters( 0, FIND_ALL | FIND_ONLY_PLAYERS, players ) > 0 )
+    {
+        Globals.RacingEvent = 1;
+        Globals.RacingWinner = 0;
+        Globals.RacingWinnersFound = 0;
+        uint countPlayers = 0;
+        for( uint i = 0, l = players.length(); i < l; i++ )
+        {
+            Critter@ player = players[ i ];
+            if( valid( player ) )
+            {
+                if( player.DenBillRacingWin == 1 )
+                {
+                    player.DenBillRacingWin = 2;
+                    CreateCheckPoint( player );
+                    countPlayers += 1;
+                }
+            }
+        }
+        if( countPlayers > 0 )
+        {
+            RadioMessageMsg( 0, TEXTMSG_TEXT, 3857 );
+            RadioMessage( 0, "" + countPlayers );
+            RadioMessageMsg( 0, TEXTMSG_TEXT, 3858 );
+        }
+    }
+}
+
+// Генерит новый чекпоинт и удаляет старый для игрока
+uint CreateCheckPoint( Critter& player )
+{
+    if( Globals.RacingEvent != 1 )
+        return 0;
+
+    int number = player.RacingCheckPoints;
+    player.RacingCheckPoints += 1;
+    player.SayMsg( SAY_NETMSG, TEXTMSG_TEXT, 3856, "$num" + player.RacingCheckPoints );
+    uint locId = CreateLocation(
+        Content::Location::den_racing_checkpoint,
+        Coords[ number ][ 0 ] + Random( -1 * int(__GlobalMapZoneLength) / 2, int(__GlobalMapZoneLength) / 2 ),
+        Coords[ number ][ 1 ] + Random( -1 * int(__GlobalMapZoneLength) / 2, int(__GlobalMapZoneLength) / 2 ), null );
+    if( locId > 0 )
+    {
+        Location@ loc = GetLocation( locId );
+        if( valid( loc ) )
+            loc.Color = ( number % 2 == 0 ? COLOR_RED : COLOR_BLUE );
+        SetKnownLoc( player, true, locId );
+        if( number > 0 )
+        {
+            RadioMessageMsg( 8, TEXTMSG_TEXT, 3860 + number );
+            RadioMessage( 8, GetPlayerName( player.Id ) );
+        }
+        if( player.RacingCheckpointLocId > 0 )
+        {
+            Location@ prev = GetLocation( player.RacingCheckpointLocId );
+            if( valid( prev ) )
+            {
+                // на квестовой локации могут постаивть машину и использовать локацию как склад
+                // поэтому локацию надо делать видимой и автоудаляемой
+                prev.Hidden = false;
+                prev.AutoGarbage = true;
+            }
+        }
+        player.RacingCheckpointLocId = locId;
+
+        loc.RacingCheckpointNumber = player.RacingCheckPoints;
+    }
+    return locId;
+}
+
+bool d_CanCheckThisPoint( Critter& player, Critter@ npc )
+{
+    Map@ map = player.GetMap();
+    if( not valid( map ) )
+        return false;
+
+    Location@ loc = map.GetLocation();
+    if( not valid( loc ) )
+        return false;
+
+    DL( "pp:" + player.RacingCheckPoints + "; pl:" + loc.RacingCheckpointNumber );
+    return loc.RacingCheckpointNumber == player.RacingCheckPoints;
+}
+
+void r_NextCheckPoint( Critter& player, Critter@ npc )
+{
+    CreateCheckPoint( player );
+}
+
+
+// Наступил на контрольный триггер
+void t_Win( Critter& player, const Item& trigger, bool entered, uint8 dir )
+{
+    if( !player.IsPlayer() || Globals.RacingEvent == 0 )
+        return;
+
+    // 1. Подходит ли игрок под требования к победителю
+    if( player.DenBillRacingWin != 2 || player.RacingCheckPoints <  14 )
+        return;
+
+    player.Wait( 500 );
+    player.RacingCheckPoints = 0;
+    if( Globals.RacingEvent == 1 && Globals.RacingWinnersFound == 0 )
+    {
+        // Победитель
+        Globals.RacingWinnersFound = 1;
+        player.DenBillRacingWin = 5;
+        Globals.RacingWinner = player.Id;
+        Map@ map = GetMapByPid( Content::Map::den_carstop, 0 );
+        if( !valid( map ) )
+            return;
+        Critter@ cr = map.GetNpc( ROLE_BILL, FIND_ALL | FIND_ONLY_NPC, 0 );
+        if( valid( cr ) )
+        {
+            cr.AddTimeEvent( "cte_Winner", 0, CTE_OPENNING, 0 );
+        }
+
+        return;
+    }
+
+    if( Globals.RacingEvent == 1 && Globals.RacingWinnersFound == 1 )
+    {
+        // Второе место
+        Globals.RacingWinnersFound = 2;
+        Globals.RacingEvent = 2;
+        player.DenBillRacingWin = 4;
+        RadioMessageMsg( 0, TEXTMSG_TEXT, 3957 );
+        RadioMessage( 0, GetPlayerName( Globals.RacingWinner ) );
+        StopRacing();        // 3957
+        return;
+    }
+    player.DenBillRacingWin = 3;
+}
+
+uint cte_Winner( Critter& cr, int identifier, uint& rate )
+{
+    Map@ map = cr.GetMap();
+    if( !valid( map ) )
+        return 0;
+    if( rate >= FirstWinnerPhrases.length() || Globals.RacingWinner == 0 )
+    {
+        RadioMessageMsg( 8, TEXTMSG_TEXT, 3953 );
+        RadioMessage( 8, GetPlayerName( Globals.RacingWinner ) );
+        RadioMessageMsg( 0, TEXTMSG_TEXT, 3953 );
+        RadioMessage( 0, GetPlayerName( Globals.RacingWinner ) );
+        RadioMessageMsg( 0, TEXTMSG_TEXT, 3954 );
+        return 0;
+    }
+    cr.SayMsg( SAY_SHOUT, TEXTMSG_TEXT, FirstWinnerPhrases[ rate ][ 0 ][ 0 ], "$winner" + GetPlayerName( Globals.RacingWinner ) );
+    Critter@npc;
+    bool talkAlready = true;
+    int  tries = 0;
+    uint spectators = map.GetNpcCount( ROLE_SPECTATOR, FIND_LIFE | FIND_ONLY_NPC );
+    for( uint i = 0, l = FirstWinnerPhrases[ rate ][ 2 ].length(); i < l && i < spectators; i++ )
+    {
+        talkAlready = true;
+        tries = 10;
+        while( tries > 0 && talkAlready )
+        {
+            tries--;
+            @npc = map.GetNpc( ROLE_SPECTATOR, FIND_LIFE | FIND_ONLY_NPC, Random( 0, spectators - 1 ) );
+            if( valid( npc ) && FirstWinnerPhrases[ rate ][ 2 ].find( npc.GERacingOpeningPhrases ) == -1 )
+            {
+                npc.GERacingOpeningPhrases = FirstWinnerPhrases[ rate ][ 2 ][ i ];
+                talkAlready = false;
+            }
+        }
+        if( valid( npc ) && npc.GERacingOpeningPhrases > 0 && !talkAlready )
+        {
+            npc.AddTimeEvent( "cte_Shout", REAL_SECOND( i ) + REAL_SECOND( 1 ) / 2, CTE_COMMENT, npc.GERacingOpeningPhrases );
+        }
+    }
+    for( uint i = 0, l = OpeningPhrases[ rate ][ 3 ].length(); i < l && i < spectators; i++ )
+    {
+        talkAlready = true;
+        tries = 10;
+        while( tries > 0 && talkAlready )
+        {
+            tries--;
+            @npc = map.GetNpc( ROLE_SPECTATOR, FIND_LIFE | FIND_ONLY_NPC, Random( 0, spectators - 1 ) );
+            if( valid( npc ) && OpeningPhrases[ rate ][ 2 ].find( npc.GERacingOpeningPhrases ) == -1 && npc.BodyType == BT_WOMEN && OpeningPhrases[ rate ][ 3 ].find( npc.GERacingOpeningPhrases ) == -1 )
+            {
+                npc.GERacingOpeningPhrases = OpeningPhrases[ rate ][ 3 ][ i ];
+                talkAlready = false;
+            }
+        }
+        if( valid( npc ) && npc.GERacingOpeningPhrases > 0 && !talkAlready )
+        {
+            npc.AddTimeEvent( "cte_Shout", REAL_SECOND( i ) + REAL_SECOND( 1 ) / 2, CTE_COMMENT, npc.GERacingOpeningPhrases );
+        }
+    }
+    if( OpeningPhrases[ rate ][ 4 ][ 0 ] > 0 )
+    {
+        for( uint i = 0; i < 2; i++ )
+        {
+            @npc = map.GetNpc( ROLE_BODYGUARD, FIND_LIFE | FIND_ONLY_NPC, i );
+            if( valid( npc ) )
+                npc.AddTimeEvent( "cte_Talk", REAL_SECOND( 1 ) + i * 5, CTE_COMMENT, 3854 );
+        }
+    }
+    rate++;
+    return REAL_SECOND( OpeningPhrases[ rate - 1 ][ 1 ][ 0 ] / 10 );
+}
+
+
+int16[][] Coords =
+{
+    { 275,   511 },  // 1
+    { 372,   696 },  // 2
+    { 758,   890 },  // 3
+    { 744,   1107 }, // 4
+    { 559,   1216 }, // 5
+    { 735,   1387 }, // 6
+    { 1212,  1394 }, // 7
+    { 1286,  1156 }, // 8
+    { 1059,  952 },  // 9
+    { 1172,  733 },  // 10
+    { 1057,  562 },  // 11
+    { 1172,  245 },  // 12
+    { 851,   113 }  // 13
+};
+
+int16[][][] OpeningPhrases =
+{
+    {
+        { 3809 },    // Фраза билли
+        { 30 },      // Время до следующей фразы в 10 долях реальных секунд
+        { 0 },       // Комментарии зрителей
+        { 0 },       // комментарии женщин-зрителей
+        { 0 },       // комментарии телохранителей
+    },
+    {
+        { 3810 },
+        { 60 },
+        { 0 },
+        { 0 },
+        { 0 },
+    },
+    {
+        { 3811 },
+        { 50 },
+        { 3822 },
+        { 0 },
+        { 0 },
+    },
+    {
+        { 3812 },
+        { 55 },
+        { 3824 },
+        { 0 },
+        { 0 },
+    },
+    {
+        { 3813 },
+        { 30 },
+        { 0 },
+        { 0 },
+        { 0 },
+    },
+    {
+        { 3814 },
+        { 150 },
+        { 3822, 3823, 3824, 3825, 3826, 3827 },
+        { 0 },
+        { 0 },
+    },
+    {
+        { 3815 },
+        { 160 },
+        { 3828, 3829, 3830, 3831, 3832, 3833 },
+        { 0 },
+        { 3854 },
+    },
+    {
+        { 3816 },
+        { 180 },
+        { 3834, 3835, 3836, 3837, 3838, 3839 },
+        { 3855 },
+        { 0 },
+    },
+    {
+        { 3817 },
+        { 120 },
+        { 3840, 3841, 3842, 3843, 3844, 3845 },
+        { 0 },
+        { 3854 },
+    },
+    {
+        { 3818 },
+        { 50 },
+        { 3824 },
+        { 0 },
+        { 0 },
+    },
+    {
+        { 3819 },
+        { 45 },
+        { 3840 },
+        { 0 },
+        { 0 },
+    },
+    {
+        { 3820 },
+        { 45 },
+        { 0 },
+        { 0 },
+        { 0 },
+    },
+    {
+        { 3821 },
+        { 150 },
+        { 3846, 3847, 3848, 3849, 3851, 3852 },
+        { 3850 },
+        { 0 }
+    },
+    {
+        { 3874 },
+        { 90 },
+        { 3876, 3877 },
+        { 0 },
+        { 0 }
+    },
+    {
+        { 3875 },
+        { 120 },
+        { 3878, 3879, 3880, 3881 },
+        { 0 },
+        { 0 }
+    }
+};
+int16[][][] FirstWinnerPhrases =
+{
+    {
+        { 3883 },                                                 // Фраза билли
+        { 110 },                                                  // Время до следующей фразы в 10 долях реальных секунд
+        { 3887, 3887, 3888, 3889, 3890, 3891, 3892, 3893, 3894 }, // Комментарии зрителей
+        { 0 },                                                    // комментарии женщин-зрителей
+        { 0 },                                                    // комментарии телохранителей
+    },
+    {
+        { 3884 },
+        { 50 },
+        { 3887 },
+        { 0 },
+        { 0 },
+    },
+    {
+        { 3885 },
+        { 120 },
+        { 3887, 3887, 3895, 3896, 3887, 3889, 3891, 3897 },
+        { 0 },
+        { 3847 },
+    },
+    {
+        { 3886 },
+        { 50 },
+        { 3887, 3898, 3950, 3951, 3952, 3889 },
+        { 0 },
+        { 3847 },
+    }
+};
+
+
+void RunStopPhase()
+{
+    DL( "RACING STOP" );
+    StopRacing();
+}
+
+void StopRacing()
+{
+    StopGameEvent( EVENT_RACING_STOP );
+    Location@[] checkPoints;
+    GetAllLocations( Content::Location::den_racing_checkpoint, checkPoints );
+    for( uint i = 0, l = checkPoints.length(); i < l; i++ )
+    {
+        Location@ loc = checkPoints[ i ];
+        if( valid( loc ) )
+        {
+            loc.AutoGarbage = true;
+        }
+    }
+
+    if( Globals.RacingWinnersFound == 2 )
+    {
+        RadioMessageMsg( 8, TEXTMSG_TEXT, 3955 );
+        RadioMessageMsg( 0, TEXTMSG_TEXT, 3955 );
+    }
+    else
+    {
+        RadioMessageMsg( 8, TEXTMSG_TEXT, 3956 );
+        RadioMessageMsg( 0, TEXTMSG_TEXT, 3956 );
+    }
+
+    Map@ map = GetMapByPid( Content::Map::den_carstop, 0 );
+    if( !valid( map ) )
+        return;
+    Critter@[] critters;
+    int npcRole = 0;
+    if( map.GetCritters( 0, FIND_ALL | FIND_ONLY_NPC, critters ) > 0 )
+    {
+        for( uint i = 0, l = critters.length(); i < l; i++ )
+        {
+            Critter@ cr = critters[ i ];
+            if( valid( cr ) )
+            {
+                npcRole = cr.NpcRole;
+                if( npcRole == ROLE_GUARD || npcRole == ROLE_BODYGUARD || npcRole == ROLE_BILL )
+                {
+                    cr.AddTimeEvent( "cte_DelNpc", Random( REAL_MINUTE( 2 ), REAL_MINUTE( 5 ) ), CTE_COMMENT, 0 );
+                }
+                if( npcRole == ROLE_SPECTATOR )
+                {
+                    cr.AddTimeEvent( "cte_Npc2HomePos", REAL_MINUTE( 1 ), CTE_RUN_START_EVENT );
+                }
+            }
+        }
+    }
+}
+
+void r_StopEvent( Critter& cr, Critter@ npc )
+{
+    StopRacing();
+}
+
+uint cte_DelNpc( Critter& cr, int identifier, uint& rate )
+{
+    if( cr.IsNpc() )
+        DeleteNpc( cr );
+    return 0;
+}
+
+void dlg_Winner( Critter& player, Critter@ npc, string@ lexems )
+{
+    if( !IS_DIALOG_GENERATED( lexems ) )
+        return;
+    lexems = "$winnerИзбранный";
+    if( Globals.RacingWinner > 0 )
+        lexems = "$winner" + GetPlayerName( Globals.RacingWinner );
+}

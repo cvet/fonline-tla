@@ -1,0 +1,247 @@
+// FOS Server
+// Author rifleman17
+// Странствующий путник, Илай.
+// Может брать с собой одного игрока в качестве спутника
+// Если путника убьет персонаж, у которого есть база, после этого Илай отведет следующего игрока на базу убийцы.
+// не надо ставить его в СФ, иначе не выберется
+
+#include "Tla"
+
+#pragma property Critter PrivateServer uint EliTimeNextSing
+
+#define CTE_HEALSELF     ( 41 )
+#define STR_ATTACKED     ( 1 )
+#define STR_ATTACK       ( 2 )
+#define STR_KILL         ( 3 )
+#define STR_TIME2MOVE    ( 4 )
+#define STR_PICK         ( 5 )
+#define PLANE_LOOT       ( 30 )
+
+// #define DL #(s) (Log("traveller: " + s))
+#define DL               # (s)
+
+import void SetTraveller( uint crId, bool isTransit, uint entireNum, uint timeWaitLoc, uint timeWaitEnc, hash[] locPids, bool visibleEncounters ) from "Traveller";
+import void UseDrug( Critter& cr, Item& drug ) from "Drugs";
+import void SetMonologue( Critter@ cr, uint firstStr, uint lastStr, uint nextMsg, uint nextDialog, uint8 sayType ) from "Monologue";
+
+uint EliId;
+
+void _EliInit( Critter& cr, bool firstTime )
+{
+    EliId = cr.Id;
+    // Прокачка
+    cr.StrengthBase = Random( 8, 10 );
+    cr.PerceptionBase = Random( 8, 10 );
+    cr.EnduranceBase = Random( 8, 10 );
+    cr.CharismaBase = Random( 8, 10 );
+    cr.IntellectBase = Random( 8, 10 );
+    cr.AgilityBase = Random( 8, 10 );
+    cr.LuckBase = Random( 8, 10 );
+    for( uint i = 0; i < CritterPropertyResistsBase.length(); i++ )
+        if( CritterPropertyResistsBase[ i ] != CritterProperty::EmpResistanceBase )
+            cr.SetAsInt( CritterPropertyResistsBase[ i ], Random( 200, 280 ) );
+    cr.MaxLifeBase = 1000;
+    cr.CurrentHp = cr.MaxLife;
+    cr.MeleeDamageBase = 45;
+    cr.ActionPointsBase = 50;
+    cr.CriticalChanceBase = 65;
+    cr.IsGeck = true;
+    cr.IsNoHome = true;
+    cr.IsNoSteal = true;
+    cr.IsNoBarter = true;
+    cr.HealingRateBase = 100;
+    for( uint i = 0; i < CritterPropertySkills.length(); i++ )
+        cr.SetAsInt( CritterPropertySkills[ i ], Random( 100, 300 ) );
+    cr.SkillOutdoorsman = 50;
+    cr.PerkBonusHthAttacks = 3;
+    cr.PerkBonusHthDamage = 3;
+    cr.PerkBetterCriticals = 1;
+    cr.PerkSilentDeath = 1;
+    cr.PerkSlayer = 1;
+    cr.PerkTerminator = 1;
+
+    hash[] locPids =
+    {
+        Content::Location::den,
+        Content::Location::klamath,
+        Content::Location::modoc,
+        Content::Location::vault_city,
+        Content::Location::gecko,
+        Content::Location::broken_hills,
+        Content::Location::new_reno,
+        Content::Location::sierra_army_depot,
+        Content::Location::vault_15,
+        Content::Location::ncr,
+        Content::Location::cathedral,
+        Content::Location::mariposa,
+        Content::Location::redding,
+        Content::Location::navarro,
+        Content::Location::arroyo,
+        Content::Location::primal_tribe,
+        Content::Location::vault_13,
+        Content::Location::barter_ground,
+        Content::Location::raiders,
+        Content::Location::replication_1,
+        Content::Location::replication_2,
+        Content::Location::replication_3,
+        Content::Location::replication_4,
+        Content::Location::replication_hell,
+        Content::Location::geck_city,
+    };
+
+    SetTraveller( cr.Id, false, 0, 60 * 60 * 24, 60 * 60 * 2, locPids, true );
+    __EventCritterAttacked.SubscribeToCritter( cr, _EliAttacked );
+    __EventNpcPlaneBeginEx.SubscribeToCritter( cr, _EliPlaneBegin );
+    __EventNpcPlaneEndEx.SubscribeToCritter( cr, _EliPlaneEnd );
+    __EventCritterIdle.SubscribeToCritter( cr, _EliIdle );
+    __EventCritterSomeCritterDead.SubscribeToCritter( cr, _EliSmthDead );
+    __EventCritterAttack.SubscribeToCritter( cr, _EliAttack );
+}
+
+bool _EliPlaneEnd( Critter& cr, NpcPlane& plane, int reason, Critter@ someCr, Item@ someItem )
+{
+    if( plane.Identifier == PLANE_LOOT && reason == REASON_SUCCESS )
+    {
+        _CritAnimatePickup( cr );
+        if( Random( 1, 3 ) < 2 )
+            cr.SayMsg( SAY_NORM, TEXTMSG_DLG, DLGSTR( cr.DialogId, STR_PICK ) );
+        AddMiscPlane( cr, AI_PLANE_ATTACK_PRIORITY - 2, 2 * __TimeMultiplier, null );
+    }
+    return true;
+}
+
+bool _EliAttack( Critter& cr, Critter& target, Item& weapon, uint8 weaponMode, const Item@ ammo )
+{
+    if( Random( 1, 10 ) < 2 )
+        cr.SayMsg( SAY_NORM, TEXTMSG_DLG, DLGSTR( cr.DialogId, STR_ATTACK ) );
+    return false;
+}
+
+void _EliSmthDead( Critter& cr, Critter& fromCr, Critter@ killer )
+{
+    if( valid( killer ) && killer.Id == cr.Id )
+    {
+        cr.SayMsg( SAY_NORM, TEXTMSG_DLG, DLGSTR( cr.DialogId, STR_KILL ) );
+        AddWalkPlane( cr, 0, PLANE_LOOT, fromCr.Id, fromCr.HexX, fromCr.HexY, 6, false, 1 );
+    }
+}
+
+void _EliIdle( Critter& cr )
+{
+    if( !valid( cr.GetMap() ) || !cr.IsNoPlanes() )
+    {
+        if( cr.EliTimeNextSing > 0 )
+            cr.EliTimeNextSing = 0;
+        return;
+    }
+    // Сохраняется время следующей песни в EliTimeNextSing
+    if( __FullSecond >= cr.EliTimeNextSing )
+    {
+        if( cr.EliTimeNextSing > 0 )
+        {
+            DL( "sing!" );
+            Sing( cr );
+        }
+        cr.EliTimeNextSing = __FullSecond + REAL_MINUTE( 5 );   // раз в 5 реальных минут
+    }
+}
+
+void Sing( Critter& cr )
+{
+    uint8  song = Random( 1, 4 );
+    uint16 firstStr = 0;
+    uint16 lastStr = 0;
+    switch( song )
+    {
+    case 1:
+        firstStr = 5973;
+        lastStr = 5978;
+        break;
+    case 2:
+        firstStr = 5980;
+        lastStr = 5987;
+        break;
+    case 3:
+        firstStr = 5988;
+        lastStr = 5997;
+        break;
+    case 4:
+        firstStr = 5960;
+        lastStr = 5967;
+        break;
+    default:
+        return;
+    }
+    SetMonologue( cr, firstStr, lastStr, 4 * __TimeMultiplier, 0, SAY_EMOTE_ON_HEAD );
+}
+
+// CRITTER_EVENT_PLANE_BEGIN
+bool _EliPlaneBegin( Critter& cr, NpcPlane& plane, int reason, Critter@ someCr, Item@ someItem )
+{
+    plane.Run = true;
+    return true;
+}
+// CRITTER_EVENT_ATTACKED
+bool _EliAttacked( Critter& cr, Critter& attacker )
+{
+    if( Random( 1, 10 ) < 3 )
+        cr.SayMsg( SAY_NORM, TEXTMSG_DLG, DLGSTR( cr.DialogId, STR_ATTACKED ) );
+    if( cr.GetTimeEvents( CTE_HEALSELF, null, null, null ) == 0 )
+        cr.AddTimeEvent( "cte_HealSelf", 0, CTE_HEALSELF );
+    return false;
+}
+
+// Поиск новой точки маршрута нпц, производится при заходе в локацию
+uint cte_HealSelf( Critter& cr, int identifier, uint& rate )
+{
+    cr.CurrentHp += 50;
+    if( cr.CurrentHp * 2 > cr.MaxLife )
+        return 0;
+    Item@ drug = cr.AddItem( Content::Item::super_stimpak, 1 );
+    if( valid( drug ) )
+        UseDrug( cr, drug );
+    return 0;
+}
+
+
+// Debug
+void WhereEli( Critter& cr, int, int, int )
+{
+    if( EliId == 0 )
+        return;
+    Critter@ eli = GetCritter( EliId );
+    if( !valid( eli ) )
+    {
+        cr.Say( SAY_NETMSG, "Eli can't be found" );
+        return;
+    }
+    Map@ map = eli.GetMap();
+    if( !valid( map ) )
+    {
+        cr.Say( SAY_NETMSG, "Eli on global. X:" + eli.WorldX + "; Y:" + eli.WorldY );
+        return;
+    }
+    cr.Say( SAY_NETMSG, "Eli found. MapPid = " + map.ProtoId + "; Id =" + map.Id );
+}
+
+// ~getaccess admin hh
+// ~run debug ToMapEntire 34 0 0
+// ~run eli AddEli 0 0 0
+// ~run eli WhereEli 0 0 0
+// ~settime 9999 2246 10 3 1 10 10 10
+void AddEli( Critter& cr, int, int, int )
+{
+    Map@ map = cr.GetMap();
+    if( !valid( map ) )
+    {
+        cr.Say( SAY_NETMSG, "Can't add Eli on global." );
+        return;
+    }
+    int[] props =
+    {
+        CritterProperty::DialogId, Content::Dialog::eli, CritterProperty::BagId, BAG_Eli,
+        CritterProperty::ReplicationTime, -1
+    };
+    map.AddNpc( Content::Critter::Eli, cr.HexX + 1, cr.HexY + 1, 6, props, "_EliInit" );
+
+}

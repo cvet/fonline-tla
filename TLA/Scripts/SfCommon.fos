@@ -1,0 +1,629 @@
+// FOS Server
+// Author: rifleman17
+// Common san-francisco scripts
+
+#include "Tla"
+
+import uint GetNearFullSecond( uint16 year, uint16 month, uint16 day, uint16 hour, uint16 minute, uint16 second ) from "Time";
+
+#pragma property Critter Protected     uint8 SFAhs7HubJudgement  Group = Quests, Quest = 4430, Max = 8
+#pragma property Critter PrivateServer uint  SFLoPanBlackmailSum Max = 2000
+#pragma property Critter PrivateServer uint  SFHububJudgementLocId
+#pragma property Critter PrivateServer uint8 SFHubJudgementKills Max = 4
+#pragma property Critter PrivateServer uint  SfMercMaster
+#pragma property Critter PrivateServer uint  SFCommonOneWeekInvokeId
+#pragma property Critter PrivateServer uint  SFCommonFightPlayerId
+#pragma property Critter PrivateServer dict< uint, uint > ClickCounter
+
+#pragma property Global PrivateServer uint8 SFZax366StatusGlobal
+#pragma property Global PrivateServer bool  SFDevinHired
+
+void _BosEvaInit( Critter& eva, bool firstTime )
+{
+    // Сброс глобального статуса для квеста "Чокнутый компьютер"
+    __EventCritterFinish.SubscribeToCritter( eva, _EvaFinish );
+    if( firstTime )
+        eva.SFCommonOneWeekInvokeId = SavedDeferredCall( GAME_DAY_TO_TICK( 7 ), OneWeek, eva.Id );
+}
+
+void _EvaFinish( Critter& eva, bool deleted )
+{
+    if( deleted )
+        CancelDeferredCall( eva.SFCommonOneWeekInvokeId );
+}
+
+void OneWeek( uint value )
+{
+    Globals.SFZax366StatusGlobal = 0;
+
+    Critter@ eva = GetCritter( value );
+    if( eva !is null )
+        eva.SFCommonOneWeekInvokeId = SavedDeferredCall( GAME_DAY_TO_TICK( 7 ), OneWeek, value );
+}
+
+// * Квест "Сбор дани для Ло Пэна                         *//
+
+#define DEAD_SHOE_CAPS          ( 200 )                          // Сумма денег, добавляемой нпц, если его убил человек, выполняющий квест Сбор дани для Ло Пэна
+#define STR_KILL_SHOE           ( 4 )                            // Строка диалога, которую игрок прочитает в чате после убийства горожанина.
+#define STR_GET_MONEY           ( 5 )                            // Строка из диалога крестьянина, которая пишется игроку в чат, когда он получает очередную сумму
+
+// Функция пишет в чат игроку сумму, набранную для Ло Пэна
+void r_ShowBlackmailSum( Critter& player, Critter@ npc )
+{
+    if( not valid( npc ) )
+        return;
+
+    string lexems = "$money " + player.SFLoPanBlackmailSum;
+    player.SayMsg( SAY_NETMSG, TEXTMSG_DLG, DLGSTR( npc.DialogId, STR_GET_MONEY ), lexems );
+}
+
+// Функция вызывается из диалога, если крестьянин вступил в бой с игроком. При смерти крестьянина, если его убил тот самый игрок
+// у него в инвентаре генерится 200 монет, и у игрока переключается счетчик собранной дани
+void r_BeginFight( Critter& player, Critter@ npc )
+{
+    if( !valid( npc ) )
+        return;
+    npc.SFCommonFightPlayerId = player.Id;
+    __EventCritterDead.SubscribeToCritter( npc, _citizenDead );
+}
+
+void _citizenDead( Critter& npc, Critter@ killer )
+{
+    if( valid( killer ) )
+    {
+        // Убить должен тот, кто пришел от Ло Пэна
+        if( killer.IsPlayer() && npc.SFCommonFightPlayerId == killer.Id )
+        {
+            _CritAddItem( npc, Content::Item::bottle_caps, DEAD_SHOE_CAPS );
+            // Для упрощения задачи, деньги начисляем сразу, несмотря на то, что игрок может их и не подобрать
+            killer.SayMsg( SAY_NETMSG, TEXTMSG_DLG, DLGSTR( npc.DialogId, STR_KILL_SHOE ) );
+            killer.SFLoPanBlackmailSum += DEAD_SHOE_CAPS;
+            // Сообщение новой суммы игроку
+            r_ShowBlackmailSum( killer, npc );
+        }
+    }
+    // Сброс запоминания игрока
+    npc.SFCommonFightPlayerId = 0;
+     __EventCritterDead.UnsubscribeFromCritter( npc, _citizenDead );
+}
+
+// * Телохранители Ло Пэна
+
+#define CONTRACT_TIME           ( 6 * 30 * 24 * 60 * 60 )     // полгода
+
+import void _MercInit( Critter& merc, bool firstTime ) from "Merc";
+import void e_MercDead( Critter& merc, Critter@ killer ) from "Merc";
+import bool Merc2Player( Critter& player, Critter& merc, bool alwaysRun, bool cancelOnAttack, uint loseDist, uint16 mercMasterDist, uint16 type, bool defendMaster, bool assistMaster, uint fireTime ) from "Merc";
+import bool IsMerc( Critter& merc ) from "Merc";
+import void CancelMerc( Critter& merc ) from "Merc";
+
+void _SFMercInit( Critter& merc, bool firstTime )
+{
+    _MercInit( merc, firstTime );
+    __EventCritterRespawn.SubscribeToCritter( merc, _SFMercRespawn );
+    __EventCritterDead.SubscribeToCritter( merc, _SFMercDead );
+}
+
+void _SFMercDead( Critter& merc, Critter@ killer )
+{
+    e_MercDead( merc, killer );
+    merc.ReplicationTime = 0;
+    merc.IsGeck = true; // Чтобы мерк не пропал на энкаунтере
+    CancelContract( merc );
+}
+
+// Отправление мерка домой.
+void SFMercToHome( Critter& merc )
+{
+    merc.TransitToMap( merc.HomeMapId, merc.HomeHexX, merc.HomeHexY, merc.HomeDir );
+    merc.IsGeck = false;
+	__EventCritterRespawn.UnsubscribeFromCritter( merc, _SFMercRespawn );
+    __EventCritterDead.UnsubscribeFromCritter( merc, _SFMercDead );
+
+}
+
+void _SFMercRespawn( Critter& cr )
+{
+    SFMercToHome( cr );
+}
+
+void r_SFMerc2Player( Critter& player, Critter@ npc )
+{
+    if( !valid( npc ) )
+        return;
+    if( IsMerc( npc ) )
+        return;
+
+    uint[] values = { npc.Id,  player.Id };
+    SavedDeferredCall( GAME_SECOND_TO_TICK( CONTRACT_TIME ), DoCancelContract, values ); // Окончание контракта через полгода
+
+    Merc2Player( player, npc, true, false, 0, MMDistMedium, MERC_GUARD_DEFAULT, true, false, CONTRACT_TIME );
+    npc.SetScript( "_SFMercInit" );
+}
+
+void DoCancelContract( uint[]& values )
+{
+    Critter@ merc = GetCritter( values[ 0 ] );
+    uint     masterId = 0;
+    if( values.length() > 0 )
+        masterId = values[ 1 ];
+    if( valid( merc ) )
+    {
+        if( masterId == 0 )
+        {
+            CancelContract( merc );
+        }
+        else
+        {
+            if( masterId == uint( merc.MasterId ) )         // Хозяин уже мог смениться
+                CancelContract( merc );
+        }
+    }
+}
+
+void CancelContract( Critter& merc )
+{
+    Critter@ cr = GetCritter( merc.SfMercMaster );
+    if( valid( cr ) && cr.SfMercMaster == 1 )
+        cr.SfMercMaster = 2;
+    merc.SfMercMaster = 0;
+}
+
+// Использование науки на Императоре Ши
+bool s_UseImperor( Critter& player, const Item& scenery, CritterProperty skill, Item@ item )
+{
+    if( skill == CritterProperty::SkillScience )
+    {
+        // RunDialog( player, Content::Dialog::sf_emperor, scenery.HexX, scenery.HexY, false );
+    }
+    return true;
+}
+
+// Квест "Нэнси и Сид"
+#define RADIO_CHANNEL_FIRST     ( 15 )
+#define RADIO_CHANNEL_LAST      ( 20 )
+#define GET_CHANNEL             ( Random( RADIO_CHANNEL_FIRST, RADIO_CHANNEL_LAST ) )
+#define NEXT_MESSAGE_SECONDS    ( 5 * 60 )    // время следующего сообщения
+#define STR_SOS                 ( 5110 )      // S.O.S.
+#define STR_NAME_NANCY          ( 5111 )      // Это Нэнси... Сид, он...
+#define STR_WHERE_IS_NANCY      ( 5112 )      // Помогите кто-нибудь, я в палатке наркодилеров на побережье... Ранена... Умираю... Сид ушел...
+#define MAX_SESSION_MESSAGES    ( 60 )        // максимальное число сообщений от ненси за один сеанс связи
+
+const string[] WhoAreYouKeywords = { "кто ты?", "ты кто?", "who are you?", "кто вы?", "вы кто?", "это кто" };
+const string[] WhereAreYouKeywords = { "где Сид", "где ты?", "где вы?", "вы где?", "ты где?", "where are you?", "Нэнси, где ты?", "Нэнси, где вы?", "Нэнси, вы где?", "Нэнси, ты где?" };
+uint  radio_channel;
+uint  message_counter; // текущее число сообщений
+bool  name_asked;
+bool  where_asked;
+uint  who_asked_id;    // Id игрока, спросившего "кто ты"
+
+import void SheduleSFInvasion() from "SfInvasion";
+
+void _TankerMapInit( Map& map, bool firstTime )
+{
+    uint time = GetNearFullSecond( 0, 0, 0, 1, 0, 0 );
+    DeferredCall( GAME_SECOND_TO_TICK( time - __FullSecond ), BeginNancyBroadcast );
+    if( firstTime )
+        SheduleSFInvasion();
+}
+
+// Функция для проверки в диалогах, что текущий меньше указанного
+bool d_CheckNowHourLess( Critter& player, Critter@ npc, int hour )
+{
+    return int(__Hour) < hour;
+}
+
+bool d_CheckNowHourMore( Critter& player, Critter@ npc, int hour )
+{
+    return int(__Hour) > hour;
+}
+
+// Выход Нэнси на радиосвязь
+void BeginNancyBroadcast()
+{
+    radio_channel = GET_CHANNEL;
+    message_counter = 0;
+    name_asked = false;
+    where_asked = false;
+    who_asked_id = 0;
+    // Первая реплика в рамках выхода на связь
+    DeferredCall( GAME_SECOND_TO_TICK( NEXT_MESSAGE_SECONDS ), TimeToBroadcast );
+    // для всех ключевых слов добавляются прослушки
+    for( uint i = 0; i < WhoAreYouKeywords.length(); i++ )
+        AddTextListener( SAY_RADIO, WhoAreYouKeywords[ i ], radio_channel, "listen_BroadcastWho" );
+    for( uint i = 0; i < WhereAreYouKeywords.length(); i++ )
+        AddTextListener( SAY_RADIO, WhereAreYouKeywords[ i ], radio_channel, "listen_BroadcastWhere" );
+    DeferredCall( GAME_DAY_TO_TICK( 1 ), BeginNancyBroadcast ); // Через сутки
+}
+
+// Регулярное радио-сообщение.
+// Повторяется раз в игровые сутки на одном из каналов, выбранном случайно
+void TimeToBroadcast()
+{
+    if( where_asked )
+    {
+        RadioMessageMsg( radio_channel, TEXTMSG_TEXT, STR_WHERE_IS_NANCY );
+        Critter@ player = GetCritter( who_asked_id );
+        if( valid( player ) && player.SFSlimSidnancy == 1 )
+        {
+            player.SFSlimSidnancy = 2;
+            message_counter = MAX_SESSION_MESSAGES;                               // Только один игрок в сутки
+        }
+        who_asked_id = 0;
+        where_asked = false;
+    }
+    else if( name_asked )
+    {
+        RadioMessageMsg( radio_channel, TEXTMSG_TEXT, STR_NAME_NANCY );
+        name_asked = false;
+    }
+    else
+    {
+        who_asked_id = 0;
+        RadioMessageMsg( radio_channel, TEXTMSG_TEXT, STR_SOS );
+    }
+    message_counter++;
+    if( message_counter > MAX_SESSION_MESSAGES )
+    {
+        for( uint i = 0; i < WhoAreYouKeywords.length(); i++ )
+            EraseTextListener( SAY_RADIO, WhoAreYouKeywords[ i ], radio_channel );
+        for( uint i = 0; i < WhereAreYouKeywords.length(); i++ )
+            EraseTextListener( SAY_RADIO, WhereAreYouKeywords[ i ], radio_channel );
+        return;
+    }
+    DeferredCall( GAME_SECOND_TO_TICK( NEXT_MESSAGE_SECONDS ), TimeToBroadcast );
+}
+
+// Прослушка радиоканала, ловим вопрос "ты кто"?
+void listen_BroadcastWho( Critter& player, string& text )
+{
+    if( !name_asked )   // Имя еще не спрашивали
+    {
+        who_asked_id = player.Id;
+        name_asked = true;
+    }
+}
+// Прослушка радиоканала, ловим вопрос "ты где"?
+void listen_BroadcastWhere( Critter& player, string& text )
+{
+    if( !where_asked && who_asked_id == player.Id ) // Где находится Нэнси, еще не спрашивали
+        where_asked = true;
+}
+
+// дебаг, консоль
+void BeginRadio( Critter& cr, int, int, int )
+{
+    BeginNancyBroadcast();
+}
+
+// Срипт  на начало атаки при обыске тела Нэнси на энкаунтере
+void _NancyInit( Critter& nancy, bool firstTime )
+{
+    __EventCritterSomeCritterUseSkill.SubscribeToCritter( nancy, _NancySkill );
+}
+
+void _NancySkill( Critter& cr, Critter& fromCr, CritterProperty skill, Critter@ onCritter, Item@ onItem, const Item@ onScenery )
+{
+    if( fromCr.IsNpc() )
+        return;
+    Map@ map = cr.GetMap();
+    if( !valid( onCritter ) || !valid( map ) )
+        return;
+    if( onCritter.Id == cr.Id )
+    {
+        Critter@[] critters;
+        if( map.GetCritters( 0, FIND_LIFE | FIND_ONLY_NPC, critters ) > 0 )
+        {
+            for( uint i = 0, l = critters.length(); i < l; i++ )
+            {
+                Critter@ npc = critters[ i ];
+                if( valid( npc ) )
+                {
+                    if( npc.TeamId == TEAM_Slaver && npc.IsNpc() )
+                    {
+                        // 84/85
+                        AddWalkPlane( npc, 0, Random( 83, 85 ), Random( 83, 85 ), 0, true, 1 );
+                        AddAttackPlane( npc, 0, fromCr );
+                        npc.IsNoHome = true;
+                    }
+                }
+            }
+        }
+    }
+}
+
+void _NancyMapInit( Map& mapNancy, bool firstTime )
+{
+    Location@ loc = mapNancy.GetLocation();
+    Location@[] locations;
+    Map@      map;
+    if( valid( loc ) && GetAllLocations( Content::Location::nancy_and_sid, locations ) > 0 )
+    {
+        for( uint i = 0, l = locations.length(); i < l; i++ )
+        {
+            if( locations[ i ].Id == loc.Id )
+                continue;
+            @map = locations[ i ].GetMapByIndex( 0 );
+            if( valid( map ) && map.GetCritters( 0, FIND_ALL | FIND_ONLY_PLAYERS, null ) == 0 )
+                DeleteLocation( locations[ i ].Id );
+        }
+    }
+}
+
+// Случайные замки для сундуков. Иначе брали ключ и мультами фармили
+void _LockerInit( Item& locker, bool firstTime )
+{
+    if( !firstTime )
+        return;
+    Map@ map = GetMap( locker.MapId );
+    if( !valid( map ) )
+        return;
+    uint keyId = Random( 10000, 50000 );
+    locker.LockerId = keyId;
+    locker.LockerComplexity = Random( 120, 180 );
+    Critter@[] critters;
+    if( map.GetCritters( Content::Critter::AgileMaleThug, FIND_ALL | FIND_ONLY_NPC, critters ) > 0 )
+    {
+        Critter@ npc = critters[ 0 ];
+        if( !valid( npc ) )
+            return;
+        Item@ key = npc.AddItem( Content::Item::key, 1 );
+        if( valid( key ) )
+            key.LockerId = keyId;
+    }
+}
+
+// Лодка
+void _BoatInit( Item& boat, bool firstTime )
+{
+    if( !firstTime )
+        return;
+    Map@ map = GetMap( boat.MapId );
+    if( !valid( map ) )
+        return;
+    uint keyId = Random( 10000, 50000 );
+    boat.Charge = boat.Car_TankVolume;
+    boat.Deterioration = 0;
+    boat.LockerId = keyId;
+    boat.LockerComplexity = Random( 100, 150 );
+    Item@ bag = boat.GetChild( 0 );
+    if( valid( bag ) )
+    {
+        bag.LockerId = keyId;
+        bag.LockerComplexity = Random( 100, 150 );
+    }
+    Critter@[] critters;
+    if( map.GetCritters( Content::Critter::AgileMaleThug, FIND_ALL | FIND_ONLY_NPC, critters ) > 0 )
+    {
+        Critter@ npc = critters[ 0 ];
+        if( !valid( npc ) )
+            return;
+        Item@ key = npc.AddItem( Content::Item::key, 1 );
+        if( valid( key ) )
+            key.LockerId = keyId;
+    }
+    boat.SetScript( null );
+}
+
+// Странствующий тоговец взрывчаткой Дэвин
+
+#define GAME_DAY          # (day)  ( 24 * 60 * 60 * day )
+#define GAME_HOUR         # (hour) ( 60 * 60 * hour )
+#define CTE_NEW_TRAVEL    ( 12 )
+#define ENTIRE_DEVIN      ( 23 )
+// Присваевает скрипт для НПЦ и запускает его выполнение
+// crId - Id нпц
+// isTransit - признак, нпц перемещается телепортом
+// entireNum - номер гекса, на который будет перемещаться нпц при заходе в локацию
+// timeWaitLoc - время ожидания на локации до следующего путешествия
+// timeWaitEnc - время ожидания на энкаунтере после завершения боя до продолжения путешествия
+// locPids - массив кодов протоипов локаций, на которые может зайти НПЦ
+import void SetTraveller( uint crId, bool isTransit, uint entireNum, uint timeWaitLoc, uint timeWaitEnc, hash[] locPids, bool visibleEncounters ) from "Traveller";
+import void CancelTraveller( uint crId ) from "Traveller";
+import void _TraderInit( Critter& trader, bool firstTime ) from "Trader";
+
+void _DevinInit( Critter& cr, bool firstTime )
+{
+    if( !Globals.SFDevinHired )
+    {
+        __EventCritterRespawn.SubscribeToCritter( cr, _DevinRespawn );
+        hash[] locPids = { Content::Location::geck_city, Content::Location::san_francisco, Content::Location::vault_city, Content::Location::ncr, Content::Location::new_reno, Content::Location::redding };
+        SetTraveller( cr.Id, true, ENTIRE_DEVIN, GAME_DAY( 20 ), GAME_HOUR( 2 ), locPids, false );
+    }
+    else
+    {
+        CancelTraveller( cr.Id );
+		__EventCritterRespawn.UnsubscribeFromCritter( cr, _DevinRespawn );
+    }
+    cr.IsBarterOnlyCash = true;
+    cr.SkillBarter = 180;
+    _TraderInit( cr, firstTime );
+}
+
+void _DevinRespawn( Critter& cr )
+{
+    DeferredCall( 3000, DevinSay, cr.Id );
+}
+
+void DevinSay( uint value )
+{
+    Critter@ cr = GetCritter( value );
+    if( valid( cr ) )
+    {
+        if( Globals.SFDevinHired )
+        {
+            cr.SayMsg( SAY_NORM, TEXTMSG_DLG, DLGSTR( cr.DialogId, 2 ) );
+            if( cr.GetTimeEvents( CTE_NEW_TRAVEL, null, null, null ) != 0 )
+                cr.EraseTimeEvents( CTE_NEW_TRAVEL );
+            cr.AddTimeEvent( "Traveller@cte_Travel", __TimeMultiplier * 2, CTE_NEW_TRAVEL );
+        }
+    }
+}
+
+void r_HireDevin( Critter& player, Critter@ npc )
+{
+    if( !valid( npc ) )
+        return;
+    CancelTraveller( npc.Id );
+    npc.IsBarterOnlyCash = true;
+    npc.SkillBarter = 180;
+    npc.SetScript( "Trader@_TraderInit" );
+}
+
+// Установка признака - может ли данный игрок нанять нпц
+// click_counter == 1? можно нанять
+// click_counter != 1 нельзя
+void r_SetCanHire( Critter& player, Critter@ npc )
+{
+    if( !valid( npc ) )
+        return;
+
+    auto clickCounter = player.ClickCounter;
+    clickCounter.setIfNotExist( npc.Id, 0 );
+    int  roll = Random( 250, 350 );
+    if( roll > player.SkillTraps )
+        clickCounter[ npc.Id ] = clickCounter[ npc.Id ] + 2;
+    else
+        clickCounter[ npc.Id ] = clickCounter[ npc.Id ] + 1;
+    player.ClickCounter = clickCounter;
+}
+
+// Квест "Правосудие Хаба"
+#define ROLE_FAMILY       ( 17 )
+#define STR_DONTKILL      ( 3510 )
+#define VICTIMS_X         ( 640 )
+#define VICTIMS_Y         ( 1150 )
+import bool GetFreeHex( Map& map, uint radius, uint16& hx, uint16& hy ) from "Caravan";
+
+#include "location.fos"
+
+// Проверка, что карта не удалена
+bool d_VictimsExists( Critter& player, Critter@ npc )
+{
+    return valid( GetLocation( player.SFHububJudgementLocId ) );
+}
+
+bool d_VictimsNotExists( Critter& player, Critter@ npc )
+{
+    return !d_VictimsExists( player, npc );
+}
+
+// добавляет локацию с жертвами, видимую игроку
+void r_AddVictimsLocation( Critter& player, Critter@ npc )
+{
+    Location@ loc = CreateLocationForCritter( player, Content::Location::hubologists_victims, VICTIMS_X, VICTIMS_Y, __GlobalMapZoneLength * 2, uint( CritterProperty::SFHububJudgementLocId ) );
+    if( valid( loc ) )
+    {
+        // чтобы не использовали локацию для склада, нужно ее удалять
+        SetLocationDeleteTime( loc, 60 * 60 * 24 * 4 ); // 4 дня
+    }
+}
+
+// Скрипт жертв
+void _HubVictimInit( Critter& cr, bool firstTime )
+{
+    __EventCritterAttacked.SubscribeToCritter( cr, _HubVictimAttacked );
+    __EventCritterDead.SubscribeToCritter( cr, _HubVictimDead );
+}
+
+void _HubVictimDead( Critter& cr, Critter@ killer )
+{
+    if( !valid( killer ) || killer.IsNpc() )
+        return;
+    if( killer.SFAhs7HubJudgement > 0 && killer.SFAhs7HubJudgement < 4 )
+        killer.SFAhs7HubJudgement = 4;
+    killer.SFHubJudgementKills += 1;
+    if( killer.SFHubJudgementKills > 3 )
+        killer.SFAhs7HubJudgement = 5;
+}
+
+
+bool _HubVictimAttacked( Critter& cr, Critter& attacker )
+{
+    r_MapAutoGarbage( attacker, cr );
+    Critter@[] family;
+    Map@ map = cr.GetMap();
+    if( !valid( map ) )
+        return false;
+    uint num = map.GetNpcCount( ROLE_FAMILY, FIND_ALL | FIND_ONLY_NPC );
+    if( num > 0 )
+    {
+        for( uint i = 0; i < num; i++ )
+        {
+            Critter@ npc = map.GetNpc( ROLE_FAMILY, FIND_ALL | FIND_ONLY_NPC, i );
+            if( valid( npc ) && npc.IsNpc() && attacker.IsPlayer() )
+            {
+                if( !npc.CheckEnemyInStack( attacker.Id ) )
+                    npc.AddEnemyToStack( attacker.Id );
+                if( npc.Id == cr.Id || npc.IsSee( cr ) )
+                {
+                    uint16 hx = npc.HexX;
+                    uint16 hy = npc.HexY;
+                    if( GetFreeHex( map, Random( 6, 20 ), hx, hy ) )
+                        AddWalkPlane( npc, 100, hx, hy, Random( 0, 5 ), true, 1 );
+                    if( Random( 1, 3 ) < 2 )
+                        npc.SayMsg( SAY_SHOUT, TEXTMSG_TEXT, STR_DONTKILL );
+                }
+            }
+        }
+    }
+    return false;
+}
+
+void r_MapAutoGarbage( Critter& player, Critter@ npc )
+{
+    Map@ map = player.GetMap();
+    if( valid( map ) )
+    {
+        Location@ loc = map.GetLocation();
+        if( valid( loc ) )
+            loc.AutoGarbage = true;
+    }
+}
+
+void r_ChangeStatus( Critter& player, Critter@ npc )
+{
+    Map@ map = player.GetMap();
+    if( valid( map ) )
+        __EventMapCritterOut.SubscribeToMap( map, _VictimsOutCritter );
+}
+
+// при выходе игрока с карты, если все живы нпй, то игрок переключает статус квеста
+void _VictimsOutCritter( Map& map, Critter& cr )
+{
+    if( cr.SFAhs7HubJudgement == 2 && map.GetNpcCount( 17, FIND_LIFE | FIND_ONLY_NPC ) == 4 )
+        cr.SFAhs7HubJudgement = 3;
+}
+
+// Рецепт на изготовление хитиновой брони
+#define STR_CANT_LEARN    ( 3515 ) // Вы не сумели запомнить содержимое рецепта. Вот если бы вы были немного опытнее...
+#define STR_LEARNED       ( 3516 ) // Вы выучили рецепт усовершенствования кожаной брони с помощью хитиновых панцирей гигантских жуков.
+void r_GetChitinArmor( Critter& player, Critter@ npc )
+{
+    Item@ item = player.AddItem( Content::Item::chitin_armor_recipe, 1 );
+    if( valid( item ) )
+    {
+        item.SetScript( "_RecipeInit" );
+    }
+}
+
+void _RecipeInit( Item& item, bool firstTime )
+{
+    __EventCritterUseSkill.SubscribeToOnItem( item, _RecipeSkill );
+}
+
+bool _RecipeSkill( Critter& cr, CritterProperty skill, Critter@ onCritter, Item@ item, const Item@ onScenery )
+{
+    if( skill == CritterProperty::SkillScience && cr.SFChitinArmorRecipeKnown == 0 )
+    {
+        if( cr.Intellect < 6 || cr.SkillScience < 90 || cr.SkillOutdoorsman < 100 )
+        {
+            cr.SayMsg( SAY_NETMSG, TEXTMSG_TEXT, STR_CANT_LEARN );
+            return true;
+        }
+        cr.SayMsg( SAY_NETMSG, TEXTMSG_TEXT, STR_LEARNED );
+        cr.SFChitinArmorRecipeKnown = 1;
+        return true;
+    }
+    return false;
+}

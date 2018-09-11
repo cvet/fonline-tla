@@ -1,0 +1,181 @@
+// FOS Server
+
+#include "Tla"
+#include "GuardLib"
+
+#pragma property Critter Protected     uint8 ReddDoctorPoisoned Group = Quests, Quest = 4311, Max = 3
+#pragma property Critter PrivateServer uint8 ReddRooneyCemetery Max = 4
+#pragma property Global PrivateServer bool ReddJohnsonBroadcast
+
+#define STR_GRAVE                ( 5425 )
+// #define DL#(s) (Log(s))
+#define DL                       # ( s )
+// Скрипт охраны Hex'a
+
+class CGuardsManagerForNCR : CGuardsManager
+{
+    CGuardsManagerForNCR()
+    {
+        super();
+        Dialog = Content::Dialog::redd_regulator;
+    }
+}
+
+// класс с алгоритмом
+CGuardsManagerForNCR Grd;
+
+bool GuardItemTest( Item@ item ) // export
+{
+    return Grd.GuardItemTest( item );
+}
+
+// Усиление нпц
+void PowerNpc( Critter& cr )
+{
+    cr.StrengthBase = Random( 8, 10 );
+    cr.PerceptionBase = Random( 8, 10 );
+    cr.EnduranceBase = Random( 8, 10 );
+    cr.AgilityBase = Random( 8, 10 );
+    cr.Level = Random( 24, 30 );
+    cr.ActionPointsBase = Random( 10, 12 );
+    cr.CriticalChanceBase = Random( 20, 30 );
+
+    for( uint i = 0; i < CritterPropertyResistsBase.length(); i++ )
+        if( CritterPropertyResistsBase[ i ] != CritterProperty::EmpResistanceBase )
+            cr.SetAsInt( CritterPropertyResistsBase[ i ], Random( 40, 70 ) );
+
+    uint type = Random( 0, 4 );
+    switch( type )
+    {
+    case 1:
+        cr.PerkSniper = 1;
+        cr.PerkTerminator = 0;
+        cr.PerkSlayer = 0;
+        break;
+    case 2:
+        cr.PerkTerminator = 1;
+        cr.PerkSniper = 0;
+        cr.PerkSlayer = 0;
+        break;
+    case 3:
+        cr.PerkSlayer = 1;
+        cr.PerkSniper = 0;
+        cr.PerkTerminator = 0;
+        break;
+    case 4:
+        cr.PerkTerminator = 1;
+        cr.PerkSlayer = 1;
+        cr.PerkSniper = 0;
+        break;
+    default:
+        cr.PerkSniper = 0;
+        cr.PerkTerminator = 0;
+        cr.PerkSlayer = 0;
+        break;
+    }
+    cr.PerkBetterCriticals = ( Random( 1, 10 ) == 1 ? 1 : 0 );
+    cr.PerkBonusRangedDamage = 1;
+    cr.PerkLifegiver = Random( 1, 3 );
+    cr.PerkBonusRateOfFire = 1;
+    cr.PerkBonusHthDamage = 1;
+    for( uint i = 0; i < CritterPropertySkills.length(); i++ )
+        cr.SetAsInt( CritterPropertySkills[ i ], Random( 150, 250 ) );
+    cr.MaxLifeBase = Random( 250, 500 );
+    cr.CurrentHp = cr.MaxLife;
+}
+
+bool s_RooneyGrave( Critter& player, const Item& scenery, CritterProperty skill, Item@ item )
+{
+    if( !valid( item ) )
+        return true;
+
+    if( player.ReddRooneyCemetery < 3 && player.ReddRooneyCemetery > 0 && item.ProtoId == Content::Item::flower && player.CountItem( Content::Item::flower ) > 1 )
+    {
+        player.ReddRooneyCemetery = 3;
+        _CritDeleteItem( player, Content::Item::flower, 2 );
+        player.SayMsg( SAY_NETMSG, TEXTMSG_TEXT, STR_GRAVE );
+        player.Experience += 200;
+    }
+
+    return true;
+}
+
+#define STR_POISONED_NO_QUEST    ( 1 )
+
+void _PoisonedInit( Critter& cr, bool firstTime )
+{
+    cr.ToKnockout( KNOCKOUT_ANIM2_DEFAULT( true ), 1000, cr.HexX, cr.HexY );
+    __EventCritterUseItem.SubscribeToOnCritter( cr, _SmthUseItem );
+}
+
+// CRITTER_EVENT_USE_ITEM_ON_ME
+bool _SmthUseItem( Critter& whoUse, Item& item, Critter@ cr, Item@ onItem, const Item@ onScenery, uint param )
+{
+    if( item.ProtoId == Content::Item::antidote )
+    {
+        if( cr.ReddDoctorPoisoned == 1 )
+        {
+            RunDialog( whoUse, 1353, cr.HexX, cr.HexY, false );
+            return true;
+        }
+        else
+        {
+            cr.SayMsg( SAY_EMOTE, TEXTMSG_DLG, DLGSTR( cr.DialogId, STR_POISONED_NO_QUEST ) );
+        }
+    }
+    return false;
+}
+
+// Квест "На Связи" Доктор Джонсон
+#define DOCTOR_CHANNEL           ( 1717 )
+#define STR_FIRST                ( 3300 )
+#define STR_LAST                 ( 3340 )
+#define STR_BREAK_FIRST          ( 3341 )
+#define STR_BREAK_LAST           ( 3343 )
+
+// Проверка, в инвентаре игрока есть радио с нужной волной
+bool d_CheckRadio( Critter& player, Critter@ npc )
+{
+    Item@[] items;
+    player.GetItems( -1, items );
+    for( uint i = 0, l = items.length(); i < l; i++ )
+    {
+        if( items[ i ].ProtoId == Content::Item::radio && items[ i ].RadioChannel == DOCTOR_CHANNEL )   // TODO: вставить проверку канала
+            return true;
+    }
+    return false;
+}
+
+void r_Broadcast( Critter& player, Critter@ npc )
+{
+    DL( "broadcat result" );
+    DeferredCall( 8000, BeginBroadcast );
+}
+
+void BeginBroadcast()
+{
+    DL( "Begin broadcast" );
+    if( Globals.ReddJohnsonBroadcast )
+        return;
+
+    Globals.ReddJohnsonBroadcast = true;
+    SavedDeferredCall( 0, Broadcast, STR_FIRST );
+}
+
+void Broadcast( uint value )
+{
+    DL( "broadcast " + value );
+    if( not Globals.ReddJohnsonBroadcast )
+        return;
+
+    if( value >= STR_LAST )
+    {
+        Globals.ReddJohnsonBroadcast = false;
+        return;
+    }
+
+    RadioMessageMsg( DOCTOR_CHANNEL, TEXTMSG_TEXT, value );
+    value++;
+
+    SavedDeferredCall( 8000, Broadcast, value );
+}

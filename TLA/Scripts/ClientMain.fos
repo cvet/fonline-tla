@@ -1,0 +1,1703 @@
+// FOS Client
+
+#include "Tla"
+
+import void InitializeGame() from "Config";
+import void InitTestScreen() from "ClientScreenTest";
+import void InitRadioScreen() from "Radio";
+import bool PerkCheck( Critter& cr, CritterProperty perk ) from "Perks";
+import void InitNameColorizing() from "NameColorizing";
+import bool TryColorizeCritter( Critter& cr ) from "NameColorizing";
+import bool PlayerIgnored( Critter& cr ) from "IgnoreList";
+import bool IgnorePlayer( string& message ) from "IgnoreList";
+import void InitIgnoreList() from "IgnoreList";
+import void InitChosenTabs() from "ChosenTabs";
+import void DrawChosenTabs() from "ChosenTabs";
+import void PlayAnimSound( uint crType, int gender, uint anim1, uint anim2 ) from "Animation";
+import uint CheckPlayerName( const string& name ) from "Parameters";
+
+void ModuleInit()
+{
+    __EventStart.Subscribe( start );
+    __EventFinish.Subscribe( finish );
+    __EventLoop.Subscribe( loop );
+    __EventGetActiveScreens.Subscribe( get_active_screens );
+    __EventScreenChange.Subscribe( screen_change );
+    __EventRenderIface.Subscribe( render_iface );
+    // __EventRenderMap.Subscribe( render_map );
+    __EventCritterIn.Subscribe( critter_in );
+    // __EventCritterOut.Subscribe( critter_out );
+    __EventItemMapIn.Subscribe( item_map_in );
+    __EventItemMapChanged.Subscribe( item_map_changed );
+    __EventItemMapOut.Subscribe( item_map_out );
+    __EventItemInvAllIn.Subscribe( item_inv_all_in );
+    __EventItemInvIn.Subscribe( item_inv_in );
+    __EventItemInvChanged.Subscribe( item_inv_changed );
+    __EventItemInvOut.Subscribe( item_inv_out );
+    __EventContainerChanged.Subscribe( container_changed );
+    __EventMapMessage.Subscribe( map_message );
+    __EventInMessage.Subscribe( in_message );
+    __EventOutMessage.Subscribe( out_message );
+    __EventCombatResult.Subscribe( combat_result );
+    __EventCritterAction.Subscribe( critter_action );
+    __EventAnimation2dProcess.Subscribe( animation2d_process );
+    // __EventItemsCollection.Subscribe( items_collection );
+}
+// //////////////////////////////////////////////////////////////////////////////////////////////////
+// Call on client loaded or new client_main.fos script received.
+bool start()
+{
+    InitializeGame();
+
+    if( __ScreenWidth < 800 || __ScreenWidth > 1280 || __ScreenHeight < 600 || __ScreenHeight > 1024 )
+    {
+        // Recomendation message
+        Message( GetMsgStr( TEXTMSG_GAME, STR_INVALID_RESOLUTION ) );
+    }
+
+    LoadFont( FONT_COURIER_NEW_SMALL, "CourierNewSmall" );
+	LoadFont( FONT_BIG, "*Big" );
+	LoadFont( FONT_BIG_NUM, "*BigNumbers" );
+	LoadFont( FONT_DEFAULT, "*Default" );
+	LoadFont( FONT_FALLOUT, "*Fallout" );
+	LoadFont( FONT_FAT, "*Fat" );
+	LoadFont( FONT_NUM, "*Numbers" );
+	LoadFont( FONT_OLD_FO, "*OldDefault" );
+	LoadFont( FONT_SAND_NUM, "*SandNumbers" );
+	LoadFont( FONT_THIN, "*Thin" );
+	LoadFont( FONT_SPECIAL, "*Special" );
+    // SetDefaultFont(FONT_COURIER_NEW_SMALL, COLOR_TEXT);
+
+    GUI_EngineCallback_Start();
+    GUI_AddDragAndDropHandler( ItemsDragAndDropHandler );
+
+    InitNameColorizing();
+    InitIgnoreList();
+    // InitTestScreen();
+    InitRadioScreen();
+    InitChosenTabs();
+
+    return true;
+}
+
+// //////////////////////////////////////////////////////////////////////////////////////////////////
+// Call on client finish.
+void finish()
+{
+    //
+}
+
+// //////////////////////////////////////////////////////////////////////////////////////////////////
+// Main loop function. Next call every cycle.
+void loop(uint& wait)
+{
+    GUI_EngineCallback_Loop();
+}
+
+// //////////////////////////////////////////////////////////////////////////////////////////////////
+// Say to engine what screens is active.
+void get_active_screens( int[]& result )
+{
+    GUI_EngineCallback_GetActiveScreens( result );
+}
+
+// //////////////////////////////////////////////////////////////////////////////////////////////////
+// Show/hide screen behaviour.
+void screen_change( bool show, int screen, dictionary@ params )
+{
+    if( show )
+        GUI_EngineCallback_ShowScreen( screen, params );
+    else
+        GUI_EngineCallback_HideScreen( screen );
+}
+
+// //////////////////////////////////////////////////////////////////////////////////////////////////
+// Render interface function. You can use Draw* functions only there.
+// Layer specification:
+//    1
+// Game map
+//    2, 3
+// PopUp menu, Cursor
+//    4
+//
+// Extra layers:
+// Global map
+//    100 (over map), 101 (over all)
+void render_iface( uint layer )
+{
+    if( layer == 2 )
+    {
+        DrawChosenTabs();
+        GUI_EngineCallback_Draw();
+
+        // Help info
+        if( __HelpInfo )
+        {
+            // About
+            string aboutText =
+                "FOnline " + ( __Singleplayer ? "Singleplayer" : "" ) + "\n" +
+                "by Gamers for Gamers\n" +
+                "version " + CustomCall( "Version" ) + "\n" +
+                "\n" +
+                "Traffic, bytes:\n" +
+                "Send: " + CustomCall( "BytesSend" ) + "\n" +
+                "Receive: " + CustomCall( "BytesReceive" ) + "\n" +
+                "Sum: " + ( CustomCall( "BytesSend" ).toInt() + CustomCall( "BytesReceive" ).toInt() ) + "\n" +
+                "\n" +
+                "FPS: " + __FPS + " (" + ( !__VSync ? "" + abs( __FixedFPS ) : "VSync" ) + ( !__VSync && __FixedFPS < 0 ? ", sleep" : "" ) + ")\n" +
+                "Ping: " + __Ping + "\n" +
+                "\n" +
+                "Sound: " + __SoundVolume + "\n" +
+                "Music: " + __MusicVolume + "\n";
+            if( __DebugInfo )
+            {
+                aboutText += "\n" +
+                             "Focused object: " + ( GUI_GetFocusedObject() !is null ? GUI_GetFocusedObject().Name : "None" ) + "\n" +
+                             "Pressed object: " + ( GUI_GetPressedObject() !is null ? GUI_GetPressedObject().Name : "None" ) + "\n" +
+                             "Hovered object: " + ( GUI_GetHoveredObject() !is null ? GUI_GetHoveredObject().Name : "None" );
+            }
+            DrawText( aboutText, 30, 30, __ScreenWidth, __ScreenHeight, COLOR_RGB( 187, 187, 187 ), FONT_BIG, 0 );
+
+            // Help
+            DrawText( MSG_GAME( STR_GAME_HELP ), 0, 0, __ScreenWidth, __ScreenHeight, COLOR_WHITE, FONT_DEFAULT, FT_CENTERX | FT_CENTERY );
+        }
+
+        // Zoom text
+        if( __MapZooming && __SpritesZoomMin != __SpritesZoomMax )
+        {
+            string@ zoomText = MSG_GAME( STR_ZOOM );
+            @zoomText = ReplaceText( zoomText, "%d", "" + int(1.0 / __SpritesZoom * 100.0) );
+            @zoomText = ReplaceText( zoomText, "%%", "%" );
+            DrawText( zoomText, 0, 0, __ScreenWidth, __ScreenHeight, COLOR_SAND, FONT_BIG, FT_CENTERX | FT_CENTERY );
+        }
+    }
+    else if( layer == 4 )
+    {
+        GUI_EngineCallback_DrawCursor();
+    }
+    /*
+       else if( layer == 100 && __GmapActive )
+       {
+        // Here you can draw on global map
+
+        // bool  __GmapActive - активна ли глобальная карта и все ли следующие нижеприведенные переменные корректны;
+        // bool  __GmapWait   - включен режим ожидания ответа о подтверждении энкаунтера;
+        // float __GmapZoom   - текущий масштаб, не забывайте учитывать его при рисовании на карте;
+        // int   __GmapOffsetX/Y   - смещение карты от нулевой координаты (верхний-левый угол);
+        // int   __GmapGroupCurX/Y - координаты группы игрока;
+        // int   __GmapGroupToX/Y  - координаты точки назначения;
+        // float __GmapGroupSpeed  - текущая скорость передвижения.
+        // Для примера, расчет текущего пикселя группы:
+        // x = __GmapGroupX / __GmapZoom + __GmapOffsetX, y = __GmapGroupY / __GmapZoom + __GmapOffsetY.
+       }
+     */
+}
+
+// //////////////////////////////////////////////////////////////////////////////////////////////////
+// Render map function. You can use DrawMap* functions only there. This drawing before 1 iface layer.
+void render_map()
+{
+    //
+}
+
+// //////////////////////////////////////////////////////////////////////////////////////////////////
+// Called on something critter in/out game.
+void critter_in( Critter& cr )
+{
+    // Default colors
+    cr.NameColor = COLOR_CRITTER_NAME;
+    cr.ContourColor = ( cr.IsPlayer() ? COLOR_CONTOUR_YELLOW : COLOR_CONTOUR_RED );
+
+    // Try colorize from file
+    if( TryColorizeCritter( cr ) )
+        return;
+
+    // Karma voting
+    cr.NameColor = COLOR_LIGHT( COLOR_CRITTER_NAME, cr.PlayerKarma / 10 );
+}
+
+void critter_out( Critter& cr )
+{
+    //
+}
+
+// //////////////////////////////////////////////////////////////////////////////////////////////////
+// Called on something item in/changed/out map.
+void item_map_in( Item& item )
+{
+    GUI_EngineCallback_ItemChanged( true );
+}
+
+void item_map_changed( Item& itemNow, Item& itemBefore )
+{
+    GUI_EngineCallback_ItemChanged( true );
+}
+
+void item_map_out( Item& item )
+{
+    GUI_EngineCallback_ItemChanged( true );
+}
+
+// //////////////////////////////////////////////////////////////////////////////////////////////////
+// Called on something critter in/out chosen inventory.
+void item_inv_all_in()
+{
+    GUI_EngineCallback_ItemChanged( false );
+}
+
+void item_inv_in( Item& item )
+{
+    GUI_EngineCallback_ItemChanged( false );
+}
+
+void item_inv_changed( Item& itemNow, Item& itemBefore )
+{
+    GUI_EngineCallback_ItemChanged( false );
+}
+
+void item_inv_out( Item& item )
+{
+    GUI_EngineCallback_ItemChanged( false );
+}
+
+void container_changed()
+{
+    GUI_EngineCallback_ItemChanged( false );
+}
+
+// //////////////////////////////////////////////////////////////////////////////////////////////////
+// Call on receive message on map.
+// By default delay == [TextDelay + message length * 100] ms
+bool map_message( string& message, uint16& hexX, uint16& hexY, uint& color, uint& delay )
+{
+    // Detect radio
+    if( color == 0xFFFFFFFE )
+        message = ".." + message + "..";
+    return true;
+}
+
+// //////////////////////////////////////////////////////////////////////////////////////////////////
+// Call on receive message.
+// By default delay == [TextDelay + message length * 100] ms
+bool in_message( string& message, int& sayType, uint& critterId, uint& delay )
+{
+    Critter@ cr = GetCritter( critterId );
+    if( valid( cr ) && PlayerIgnored( cr ) )
+        return false;
+    return true;
+}
+
+// //////////////////////////////////////////////////////////////////////////////////////////////////
+// Call on send message.
+bool out_message( string& message, int& sayType )
+{
+    string cmdPrefix = "~";
+    if( message[ 0 ] == cmdPrefix ) // Command
+    {
+        message[ 0 ] = "";
+
+        if( message == "names" )
+        {
+            InitNameColorizing();
+            Message( "Names colorizer refreshed." );
+            return false;
+        }
+
+        if( message == "ignorelist" )
+        {
+            InitIgnoreList();
+            Message( "Ignore list refreshed." );
+            return false;
+        }
+
+        if( message == "globalmap" )
+        {
+            RunServerScript( "NoPvpMaps@Rpc_CritterToGlobal", 0, 0, 0, null, null );
+            return false;
+        }
+
+        if( message.length() > 7 && substring( message, 0, 7 ) == "ignore " )
+        {
+            IgnorePlayer( cmdPrefix + message );
+            InitIgnoreList();
+            return false;
+        }
+
+        string separator = "#";
+        string result = CustomCall( "Command" + separator + message, separator );
+        if( result == "UNKNOWN" )
+        {
+            Message( "Unknown command." );
+        }
+        else if( result.length() > 0 )
+        {
+            string@[] @ msg = splitEx( result, separator );
+            for( uint i = 0; i < msg.length(); i++ )
+                Message( ReplaceText( result, "<", "<" + cmdPrefix ) );
+        }
+
+        return false;
+    }
+
+    if( sayType == SAY_NORM )
+    {
+        if( message.length() > 2 && ( message[ 0 ] == "/" || message[ 0 ] == "." ) )
+        {
+            string ch = message[ 1 ];
+            if(     ch == "к" || ch == "К" || ch == "s" || ch == "S" )
+                sayType = SAY_SHOUT;
+            else if( ch == "э" || ch == "Э" || ch == "e" || ch == "E" )
+                sayType = SAY_EMOTE;
+            else if( ch == "ш" || ch == "Ш" || ch == "w" || ch == "W" )
+                sayType = SAY_WHISP;
+            else if( ch == "с" || ch == "С" || ch == "$" )
+                sayType = SAY_SOCIAL;
+            else if( ch == "р" || ch == "Р" || ch == "r" || ch == "R" )
+                sayType = SAY_RADIO;
+
+            if( sayType != SAY_NORM )
+            {
+                message[ 0 ] = "";
+                message[ 0 ] = "";
+                while( message[ 0 ] == " " )
+                    message[ 0 ] = "";
+            }
+        }
+        else if(         // RegExp: [*]([^*].*[^*])[*]
+            message.length() >= 4 && message[ 0 ] == "*" && message[ 1 ] != "*" &&
+            message[ message.length() - 2 ] != "*" && message[ message.length() - 1 ] == "*" )
+        {
+            sayType = SAY_EMOTE;
+            message = substring( message, 1, message.length() - 2 );
+        }
+    }
+
+    bool result = false;
+    for( uint i = 0, j = message.length(); i < j; i++ )
+    {
+        if( message[ i ] != " " )
+        {
+            result = true;
+            break;
+        }
+    }
+
+    return result;
+}
+
+// //////////////////////////////////////////////////////////////////////////////////////////////////
+// To-hit chance.
+int to_hit( const Critter& chosen, const Critter& target, const Item& weapon, uint8 weaponMode )
+{
+    int use         = _WeaponModeUse( weaponMode );
+    int hitLocation = _WeaponModeAim( weaponMode );
+    if( use > 2 )
+        return 0;
+
+    if( target.IsDead() )
+        return 0;
+    if( !chosen.IsLife() )
+        return 0;
+
+    const Item@ realWeapon = _CritGetItemHand( chosen );
+    const Item@ ammo = null;
+
+    if( valid( realWeapon ) && _WeaponRound( weapon, use ) > 0 )
+    {
+        if( realWeapon.AmmoCount == 0 )
+            return 0;
+        @ammo = GetProtoItem( realWeapon.AmmoPid );
+    }
+
+    CritterProperty skill = _WeaponSkill( weapon, use );
+    int             wpnMaxDist = _WeaponMaxDist( weapon, use );
+    if( skill == CritterProperty::SkillThrowing )
+        wpnMaxDist = MIN( wpnMaxDist, 3 * MIN( int(10), chosen.Strength + 2 * chosen.PerkHeaveHo ) );
+
+    int dist = GetCrittersDistantion( chosen, target );
+    if( dist > wpnMaxDist )
+        return 0;
+
+    int toHit = int( chosen.GetAsInt( skill ) );
+    int weaponPerk = weapon.Weapon_Perk;
+    int blockers = 0;
+
+    if( skill != CritterProperty::SkillUnarmed && skill != CritterProperty::SkillMeleeWeapons )
+    {
+        // Ranged attack modifiers
+        int distmod1 = 2; // Used for initial weapon bonus
+        int distmod2 = 0; // Minimal distance
+        if( weaponPerk == WEAPON_PERK_LONG_RANGE )
+            distmod1 = 4;
+        else if( weaponPerk == WEAPON_PERK_SCOPE_RANGE )
+        {
+            distmod1 = 5;
+            distmod2 = 8;
+        }
+
+        int perception = chosen.Perception;
+        int acc = dist;
+
+        if( dist < distmod2 )
+            acc += distmod2;
+        else
+        {
+            if( chosen.IsPlayer() )
+                acc -= ( perception - 2 ) * distmod1;               // we want to keep it, because fo2238 might use it to display NPCs chance (via possessing)
+            else
+                acc -= perception * distmod1;
+        }
+
+        if( -2 * perception > acc )
+            acc = -2 * perception;
+
+        acc -= 2 * chosen.PerkSharpshooter;
+
+        if( acc >= 0 )
+        {
+            if( chosen.IsDamagedEye )
+                acc *= -12;
+            else
+                acc *= -4;
+        }
+        else
+        {
+            acc *= -4;
+        }
+
+        toHit += acc;
+
+        blockers = GetCrittersPath( chosen.HexX, chosen.HexY, target.HexX, target.HexY, 0.0f, dist, FIND_LIFE, null );
+        if( !target.IsKnockout() )
+            blockers--;
+        toHit -= 10 * blockers;
+    } // End range modifiers
+
+    if( !( weapon.Weapon_IsUnarmed ) && chosen.IsTraitOneHander && valid( realWeapon ) )
+        toHit += ( weapon.Weapon_IsTwoHanded ? -40 : 20 );
+
+    int handlingStrength = chosen.Strength;
+    int reqStrength = weapon.Weapon_MinStrength;
+    if( chosen.PerkWeaponHandling != 0 )
+        handlingStrength += 3;
+    if( handlingStrength < reqStrength )
+        toHit -= ( reqStrength - handlingStrength ) * 20;
+    if( weaponPerk == WEAPON_PERK_ACCURATE )
+        toHit += 20;
+
+    int acmod = target.ArmorClass;
+    if( valid( ammo ) )
+        acmod += ammo.Ammo_AcMod;
+    if( acmod > 0 )
+        toHit -= acmod;
+    // TODO: tohit += 15 if target is multihex
+    // TODO: light penalty
+
+    if( chosen.IsDamagedEye )
+        toHit -= 25;
+    if( chosen.PerkVampireAccuracy != 0 && IS_NIGHT( __Hour ) )
+        toHit += 13;
+    if( target.IsKnockout() )
+        toHit += 40;
+    toHit += target.Multihex * 15;
+
+    int hitMod = GetHitAim( hitLocation );
+    if( skill == CritterProperty::SkillMeleeWeapons || skill == CritterProperty::SkillUnarmed )
+        hitMod /= 2;
+    toHit -= hitMod;
+    toHit = CLAMP( toHit, 5, 95 );
+
+    return toHit;
+}
+
+uint GetHitAim( int hitLocation )
+{
+    switch( hitLocation )
+    {
+    case HIT_LOCATION_NONE:
+        break;
+    case HIT_LOCATION_UNCALLED:
+        break;
+    case HIT_LOCATION_TORSO:
+        return __HitAimTorso;
+    case HIT_LOCATION_EYES:
+        return __HitAimEyes;
+    case HIT_LOCATION_HEAD:
+        return __HitAimHead;
+    case HIT_LOCATION_LEFT_ARM:
+    case HIT_LOCATION_RIGHT_ARM:
+        return __HitAimArms;
+    case HIT_LOCATION_GROIN:
+        return __HitAimGroin;
+    case HIT_LOCATION_RIGHT_LEG:
+    case HIT_LOCATION_LEFT_LEG:
+        return __HitAimLegs;
+    default:
+        break;
+    }
+    return 0;
+}
+
+// //////////////////////////////////////////////////////////////////////////////////////////////////
+// Override aim location set by player through targetting screen or simple click on target.
+void hit_aim( uint8& aim )
+{}
+
+// //////////////////////////////////////////////////////////////////////////////////////////////////
+// Combat results.
+void combat_result( uint[]& data )
+{
+    uint datalen = data.length();
+    if( datalen == 0 )
+        return;
+    if( data[ 0 ] != datalen )
+        return;
+
+    uint current = 1;
+
+    while( current < datalen )
+    {
+        int      damage  = -1;
+        uint     effect =  0;
+        uint     loc    =  0;
+        int      message = -1;
+
+        uint     mode = data[ current++ ];
+        uint     who  = data[ current++ ];
+        uint     who2;
+        Critter@ originalTarget;
+
+        Critter@ cr         = GetCritter( who );
+        Critter@ chosen     = GetChosen();
+        Critter@ trueTarget = null;
+
+        bool     self = ( who == GetChosen().Id );
+
+        string   name = "error0";
+        if( valid( cr ) )
+        {
+            if( !self )
+                name = cr.Name;
+            else
+                name = GetMsgStr( TEXTMSG_COMBAT, chosen.Gender == GENDER_MALE ? 506 : 556 );
+        }
+
+        uint offset;
+        if( self )
+        {
+            if( cr.Gender == GENDER_MALE )
+                offset = 506;
+            else
+                offset = 556;
+        }
+        else
+        {
+            if( cr.Gender == GENDER_MALE )
+                offset = 606;
+            else
+                offset = 706;
+        }
+
+        string result;
+
+        // reading and preparing the data:
+        switch( mode )
+        {
+        case CMSG_CRIT_MISS:
+            effect = data[ current++ ];
+            result = GetMsgStr( TEXTMSG_COMBAT, offset + 8 );
+            result = ReplaceText( result, "%s", name );
+            break;
+        case CMSG_CRIT_MISS_DAMAGE:
+            effect = data[ current++ ];
+            damage = data[ current++ ];
+            result = GetMsgStr( TEXTMSG_COMBAT, offset + ( damage > 1 ? 28 : 27 ) );
+            result = ReplaceText( result, "%s", name );
+            if( damage > 1 )
+                result = ReplaceText( result, "%d", damage );
+            break;
+        case CMSG_HIT:
+        case CMSG_HIT_DEAD:
+            damage = data[ current++ ];
+            result = GetMsgStr( TEXTMSG_COMBAT, offset + ( damage > 1 ? 7 : ( damage != 0 ? 17 : 21 ) ) );
+            result = ReplaceText( result, "%s", name );
+            if( damage > 1 )
+                result = ReplaceText( result, "%d", damage );
+            break;
+        case CMSG_AIMED_HIT:
+        case CMSG_AIMED_HIT_DEAD:
+            loc    = data[ current++ ];
+            damage = data[ current++ ];
+            result = GetMsgStr( TEXTMSG_COMBAT, offset + ( damage > 1 ? 6 : ( damage != 0 ? 16 : 20 ) ) );
+            result = ReplaceText( result, "%s", name );
+            result = ReplaceText( result, "%s", GetMsgStr( TEXTMSG_COMBAT, 1000 + cr.CrTypeAlias * 10 + loc - 1 ) );
+            if( damage > 1 )
+                result = ReplaceText( result, "%d", damage );
+            break;
+        case CMSG_CRIT_HIT:
+            damage  = data[ current++ ];
+            effect  = data[ current++ ];
+            message = data[ current++ ];
+            result = GetMsgStr( TEXTMSG_COMBAT, offset + ( damage > 1 ? 14 : ( damage != 0 ? 18 : 22 ) ) );
+            result = ReplaceText( result, "%s", name );
+            if( damage > 1 )
+                result = ReplaceText( result, "%d", damage );
+            break;
+        case CMSG_CRIT_AIMED_HIT:
+            loc     = data[ current++ ];
+            damage  = data[ current++ ];
+            effect  = data[ current++ ];
+            message = data[ current++ ];
+            result = GetMsgStr( TEXTMSG_COMBAT, offset + ( damage > 1 ? 5 : ( damage != 0 ? 15 : 19 ) ) );
+            result = ReplaceText( result, "%s", name );
+            result = ReplaceText( result, "%s", GetMsgStr( TEXTMSG_COMBAT, 1000 + cr.CrTypeAlias * 10 + loc - 1 ) );
+            if( damage > 1 )
+                result = ReplaceText( result, "%d", damage );
+            break;
+        case CMSG_CRIT_HIT_DEAD:
+            damage  = data[ current++ ];
+            message = data[ current++ ];
+            result = GetMsgStr( TEXTMSG_COMBAT, offset + ( damage > 1 ? 14 : ( damage != 0 ? 18 : 22 ) ) );
+            result = ReplaceText( result, "%s", name );
+            if( damage > 1 )
+                result = ReplaceText( result, "%d", damage );
+            break;
+        case CMSG_CRIT_AIMED_HIT_DEAD:
+            loc     = data[ current++ ];
+            damage  = data[ current++ ];
+            message = data[ current++ ];
+            result = GetMsgStr( TEXTMSG_COMBAT, offset + ( damage > 1 ? 5 : ( damage != 0 ? 15 : 19 ) ) );
+            result = ReplaceText( result, "%s", name );
+            result = ReplaceText( result, "%s", GetMsgStr( TEXTMSG_COMBAT, 1000 + cr.CrTypeAlias * 10 + loc - 1 ) );
+            if( damage > 1 )
+                result = ReplaceText( result, "%d", damage );
+            break;
+        case CMSG_OOPS:
+            who2 = data[ current++ ];           // who2 was hit instead of who
+            // +2 "... was hit instead of you!"
+            // +3 "... was hit instead of ...!"
+            @trueTarget = GetCritter( who2 );
+            if( self )
+            {
+                // It was original target
+                result = GetMsgStr( TEXTMSG_COMBAT, cr.Gender == GENDER_MALE ? 608 : 708 );
+                string nameTrue = "error1";
+                if( valid( trueTarget ) )
+                    nameTrue = trueTarget.Name;
+                result = ReplaceText( result, "%s", nameTrue );
+            }
+            else
+            {
+                // It was not original target
+                result = GetMsgStr( TEXTMSG_COMBAT, offset + 3 );
+                if( who2 == GetChosen().Id )
+                {
+                    result = ReplaceText( result, "%s", GetMsgStr( TEXTMSG_COMBAT, chosen.Gender == GENDER_MALE ? 506 : 556 ) );
+                }
+                else
+                {
+                    string nameTrue = "error1";
+                    if( valid( trueTarget ) )
+                        nameTrue = trueTarget.Name;
+                    result = ReplaceText( result, "%s", nameTrue );
+                }
+                result = ReplaceText( result, "%s", name );
+            }
+            break;
+        case CMSG_MISS:
+            result = GetMsgStr( TEXTMSG_COMBAT, offset + 9 );
+            result = ReplaceText( result, "%s", name );
+            break;
+        case CMSG_HIT_RANDOMLY:
+            result  = GetMsgStr( TEXTMSG_COMBAT, offset + 9 );
+            result  = ReplaceText( result, "%s", name );
+            result += GetMsgStr( TEXTMSG_COMBAT, 108 ) + GetMsgStr( TEXTMSG_COMBAT, offset - 306 + 20 );
+        default:
+            break;
+        }
+
+        bool isVerbose = ( __CombatMessagesType == 0 );
+        string@[] ext;
+
+        if( message != -1 && isVerbose )       // Must be critical hit
+        {
+            result += GetMsgStr( TEXTMSG_COMBAT, message );
+        }
+        else if( effect != 0 )
+        {
+            offset -= 306;
+            if( mode > CMSG_CRIT_MISS_DAMAGE )           // Hit flags
+            {
+                if( FLAG( effect, HF_KNOCKOUT ) )
+                    ext.insertLast( @GetMsgStr( TEXTMSG_COMBAT, offset + 0 ) );
+                if( FLAG( effect, HF_KNOCKDOWN ) )
+                    ext.insertLast( @GetMsgStr( TEXTMSG_COMBAT, offset + 1 ) );
+                if( FLAG( effect, HF_CRIPPLED_LEFT_LEG ) )
+                    ext.insertLast( @GetMsgStr( TEXTMSG_COMBAT, offset + 2 ) );
+                if( FLAG( effect, HF_CRIPPLED_RIGHT_LEG ) )
+                    ext.insertLast( @GetMsgStr( TEXTMSG_COMBAT, offset + 3 ) );
+                if( FLAG( effect, HF_CRIPPLED_LEFT_ARM ) )
+                    ext.insertLast( @GetMsgStr( TEXTMSG_COMBAT, offset + 4 ) );
+                if( FLAG( effect, HF_CRIPPLED_RIGHT_ARM ) )
+                    ext.insertLast( @GetMsgStr( TEXTMSG_COMBAT, offset + 5 ) );
+                if( FLAG( effect, HF_BLINDED ) )
+                    ext.insertLast( @GetMsgStr( TEXTMSG_COMBAT, offset + 6 ) );
+                // if(FLAG(effect, HF_DEATH))              ext.insertLast(@GetMsgStr(TEXTMSG_COMBAT, offset     )); // This is handled elsewhere
+                // if(FLAG(effect, HF_ON_FIRE))            ext.insertLast(@GetMsgStr(TEXTMSG_COMBAT, offset + 10)); // Not used
+                if( FLAG( effect, HF_BYPASS_ARMOR ) )
+                    ext.insertLast( @GetMsgStr( TEXTMSG_COMBAT, offset + 11 ) );
+                if( FLAG( effect, HF_DROPPED_WEAPON ) )
+                    ext.insertLast( @GetMsgStr( TEXTMSG_COMBAT, offset + 14 ) );
+                if( FLAG( effect, HF_LOST_NEXT_TURN ) )
+                    ext.insertLast( @GetMsgStr( TEXTMSG_COMBAT, offset + 15 ) );
+                if( FLAG( effect, HF_RANDOM ) )
+                    ext.insertLast( @GetMsgStr( TEXTMSG_COMBAT, offset + 21 ) );
+            }
+            else
+            {
+                if( FLAG( effect, MF_KNOCKED_DOWN ) )
+                    ext.insertLast( @GetMsgStr( TEXTMSG_COMBAT, offset +  1 ) );
+                // if(FLAG(effect, MF_ON_FIRE))              ext.insertLast(@GetMsgStr(TEXTMSG_COMBAT, offset + 10)); // Not used
+                if( FLAG( effect, MF_WEAPON_EXPLODED ) )
+                    ext.insertLast( @GetMsgStr( TEXTMSG_COMBAT, offset + 12 ) );
+                if( FLAG( effect, MF_WEAPON_DESTROYED ) )
+                    ext.insertLast( @GetMsgStr( TEXTMSG_COMBAT, offset + 13 ) );
+                if( FLAG( effect, MF_WEAPON_DROPPED ) )
+                    ext.insertLast( @GetMsgStr( TEXTMSG_COMBAT, offset + 14 ) );
+                if( FLAG( effect, MF_LOST_NEXT_TURN ) )
+                    ext.insertLast( @GetMsgStr( TEXTMSG_COMBAT, offset + 15 ) );
+                if( FLAG( effect, MF_HIT_SELF ) )
+                    ext.insertLast( @GetMsgStr( TEXTMSG_COMBAT, offset + 16 ) );
+                if( FLAG( effect, MF_LOST_REST_OF_AMMO ) )
+                    ext.insertLast( @GetMsgStr( TEXTMSG_COMBAT, offset + 17 ) );
+                if( FLAG( effect, MF_FIRED_DUD_SHOT ) )
+                    ext.insertLast( @GetMsgStr( TEXTMSG_COMBAT, offset + 18 ) );
+                if( FLAG( effect, MF_HURT_SELF ) )
+                    ext.insertLast( @GetMsgStr( TEXTMSG_COMBAT, offset + 19 ) );
+                // if(FLAG(effect, MF_HIT_RANDOMLY))         ext.insertLast(@GetMsgStr(TEXTMSG_COMBAT, offset + 20)); // This is handled elsewhere
+                if( FLAG( effect, MF_CRIPPLED_RANDOM_LIMB ) )
+                    ext.insertLast( @GetMsgStr( TEXTMSG_COMBAT, offset + 21 ) );
+                if( FLAG( effect, MF_WAS_KILLED ) )
+                    ext.insertLast( @GetMsgStr( TEXTMSG_COMBAT, offset +  7 ) );
+            }
+            offset += 306;
+        }
+
+        if( 8 <= mode && mode <= 11 && ( !isVerbose || message == -1 ) )
+            ext.insertLast( @GetMsgStr( TEXTMSG_COMBAT, offset + 7 - 306 ) );
+
+        for( uint m = 0, n = ext.length(); m < n; m++ )
+        {
+            if( m == n - 1 )
+                result += GetMsgStr( TEXTMSG_COMBAT, 108 );
+            else
+                result += ", ";
+
+            result += ext[ m ];
+        }
+
+        result += ".";
+
+        Message( result, FOMB_COMBAT_RESULT );
+
+        if( 8 <= mode && mode <= 11 && isVerbose && message != -1 )
+            Message( name + " " + GetMsgStr( TEXTMSG_COMBAT, offset + 7 - 306 ) + ".", FOMB_COMBAT_RESULT );
+
+        // On head indication
+        if( __DamageHitDelay > 0 && damage > 0 )
+            MapMessage( "-" + damage, cr.HexX, cr.HexY, __DamageHitDelay, 0xFFC80000, true, Random( -5, 5 ), -20 );
+    }
+}
+
+// //////////////////////////////////////////////////////////////////////////////////////////////////
+// Generic description. Descriptions type look in _client_defines.fos, Generic descriptions types.
+// int& offsX, int& offsY - offsets of text, by default is zero.
+string@ generic_description( int descType, int& offsX, int& offsY )
+{
+    Critter@ chosen = GetChosen();
+    if( not valid( chosen ) )
+        return "";
+    string result;
+
+    if( descType == DESC_INVENTORY_MAIN )
+    {
+        result += chosen.Name        + "\n";
+        result += "---------------------\n";
+        result += GetMsgStr( TEXTMSG_GAME, STR_INV_SHORT_SPECIAL( CritterProperty::Strength ) )   + "\n";
+        result += GetMsgStr( TEXTMSG_GAME, STR_INV_SHORT_SPECIAL( CritterProperty::Perception ) ) + "\n";
+        result += GetMsgStr( TEXTMSG_GAME, STR_INV_SHORT_SPECIAL( CritterProperty::Endurance ) )  + "\n";
+        result += GetMsgStr( TEXTMSG_GAME, STR_INV_SHORT_SPECIAL( CritterProperty::Charisma ) )   + "\n";
+        result += GetMsgStr( TEXTMSG_GAME, STR_INV_SHORT_SPECIAL( CritterProperty::Intellect ) )  + "\n";
+        result += GetMsgStr( TEXTMSG_GAME, STR_INV_SHORT_SPECIAL( CritterProperty::Agility ) )    + "\n";
+        result += GetMsgStr( TEXTMSG_GAME, STR_INV_SHORT_SPECIAL( CritterProperty::Luck ) )       + "\n";
+        result += "---------------------\n";
+
+        Item@ weaponMain = chosen.GetItem( 0, SLOT_HAND1 );
+        if( valid( weaponMain ) )
+        {
+            int use = _WeaponModeUse( weaponMain.Mode );
+            if( use > 2 )
+                use = 0;
+
+            result += GetMsgStr( TEXTMSG_ITEM, STR_ITEM_NAME( weaponMain ) ) + "\n";
+
+            if( weaponMain.Type == ItemType::Weapon )
+            {
+                result += GetMsgStr( TEXTMSG_GAME, STR_INV_DMG ) + " ";
+                result += _WeaponDmgMin( weaponMain, use ) + "-";
+                int wpnMaxDmg = _WeaponDmgMax( weaponMain, use );
+                if( _WeaponIsHtHAttack( weaponMain, use ) )
+                    wpnMaxDmg += chosen.MeleeDamage;
+                result += wpnMaxDmg;
+
+                if( _WeaponMaxDist( weaponMain, use ) > 1 )
+                {
+                    result += " " + GetMsgStr( TEXTMSG_GAME, STR_INV_DIST ) + " ";
+                    int wpnMaxDist = _WeaponMaxDist( weaponMain, use );
+                    if( _WeaponSkill( weaponMain, use ) == CritterProperty::SkillThrowing )
+                        wpnMaxDist = MIN( wpnMaxDist, 3 * MIN( int(10), chosen.Strength + 2 * chosen.PerkHeaveHo ) );
+                    result += wpnMaxDist;
+                }
+                result += "\n";
+
+                if( weaponMain.Weapon_MaxAmmoCount > 0 )
+                {
+                    result += GetMsgStr( TEXTMSG_GAME, STR_INV_AMMO ) + " ";
+                    result += weaponMain.AmmoCount            + "/";
+                    result += weaponMain.Weapon_MaxAmmoCount  + " ";
+                    result += GetMsgStr( TEXTMSG_GAME, STR_CALIBER( weaponMain.Weapon_Caliber ) );
+                }
+                result += "\n";
+            }
+            else
+            {
+                result += "\n\n";
+            }
+        }
+        else
+        {
+            // Unarmed
+            const Item@ unarmed = chosen.GetSlotItem( SLOT_HAND1 );
+            result += GetMsgStr( TEXTMSG_GAME, STR_INV_NO_ITEM )     + "\n";
+            result += GetMsgStr( TEXTMSG_GAME, STR_INV_UNARMED_DMG ) + " ";
+            result += _WeaponDmgMin( unarmed, _WeaponModeUse( unarmed.Mode ) ) + "-";
+            result += ( _WeaponDmgMax( unarmed, _WeaponModeUse( unarmed.Mode ) ) + chosen.MeleeDamage );
+            result += "\n\n";
+        }
+        result += "---------------------\n";
+
+        Item@ weaponExt = chosen.GetItem( 0, SLOT_HAND2 );
+        if( valid( weaponExt ) )
+        {
+            int use = _WeaponModeUse( weaponExt.Mode );
+            if( use > 2 )
+                use = 0;
+
+            result += GetMsgStr( TEXTMSG_ITEM, STR_ITEM_NAME( weaponExt ) ) + "\n";
+
+            if( weaponExt.Type == ItemType::Weapon )
+            {
+                result += GetMsgStr( TEXTMSG_GAME, STR_INV_DMG ) + " ";
+                result += _WeaponDmgMin( weaponExt, use )  + "-";
+                int wpnMaxDmg = _WeaponDmgMax( weaponExt, use );
+                if( _WeaponIsHtHAttack( weaponExt, use ) )
+                    wpnMaxDmg += chosen.MeleeDamage;
+                result += wpnMaxDmg;
+                if( _WeaponMaxDist( weaponExt, use ) > 1 )
+                {
+                    result += " " + GetMsgStr( TEXTMSG_GAME, STR_INV_DIST ) + " ";
+                    int wpnMaxDist = _WeaponMaxDist( weaponExt, use );
+                    if( _WeaponSkill( weaponExt, use ) == CritterProperty::SkillThrowing )
+                        wpnMaxDist = MIN( wpnMaxDist, 3 * MIN( int(10), chosen.Strength + 2 * chosen.PerkHeaveHo ) );
+                    result += wpnMaxDist;
+                }
+                result += "\n";
+
+                if( weaponExt.Weapon_MaxAmmoCount > 0 )
+                {
+                    result += GetMsgStr( TEXTMSG_GAME, STR_INV_AMMO ) + " ";
+                    result += weaponExt.AmmoCount             + "/";
+                    result += weaponExt.Weapon_MaxAmmoCount   + " ";
+                    result += GetMsgStr( TEXTMSG_GAME, STR_CALIBER( weaponExt.Weapon_Caliber ) );
+                }
+                result += "\n";
+            }
+            else
+            {
+                result += "\n\n";
+            }
+        }
+        else
+        {
+            // Unarmed
+            const Item@ unarmed = chosen.GetSlotItem( SLOT_HAND2 );
+            result += GetMsgStr( TEXTMSG_GAME, STR_INV_NO_ITEM )     + "\n";
+            result += GetMsgStr( TEXTMSG_GAME, STR_INV_UNARMED_DMG ) + " ";
+            result += _WeaponDmgMin( unarmed, _WeaponModeUse( unarmed.Mode ) ) + "-";
+            result += ( _WeaponDmgMax( unarmed, _WeaponModeUse( unarmed.Mode ) ) + chosen.MeleeDamage );
+            result += "\n\n";
+        }
+
+        result += GetMsgStr( TEXTMSG_GAME, STR_INV_TOTAL_WEIGHT ) + " ";
+        result += ( chosen.ItemsWeight() / 1000 ) + "/";
+        result += ( chosen.CarryWeight / 1000 ) + ".";
+    }
+    else if( descType == DESC_INVENTORY_SPECIAL )
+    {
+        offsX = 23;
+        result += "\n\n";
+        result += chosen.Strength   + "\n";
+        result += chosen.Perception + "\n";
+        result += chosen.Endurance  + "\n";
+        result += chosen.Charisma   + "\n";
+        result += chosen.Intellect  + "\n";
+        result += chosen.Agility    + "\n";
+        result += chosen.Luck;
+    }
+    else if( descType == DESC_INVENTORY_STATS )
+    {
+        offsX = 39;
+        result += "\n\n";
+        result += GetMsgStr( TEXTMSG_GAME, STR_INV_HP ) + " ";
+        result += chosen.CurrentHp + "/" + chosen.MaxLife + "\n";
+        result += GetMsgStr( TEXTMSG_GAME, STR_INV_AC ) + " ";
+        result += chosen.ArmorClass + "\n";
+        result += GetMsgStr( TEXTMSG_GAME, STR_INV_NORMAL ) + "\n";
+        result += GetMsgStr( TEXTMSG_GAME, STR_INV_LASER )  + "\n";
+        result += GetMsgStr( TEXTMSG_GAME, STR_INV_FIRE )   + "\n";
+        result += GetMsgStr( TEXTMSG_GAME, STR_INV_PLASMA ) + "\n";
+        result += GetMsgStr( TEXTMSG_GAME, STR_INV_EXPLODE );
+    }
+    else if( descType == DESC_INVENTORY_RESIST )
+    {
+        offsX = 103;
+        result += "\n\n\n\n";
+        int[] threshold = chosen.DamageThreshold;
+        int[] resistance = chosen.DamageResistance;
+        result += threshold[ DAMAGE_NORMAL ]  + "/" + resistance[ DAMAGE_NORMAL ]  + "%\n";
+        result += threshold[ DAMAGE_LASER ]   + "/" + resistance[ DAMAGE_LASER ]   + "%\n";
+        result += threshold[ DAMAGE_FIRE ]    + "/" + resistance[ DAMAGE_FIRE ]    + "%\n";
+        result += threshold[ DAMAGE_PLASMA ]  + "/" + resistance[ DAMAGE_PLASMA ]  + "%\n";
+        result += threshold[ DAMAGE_EXPLODE ] + "/" + resistance[ DAMAGE_EXPLODE ] + "%";
+    }
+
+    return result;
+}
+
+// //////////////////////////////////////////////////////////////////////////////////////////////////
+// Item description. Look types look in _client_defines.fos, Item look types.
+string@ item_description( Item& item, int lookType )
+{
+    // Default error text
+    if( not IsMsgStr( TEXTMSG_ITEM, STR_ITEM_NAME( item ) + ( lookType != ITEM_LOOK_ONLY_NAME ? 1 : 0 ) ) )
+        return GetMsgStr( TEXTMSG_GAME, STR_ITEM_LOOK_NOTHING );
+
+    string result;
+
+    // Car on world map
+    if( lookType == ITEM_LOOK_WM_CAR )
+    {
+        string fuel = GetMsgStr( TEXTMSG_GAME, STR_INV_CAR_FUEL );
+        fuel = ReplaceText( fuel, "VALUE",     item.Charge / 100 );
+        fuel = ReplaceText( fuel, "MAX_VALUE", item.Car_TankVolume / 100 );
+        string deterioration = GetMsgStr( TEXTMSG_GAME, STR_INV_CAR_DETERIORATION );
+        deterioration = ReplaceText( deterioration, "VALUE", item.Deterioration * 100 / item.Car_MaxDeterioration );
+        result = fuel + "\n" + deterioration;
+    }
+    // Short info
+    else if( lookType == ITEM_LOOK_ONLY_NAME )
+    {
+        result += ReplaceText( GetMsgStr( TEXTMSG_GAME, STR_ITEM_LOOK ), "NAME", GetMsgStr( TEXTMSG_ITEM, STR_ITEM_NAME( item ) ) );
+    }
+    // Full info
+    else
+    {
+        if( lookType == ITEM_LOOK_INVENTORY )
+            result += GetMsgStr( TEXTMSG_ITEM, STR_ITEM_NAME( item ) ) + "\n";
+
+        if( item.ProtoId == Content::Item::holodisk && item.HolodiskNum != 0 )
+            result += GetMsgStr( TEXTMSG_HOLO, STR_HOLO_INFO_NAME( item.HolodiskNum ) );
+        else
+            result += GetMsgStr( TEXTMSG_ITEM, STR_ITEM_INFO( item ) );
+
+        if( lookType != ITEM_LOOK_MAP )
+        {
+            // Weight
+            result += "\n" + ReplaceText( GetMsgStr( TEXTMSG_GAME, STR_ITEM_WEIGHT_GRAMM ), "VALUE", item.Weight * item.Count );
+
+            // Ammo load
+            if( item.Type == ItemType::Weapon && item.Weapon_MaxAmmoCount > 0 )
+            {
+                result += "\n";
+                string str = GetMsgStr( TEXTMSG_GAME, STR_INV_HAS_SHOTS );
+                str = ReplaceText( str, "VALUE",     item.AmmoCount );
+                str = ReplaceText( str, "MAX_VALUE", item.Weapon_MaxAmmoCount );
+                str = ReplaceText( str, "AMMO",      GetMsgStr( TEXTMSG_GAME, STR_CALIBER( item.Weapon_Caliber ) ) );
+                result += str;
+            }
+
+            // Deterioration
+            if( item.Deteriorable )
+            {
+                uint8  brokenCount = item.BrokenCount;
+                uint16 deterioration = item.Deterioration;
+
+                // Broken level, procent
+                result += "\n";
+                if( item.BrokenNotresc )
+                    result += GetMsgStr( TEXTMSG_GAME, STR_DETERIORATION_NO_RESC );
+                else if( item.BrokenLowBroken )
+                    result += GetMsgStr( TEXTMSG_GAME, STR_DETERIORATION_BROKEN_LOW );
+                else if( item.BrokenNormBroken )
+                    result += GetMsgStr( TEXTMSG_GAME, STR_DETERIORATION_BROKEN_NORM );
+                else if( item.BrokenHighBroken )
+                    result += GetMsgStr( TEXTMSG_GAME, STR_DETERIORATION_BROKEN_HIGH );
+                else
+                    result += ReplaceText( GetMsgStr( TEXTMSG_GAME, STR_DETERIORATION_PROCENT ), "VALUE", deterioration * 100 / MAX_DETERIORATION );
+
+                // Service
+                if( item.BrokenService )
+                    result += "\n" + GetMsgStr( TEXTMSG_GAME, STR_DETERIORATION_SERVICE );
+
+                // Service ext
+                if( item.BrokenServiceExt )
+                    result += "\n" + GetMsgStr( TEXTMSG_GAME, STR_DETERIORATION_SERVICE_EXT );
+
+                // Broken count
+                Critter@ chosen = GetChosen();
+                if( valid( chosen ) && chosen.PerkMrFixit != 0 )
+                    result += "\n" + ReplaceText( GetMsgStr( TEXTMSG_GAME, STR_DETERIORATION_BROKEN_COUNT ), "VALUE", brokenCount );
+            }
+
+            // Key id
+            if( item.Type == ItemType::Key )
+                result += "\n" + ReplaceText( GetMsgStr( TEXTMSG_GAME, STR_INV_KEY_NUMBER ), "KEY_ID", item.LockerId );
+        }
+    }
+
+    // Format tags
+    if( item.Lexems != "" )
+        return FormatTags( result, item.Lexems );
+    return result;
+}
+
+// //////////////////////////////////////////////////////////////////////////////////////////////////
+// Critter description. Look types look in _client_defines.fos, Critter look types.
+string@ critter_description( Critter& cr, int lookType )
+{
+    string result;
+    int    gender = cr.Gender;
+
+    // Player
+    if( cr.IsPlayer() )
+    {
+        // Only name
+        if( lookType == CRITTER_ONLY_NAME )
+        {
+            result = cr.Name;             // No change
+        }
+        // Short info
+        else if( lookType == CRITTER_LOOK_SHORT )
+        {
+            result += GetMsgStr( TEXTMSG_GAME, STR_CRIT_LOOK1( gender ) );
+            result += cr.Name;
+            result += ".";
+        }
+        // Full info
+        else
+        {
+            result += GetMsgStr( TEXTMSG_GAME, STR_CRIT_LOOK1( gender ) );
+
+            // Age
+            uint ageStr = GetMsgStrNumUpper( TEXTMSG_GAME, STR_CRIT_LOOK_AGE( gender, cr.Age ) );
+            if( ageStr != 0 )
+                result += GetMsgStr( TEXTMSG_GAME, ageStr );
+            else
+                result += cr.Name;
+            result += ".";
+        }
+    }
+    // Npc
+    else
+    {
+        hash dlgId = cr.DialogId;
+        hash npcPid = cr.ProtoId;
+        bool defaultText = false;
+
+        if( lookType == CRITTER_ONLY_NAME )
+        {
+            result = GetMsgStr( TEXTMSG_DLG, STR_NPC_NAME( dlgId, npcPid ) );
+        }
+        // Short info
+        else if( lookType == CRITTER_LOOK_SHORT )
+        {
+            if( cr.IsLife() && IsMsgStr( TEXTMSG_DLG, STR_NPC_INFO_LIFE( dlgId, npcPid ) ) )
+                result += GetMsgStr( TEXTMSG_DLG, STR_NPC_INFO_LIFE( dlgId, npcPid ) );
+            else if( cr.IsKnockout() && IsMsgStr( TEXTMSG_DLG, STR_NPC_INFO_KO( dlgId, npcPid ) ) )
+                result += GetMsgStr( TEXTMSG_DLG, STR_NPC_INFO_KO(  dlgId, npcPid ) );
+            else if( cr.IsDead() && IsMsgStr( TEXTMSG_DLG, STR_NPC_INFO_DEAD( dlgId, npcPid ) ) )
+                result += GetMsgStr( TEXTMSG_DLG, STR_NPC_INFO_DEAD( dlgId, npcPid ) );
+            else
+                defaultText = true;
+        }
+        // Full info
+        else
+        {
+            if( cr.IsLife() && IsMsgStr( TEXTMSG_DLG, STR_NPC_FULL_INFO_LIFE( dlgId, npcPid ) ) )
+                result += GetMsgStr( TEXTMSG_DLG, STR_NPC_FULL_INFO_LIFE( dlgId, npcPid ) );
+            else if( cr.IsKnockout() && IsMsgStr( TEXTMSG_DLG, STR_NPC_FULL_INFO_KO( dlgId, npcPid ) ) )
+                result += GetMsgStr( TEXTMSG_DLG, STR_NPC_FULL_INFO_KO(  dlgId, npcPid ) );
+            else if( cr.IsDead() && IsMsgStr( TEXTMSG_DLG, STR_NPC_FULL_INFO_DEAD( dlgId, npcPid ) ) )
+                result += GetMsgStr( TEXTMSG_DLG, STR_NPC_FULL_INFO_DEAD( dlgId, npcPid ) );
+            else
+                defaultText = true;
+        }
+
+        if( defaultText )
+        {
+            // Check standart text
+            if( IsMsgStr( TEXTMSG_DLG, STR_NPC_NAME( dlgId, npcPid ) ) )
+            {
+                if( cr.IsLife() )
+                    result += ReplaceText( GetMsgStr( TEXTMSG_GAME, STR_CRIT_LOOK_LIFE ), "NAME", GetMsgStr( TEXTMSG_DLG, STR_NPC_NAME( dlgId, npcPid ) ) );
+                else if( cr.IsKnockout() )
+                    result += ReplaceText( GetMsgStr( TEXTMSG_GAME, STR_CRIT_LOOK_KO ), "NAME", GetMsgStr( TEXTMSG_DLG, STR_NPC_NAME( dlgId, npcPid ) ) );
+                else if( cr.IsDead() )
+                    result += ReplaceText( GetMsgStr( TEXTMSG_GAME, STR_CRIT_LOOK_DEAD ), "NAME", GetMsgStr( TEXTMSG_DLG, STR_NPC_NAME( dlgId, npcPid ) ) );
+            }
+            // Set default text
+            else
+            {
+                result += GetMsgStr( TEXTMSG_GAME, STR_CRIT_LOOK_NOTHING );
+            }
+        }
+    }
+
+    // Additional description
+    if( lookType == CRITTER_LOOK_FULL )
+    {
+        if( result.length() > 0 && result[ result.length() - 1 ] != "." )
+            result += ".";
+        result += " ";
+
+        Critter@ chosen = GetChosen();
+        if( valid( chosen ) && chosen.PerkAwareness != 0 )   // Awareness
+        {
+            result += GetMsgStr( TEXTMSG_GAME, STR_CRIT_LOOK_HP( gender ) );
+            result = ReplaceText( result, "CUR", cr.CurrentHp );
+            result = ReplaceText( result, "MAX", cr.MaxLife );
+
+            Item@ item = cr.GetItem( 0, SLOT_HAND1 );
+            if( _CritIsInjured( cr ) )
+            {
+                if( valid( item ) )
+                    result += ", ";
+                else
+                    result += GetMsgStr( TEXTMSG_GAME, STR_AND );
+
+                result += GetMsgStr( TEXTMSG_GAME, STR_CRIT_LOOK_LIMBS( gender, false ) );
+            }
+
+            if( valid( item ) )
+            {
+                if( item.Type == ItemType::Weapon )
+                {
+                    if( item.Weapon_MaxAmmoCount == 0 )
+                    {
+                        result += GetMsgStr( TEXTMSG_GAME, STR_CRIT_LOOK_WEAP );
+                        result = ReplaceText( result, "WEAPON", GetMsgStr( TEXTMSG_ITEM, STR_ITEM_NAME( item ) ) );
+                    }
+                    else
+                    {
+                        result += GetMsgStr( TEXTMSG_GAME, STR_CRIT_LOOK_WEAP_AMMO );
+                        result = ReplaceText( result, "WEAPON", GetMsgStr( TEXTMSG_ITEM, STR_ITEM_NAME( item ) ) );
+                        result = ReplaceText( result, "CUR", item.AmmoCount );
+                        result = ReplaceText( result, "MAX", item.Weapon_MaxAmmoCount );
+                        result = ReplaceText( result, "AMMO", GetMsgStr( TEXTMSG_GAME, STR_CALIBER( item.Weapon_Caliber ) ) );
+                    }
+                }
+                else
+                {
+                    result += GetMsgStr( TEXTMSG_GAME, STR_CRIT_LOOK_MISC );
+                    result = ReplaceText( result, "MISC", GetMsgStr( TEXTMSG_ITEM, STR_ITEM_NAME( item ) ) );
+                }
+            }
+        }
+        else         // Simple
+        {
+            result += GetMsgStr( TEXTMSG_GAME, STR_CRIT_LOOK_WHO( gender ) );
+
+            int hp_proc = cr.CurrentHp * 100 / cr.MaxLife;
+            if( cr.IsDead() )
+                result += GetMsgStr( TEXTMSG_GAME, STR_CRIT_LOOK_STATE( 0 ) );
+            else if( hp_proc < 34 )
+                result += GetMsgStr( TEXTMSG_GAME, STR_CRIT_LOOK_STATE( 1 ) );
+            else if( hp_proc < 67 )
+                result += GetMsgStr( TEXTMSG_GAME, STR_CRIT_LOOK_STATE( 2 ) );
+            else if( hp_proc < 100 )
+                result += GetMsgStr( TEXTMSG_GAME, STR_CRIT_LOOK_STATE( 3 ) );
+            else
+                result += GetMsgStr( TEXTMSG_GAME, STR_CRIT_LOOK_STATE( 4 ) );
+
+            if( _CritIsInjured( cr ) )
+            {
+                if( hp_proc < 90 )
+                    result += GetMsgStr( TEXTMSG_GAME, STR_AND );
+                result += GetMsgStr( TEXTMSG_GAME, STR_CRIT_LOOK_LIMBS( gender, hp_proc >= 90 ) );
+            }
+        }
+        result += ".";
+    }
+
+    // Format tags
+    if( cr.Lexems != "" )
+        return FormatTags( result, cr.Lexems );
+    return result;
+}
+
+// //////////////////////////////////////////////////////////////////////////////////////////////////
+// Call to determine cost of single item.
+// To allow function set __CustomItemCost to true.
+// Don't forgot specify this function in client script.
+uint item_cost( Item& item, Critter& chosen, Critter& npc, bool sell )
+{
+    return sell ? 1 : 2;
+}
+
+// //////////////////////////////////////////////////////////////////////////////////////////////////
+// Call to determine available timeouts.
+void get_available_timeouts( CritterProperty[]& timeouts )
+{
+    for( uint i = 0; i < CritterPropertyTimeouts.length(); i++ )
+        timeouts.insertLast( CritterPropertyTimeouts[ i ] );
+}
+
+// //////////////////////////////////////////////////////////////////////////////////////////////////
+// Call on some critter action.
+void critter_action( bool localCall, Critter& cr, int action, int actionExt, Item@ item )
+{
+    // Not process locally called actions
+    if( cr.IsChosen() && not localCall )
+    {
+        switch( action )
+        {
+        case ACTION_MOVE_ITEM:
+        case ACTION_MOVE_ITEM_SWAP:
+        case ACTION_USE_ITEM:
+        case ACTION_DROP_ITEM:
+        case ACTION_USE_WEAPON:
+        case ACTION_RELOAD_WEAPON:
+        case ACTION_USE_SKILL:
+        case ACTION_PICK_ITEM:
+        case ACTION_PICK_CRITTER:
+        case ACTION_OPERATE_CONTAINER:
+            return;             // Skip processing
+        default:
+            break;              // Processing
+        }
+    }
+
+    const Item@ proto = ( valid( item ) ? item : cr.GetSlotItem( SLOT_HAND1 ) );
+    if( ( action >= ACTION_MOVE_ITEM && action <= ACTION_OPERATE_CONTAINER ) || action == ACTION_STANDUP )
+        cr.Wait( __Breaktime );
+
+    switch( action )
+    {
+    case ACTION_MOVE:
+        // Not implemented
+        // cr.Wait(move time);
+        break;
+    case ACTION_RUN:
+        // Not implemented
+        // cr.Wait(run time);
+        break;
+    case ACTION_MOVE_ITEM:
+        if( cr.IsLife() )
+        {
+            uint8 fromSlot = actionExt;
+            uint8 toSlot = item.CritSlot;
+
+            cr.ClearAnim();
+
+            if( toSlot == SLOT_HAND1 )
+                cr.Animate( 0, ANIM2_SHOW_WEAPON, item );
+            else if( fromSlot == SLOT_HAND1 )
+                cr.Animate( 0, ANIM2_HIDE_WEAPON, item );
+            else
+                cr.Animate( 0, ANIM2_SWITCH_ITEMS );
+        }
+        break;
+    case ACTION_MOVE_ITEM_SWAP:
+        break;
+    case ACTION_USE_ITEM:
+        if( cr.IsLife() && valid( proto ) )
+        {
+            cr.ClearAnim();
+
+            if( proto.Type == ItemType::Weapon && cr.IsAnimAviable( proto.Weapon_Anim1, proto.Weapon_Anim2_0 ) )
+                cr.Animate( proto.Weapon_Anim1, proto.Weapon_Anim2_0, item );
+            else
+                cr.Animate( 0, ANIM2_USE, item );
+        }
+        break;
+    case ACTION_DROP_ITEM:
+        if( cr.IsLife() )
+        {
+            cr.ClearAnim();
+            cr.Animate( 0, ANIM2_PICKUP );
+        }
+        break;
+    case ACTION_USE_WEAPON:
+        if( cr.IsLife() && valid( proto ) )
+        {
+            int  use   = ( actionExt & 0xF );
+            int  aim   = ( ( actionExt >> 4 ) & 0xF );
+            bool fail = ( ( ( actionExt >> 8 ) & 1 ) != 0 );
+
+            cr.ClearAnim();
+
+            cr.Animate( 0, ANIM2_PREPARE_WEAPON );
+
+            PlaySound( 'W', SOUND_WEAPON_USE, _WeaponSoundId( proto, use ), use != 1 ? '1' : '2' );
+            cr.Animate( 0, _WeaponAnim2( proto, use ), item );
+
+            if( fail )
+                cr.Animate( 0, ANIM2_DAMAGE_FRONT, item );
+            else
+                cr.Animate( 0, ANIM2_TURNOFF_WEAPON );
+        }
+        break;
+    case ACTION_RELOAD_WEAPON:
+        if( cr.IsLife() && valid( proto ) )
+        {
+            cr.ClearAnim();
+            PlaySound( 'W', SOUND_WEAPON_RELOAD, proto.Weapon_SoundId_0, '1' );
+            cr.Animate( item.Weapon_Anim1, ANIM2_RELOAD, item );
+        }
+        break;
+    case ACTION_USE_SKILL:
+        if( cr.IsLife() && actionExt != CritterProperty::SkillSneak )
+        {
+            cr.ClearAnim();
+            cr.Animate( 0, ANIM2_USE );
+        }
+        break;
+    case ACTION_PICK_ITEM:
+        if( cr.IsLife() && valid( proto ) )
+        {
+            cr.ClearAnim();
+            cr.Animate( 0, proto.GroundLevel ? ANIM2_PICKUP : ANIM2_USE );
+        }
+        break;
+    case ACTION_PICK_CRITTER:
+        if( cr.IsLife() )
+        {
+            cr.ClearAnim();
+
+            switch( actionExt )           // 0 - loot, 1 - steal, 2 - push
+            {
+            case 0:
+                cr.Animate( 0, ANIM2_LOOT );
+                break;
+            case 1:
+                cr.Animate( 0, ANIM2_STEAL );
+                break;
+            case 2:
+                cr.Animate( 0, ANIM2_PUSH );
+                break;
+            default:
+                break;
+            }
+        }
+        break;
+    case ACTION_OPERATE_CONTAINER:
+        if( cr.IsLife() )
+        {
+            cr.ClearAnim();
+            int transferType  = actionExt / 10;
+            int directionType = actionExt % 10;
+
+            if( transferType == TRANSFER_HEX_CONT_DOWN || transferType == TRANSFER_CRIT_LOOT )
+                cr.Animate( 0, ANIM2_PICKUP );
+            else
+                cr.Animate( 0, ANIM2_USE );
+        }
+        break;
+    case ACTION_DODGE:
+        if( not cr.IsAnimPlaying() && cr.IsLife() )
+        {
+            cr.Animate( 0, actionExt == 0 ? ANIM2_DODGE_FRONT : ANIM2_DODGE_BACK );
+        }
+        break;
+    case ACTION_DAMAGE:
+        if( not cr.IsAnimPlaying() )
+        {
+            if( cr.IsLife() )
+                cr.Animate( 0, actionExt == 0 ? ANIM2_DAMAGE_FRONT : ANIM2_DAMAGE_BACK );
+            else if( cr.IsKnockout() )
+                cr.Animate( 0, actionExt == 0 ? ANIM2_DAMAGE_PRONE_FRONT : ANIM2_DAMAGE_PRONE_BACK );
+        }
+        else
+        {
+            // Todo:
+            // ANIM2_WALK_DAMAGE_FRONT
+            // ANIM2_WALK_DAMAGE_BACK
+            // ANIM2_LIMP_DAMAGE_FRONT
+            // ANIM2_LIMP_DAMAGE_BACK
+            // ANIM2_RUN_DAMAGE_FRONT
+            // ANIM2_RUN_DAMAGE_BACK
+        }
+        break;
+    case ACTION_DAMAGE_FORCE:
+        if( cr.IsLife() )
+        {
+            cr.ClearAnim();
+            cr.Animate( 0, actionExt == 0 ? ANIM2_DAMAGE_FRONT : ANIM2_DAMAGE_BACK );
+        }
+        else if( cr.IsKnockout() )
+        {
+            cr.ClearAnim();
+            cr.Animate( 0, actionExt == 0 ? ANIM2_DAMAGE_PRONE_FRONT : ANIM2_DAMAGE_PRONE_BACK );
+        }
+        break;
+    case ACTION_KNOCKOUT:
+        if( not cr.IsKnockout() )
+        {
+            cr.ClearAnim();
+            cr.Animate( 0, actionExt );
+        }
+        break;
+    case ACTION_STANDUP:
+        if( cr.IsKnockout() )
+        {
+            cr.ClearAnim();
+            cr.Animate( 0, actionExt );
+        }
+        break;
+    case ACTION_FIDGET:
+        if( cr.IsLife() && not cr.IsAnimPlaying() )
+        {
+            cr.Animate( 0, ANIM2_FIDGET );
+        }
+        break;
+    case ACTION_DEAD:
+        if( not cr.IsDead() )
+        {
+            cr.ClearAnim();
+            cr.Animate( 0, actionExt );
+        }
+        break;
+    case ACTION_CONNECT:
+        break;
+    case ACTION_DISCONNECT:
+        break;
+    case ACTION_RESPAWN:
+        break;
+    case ACTION_REFRESH:
+        break;
+    default:
+        break;
+    }
+}
+
+// //////////////////////////////////////////////////////////////////////////////////////////////////
+// Call before 2d animation playing.
+void animation2d_process( bool animateStay, Critter& cr, uint anim1, uint anim2, Item@ item )
+{
+    if( !animateStay )
+        PlayAnimSound( cr.ModelName, cr.Gender, anim1, anim2 );
+}
+
+// //////////////////////////////////////////////////////////////////////////////////////////////////
+// Called on some items collection generating.
+// To force function call use RefreshItemsCollection(int collection)
+// Collection constants see in Items collections _client_defines.fos
+// If you want disable showing than just null pointer in collection
+void items_collection( int collection, Item@[]& items )
+{
+    // Example
+    // Disable showing of all weapons in USE mode:
+    /*if(collection == ITEMS_USE)
+       {
+            for(uint i = 0, j = items.length(); i < j; i++)
+                    if(items[i].Type == ItemType::Weapon)
+                            @items[i] = null;
+       }*/
+}
+
+// //////////////////////////////////////////////////////////////////////////////////////////////////
+// Call on message added to message box.
+// Parameters messageText and messageType can be changed for engine handler.
+void message_box( string& messageText, int messageType, bool scriptCall )
+{
+    GUIMessageBox@[] messageBoxes;
+    GUI_CollectMessageBoxes( messageBoxes );
+    for( uint i = 0; i < messageBoxes.length(); i++ )
+        messageBoxes[ i ].AddMessage( messageText, messageType );
+}
+
+// //////////////////////////////////////////////////////////////////////////////////////////////////
+// Called to check interface hit.
+bool check_interface_hit( int x, int y )
+{
+    return GUI_CheckHit( x, y );
+}
+
+// //////////////////////////////////////////////////////////////////////////////////////////////////
+// Called to check current container item under mouse.
+bool get_cont_item( uint& itemId, bool& isEnemy )
+{
+    GUIScreen@ screen = GUI_GetActiveScreen();
+    if( screen is null || screen.IsHardcoded || screen.Index != CLIENT_SCREEN_INVENTORY )
+        return false;
+
+    if( __Cursor == CursorType::Default )
+    {
+        GUIObject@ hitObj = screen.FindMouseHit();
+        if( hitObj !is null && hitObj.Grid !is null )
+        {
+            GUIItemView@ itemView = cast< GUIItemView >( hitObj.Grid );
+            if( itemView !is null )
+            {
+                Item@ item = itemView.GetItem( hitObj.CellIndex );
+                if( item !is null )
+                {
+                    itemId = item.Id;
+                    isEnemy = ( itemView.ItemsCollection == ITEMS_BARTER_OPPONENT ||
+                                itemView.ItemsCollection == ITEMS_BARTER_OPPONENT_OFFER ||
+                                itemView.ItemsCollection == ITEMS_PICKUP_FROM );
+                }
+            }
+        }
+    }
+
+    return true;
+}
+
+// //////////////////////////////////////////////////////////////////////////////////////////////////
+// Items and drop handler.
+bool ItemsDragAndDropHandler( GUIObject& obj, GUIObject@ target )
+{
+    if( obj.Grid is null )
+        return false;
+
+    // Destination
+    GUIItemView@ targetItemView;
+    Item@        targetItem;
+    if( target !is null )
+    {
+        if( target.Grid !is null )
+        {
+            @targetItemView = cast< GUIItemView >( target.Grid );
+            if( targetItemView is null )
+                return false;
+            @targetItem = targetItemView.GetItem( target.CellIndex );
+        }
+        else
+        {
+            @targetItemView = cast< GUIItemView >( target );
+            if( targetItemView is null )
+                return false;
+        }
+    }
+
+    // Source
+    GUIItemView@ objItemView = cast< GUIItemView >( obj.Grid );
+    if( objItemView is null )
+        return false;
+    Item@ objItem = objItemView.GetItem( obj.CellIndex );
+    if( objItem is null )
+        return false;
+
+    // Drop item
+    if( targetItemView is null )
+    {
+        if( objItem.Stackable && objItem.Count > 1 )
+            CustomCall( "SplitDrop " + objItem.Id );
+        else
+            SetChosenActions( array< uint > = { CHOSEN_MOVE_ITEM, objItem.Id, objItem.Count, SLOT_GROUND, 0, 0, 0 } );
+        return true;
+    }
+
+    // Barter
+    if( ( objItemView.ItemsCollection == ITEMS_BARTER && targetItemView.ItemsCollection == ITEMS_BARTER_OFFER ) ||
+        ( objItemView.ItemsCollection == ITEMS_BARTER_OPPONENT && targetItemView.ItemsCollection == ITEMS_BARTER_OPPONENT_OFFER ) ||
+        ( objItemView.ItemsCollection == ITEMS_BARTER_OFFER && targetItemView.ItemsCollection == ITEMS_BARTER ) ||
+        ( objItemView.ItemsCollection == ITEMS_BARTER_OPPONENT_OFFER && targetItemView.ItemsCollection == ITEMS_BARTER_OPPONENT ) )
+    {
+        if( objItem.Stackable && objItem.Count > 1 )
+            CustomCall( "SplitItem " + objItem.Id + " " + objItemView.ItemsCollection );
+        else
+            CustomCall( "BarterMoveItem " + objItem.Id + " " + objItemView.ItemsCollection + " " + objItem.Count );
+        return true;
+    }
+
+    // Loot
+    if( ( objItemView.ItemsCollection == ITEMS_PICKUP && targetItemView.ItemsCollection == ITEMS_PICKUP_FROM ) ||
+        ( objItemView.ItemsCollection == ITEMS_PICKUP_FROM && targetItemView.ItemsCollection == ITEMS_PICKUP ) )
+    {
+        if( objItem.Stackable && objItem.Count > 1 )
+        {
+            CustomCall( "SplitItem " + objItem.Id + " " + objItemView.ItemsCollection );
+        }
+        else
+        {
+            uint[] actions;
+            GetChosenActions( actions );
+            uint[] useItemAction = { CHOSEN_MOVE_ITEM_CONT, objItem.Id, objItemView.ItemsCollection, objItem.Count, 0, 0, 0 };
+            for( uint i = 0; i < useItemAction.length(); i++ )
+                actions.insertLast( useItemAction[ i ] );
+            SetChosenActions( actions );
+        }
+        return true;
+    }
+
+    // Load ammo
+    if( ( objItemView.ItemsCollection == ITEMS_INVENTORY || objItemView.ItemsCollection == ITEMS_CHOSEN_ALL ) &&
+        targetItem !is null && objItem.Type == ItemType::Ammo && targetItem.Type == ItemType::Weapon )
+    {
+        if( objItem.Ammo_Caliber == targetItem.Weapon_Caliber &&
+            ( targetItem.AmmoCount < targetItem.Weapon_MaxAmmoCount || targetItem.AmmoPid != objItem.ProtoId ) )
+        {
+            uint[] actions;
+            GetChosenActions( actions );
+            uint[] useItemAction = { CHOSEN_USE_ITEM, targetItem.Id, 0, TARGET_SELF_ITEM, objItem.Id, USE_RELOAD, 0 };
+            for( uint i = 0; i < useItemAction.length(); i++ )
+                actions.insertLast( useItemAction[ i ] );
+            SetChosenActions( actions );
+            return true;
+        }
+    }
+
+    // Transfer between slots
+    int objSlot = objItemView.UserData + obj.CellIndex;
+    int targetSlot = targetItemView.UserData + ( target !is null && targetItemView.UserData != SLOT_INV ? target.CellIndex : 0 );
+    if( objSlot != targetSlot )
+    {
+        uint[] actions;
+        GetChosenActions( actions );
+        uint[] useItemAction = { CHOSEN_MOVE_ITEM, objItem.Id, objItem.Count, targetSlot, 0, 0, 0 };
+        for( uint i = 0; i < useItemAction.length(); i++ )
+            actions.insertLast( useItemAction[ i ] );
+        SetChosenActions( actions );
+        return true;
+    }
+
+    return true;
+}
+
+// //////////////////////////////////////////////////////////////////////////////////////////////////
+// Event on create lmenu node collection.
+// In nodes located collected nodes by engine.
+void lmenu_collect_nodes( Critter@ cr, Item@ item, int[]& nodes )
+{
+    //
+}
+
+// //////////////////////////////////////////////////////////////////////////////////////////////////
+// Event on lmenu node selection.
+bool lmenu_node_select( int nodeType, Critter@ cr, Item@ item )
+{
+    // Pass to engine handler
+    return false;
+}

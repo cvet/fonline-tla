@@ -1,0 +1,326 @@
+// FOS Server
+// специализированный инструмент для настройки поведения нпц в команде на конкретной карте
+
+#include "Tla"
+
+#pragma property Critter PrivateServer uint FighterPatternCanGenStim
+#pragma property Critter PrivateServer int  FighterPatternAllyAssistRadius
+#pragma property Critter PrivateServer int  FighterPatternAssistAlliesNum
+#pragma property Critter PrivateServer int  FighterPatternMustHealLvl
+#pragma property Critter PrivateServer int  FighterPatternLocalAlarmDeads
+#pragma property Critter PrivateServer int  FighterPatternGlobalAlarmDeads
+#pragma property Map PrivateServer bool FighterPatternEnemySpotted
+#pragma property Map PrivateServer dict< uint, uint > FighterPatternDeadAllies
+
+#define MSG_KILLEM    ( 17 )                                                                // код сообщения "убить гада"
+
+import void UseDrugOn( Critter& cr, Critter& onCr, Item& drug ) from "Drugs";
+
+// счетчик убитых напарников (с тем же TeamID)
+int DeadAllyCounter( Critter& cr )
+{
+    if( !valid( cr.GetMap() ) )
+        return 0;
+
+    if( cr.IsPlayer() )
+        return 0;
+
+    if( cr.TeamId == 0 )
+        return 0;
+
+    return cr.GetMap().FighterPatternDeadAllies.get( cr.TeamId, 0 );
+}
+
+void AddDeadAlly( Critter& cr )
+{
+    if( !valid( cr.GetMap() ) )
+        return;
+
+    if( cr.IsPlayer() )
+        return;
+
+    if( cr.TeamId == 0 )
+        return;
+
+    auto        deadAllies = cr.GetMap().FighterPatternDeadAllies;
+    deadAllies[ cr.TeamId ] = DeadAllyCounter( cr ) + 1;
+    cr.GetMap().FighterPatternDeadAllies = deadAllies;
+}
+
+// map карта с мобами
+// teamId - номер команды моббов
+// aDist - дистанция атаки видимого игрока
+// alRadius - радиус реакции нпц на нападение моба из группы
+// alNum - число мобов, которые подключаются к атаке
+// hLvl - значение здоровья, при котором моб будет лечиться стимпаками
+// locAlarm - число смертей мобов после которого остальные подходят к нападающему
+// globAlarm - число смертей мобов, после которого все мобы на карте присоединяются к бою
+// fArmLvl - коэффициент усиления брони и резистов моба
+void SetMapMobsTemplate( Map& map, uint teamId, int aDist, int alRadius, int alNum, int hLvl, int locAlarm, int globAlarm, int fArmLvl )
+{
+    FighterPattern@ fp = FighterPattern();
+    fp.AttackDist = aDist;
+    fp.AllyAssistRadius = alRadius;
+    fp.AssistAlliesNum = alNum;
+    fp.MustHealLvl = hLvl;
+    fp.LocalAlarmDeads = locAlarm;
+    fp.GlobalAlarmDeads = globAlarm;
+    fp.ForceArmourLvl = fArmLvl;
+
+    Critter@[] critters;
+    map.GetCritters( 0, FIND_LIFE | FIND_ONLY_NPC, critters );
+
+    for( uint i = 0; i < critters.length(); i++ )
+    {
+        if( uint( critters[ i ].TeamId ) != teamId )
+            continue;
+        fp.InitPattern( critters[ i ] );
+    }
+
+    __EventMapCritterDead.SubscribeToMap( map, e_OnMapCritterDead );
+}
+
+class FighterPattern
+{
+    FighterPattern()
+    {}
+
+    int AttackDist;       // расстояние, на котором начинается атака
+    int AllyAssistRadius; // радиус, в котором ищем членов группы
+    int AssistAlliesNum;  // число членов группы, которым отправится призыв о помощи
+    int MustHealLvl;      // уровень в процентах от макс хп, после которого нпц пытается полечиться
+    int LocalAlarmDeads;  // число смертей, после которых на помощь приходят все криттеры видящие нпц
+    int GlobalAlarmDeads; // число смертей, после которых призыв о помощи пойдет по всей карте
+    int ForceArmourLvl;   // уровень усиления брони и резистов криттера 0 - базовый
+
+    void InitPattern( Critter& cr )
+    {
+        cr.ShowCritterDist1 = AttackDist;
+        // DL("cr,GlobAl" +cr.FighterPatternGlobalAlarmDeads);
+        cr.FighterPatternAllyAssistRadius = AllyAssistRadius;
+        cr.FighterPatternAssistAlliesNum = AssistAlliesNum;
+        cr.FighterPatternMustHealLvl = MustHealLvl;
+        cr.FighterPatternLocalAlarmDeads = LocalAlarmDeads;
+        cr.FighterPatternGlobalAlarmDeads = GlobalAlarmDeads;
+        // DL("GlobalAlarmDeads;" + GlobalAlarmDeads+"cr,GlobAl" +cr.FighterPatternGlobalAlarmDeads);
+
+        _SetOnDeadEvents( cr );
+        _SetOnAttackedEvents( cr );
+        _SetSeeEnemyEvents( cr );
+        _SetOnItemDroppedEvents( cr );
+        _SetOnMessageEvents( cr );
+        _SetOnIddleEvents( cr );
+
+        ForceCritterArmour( cr );
+    }
+
+    void ForceCritterArmour( Critter& cr )
+    {
+        if( ForceArmourLvl > 3 && Random( 1, 3 ) == 1 )
+        {
+            cr.PerkTerminator = 1;
+            cr.StrengthBase = 10;
+            cr.EnduranceBase = Random( 9, 10 );
+            DL( "Terminator" );
+        }
+
+        for( uint i = 0; i < CritterPropertyResistsBase.length(); i++ )
+        {
+            if( CritterPropertyResistsBase[ i ] != CritterProperty::EmpResistanceBase )
+            {
+                int r = Random( 1, ForceArmourLvl ) * 20;
+                r = CLAMP( r, 30, 180 );
+                cr.SetAsInt( CritterPropertyResistsBase[ i ], r );
+            }
+        }
+
+        cr.MaxLifeBase = CLAMP( cr.MaxLifeBase + ForceArmourLvl * 30, 50, 250 );
+        cr.CurrentHp = CLAMP( cr.CurrentHp + ForceArmourLvl * 30, 50, 250 );
+    }
+
+    void _SetOnAttackedEvents( Critter& cr )
+    {
+        cr.FighterPatternCanGenStim = Random( 1, 5 );
+        __EventCritterAttacked.SubscribeToCritter( cr, e_CritterAttacked );
+    }
+
+    void _SetSeeEnemyEvents( Critter& cr )
+    {
+        __EventCritterShowDist1.SubscribeToCritter( cr, e_ShowCritter1 );
+    }
+
+    void _SetOnItemDroppedEvents( Critter& cr )
+    {}
+
+    void _SetOnDeadEvents( Critter& cr )
+    {
+        // __EventCritterDead.SubscribeToCritter( cr, e_CritterDead );
+        // __EventCritterSomeCritterDead.SubscribeToCritter( cr, e_CritterSmthDead );
+    }
+
+    void _SetOnMessageEvents( Critter& cr )
+    {
+        __EventCritterMessage.SubscribeToCritter( cr, e_CritterMessage );
+    }
+
+    void _SetOnIddleEvents( Critter& cr )
+    {}
+}
+
+/************************Обработка событий*************************/
+void e_OnMapCritterDead( Map& map, Critter& cr, Critter@ killer )
+{
+    if( cr.IsPlayer() )
+    {
+        if( map.GetCritters( 0, FIND_LIFE | FIND_ONLY_PLAYERS, null ) == 0 )
+        {
+            map.FighterPatternEnemySpotted = false;
+            DL( "All players dead" );
+        }
+    }
+    else
+    {
+        AddDeadAlly( cr );
+        if( !valid( killer ) )
+            return;
+        if( !killer.IsPlayer() )
+            return;
+        if( DeadAllyCounter( cr ) >= cr.FighterPatternGlobalAlarmDeads )
+        {
+            cr.SendMessage( MSG_KILLEM, killer.Id, MESSAGE_TO_ALL_ON_MAP );
+            DL( "Global alarm called" + DeadAllyCounter( cr ) + "cr deads = FighterPatternGlobalAlarmDeads" + cr.FighterPatternGlobalAlarmDeads );
+            return;
+        }
+        if( DeadAllyCounter( cr ) >= cr.FighterPatternLocalAlarmDeads )
+        {
+            cr.SendMessage( MSG_KILLEM, killer.Id, MESSAGE_TO_WHO_SEES_ME );
+            DL( "Local alarm called" + DeadAllyCounter( cr ) );
+            return;
+        }
+    }
+}
+
+void e_ShowCritter1( Critter& cr, Critter& showCrit )
+{
+    if( !showCrit.IsPlayer() )
+        return;
+    // DL("see player");
+    // на появление игроков реагируют только первые заметивщие
+    if( cr.GetMap().FighterPatternEnemySpotted )
+        return;
+    cr.GetMap().FighterPatternEnemySpotted = true;
+
+    // DL("See Critter mydist"+cr.ShowCritterDist1 + " and dist "+ GetCrittersDistantion(cr, showCrit));
+    if( !showCrit.IsLife() )
+        return;
+    if( cr.CheckEnemyInStack( showCrit.Id ) )
+        return;
+    // DL("will attack Critter");
+    e_CritterMessage( cr, cr, MSG_KILLEM, showCrit.Id );
+    uint dist = GetCrittersDistantion( cr, showCrit );
+    if( cr.ShowCritterDist1  >= dist )
+    {
+        Map@ map = cr.GetMap();
+        if( !valid( map ) )
+            return;
+
+        Critter@[] critters;
+
+        if( map.GetCrittersHex( cr.HexX, cr.HexY, cr.FighterPatternAllyAssistRadius, FIND_LIFE | FIND_ONLY_NPC, critters ) == 0 )
+            return;
+
+        for( uint i = 0; i < critters.length(); i++ )
+        {
+            if( i >= uint( cr.FighterPatternAssistAlliesNum ) )
+                break;
+            e_CritterMessage( critters[ i ], cr, MSG_KILLEM, showCrit.Id );
+        }
+    }
+}
+
+bool e_CritterAttacked( Critter& cr, Critter& attacker )
+{
+    DL( "try heal" );
+    if( cr.CurrentHp * 100 > cr.FighterPatternMustHealLvl * cr.MaxLife )
+    {
+        DL( "Heal not needed" );
+        return false;
+    }
+    _TryHeal( cr );
+    return false;
+}
+
+void e_CritterMessage( Critter& cr, Critter& fromCr, int message, int value )
+{
+    switch( message )
+    {
+    case MSG_KILLEM:
+        if( _IsAlly( cr, fromCr ) )
+        {
+            if( !cr.IsLife() )
+                return;
+            if( !valid( GetCritter( value ) ) )
+                return;
+            if( !cr.CheckEnemyInStack( value ) )
+            {
+                cr.AddEnemyToStack( value );
+                DL( "Added enemy: " + value );
+            }
+            else
+            {
+                DL( "Enemy already in stack: " + value );
+            }
+        }
+        break;
+    default:
+        break;
+    }
+}
+
+/********************Вспомогательные функции***********************/
+// попытка полечиться, если криттер жив и есть стимпаки
+bool _TryHeal( Critter& cr )
+{
+    if( !cr.IsLife() )
+        return false;
+    if( cr.CountItem( Content::Item::super_stimpak ) == 0 && Random( 1, 6 ) == 1 && cr.FighterPatternCanGenStim > 1 )
+    {
+        cr.AddItem( Content::Item::super_stimpak, 1 );
+        cr.FighterPatternCanGenStim -= 2;
+    }
+    if( cr.CountItem( Content::Item::super_stimpak ) > 0 )
+    {
+        Item@ item = cr.GetItem( Content::Item::super_stimpak, -1 );
+        UseDrugOn( cr, cr, item );
+        _CritAnimateUse( cr );
+        DL( "SuperStim used" );
+        return true;
+    }
+    if( cr.CountItem( Content::Item::stimpak ) == 0 && Random( 1, 4 ) == 1 && cr.FighterPatternCanGenStim > 0 )
+    {
+        cr.AddItem( Content::Item::stimpak, 1 );
+        cr.FighterPatternCanGenStim -= 1;
+    }
+    if( cr.CountItem( Content::Item::stimpak ) > 0 )
+    {
+        Item@ item = cr.GetItem( Content::Item::stimpak, -1 );
+        UseDrugOn( cr, cr, item );
+        _CritAnimateUse( cr );
+        DL( "Stim used" );
+        return true;
+    }
+    DL( "no Stim in bag" );
+
+    return false;
+}
+
+// признак = это свой (та же группа)
+bool _IsAlly( Critter& cr1, Critter& cr2 )
+{
+    return cr1.TeamId != 0 && cr1.TeamId == cr2.TeamId;
+}
+
+void DL( string msg )
+{
+    // Log(msg);
+}

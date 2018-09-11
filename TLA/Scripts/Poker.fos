@@ -1,0 +1,1574 @@
+// FOS Server
+// Author: Tab10id
+
+#include "Tla"
+#include "Poker"
+#include "PokerGameList"
+
+#pragma property Critter PrivateServer int  PokerWins
+#pragma property Critter PrivateServer uint PokerNumOfNpc
+#pragma property Critter PrivateServer dict< uint, uint > PokerWincash
+#pragma property Critter PrivateServer dict< uint, uint > PokerFraud
+#pragma property Critter PrivateServer dict< uint, uint > PokerManywins
+#pragma property Critter PrivateServer uint[] PokerData
+
+uint NumOfNpc = 0;
+
+uint64[] Koloda;     // Колода, биты в числе указывают на наличие карты в калоде, всего используется 52 бита
+uint8[][] GameCards; // Карты непосредственно учавствующие в игре: 0-4 - карты игрока, 5-19 - карты противников
+uint8[][] ReplCards; // Карты для замены (5 бит указывают, заменять карту или нет), нулевой элемент в массиве - игрок
+uint8[] Stroy;       // Порядок игроков во время ставок меняется от 0 до PLAYERS_COUNT-1
+uint8[] BetEnd;      // Определяет окончание круга ставок.
+uint[] Bank;         // Величина банка
+uint[] Bet;          // Величина текущей ставки
+uint8[] GameStage;   // Часть игры (раздача карт, ставки, обмен карт, второй круг ставок, вскрытие карт)
+bool[] FirstGame;    // определяет первая ли игра идет
+uint8[] MHod;        // Определяет очереднойсь ходов игроков (если MHod==0, значит очередь игрока.)
+uint8[][] PlState;
+uint[][] PlBet;
+bool[] InGame;
+bool[] PlayerCardsInDial;
+uint[] InGamePl;
+uint8[] WinKoef;
+string[] DlgTxt;
+string[] DlgTxtNet;
+string[] DlgTxt2;
+uint[][] GameData;
+uint[][] GameDataTemp;
+uint[] MoneyForStartGame;
+uint[] MinBet;
+uint[] Raise_1;
+uint[] Raise_2;
+uint[] Raise_3;
+uint[] MaxBet;
+uint8[] FraudMode;
+uint16[] OnCheat1;
+uint16[] OnCheat2;
+uint16[] OnCheat3;
+uint8[] PMLevel;
+uint8[] CardInSleeve;
+uint8[] Fraud2Succ;
+uint8[] VarRiseSucc;
+uint16[] GameNum;
+uint16[] ModChFr;
+uint[] StartGameMoney;
+uint[] StopGameMoney;
+uint16[] WaitForGame;
+
+bool[] App;
+
+string DialStrCards = "@msg dlg " + DLGSTR( DID, STR_CARDS ) + "@\n";    // Ваши карты:
+string DialStrCardsNet = "@msg dlg " + DLGSTR( DID, STR_CARDS ) + "@\n"; // Ваши карты:
+string DialStrCombo = "@msg dlg " + DLGSTR( DID, STR_COMBO ) + "@ ";     // у вас
+string DialStrBank = "@msg dlg " + DLGSTR( DID, STR_BANK ) + "@ ";       // В банке:
+string DialStrBet = "@msg dlg " + DLGSTR( DID, STR_BET ) + "@ ";         // Текущая ставка:
+string DialStrMineBet = "@msg dlg " + DLGSTR( DID, STR_MBET ) + "@ ";    // Ваша последняя ставка:
+string DialStrFold = "@msg dlg " + DLGSTR( DID, STR_FOLD ) + "@";        // спасовал
+string DialStrRaise = "@msg dlg " + DLGSTR( DID, STR_RAISE ) + "@";      // поднял ставку
+string DialStrWait = "@msg dlg " + DLGSTR( DID, STR_WAIT ) + "@";        // еще не делал ставку
+string DialStrCall = "@msg dlg " + DLGSTR( DID, STR_CALL ) + "@";        // ответил на ставку
+string DialStrAccept = "@msg dlg " + DLGSTR( DID, STR_ACCEPT ) + "@";    // принял ставку
+string DialStrPl = "@msg dlg " + DLGSTR( DID, STR_PL ) + "@ ";           // Игрок
+
+void _PokermanInit( Critter& pokerMan, bool firstTime )
+{
+    Koloda.grow( 1 );
+    GameCards.grow( 1 );
+    GameCards[ GameCards.length() - 1 ].grow( PLAYERS_COUNT * CARD_COUNT );
+    ReplCards.grow( 1 );
+    ReplCards[ ReplCards.length() - 1 ].grow( PLAYERS_COUNT );
+    PlState.grow( 1 );
+    PlState[ PlState.length() - 1 ].grow( PLAYERS_COUNT );
+    PlBet.grow( 1 );
+    PlBet[ PlBet.length() - 1 ].grow( PLAYERS_COUNT );
+    InGamePl.grow( 1 );
+    GameData.grow( 1 );
+    GameData[ GameData.length() - 1 ].grow( GAMEVAR_COUNT );
+    GameDataTemp.grow( 1 );
+    GameDataTemp[ GameDataTemp.length() - 1 ].grow( GAMEVAR_COUNT );
+    MoneyForStartGame.grow( 1 );
+    MinBet.grow( 1 );
+    Raise_1.grow( 1 );
+    Raise_2.grow( 1 );
+    Raise_3.grow( 1 );
+    MaxBet.grow( 1 );
+    App.grow( 1 );
+    PMLevel.grow( 1 );
+    StartGameMoney.grow( 1 );
+    StopGameMoney.grow( 1 );
+    WaitForGame.grow( 1 );
+
+    Stroy.insertLast( 0 );
+    BetEnd.insertLast( 0 );
+    Bank.insertLast( 0 );
+    Bet.insertLast( 0 );
+    GameStage.insertLast( 0 );
+    FirstGame.insertLast( false );
+    MHod.insertLast( 0 );
+    InGame.insertLast( false );
+    PlayerCardsInDial.insertLast( false );
+    WinKoef.insertLast( 100 );
+    DlgTxt.insertLast( "" );
+    DlgTxtNet.insertLast( "" );
+    DlgTxt2.insertLast( "" );
+    FraudMode.insertLast( 0 );
+    OnCheat1.insertLast( 0 );
+    OnCheat2.insertLast( 0 );
+    OnCheat3.insertLast( 0 );
+    CardInSleeve.insertLast( 0 );
+    Fraud2Succ.insertLast( 0 );
+    VarRiseSucc.insertLast( 0 );
+    GameNum.insertLast( 0 );
+    ModChFr.insertLast( 0 );
+
+    pokerMan.PokerNumOfNpc = NumOfNpc++;
+    if( pokerMan.PokerData.length() > 0 )
+    {
+        GameDataTemp[ pokerMan.PokerNumOfNpc ]  = pokerMan.PokerData;
+        for( uint8 i = 0; i < GAMEVAR_COUNT; i++ )
+            GameData[ pokerMan.PokerNumOfNpc ][ i ] = GameDataTemp[ pokerMan.PokerNumOfNpc ][ i ];
+        GetAData( pokerMan );
+        InGame[ pokerMan.PokerNumOfNpc ] = true;
+        PrintCards( null, pokerMan, 0 );
+    }
+    LoadSettings( pokerMan.NpcRole, pokerMan );
+    __EventCritterFinish.SubscribeToCritter( pokerMan, _SaveAD );
+    #ifdef __DEBUG__
+    Log( "\n<Poker> npcId - " + pokerMan.Id + ", npcPokerNumOfNpc - " + pokerMan.PokerNumOfNpc + "\n" );
+    #endif
+}
+
+void InitGame( Critter& pokerMan, Critter& master ) // запуск игры
+{
+    auto pokerManywins = pokerMan.PokerManywins;
+    pokerManywins[ master.Id ] = __FullSecond;
+    pokerMan.PokerManywins = pokerManywins;
+
+    StartGameMoney[ pokerMan.PokerNumOfNpc ] = master.CountItem( Content::Item::bottle_caps );
+    InGame[ pokerMan.PokerNumOfNpc ] = true;
+    BetEnd[ pokerMan.PokerNumOfNpc ] = 0;
+    WinKoef[ pokerMan.PokerNumOfNpc ] = 100;
+    for( uint8 i = 0; i < ( PLAYERS_COUNT * CARD_COUNT ); i++ )
+    {
+        GameCards[ pokerMan.PokerNumOfNpc ][ i ] = 0;
+    }
+    Bank[ pokerMan.PokerNumOfNpc ] = PLAYERS_COUNT * MinBet[ pokerMan.PokerNumOfNpc ]; // Кладем в банк минимальную ставку
+    Bet[ pokerMan.PokerNumOfNpc ] = MinBet[ pokerMan.PokerNumOfNpc ];
+    for( uint8 l = 0; l < PLAYERS_COUNT; l++ )
+    {
+        ReplCards[ pokerMan.PokerNumOfNpc ][ l ] = 0;
+        PlBet[ pokerMan.PokerNumOfNpc ][ l ] = MinBet[ pokerMan.PokerNumOfNpc ];
+        PlState[ pokerMan.PokerNumOfNpc ][ l ] = PLST_WAIT;
+    }
+    GameStage[ pokerMan.PokerNumOfNpc ] = GAME_E_BETROUND1;
+    Koloda[ pokerMan.PokerNumOfNpc ] = uint64( -1 );            // Все биты = 1
+    uint8 m;
+    for( uint8 i = 0; i < ( PLAYERS_COUNT * CARD_COUNT ); i++ ) // Раздача карт
+    {
+        do
+        {
+            m = Random( 1, 52 );
+        }
+        while( GetBit( Koloda[ pokerMan.PokerNumOfNpc ], m ) != 1 );
+        Koloda[ pokerMan.PokerNumOfNpc ] = SetBit( Koloda[ pokerMan.PokerNumOfNpc ], m, false );
+        GameCards[ pokerMan.PokerNumOfNpc ][ i ] = m;
+    }
+    #ifdef __DEBUG__
+    Log( "\n<Poker>\nPlayer Cards:I " + GameCards[ pokerMan.PokerNumOfNpc ][ 0 ] + ";" + GameCards[ pokerMan.PokerNumOfNpc ][ 1 ] + ";" + GameCards[ pokerMan.PokerNumOfNpc ][ 2 ] + ";" + GameCards[ pokerMan.PokerNumOfNpc ][ 3 ] + ";" + GameCards[ pokerMan.PokerNumOfNpc ][ 4 ] + "\n" + GetStrCombo( GetCombo( 0, GameCards[ pokerMan.PokerNumOfNpc ] ) ) + "\n1:I " + GameCards[ pokerMan.PokerNumOfNpc ][ 5 ] + ";" + GameCards[ pokerMan.PokerNumOfNpc ][ 6 ] + ";" + GameCards[ pokerMan.PokerNumOfNpc ][ 7 ] + ";" + GameCards[ pokerMan.PokerNumOfNpc ][ 8 ] + ";" + GameCards[ pokerMan.PokerNumOfNpc ][ 9 ] + "\n" + GetStrCombo( GetCombo( 1, GameCards[ pokerMan.PokerNumOfNpc ] ) ) + "\n2:I " + GameCards[ pokerMan.PokerNumOfNpc ][ 10 ] + ";" + GameCards[ pokerMan.PokerNumOfNpc ][ 11 ] + ";" + GameCards[ pokerMan.PokerNumOfNpc ][ 12 ] + ";" + GameCards[ pokerMan.PokerNumOfNpc ][ 13 ] + ";" + GameCards[ pokerMan.PokerNumOfNpc ][ 14 ] + "\n" + GetStrCombo( GetCombo( 2, GameCards[ pokerMan.PokerNumOfNpc ] ) ) + "\n3:I " + GameCards[ pokerMan.PokerNumOfNpc ][ 15 ] + ";" + GameCards[ pokerMan.PokerNumOfNpc ][ 16 ] + ";" + GameCards[ pokerMan.PokerNumOfNpc ][ 17 ] + ";" + GameCards[ pokerMan.PokerNumOfNpc ][ 18 ] + ";" + GameCards[ pokerMan.PokerNumOfNpc ][ 19 ] + "\n" + GetStrCombo( GetCombo( 3, GameCards[ pokerMan.PokerNumOfNpc ] ) ) );
+    #endif
+    if( !FirstGame[ pokerMan.PokerNumOfNpc ] )                                                         // Порядок игроков (определяет порядок ставок)
+    {
+        Stroy[ pokerMan.PokerNumOfNpc ] = ( Stroy[ pokerMan.PokerNumOfNpc ] + 1 ) % ( PLAYERS_COUNT ); // Если игра не первая, то порядок смещается на 1
+        GameNum[ pokerMan.PokerNumOfNpc ]++;
+    }
+    else                                                                                               // если игра первая, то первый игрок выбирается случайно
+    {
+        Stroy[ pokerMan.PokerNumOfNpc ] = Random( 0, ( PLAYERS_COUNT - 1 ) );
+        FirstGame[ pokerMan.PokerNumOfNpc ] = false;
+        GameNum[ pokerMan.PokerNumOfNpc ] = 1;
+        ModChFr[ pokerMan.PokerNumOfNpc ] = 0;
+    }
+    MHod[ pokerMan.PokerNumOfNpc ] = Stroy[ pokerMan.PokerNumOfNpc ];
+    FraudMode[ pokerMan.PokerNumOfNpc ] = 0;
+    CardInSleeve[ pokerMan.PokerNumOfNpc ] = 0;
+    Fraud2Succ[ pokerMan.PokerNumOfNpc ] = 0;
+    VarRiseSucc[ pokerMan.PokerNumOfNpc ] = 0;
+}
+
+void _SaveAD( Critter& pokerMan, bool deleted )
+{
+    if( not deleted )
+    {
+        if( InGame[ pokerMan.PokerNumOfNpc ] )
+        {
+            SaveData( pokerMan );
+            pokerMan.PokerData = GameData[ pokerMan.PokerNumOfNpc ];
+        }
+    }
+}
+
+void SaveData( Critter& pokerMan )
+{
+    uint k = 0;
+    // Разделяем переменную uint64 на две переменные uint32 чтобы сохранить их в базе
+    GameData[ pokerMan.PokerNumOfNpc ][ k++ ] = Koloda[ pokerMan.PokerNumOfNpc ] >> 32;           // Первые 20 карт колоды
+    GameData[ pokerMan.PokerNumOfNpc ][ k++ ] = ( Koloda[ pokerMan.PokerNumOfNpc ] << 32 ) >> 32; // Последние 32 карты колоды
+    for( uint8 i = 0; i < PLAYERS_COUNT * CARD_COUNT; i++ )
+    {
+        GameData[ pokerMan.PokerNumOfNpc ][ k++ ] = GameCards[ pokerMan.PokerNumOfNpc ][ i ];
+    }
+    for( uint8 i = 0; i < PLAYERS_COUNT; i++ )
+    {
+        GameData[ pokerMan.PokerNumOfNpc ][ k++ ] = ReplCards[ pokerMan.PokerNumOfNpc ][ i ];
+    }
+    GameData[ pokerMan.PokerNumOfNpc ][ k++ ] = Stroy[ pokerMan.PokerNumOfNpc ];
+    GameData[ pokerMan.PokerNumOfNpc ][ k++ ] = BetEnd[ pokerMan.PokerNumOfNpc ];
+    GameData[ pokerMan.PokerNumOfNpc ][ k++ ] = Bank[ pokerMan.PokerNumOfNpc ];
+    GameData[ pokerMan.PokerNumOfNpc ][ k++ ] = Bet[ pokerMan.PokerNumOfNpc ];
+    GameData[ pokerMan.PokerNumOfNpc ][ k++ ] = GameStage[ pokerMan.PokerNumOfNpc ];
+    GameData[ pokerMan.PokerNumOfNpc ][ k++ ] = MHod[ pokerMan.PokerNumOfNpc ];
+    for( uint8 i = 0; i < PLAYERS_COUNT; i++ )
+    {
+        GameData[ pokerMan.PokerNumOfNpc ][ k++ ] = PlState[ pokerMan.PokerNumOfNpc ][ i ];
+    }
+    for( uint8 i = 0; i < PLAYERS_COUNT; i++ )
+    {
+        GameData[ pokerMan.PokerNumOfNpc ][ k++ ] = PlBet[ pokerMan.PokerNumOfNpc ][ i ];
+    }
+    GameData[ pokerMan.PokerNumOfNpc ][ k++ ] = InGamePl[ pokerMan.PokerNumOfNpc ];
+    GameData[ pokerMan.PokerNumOfNpc ][ k++ ] = WinKoef[ pokerMan.PokerNumOfNpc ];
+    GameData[ pokerMan.PokerNumOfNpc ][ k++ ] = FraudMode[ pokerMan.PokerNumOfNpc ];
+    GameData[ pokerMan.PokerNumOfNpc ][ k++ ] = CardInSleeve[ pokerMan.PokerNumOfNpc ];
+    GameData[ pokerMan.PokerNumOfNpc ][ k++ ] = Fraud2Succ[ pokerMan.PokerNumOfNpc ];
+    GameData[ pokerMan.PokerNumOfNpc ][ k++ ] = GameNum[ pokerMan.PokerNumOfNpc ];
+    GameData[ pokerMan.PokerNumOfNpc ][ k++ ] = ModChFr[ pokerMan.PokerNumOfNpc ];
+    GameData[ pokerMan.PokerNumOfNpc ][ k ] = StartGameMoney[ pokerMan.PokerNumOfNpc ];
+}
+
+void GetAData( Critter& pokerMan )
+{
+    uint   k = 0;
+    uint64 temp;
+    // "Склеиваем" 2 uint32 в один uint64
+    Koloda[ pokerMan.PokerNumOfNpc ] = GameData[ pokerMan.PokerNumOfNpc ][ k++ ]; // Последние 32 карты колоды
+    temp = GameData[ pokerMan.PokerNumOfNpc ][ k++ ];                             // чтобы не потерять информацию при сдвиге
+    Koloda[ pokerMan.PokerNumOfNpc ] += temp << 32;                               // первые 20 карт колоды
+    for( uint8 i = 0; i < PLAYERS_COUNT * CARD_COUNT; i++ )
+    {
+        GameCards[ pokerMan.PokerNumOfNpc ][ i ] = GameData[ pokerMan.PokerNumOfNpc ][ k++ ];
+    }
+    for( uint8 i = 0; i < PLAYERS_COUNT; i++ )
+    {
+        ReplCards[ pokerMan.PokerNumOfNpc ][ i ] = GameData[ pokerMan.PokerNumOfNpc ][ k++ ];
+    }
+    Stroy[ pokerMan.PokerNumOfNpc ] = GameData[ pokerMan.PokerNumOfNpc ][ k++ ];
+    BetEnd[ pokerMan.PokerNumOfNpc ] = GameData[ pokerMan.PokerNumOfNpc ][ k++ ];
+    Bank[ pokerMan.PokerNumOfNpc ] = GameData[ pokerMan.PokerNumOfNpc ][ k++ ];
+    Bet[ pokerMan.PokerNumOfNpc ] = GameData[ pokerMan.PokerNumOfNpc ][ k++ ];
+    GameStage[ pokerMan.PokerNumOfNpc ] = GameData[ pokerMan.PokerNumOfNpc ][ k++ ];
+    MHod[ pokerMan.PokerNumOfNpc ] = GameData[ pokerMan.PokerNumOfNpc ][ k++ ];
+    for( uint8 i = 0; i < PLAYERS_COUNT; i++ )
+    {
+        PlState[ pokerMan.PokerNumOfNpc ][ i ] = GameData[ pokerMan.PokerNumOfNpc ][ k++ ];
+    }
+    for( uint8 i = 0; i < PLAYERS_COUNT; i++ )
+    {
+        PlBet[ pokerMan.PokerNumOfNpc ][ i ] = GameData[ pokerMan.PokerNumOfNpc ][ k++ ];
+    }
+    InGamePl[ pokerMan.PokerNumOfNpc ] = GameData[ pokerMan.PokerNumOfNpc ][ k++ ];
+    WinKoef[ pokerMan.PokerNumOfNpc ] = GameData[ pokerMan.PokerNumOfNpc ][ k++ ];
+    FraudMode[ pokerMan.PokerNumOfNpc ] = GameData[ pokerMan.PokerNumOfNpc ][ k++ ];
+    CardInSleeve[ pokerMan.PokerNumOfNpc ] = GameData[ pokerMan.PokerNumOfNpc ][ k++ ];
+    Fraud2Succ[ pokerMan.PokerNumOfNpc ] = GameData[ pokerMan.PokerNumOfNpc ][ k++ ];
+    GameNum[ pokerMan.PokerNumOfNpc ] = GameData[ pokerMan.PokerNumOfNpc ][ k++ ];
+    ModChFr[ pokerMan.PokerNumOfNpc ] = GameData[ pokerMan.PokerNumOfNpc ][ k++ ];
+    StartGameMoney[ pokerMan.PokerNumOfNpc ] = GameData[ pokerMan.PokerNumOfNpc ][ k ];
+}
+
+void EraseData( Critter& npc )
+{
+    npc.PokerData = array< uint >();
+}
+
+void NpcAction( uint8 m, Critter& master, Critter& pokerMan )
+{
+    if( ChWinFold( pokerMan ) )
+    {
+        EndGame( master, pokerMan );
+        return;
+    }
+
+    while( PlState[ pokerMan.PokerNumOfNpc ][ m ] == PLST_PASS )
+    {
+        m++;
+        BetEnd[ pokerMan.PokerNumOfNpc ]++;
+        if( m == PLAYERS_COUNT )
+        {
+            return;
+        }
+    }
+    int8[] modCh = { -20, 0, 10, 20, 35, 50, 60, 70, 80, 90 };
+    uint mB = Bet[ pokerMan.PokerNumOfNpc ] * ( 1000 / MaxBet[ pokerMan.PokerNumOfNpc ] );
+    int8 chance;
+    if( mB >= 100 )
+    {
+        chance = 100 - ( ( mB ) / 10 - 5 );
+    }
+    else
+    {
+        chance = 95;
+    }
+    chance += modCh[ GetCombo( m, GameCards[ pokerMan.PokerNumOfNpc ] ) % 10 ];
+
+    if( ( ModChFr[ pokerMan.PokerNumOfNpc ] / GameNum[ pokerMan.PokerNumOfNpc ] ) > 2 )
+    {
+        chance += ModChFr[ pokerMan.PokerNumOfNpc ];
+    }
+    bool doBet = false;
+    if( chance < 5 )
+    {
+        chance = 5;
+    }
+    else
+    {
+        if( chance > 95 )
+        {
+            chance = 95;
+        }
+    }
+
+    if( ( 100 - Random( 0, 99 ) ) <= chance )
+    {
+        doBet = true;
+    }
+
+    DlgTxt[ pokerMan.PokerNumOfNpc ] = DialStrPl + " №" + m + " ";
+    PlayerCardsInDial[ pokerMan.PokerNumOfNpc ] = false;
+    if( doBet )
+    {
+        if( Random( 0, 1 ) == 1 )
+        {
+            Bank[ pokerMan.PokerNumOfNpc ] += Bet[ pokerMan.PokerNumOfNpc ] - PlBet[ pokerMan.PokerNumOfNpc ][ m ];
+            PlState[ pokerMan.PokerNumOfNpc ][ m ] = PLST_CALL;
+            if( Bet[ pokerMan.PokerNumOfNpc ] == PlBet[ pokerMan.PokerNumOfNpc ][ m ] )
+            {
+                master.SayMsg( SAY_NETMSG, TEXTMSG_DLG, DLGSTR( DID, STR_DLGREPLY ), "$gametext" + DlgTxt[ pokerMan.PokerNumOfNpc ] + DialStrCall );
+                DlgTxt[ pokerMan.PokerNumOfNpc ] += DialStrAccept + "\n" + DialStrBank + Bank[ pokerMan.PokerNumOfNpc ] + "\n" + DialStrBet + Bet[ pokerMan.PokerNumOfNpc ];
+            }
+            else
+            {
+                master.SayMsg( SAY_NETMSG, TEXTMSG_DLG, DLGSTR( DID, STR_DLGREPLY ), "$gametext" + DlgTxt[ pokerMan.PokerNumOfNpc ] + DialStrCall );
+                DlgTxt[ pokerMan.PokerNumOfNpc ] += DialStrCall + "\n" + DialStrBank + Bank[ pokerMan.PokerNumOfNpc ] + "\n" + DialStrBet + Bet[ pokerMan.PokerNumOfNpc ];
+            }
+            PlBet[ pokerMan.PokerNumOfNpc ][ m ] = Bet[ pokerMan.PokerNumOfNpc ];
+        }
+        else
+        {
+            if( ( ( PlBet[ pokerMan.PokerNumOfNpc ][ m ] + Raise_1[ pokerMan.PokerNumOfNpc ] ) > Bet[ pokerMan.PokerNumOfNpc ] ) and ( ( PlBet[ pokerMan.PokerNumOfNpc ][ m ] + Raise_1[ pokerMan.PokerNumOfNpc ] ) <= MaxBet[ pokerMan.PokerNumOfNpc ] ) )
+            {
+                Bank[ pokerMan.PokerNumOfNpc ] += Raise_1[ pokerMan.PokerNumOfNpc ];
+                PlState[ pokerMan.PokerNumOfNpc ][ m ] = PLST_RAISE;
+                Bet[ pokerMan.PokerNumOfNpc ] += ( Bet[ pokerMan.PokerNumOfNpc ] - PlBet[ pokerMan.PokerNumOfNpc ][ m ] ) + Raise_1[ pokerMan.PokerNumOfNpc ];
+                PlBet[ pokerMan.PokerNumOfNpc ][ m ] = Bet[ pokerMan.PokerNumOfNpc ];
+                master.SayMsg( SAY_NETMSG, TEXTMSG_DLG, DLGSTR( DID, STR_DLGREPLY ), "$gametext" + DlgTxt[ pokerMan.PokerNumOfNpc ] + DialStrRaise );
+                DlgTxt[ pokerMan.PokerNumOfNpc ] += DialStrRaise + "\n" + DialStrBank + Bank[ pokerMan.PokerNumOfNpc ] + "\n" + DialStrBet + Bet[ pokerMan.PokerNumOfNpc ];
+                BetEnd[ pokerMan.PokerNumOfNpc ] = 0;
+            }
+            else
+            {
+                if( ( ( PlBet[ pokerMan.PokerNumOfNpc ][ m ] + Raise_2[ pokerMan.PokerNumOfNpc ] ) > Bet[ pokerMan.PokerNumOfNpc ] ) and ( ( PlBet[ pokerMan.PokerNumOfNpc ][ m ] + Raise_2[ pokerMan.PokerNumOfNpc ] ) <= MaxBet[ pokerMan.PokerNumOfNpc ] ) )
+                {
+                    Bank[ pokerMan.PokerNumOfNpc ] += Raise_2[ pokerMan.PokerNumOfNpc ];
+                    PlState[ pokerMan.PokerNumOfNpc ][ m ] = PLST_RAISE;
+                    Bet[ pokerMan.PokerNumOfNpc ] += ( Bet[ pokerMan.PokerNumOfNpc ] - PlBet[ pokerMan.PokerNumOfNpc ][ m ] ) + Raise_2[ pokerMan.PokerNumOfNpc ];
+                    PlBet[ pokerMan.PokerNumOfNpc ][ m ] = Bet[ pokerMan.PokerNumOfNpc ];
+                    master.SayMsg( SAY_NETMSG, TEXTMSG_DLG, DLGSTR( DID, STR_DLGREPLY ), "$gametext" + DlgTxt[ pokerMan.PokerNumOfNpc ] + DialStrRaise );
+                    DlgTxt[ pokerMan.PokerNumOfNpc ] += DialStrRaise + "\n" + DialStrBank + Bank[ pokerMan.PokerNumOfNpc ] + "\n" + DialStrBet + Bet[ pokerMan.PokerNumOfNpc ];
+                    BetEnd[ pokerMan.PokerNumOfNpc ] = 0;
+                }
+                else
+                {
+                    if( ( ( PlBet[ pokerMan.PokerNumOfNpc ][ m ] + Raise_3[ pokerMan.PokerNumOfNpc ] ) > Bet[ pokerMan.PokerNumOfNpc ] ) and ( ( PlBet[ pokerMan.PokerNumOfNpc ][ m ] + Raise_3[ pokerMan.PokerNumOfNpc ] ) <= MaxBet[ pokerMan.PokerNumOfNpc ] ) )
+                    {
+                        Bank[ pokerMan.PokerNumOfNpc ] += Raise_3[ pokerMan.PokerNumOfNpc ];
+                        PlState[ pokerMan.PokerNumOfNpc ][ m ] = PLST_RAISE;
+                        Bet[ pokerMan.PokerNumOfNpc ] += ( Bet[ pokerMan.PokerNumOfNpc ] - PlBet[ pokerMan.PokerNumOfNpc ][ m ] ) + Raise_3[ pokerMan.PokerNumOfNpc ];
+                        PlBet[ pokerMan.PokerNumOfNpc ][ m ] = Bet[ pokerMan.PokerNumOfNpc ];
+                        master.SayMsg( SAY_NETMSG, TEXTMSG_DLG, DLGSTR( DID, STR_DLGREPLY ), "$gametext" + DlgTxt[ pokerMan.PokerNumOfNpc ] + DialStrRaise );
+                        DlgTxt[ pokerMan.PokerNumOfNpc ] += DialStrRaise + "\n" + DialStrBank + Bank[ pokerMan.PokerNumOfNpc ] + "\n" + DialStrBet + Bet[ pokerMan.PokerNumOfNpc ];
+                        BetEnd[ pokerMan.PokerNumOfNpc ] = 0;
+                    }
+                    else
+                    {
+                        Bank[ pokerMan.PokerNumOfNpc ] += Bet[ pokerMan.PokerNumOfNpc ] - PlBet[ pokerMan.PokerNumOfNpc ][ m ];
+                        PlState[ pokerMan.PokerNumOfNpc ][ m ] = PLST_CALL;
+                        if( Bet[ pokerMan.PokerNumOfNpc ] == PlBet[ pokerMan.PokerNumOfNpc ][ m ] )
+                        {
+                            master.SayMsg( SAY_NETMSG, TEXTMSG_DLG, DLGSTR( DID, STR_DLGREPLY ), "$gametext" + DlgTxt[ pokerMan.PokerNumOfNpc ] + DialStrAccept );
+                            DlgTxt[ pokerMan.PokerNumOfNpc ] += DialStrAccept + "\n" + DialStrBank + Bank[ pokerMan.PokerNumOfNpc ] + "\n" + DialStrBet + Bet[ pokerMan.PokerNumOfNpc ];
+                        }
+                        else
+                        {
+                            master.SayMsg( SAY_NETMSG, TEXTMSG_DLG, DLGSTR( DID, STR_DLGREPLY ), "$gametext" + DlgTxt[ pokerMan.PokerNumOfNpc ] + DialStrCall );
+                            DlgTxt[ pokerMan.PokerNumOfNpc ] += DialStrCall + "\n" + DialStrBank + Bank[ pokerMan.PokerNumOfNpc ] + "\n" + DialStrBet + Bet[ pokerMan.PokerNumOfNpc ];
+                        }
+                        PlBet[ pokerMan.PokerNumOfNpc ][ m ] = Bet[ pokerMan.PokerNumOfNpc ];
+                    }
+                }
+            }
+            master.SayMsg( SAY_NETMSG, TEXTMSG_DLG, DLGSTR( DID, STR_DLGREPLY ), "$gametext" + DialStrBank + Bank[ pokerMan.PokerNumOfNpc ] );
+            master.SayMsg( SAY_NETMSG, TEXTMSG_DLG, DLGSTR( DID, STR_DLGREPLY ), "$gametext" + DialStrBet + Bet[ pokerMan.PokerNumOfNpc ] );
+        }
+    }
+    else
+    {
+        if( Bet[ pokerMan.PokerNumOfNpc ] == PlBet[ pokerMan.PokerNumOfNpc ][ m ] )
+        {
+            PlState[ pokerMan.PokerNumOfNpc ][ m ] = PLST_CALL;
+            DlgTxt[ pokerMan.PokerNumOfNpc ] += DialStrAccept;
+            master.SayMsg( SAY_NETMSG, TEXTMSG_DLG, DLGSTR( DID, STR_DLGREPLY ), "$gametext" + DlgTxt[ pokerMan.PokerNumOfNpc ] );
+            master.SayMsg( SAY_NETMSG, TEXTMSG_DLG, DLGSTR( DID, STR_DLGREPLY ), "$gametext" + DialStrBank + Bank[ pokerMan.PokerNumOfNpc ] );
+            master.SayMsg( SAY_NETMSG, TEXTMSG_DLG, DLGSTR( DID, STR_DLGREPLY ), "$gametext" + DialStrBet + Bet[ pokerMan.PokerNumOfNpc ] );
+        }
+        else
+        {
+            PlState[ pokerMan.PokerNumOfNpc ][ m ] = PLST_PASS;
+            DlgTxt[ pokerMan.PokerNumOfNpc ] += DialStrFold;
+            master.SayMsg( SAY_NETMSG, TEXTMSG_DLG, DLGSTR( DID, STR_DLGREPLY ), "$gametext" + DlgTxt[ pokerMan.PokerNumOfNpc ] );
+            master.SayMsg( SAY_NETMSG, TEXTMSG_DLG, DLGSTR( DID, STR_DLGREPLY ), "$gametext" + DialStrBank + Bank[ pokerMan.PokerNumOfNpc ] );
+            master.SayMsg( SAY_NETMSG, TEXTMSG_DLG, DLGSTR( DID, STR_DLGREPLY ), "$gametext" + DialStrBet + Bet[ pokerMan.PokerNumOfNpc ] );
+        }
+    }
+
+    if( ChWinFold( pokerMan ) )
+    {
+        EndGame( master, pokerMan );
+        return;
+    }
+    BetEnd[ pokerMan.PokerNumOfNpc ]++;
+}
+
+void GetNpcBet( Critter& master, Critter& pokerMan )
+{
+    if( ( GameStage[ pokerMan.PokerNumOfNpc ] != GAME_E_BETROUND1 ) and ( GameStage[ pokerMan.PokerNumOfNpc ] != GAME_E_BETROUND2 ) and ( GameStage[ pokerMan.PokerNumOfNpc ] != GAME_E_REPLACECARD ) )
+    {
+        return;
+    }
+    if( MHod[ pokerMan.PokerNumOfNpc ] != 0 )
+    {
+        NpcAction( MHod[ pokerMan.PokerNumOfNpc ], master, pokerMan );
+        MHod[ pokerMan.PokerNumOfNpc ] = ( MHod[ pokerMan.PokerNumOfNpc ] + 1 ) % PLAYERS_COUNT;
+        if( BetEnd[ pokerMan.PokerNumOfNpc ] == PLAYERS_COUNT )
+        {
+            BetEnd[ pokerMan.PokerNumOfNpc ] = 0;
+            if( GameStage[ pokerMan.PokerNumOfNpc ] == GAME_E_BETROUND1 )
+            {
+                GameStage[ pokerMan.PokerNumOfNpc ] = GAME_E_REPLACECARD;
+            }
+            else
+            {
+                if( GameStage[ pokerMan.PokerNumOfNpc ] == GAME_E_BETROUND2 )
+                {
+                    EraseData( pokerMan );
+                    EndGame( master, pokerMan );
+                }
+            }
+        }
+    }
+}
+
+void EndGame( Critter& master, Critter& pokerMan ) // Определение победителя, вывод результата на экран, распределение банка
+{
+    uint8  max = 0;
+    uint8  maxHC = 0;
+    uint8  wCount = 0;
+    uint   prize;
+    uint8[] winners = { 0, 0, 0, 0 };
+    uint8  wc = 0;
+    string comb = "";
+    auto   pokerWincash = pokerMan.PokerWincash;
+    pokerWincash.setIfNotExist( master.Id, 0 );
+
+    GameStage[ pokerMan.PokerNumOfNpc ] = GAME_E_END;
+    for( uint8 i = 0; i < PLAYERS_COUNT; i++ )
+    {
+        if( PlState[ pokerMan.PokerNumOfNpc ][ i ] != PLST_PASS )
+        {
+            if( GetCombo( i, GameCards[ pokerMan.PokerNumOfNpc ] ) % 10 > max )
+            {
+                max = GetCombo( i, GameCards[ pokerMan.PokerNumOfNpc ] ) % 10;
+            }
+        }
+    }
+    for( uint8 i = 0; i < PLAYERS_COUNT; i++ )
+    {
+        if( PlState[ pokerMan.PokerNumOfNpc ][ i ] != PLST_PASS )
+        {
+            if( GetCombo( i, GameCards[ pokerMan.PokerNumOfNpc ] ) % 10 == max )
+            {
+                wCount++;
+            }
+        }
+    }
+    if( wCount == 1 )
+    {
+        for( uint8 i = 0; i < PLAYERS_COUNT; i++ )
+        {
+            if( PlState[ pokerMan.PokerNumOfNpc ][ i ] != PLST_PASS )
+            {
+                if( GetCombo( i, GameCards[ pokerMan.PokerNumOfNpc ] ) % 10 == max )
+                {
+                    winners[ i ] = 1;
+                }
+            }
+        }
+    }
+    else
+    {
+        for( uint8 i = 0; i < PLAYERS_COUNT; i++ )
+        {
+            if( PlState[ pokerMan.PokerNumOfNpc ][ i ] != PLST_PASS )
+            {
+                if( GetCombo( i, GameCards[ pokerMan.PokerNumOfNpc ] ) % 10 == max )
+                {
+                    if( GetCombo( i, GameCards[ pokerMan.PokerNumOfNpc ] ) / 10 > maxHC )
+                    {
+                        maxHC = GetCombo( i, GameCards[ pokerMan.PokerNumOfNpc ] ) / 10;
+                    }
+                }
+            }
+        }
+        for( uint8 i = 0; i < PLAYERS_COUNT; i++ )
+        {
+            if( PlState[ pokerMan.PokerNumOfNpc ][ i ] != PLST_PASS )
+            {
+                if( GetCombo( i, GameCards[ pokerMan.PokerNumOfNpc ] ) % 10 == max )
+                {
+                    if( GetCombo( i, GameCards[ pokerMan.PokerNumOfNpc ] ) / 10 == maxHC )
+                    {
+                        winners[ i ] = 1;
+                    }
+                }
+            }
+        }
+    }
+    uint8 t = 0;
+    for( uint8 i = 0; i < PLAYERS_COUNT; i++ )
+    {
+        wc += winners[ i ];
+        if( winners[ i ] == 1 )
+        {
+            t = i;
+        }
+    }
+    DlgTxt[ pokerMan.PokerNumOfNpc ] = "@msg dlg " + DLGSTR( DID, STR_WINCOMBO ) + "@ " + GetStrCombo( GetCombo( t, GameCards[ pokerMan.PokerNumOfNpc ] ) );
+    PlayerCardsInDial[ pokerMan.PokerNumOfNpc ] = true;
+    master.SayMsg( SAY_NETMSG, TEXTMSG_DLG, DLGSTR( DID, STR_DLGREPLY ), "$gametext" + "@msg dlg " + DLGSTR( DID, STR_WINCOMBO ) + "@ " + GetStrCombo( GetCombo( t, GameCards[ pokerMan.PokerNumOfNpc ] ) ) );
+    for( uint8 s = 0; s < CARD_COUNT; s++ )
+    {
+        comb += GetStrCard( GameCards[ pokerMan.PokerNumOfNpc ][ t * 5 + s ] );
+        if( s != CARD_COUNT - 1 )
+        {
+            comb += ", ";
+        }
+    }
+    master.SayMsg( SAY_NETMSG, TEXTMSG_DLG, DLGSTR( DID, STR_DLGREPLY ), "$gametext" + comb );
+    DlgTxt[ pokerMan.PokerNumOfNpc ] += "\n" + comb + "\n" + "@msg dlg " + DLGSTR( DID, STR_WINERS ) + "@";
+    prize = Bank[ pokerMan.PokerNumOfNpc ] / wc;
+    master.SayMsg( SAY_NETMSG, TEXTMSG_DLG, DLGSTR( DID, STR_DLGREPLY ), "$gametext" + "@msg dlg " + DLGSTR( DID, STR_WINERS ) + "@" );
+    for( uint8 i = 0; i < 4; i++ )
+    {
+        if( winners[ i ] == 1 )
+        {
+            if( i == 0 )
+            {
+                master.SayMsg( SAY_NETMSG, TEXTMSG_DLG, DLGSTR( DID, STR_DLGREPLY ), "$gametext" + "@msg dlg " + DLGSTR( DID, STR_YOUWIN ) + "@" );
+                DlgTxt[ pokerMan.PokerNumOfNpc ] += " @msg dlg " + DLGSTR( DID, STR_YOUWIN ) + "@" + "\n";
+                master.PokerWins += 1;
+                master.AddItem( Content::Item::bottle_caps, prize * ( WinKoef[ pokerMan.PokerNumOfNpc ] / 100 ) );
+            }
+            else
+            {
+                master.SayMsg( SAY_NETMSG, TEXTMSG_DLG, DLGSTR( DID, STR_DLGREPLY ), "$gametext" + "@msg dlg " + DLGSTR( DID, STR_WINPLNUM ) + "@ " + i );
+                DlgTxt[ pokerMan.PokerNumOfNpc ] += " @msg dlg " + DLGSTR( DID, STR_WINPLNUM ) + "@ " + i + "\n";
+            }
+        }
+    }
+    pokerWincash[ master.Id ] = pokerWincash[ master.Id ] + master.CountItem( Content::Item::bottle_caps ) - StartGameMoney[ pokerMan.PokerNumOfNpc ];
+    pokerMan.PokerWincash = pokerWincash;
+    InGame[ pokerMan.PokerNumOfNpc ] = false;
+}
+
+// /////////////////////////////////////////////////////////////////////
+//                                                                   //
+//                          Диалоги                                  //
+//                                                                   //
+// /////////////////////////////////////////////////////////////////////
+
+
+
+
+// ///////////////////Формирование диалога/////////////////////////////
+void dlg_GameText( Critter& player, Critter@ pokerMan, string@ lexems )
+{
+    if( not IS_DIALOG_GENERATED( lexems ) )
+        return;
+    lexems = "$gametext" + DlgTxt[ pokerMan.PokerNumOfNpc ];
+    lexems += "$gametext2" + DlgTxt2[ pokerMan.PokerNumOfNpc ];
+    lexems += "$ra_one" + Raise_1[ pokerMan.PokerNumOfNpc ];
+    lexems += "$ra_two" + Raise_2[ pokerMan.PokerNumOfNpc ];
+    lexems += "$ra_three" + Raise_3[ pokerMan.PokerNumOfNpc ];
+    lexems += "$replaceCardOne";
+    if( GetBit( ReplCards[ pokerMan.PokerNumOfNpc ][ 0 ], 1 ) == 1 )
+    {
+        lexems += "@msg dlg " + DLGSTR( DID, STR_UNSELECT ) + "@";
+    }
+    else
+    {
+        lexems += "@msg dlg " + DLGSTR( DID, STR_SELECT ) + "@";
+    }
+    lexems += "$replaceCardTwo";
+    if( GetBit( ReplCards[ pokerMan.PokerNumOfNpc ][ 0 ], 2 ) == 1 )
+    {
+        lexems += "@msg dlg " + DLGSTR( DID, STR_UNSELECT ) + "@";
+    }
+    else
+    {
+        lexems += "@msg dlg " + DLGSTR( DID, STR_SELECT ) + "@";
+    }
+    lexems += "$replaceCardThree";
+    if( GetBit( ReplCards[ pokerMan.PokerNumOfNpc ][ 0 ], 3 ) == 1 )
+    {
+        lexems += "@msg dlg " + DLGSTR( DID, STR_UNSELECT ) + "@";
+    }
+    else
+    {
+        lexems += "@msg dlg " + DLGSTR( DID, STR_SELECT ) + "@";
+    }
+    lexems += "$replaceCardFour";
+    if( GetBit( ReplCards[ pokerMan.PokerNumOfNpc ][ 0 ], 4 ) == 1 )
+    {
+        lexems += "@msg dlg " + DLGSTR( DID, STR_UNSELECT ) + "@";
+    }
+    else
+    {
+        lexems += "@msg dlg " + DLGSTR( DID, STR_SELECT ) + "@";
+    }
+    lexems += "$replaceCardFive";
+    if( GetBit( ReplCards[ pokerMan.PokerNumOfNpc ][ 0 ], 5 ) == 1 )
+    {
+        lexems += "@msg dlg " + DLGSTR( DID, STR_UNSELECT ) + "@";
+    }
+    else
+    {
+        lexems += "@msg dlg " + DLGSTR( DID, STR_SELECT ) + "@";
+    }
+}
+
+void dlg_StartGemeMoney( Critter& player, Critter@ pokerMan, string@ lexems )
+{
+    if( not IS_DIALOG_GENERATED( lexems ) )
+        return;
+    lexems = "$game_cost" + MoneyForStartGame[ pokerMan.PokerNumOfNpc ];
+}
+
+void dlg_VarRaise( Critter& master, Critter@ pokerMan, string@ str )
+{
+    uint min, max, bRaise = 0;
+    int  moneyString = 0;
+    min = Bet[ pokerMan.PokerNumOfNpc ] - PlBet[ pokerMan.PokerNumOfNpc ][ 0 ];
+    max = master.CountItem( Content::Item::bottle_caps );
+    if( ( PlBet[ pokerMan.PokerNumOfNpc ][ 0 ] + max ) > MaxBet[ pokerMan.PokerNumOfNpc ] )
+    {
+        max = MaxBet[ pokerMan.PokerNumOfNpc ] - PlBet[ pokerMan.PokerNumOfNpc ][ 0 ];
+    }
+    if( not IS_DIALOG_SAY_MODE( str ) )
+    {
+        if( not IS_DIALOG_GENERATED( str ) )
+            return;
+        App[ pokerMan.PokerNumOfNpc ] = false;
+        str += "$min " + min + "$max " + max;
+    }
+    else
+    {
+        if( VarRiseSucc[ pokerMan.PokerNumOfNpc ] == 1 )
+        {
+            return;
+        }
+        if( not StrToInt( str, moneyString ) )
+        {
+            if( not App[ pokerMan.PokerNumOfNpc ] )
+            {
+                master.SayMsg( SAY_APPEND, TEXTMSG_DLG, STR_INVALID_MONEY_COUNT );
+                App[ pokerMan.PokerNumOfNpc ] = true;
+            }
+        }
+        else
+        {
+            if( moneyString < 0 )
+            {
+                if( not App[ pokerMan.PokerNumOfNpc ] )
+                {
+                    master.SayMsg( SAY_APPEND, TEXTMSG_DLG, STR_INVALID_MONEY_COUNT );
+                    App[ pokerMan.PokerNumOfNpc ] = true;
+                }
+            }
+            else
+            {
+                bRaise = moneyString;
+                if( ( bRaise < min ) or ( bRaise > max ) )
+                {
+                    if( not App[ pokerMan.PokerNumOfNpc ] )
+                    {
+                        master.SayMsg( SAY_APPEND, TEXTMSG_DLG, STR_INVALID_MONEY_COUNT );
+                        App[ pokerMan.PokerNumOfNpc ] = true;
+                    }
+                }
+                else
+                {
+                    master.SayMsg( SAY_DIALOG, TEXTMSG_DLG, STR_OPERATION_SUCCESS );
+                    VarRiseSucc[ pokerMan.PokerNumOfNpc ] = 1;
+                    PlBet[ pokerMan.PokerNumOfNpc ][ 0 ] += bRaise;
+                    Bank[ pokerMan.PokerNumOfNpc ] += bRaise;
+                    if( PlBet[ pokerMan.PokerNumOfNpc ][ 0 ] > Bet[ pokerMan.PokerNumOfNpc ] )
+                    {
+                        Bet[ pokerMan.PokerNumOfNpc ] = PlBet[ pokerMan.PokerNumOfNpc ][ 0 ];
+                        BetEnd[ pokerMan.PokerNumOfNpc ] = 1;
+                        MHod[ pokerMan.PokerNumOfNpc ]++;
+                        PlState[ pokerMan.PokerNumOfNpc ][ 0 ] = PLST_RAISE;
+                    }
+                    else
+                    {
+                        BetEnd[ pokerMan.PokerNumOfNpc ]++;
+                        MHod[ pokerMan.PokerNumOfNpc ]++;
+                        if( BetEnd[ pokerMan.PokerNumOfNpc ] == PLAYERS_COUNT )
+                        {
+                            BetEnd[ pokerMan.PokerNumOfNpc ] = 0;
+                            if( GameStage[ pokerMan.PokerNumOfNpc ] == GAME_E_BETROUND1 )
+                            {
+                                GameStage[ pokerMan.PokerNumOfNpc ] = GAME_E_REPLACECARD;
+                            }
+                            else
+                            {
+                                if( GameStage[ pokerMan.PokerNumOfNpc ] == GAME_E_BETROUND2 )
+                                {
+                                    EraseData( pokerMan );
+                                    EndGame( master, pokerMan );
+                                }
+                            }
+                        }
+                        PlState[ pokerMan.PokerNumOfNpc ][ 0 ] = PLST_CALL;
+                    }
+                    if( master.CountItem( Content::Item::bottle_caps ) >= bRaise )
+                    {
+                        master.DeleteItem( Content::Item::bottle_caps, bRaise );
+                    }
+                    else
+                    {
+                        #ifdef __DEBUG__
+                        Log( "Player have not money" );
+                        #endif
+                    }
+                    PrintCards( null, pokerMan, 0 );
+                }
+            }
+        }
+    }
+}
+
+void dlg_FraudCheck( Critter& player, Critter@ pokerMan, string@ lexems )
+{
+    if( not IS_DIALOG_GENERATED( lexems ) )
+        return;
+
+    auto pokerFraud = pokerMan.PokerFraud;
+    pokerFraud.setIfNotExist( player.Id, 0 );
+
+    if( pokerFraud[ player.Id ] != 1 )
+        lexems = "$fraud@msg dlg " + DLGSTR( DID, STR_FRAUD_ON ) + "@";
+    else
+        lexems = "$fraud@msg dlg " + DLGSTR( DID, STR_FRAUD_OFF ) + "@";
+}
+
+void dlg_ManyWins( Critter& player, Critter@ pokerMan, string@ lexems )
+{
+    if( not IS_DIALOG_GENERATED( lexems ) )
+        return;
+
+    auto pokerMamywins = pokerMan.PokerManywins;
+    pokerMamywins.setIfNotExist( player.Id, 0 );
+    if( __FullSecond - pokerMamywins[ player.Id ] < ( WaitForGame[ pokerMan.PokerNumOfNpc ] * 24 * 60 * 60 ) )
+        lexems = "$manywins@msg dlg " + DLGSTR( DID, STR_MANYWINS_ON ) + "@";
+    else
+        lexems = "$manywins@msg dlg " + DLGSTR( DID, STR_MANYWINS_OFF ) + "@";
+}
+
+// ///////////////////Результаты реплик////////////////////////////////
+void r_Replace( Critter& master, Critter@ pokerMan ) // замена карт
+{
+    uint8 m;
+    uint8[] cardsInPack;
+    for( uint8 i = 1; i <= 52; i++ )
+    {
+        if( GetBit( Koloda[ pokerMan.PokerNumOfNpc ], i ) == 1 )
+        {
+            cardsInPack.insertLast( i );
+        }
+    }
+    NpcReplaceCards( pokerMan );
+    for( uint8 t = 0; t < PLAYERS_COUNT; t++ )
+    {
+        for( uint8 i = 0; i < CARD_COUNT; i++ )
+        {
+            if( GetBit( ReplCards[ pokerMan.PokerNumOfNpc ][ t ], i + 1 ) == 1 )
+            {
+                if( cardsInPack.length() != 0 )
+                {
+                    m = Random( 0, cardsInPack.length() - 1 );
+                    Koloda[ pokerMan.PokerNumOfNpc ] = SetBit( Koloda[ pokerMan.PokerNumOfNpc ], cardsInPack[ m ], false );
+                    GameCards[ pokerMan.PokerNumOfNpc ][ t * CARD_COUNT + i ] = cardsInPack[ m ];
+                }
+                else
+                {
+                    Log( "Error: Pack of cards is empty" );
+                    return;
+                }
+            }
+        }
+        ReplCards[ pokerMan.PokerNumOfNpc ][ t ] = 0;
+    }
+    GameStage[ pokerMan.PokerNumOfNpc ] = GAME_E_BETROUND2;
+    PrintCards( master, pokerMan, 0 );
+}
+
+void r_ReplSet( Critter& master, Critter@ pokerMan, int val )
+{
+    if( GetBit( ReplCards[ pokerMan.PokerNumOfNpc ][ 0 ], val ) == 1 )
+    {
+        ReplCards[ pokerMan.PokerNumOfNpc ][ 0 ] = SetBit5( ReplCards[ pokerMan.PokerNumOfNpc ][ 0 ], val, false ); // отменить выбор карты для замены
+    }
+    else
+    {
+        ReplCards[ pokerMan.PokerNumOfNpc ][ 0 ] = SetBit5( ReplCards[ pokerMan.PokerNumOfNpc ][ 0 ], val, true ); // выбор карты для замены
+    }
+}
+
+void r_BetRaise( Critter& master, Critter@ pokerMan, int val ) // Повышение ставки
+{
+    switch( val )
+    {
+    case -1:
+        if( master.CountItem( Content::Item::bottle_caps ) > 0 )
+        {
+            Bank[ pokerMan.PokerNumOfNpc ] += master.CountItem( Content::Item::bottle_caps );
+            PlBet[ pokerMan.PokerNumOfNpc ][ 0 ] = PlBet[ pokerMan.PokerNumOfNpc ][ 0 ] + master.CountItem( Content::Item::bottle_caps );
+            Bet[ pokerMan.PokerNumOfNpc ] = PlBet[ pokerMan.PokerNumOfNpc ][ 0 ];
+            master.DeleteItem( Content::Item::bottle_caps, master.CountItem( Content::Item::bottle_caps ) );
+        }
+        else
+        {
+            #ifdef __DEBUG__
+            Log( "Player have not money" );
+            #endif
+        }
+        break;
+    case 0:
+        if( master.CountItem( Content::Item::bottle_caps ) >= Raise_1[ pokerMan.PokerNumOfNpc ] )
+        {
+            Bank[ pokerMan.PokerNumOfNpc ] += Raise_1[ pokerMan.PokerNumOfNpc ];
+            PlBet[ pokerMan.PokerNumOfNpc ][ 0 ] = PlBet[ pokerMan.PokerNumOfNpc ][ 0 ] + Raise_1[ pokerMan.PokerNumOfNpc ];
+            Bet[ pokerMan.PokerNumOfNpc ] = PlBet[ pokerMan.PokerNumOfNpc ][ 0 ];
+            master.DeleteItem( Content::Item::bottle_caps, Raise_1[ pokerMan.PokerNumOfNpc ] );
+        }
+        else
+        {
+            #ifdef __DEBUG__
+            Log( "Player have not money" );
+            #endif
+        }
+        break;
+    case 1:
+        if( master.CountItem( Content::Item::bottle_caps ) >= Raise_2[ pokerMan.PokerNumOfNpc ] )
+        {
+            Bank[ pokerMan.PokerNumOfNpc ] += Raise_2[ pokerMan.PokerNumOfNpc ];
+            PlBet[ pokerMan.PokerNumOfNpc ][ 0 ] = PlBet[ pokerMan.PokerNumOfNpc ][ 0 ] + Raise_2[ pokerMan.PokerNumOfNpc ];
+            Bet[ pokerMan.PokerNumOfNpc ] = PlBet[ pokerMan.PokerNumOfNpc ][ 0 ];
+            master.DeleteItem( Content::Item::bottle_caps, Raise_2[ pokerMan.PokerNumOfNpc ] );
+        }
+        else
+        {
+            #ifdef __DEBUG__
+            Log( "Player have not money" );
+            #endif
+        }
+        break;
+    case 2:
+        if( master.CountItem( Content::Item::bottle_caps ) >= Raise_3[ pokerMan.PokerNumOfNpc ] )
+        {
+            Bank[ pokerMan.PokerNumOfNpc ] += Raise_3[ pokerMan.PokerNumOfNpc ];
+            PlBet[ pokerMan.PokerNumOfNpc ][ 0 ] = PlBet[ pokerMan.PokerNumOfNpc ][ 0 ] + Raise_3[ pokerMan.PokerNumOfNpc ];
+            Bet[ pokerMan.PokerNumOfNpc ] = PlBet[ pokerMan.PokerNumOfNpc ][ 0 ];
+            master.DeleteItem( Content::Item::bottle_caps, Raise_3[ pokerMan.PokerNumOfNpc ] );
+        }
+        else
+        {
+            #ifdef __DEBUG__
+            Log( "Player have not money" );
+            #endif
+        }
+        break;
+    default:
+        Log( "ERROR" );
+        break;
+    }
+    BetEnd[ pokerMan.PokerNumOfNpc ] = 1;
+    MHod[ pokerMan.PokerNumOfNpc ]++;
+    PlState[ pokerMan.PokerNumOfNpc ][ 0 ] = PLST_RAISE;
+    ModChFr[ pokerMan.PokerNumOfNpc ]++;
+    PrintCards( master, pokerMan, 0 );
+}
+
+void r_BetCall( Critter& master, Critter@ pokerMan, int val ) // Ответ на ставку
+{
+    if( val == D_VA_BANK )
+    {
+        WinKoef[ pokerMan.PokerNumOfNpc ] = ( ( PlBet[ pokerMan.PokerNumOfNpc ][ 0 ] + master.CountItem( Content::Item::bottle_caps ) ) / Bet[ pokerMan.PokerNumOfNpc ] ) * 100;
+        Log( "Koef: " + WinKoef[ pokerMan.PokerNumOfNpc ] );
+    }
+    if( Bet[ pokerMan.PokerNumOfNpc ] - PlBet[ pokerMan.PokerNumOfNpc ][ 0 ] != 0 )
+    {
+        if( Bet[ pokerMan.PokerNumOfNpc ] - PlBet[ pokerMan.PokerNumOfNpc ][ 0 ] > master.CountItem( Content::Item::bottle_caps ) )
+        {
+            master.DeleteItem( Content::Item::bottle_caps, master.CountItem( Content::Item::bottle_caps ) );
+        }
+        else
+        {
+            master.DeleteItem( Content::Item::bottle_caps, Bet[ pokerMan.PokerNumOfNpc ] - PlBet[ pokerMan.PokerNumOfNpc ][ 0 ] );
+        }
+    }
+    PlBet[ pokerMan.PokerNumOfNpc ][ 0 ] = Bet[ pokerMan.PokerNumOfNpc ];
+    BetEnd[ pokerMan.PokerNumOfNpc ]++;
+    MHod[ pokerMan.PokerNumOfNpc ]++;
+    if( BetEnd[ pokerMan.PokerNumOfNpc ] == PLAYERS_COUNT )
+    {
+        BetEnd[ pokerMan.PokerNumOfNpc ] = 0;
+        if( GameStage[ pokerMan.PokerNumOfNpc ] == GAME_E_BETROUND1 )
+        {
+            GameStage[ pokerMan.PokerNumOfNpc ] = GAME_E_REPLACECARD;
+        }
+        else
+        {
+            if( GameStage[ pokerMan.PokerNumOfNpc ] == GAME_E_BETROUND2 )
+            {
+                EraseData( pokerMan );
+                EndGame( master, pokerMan );
+            }
+        }
+    }
+    PlState[ pokerMan.PokerNumOfNpc ][ 0 ] = PLST_CALL;
+    PrintCards( master, pokerMan, 0 );
+}
+
+void r_BetPass( Critter& master, Critter@ pokerMan ) // Игрок спасовал
+{
+    PlState[ pokerMan.PokerNumOfNpc ][ 0 ] = PLST_PASS;
+    EndGame( master, pokerMan );
+}
+
+uint r_StartNewGame( Critter& master, Critter@ pokerMan ) // Начало новой игры
+{
+    auto pokerWincash = pokerMan.PokerWincash;
+    pokerWincash.setIfNotExist( master.Id, 0 );
+
+    if( pokerWincash[ master.Id ] > StopGameMoney[ pokerMan.PokerNumOfNpc ] )
+        return D_MANYWINS;
+
+    if( master.CountItem( Content::Item::bottle_caps ) >= Raise_1[ pokerMan.PokerNumOfNpc ] )
+    {
+        master.DeleteItem( Content::Item::bottle_caps, Raise_1[ pokerMan.PokerNumOfNpc ] );
+    }
+    else
+    {
+        #ifdef __DEBUG__
+        Log( "Player have not money" );
+        #endif
+    }
+    InitGame( pokerMan, master );
+    EraseData( pokerMan );
+    PrintCards( master, pokerMan, 0 );
+    return 0;
+}
+
+void r_TermGame( Critter& master, Critter@ pokerMan )
+{
+    InGame[ pokerMan.PokerNumOfNpc ] = false;
+}
+
+void r_GetCards( Critter& master, Critter@ pokerMan ) // Начало игры
+{
+    FirstGame[ pokerMan.PokerNumOfNpc ] = true;
+    InitGame( pokerMan, master );
+    EraseData( pokerMan );
+    PrintCards( master, pokerMan, 0 );
+}
+
+void r_BetNext( Critter& master, Critter@ pokerMan )
+{
+    GetNpcBet( master, pokerMan );
+}
+
+void r_ViewCards( Critter& master, Critter@ pokerMan )
+{
+    PrintCards( master, pokerMan, 0 );
+}
+
+void r_GetStartMoney( Critter& master, Critter@ pokerMan )
+{
+    if( master.CountItem( Content::Item::bottle_caps ) >= MoneyForStartGame[ pokerMan.PokerNumOfNpc ] )
+    {
+        master.DeleteItem( Content::Item::bottle_caps, MoneyForStartGame[ pokerMan.PokerNumOfNpc ] );
+    }
+    else
+    {
+        #ifdef __DEBUG__
+        Log( "Player have not money" );
+        #endif
+    }
+}
+
+void r_Fraud( Critter& master, Critter@ pokerMan )
+{
+    FraudMode[ pokerMan.PokerNumOfNpc ] = 1;
+}
+
+uint r_Fraud1( Critter& master, Critter@ pokerMan, int val )
+{
+    bool fraudSucc = false;
+    uint diffic, rand;
+    int  luckModif;
+    if( ( val <= 2 ) and ( val >= 0 ) )
+    {
+        diffic = int( 3.3 * float(master.SkillGambling) ) / PMLevel[ pokerMan.PokerNumOfNpc ];
+        luckModif = int( ( float(master.Luck) - 5.5 ) * 4.0 );
+        if( diffic + luckModif > 0 )
+        {
+            diffic += luckModif;
+        }
+        else
+        {
+            diffic = 0;
+        }
+        if( diffic > 100 )
+        {
+            diffic = 100;
+        }
+        diffic = int(float(diffic) * 0.95);
+        rand = Random( 1, 100 );
+        #ifdef __DEBUG__
+        Log( "\n<Poker> PMLevel: " + PMLevel[ pokerMan.PokerNumOfNpc ] + ", player.Param[SK_GAMBLING]: " + master.SkillGambling + ", master.Luck: " + master.Luck + ", Chance: " + diffic );
+        #endif
+        if( rand <= diffic )
+        {
+            fraudSucc = true;
+        }
+        if( fraudSucc )
+        {
+            PrintCards( master, pokerMan, val + 1 );
+        }
+        else
+        {
+            RunCheatScript( OnCheat1[ pokerMan.PokerNumOfNpc ], master, pokerMan );
+            return uint( -1 );
+        }
+    }
+    return 0;
+}
+
+void r_Fraud2( Critter& master, Critter@ pokerMan )
+{
+    FraudMode[ pokerMan.PokerNumOfNpc ] = 2;
+    PrintFraud2Text( master, pokerMan );
+}
+
+uint r_Fraud2( Critter& master, Critter@ pokerMan, int val )
+{
+    bool fraudSucc = false;
+    uint diffic, rand;
+    if( ( val <= 4 ) and ( val >= 0 ) )
+    {
+        diffic = int( 3.3 * float(master.SkillGambling) ) / PMLevel[ pokerMan.PokerNumOfNpc ];
+        if( diffic > 100 )
+        {
+            diffic = 100;
+        }
+        diffic = int(float(diffic) * 0.95);
+        rand = Random( 1, 100 );
+        #ifdef __DEBUG__
+        Log( "\n<Poker> PMLevel: " + PMLevel[ pokerMan.PokerNumOfNpc ] + ", player.Param[SK_GAMBLING]: " + master.SkillGambling + ", Chance: " + diffic );
+        #endif
+        if( rand <= diffic )
+        {
+            fraudSucc = true;
+        }
+        if( fraudSucc )
+        {
+            if( ( val >= 0 ) and ( val <= 4 ) )
+            {
+                GameCards[ pokerMan.PokerNumOfNpc ][ val ] = CardInSleeve[ pokerMan.PokerNumOfNpc ];
+                PrintCards( master, pokerMan, 0 );
+                Fraud2Succ[ pokerMan.PokerNumOfNpc ] = 1;
+                FraudMode[ pokerMan.PokerNumOfNpc ] = 1;
+            }
+        }
+        else
+        {
+            RunCheatScript( OnCheat2[ pokerMan.PokerNumOfNpc ], master, pokerMan );
+            return uint( -1 );
+        }
+    }
+    return 0;
+}
+
+void r_FraudCancel( Critter& master, Critter@ pokerMan )
+{
+    FraudMode[ pokerMan.PokerNumOfNpc ] = 0;
+}
+
+void r_FraudCheck( Critter& master, Critter@ pokerMan )
+{
+    auto pokerFraud = pokerMan.PokerFraud;
+    pokerFraud.setIfNotExist( master.Id, 0 );
+    uint pf = pokerFraud[ master.Id ];
+    #ifdef __DEBUG__
+    Log( "<poker> pokerMan.PokerFraud: " + pf + " FM: " + __FullSecond );
+    #endif
+    if( pokerFraud[ master.Id ] <= __FullSecond )
+    {
+        pokerFraud[ master.Id ] = 1;
+        pokerMan.PokerFraud = pokerFraud;
+    }
+}
+
+void r_VarRise( Critter& master, Critter@ pokerMan )
+{
+    VarRiseSucc[ pokerMan.PokerNumOfNpc ] = 0;
+}
+
+void r_ManyWinsCheck( Critter& master, Critter@ pokerMan )
+{
+    auto pokerManywins = pokerMan.PokerManywins;
+    pokerManywins.setIfNotExist( master.Id, 0 );
+    auto pokerWincash = pokerMan.PokerWincash;
+    pokerWincash.setIfNotExist( master.Id, 0 );
+    if( ( __FullSecond - pokerManywins[ master.Id ] ) > ( WaitForGame[ pokerMan.PokerNumOfNpc ] ) * 24 * 60 * 60 )
+    {
+        pokerWincash[ master.Id ] = 0;
+        pokerMan.PokerWincash = pokerWincash;
+    }
+}
+
+// /////////////////////Условия для появления реплик/////////////////////////////////
+bool d_GameOver( Critter& master, Critter@ pokerMan )
+{
+    if( GameStage[ pokerMan.PokerNumOfNpc ] == GAME_E_END )
+    {
+        return true;
+    }
+    return false;
+}
+
+bool d_TermGame( Critter& master, Critter@ pokerMan )
+{
+    if( FraudMode[ pokerMan.PokerNumOfNpc ] != 0 )
+    {
+        return false;
+    }
+    if( GameStage[ pokerMan.PokerNumOfNpc ] != GAME_E_END )
+    {
+        return true;
+    }
+    else
+    {
+        return false;
+    }
+}
+
+bool d_Replaced( Critter& master, Critter@ pokerMan ) // для отображения реплик игрока в диалоге
+{
+    if( GameStage[ pokerMan.PokerNumOfNpc ] != GAME_E_REPLACECARD )
+    {
+        return false;
+    }
+    if( FraudMode[ pokerMan.PokerNumOfNpc ] != 0 )
+    {
+        return false;
+    }
+    return true;
+}
+
+bool d_Replace( Critter& master, Critter@ pokerMan ) // для вывода строки "заменить карты"
+{
+    if( FraudMode[ pokerMan.PokerNumOfNpc ] != 0 )
+    {
+        return false;
+    }
+    if( GameStage[ pokerMan.PokerNumOfNpc ] == GAME_E_REPLACECARD )
+    {
+        return true;
+    }
+    return false;
+}
+
+bool d_InGame( Critter& master, Critter@ pokerMan, int val )
+{
+    if( ( InGame[ pokerMan.PokerNumOfNpc ] ) and ( master.Id == InGamePl[ pokerMan.PokerNumOfNpc ] ) )
+    {
+        if( val == PL_RESUME_GAME )
+        {
+            return true;
+        }
+        else
+        {
+            return false;
+        }
+    }
+    else
+    {
+        if( val == PL_START_GAME )
+        {
+            return true;
+        }
+        else
+        {
+            return false;
+        }
+    }
+}
+
+bool d_BetCall( Critter& master, Critter@ pokerMan, int val ) // Вывод строки "Ответить на ставку"
+{
+    if( FraudMode[ pokerMan.PokerNumOfNpc ] != 0 )
+    {
+        return false;
+    }
+    if( ( GameStage[ pokerMan.PokerNumOfNpc ] == GAME_E_BETROUND1 ) or ( GameStage[ pokerMan.PokerNumOfNpc ] == GAME_E_BETROUND2 ) )
+    {
+        if( val != D_VA_BANK )
+        {
+            if( Bet[ pokerMan.PokerNumOfNpc ] < PlBet[ pokerMan.PokerNumOfNpc ][ 0 ] )
+            {
+                return false;
+            }
+            else
+            {
+                if( ( Bet[ pokerMan.PokerNumOfNpc ] - PlBet[ pokerMan.PokerNumOfNpc ][ 0 ] ) <= master.CountItem( Content::Item::bottle_caps ) )
+                {
+                    if( Bet[ pokerMan.PokerNumOfNpc ] - PlBet[ pokerMan.PokerNumOfNpc ][ 0 ] == 0 )
+                    {
+                        if( val == D_PRIN )
+                        {
+                            return true;
+                        }
+                        else
+                        {
+                            return false;
+                        }
+                    }
+                    else
+                    {
+                        if( val == D_PRIN )
+                        {
+                            return false;
+                        }
+                        else
+                        {
+                            return true;
+                        }
+                    }
+                }
+                else
+                {
+                    return false;
+                }
+            }
+        }
+        else
+        {
+            if( master.CountItem( Content::Item::bottle_caps ) > 0 )
+            {
+                if( ( Bet[ pokerMan.PokerNumOfNpc ] - PlBet[ pokerMan.PokerNumOfNpc ][ 0 ] ) > master.CountItem( Content::Item::bottle_caps ) )
+                {
+                    return true;
+                }
+                else
+                {
+                    return false;
+                }
+            }
+            else
+            {
+                return false;
+            }
+        }
+    }
+    return false;
+}
+
+bool d_BetRaise( Critter& master, Critter@ pokerMan, int val ) // Вывод строк на повышение ставки
+{
+    uint betMoney;
+    uint min, max;
+    min = Bet[ pokerMan.PokerNumOfNpc ] - PlBet[ pokerMan.PokerNumOfNpc ][ 0 ];
+    max = master.CountItem( Content::Item::bottle_caps );
+    if( ( PlBet[ pokerMan.PokerNumOfNpc ][ 0 ] + max ) > MaxBet[ pokerMan.PokerNumOfNpc ] )
+    {
+        max = MaxBet[ pokerMan.PokerNumOfNpc ] - PlBet[ pokerMan.PokerNumOfNpc ][ 0 ];
+    }
+    if( FraudMode[ pokerMan.PokerNumOfNpc ] != 0 )
+    {
+        return false;
+    }
+    if( ( GameStage[ pokerMan.PokerNumOfNpc ] == GAME_E_BETROUND1 ) or ( GameStage[ pokerMan.PokerNumOfNpc ] == GAME_E_BETROUND2 ) )
+    {
+        switch( val )
+        {
+        case -1:
+            betMoney = master.CountItem( Content::Item::bottle_caps );
+            break;
+        case 0:
+            betMoney = Raise_1[ pokerMan.PokerNumOfNpc ];
+            break;
+        case 1:
+            betMoney = Raise_2[ pokerMan.PokerNumOfNpc ];
+            break;
+        case 2:
+            betMoney = Raise_3[ pokerMan.PokerNumOfNpc ];
+            break;
+        case 3:
+            if( Bet[ pokerMan.PokerNumOfNpc ] == MaxBet[ pokerMan.PokerNumOfNpc ] )
+            {
+                return false;
+            }
+            if( max >= min )
+            {
+                return true;
+            }
+            else
+            {
+                return false;
+            }
+        default:
+            Log( "Error" );
+            break;
+        }
+        if( ( betMoney <= master.CountItem( Content::Item::bottle_caps ) ) and ( ( betMoney + PlBet[ pokerMan.PokerNumOfNpc ][ 0 ] ) > Bet[ pokerMan.PokerNumOfNpc ] ) and ( ( betMoney + PlBet[ pokerMan.PokerNumOfNpc ][ 0 ] ) <= MaxBet[ pokerMan.PokerNumOfNpc ] ) )
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool d_BetNext( Critter& master, Critter@ pokerMan, int val )
+{
+    if( FraudMode[ pokerMan.PokerNumOfNpc ] != 0 )
+    {
+        return false;
+    }
+    if( ( GameStage[ pokerMan.PokerNumOfNpc ] == GAME_E_BETROUND1 ) or ( GameStage[ pokerMan.PokerNumOfNpc ] == GAME_E_BETROUND2 ) )
+    {
+        if( val == 0 )
+        {
+            if( MHod[ pokerMan.PokerNumOfNpc ] != 0 )
+            {
+                return true;
+            }
+            else
+            {
+                return false;
+            }
+        }
+        else
+        {
+            if( MHod[ pokerMan.PokerNumOfNpc ] != 0 )
+            {
+                return false;
+            }
+            else
+            {
+                return true;
+            }
+        }
+    }
+    else
+    {
+        return false;
+    }
+}
+
+bool d_ViewCards( Critter& master, Critter@ pokerMan )
+{
+    if( FraudMode[ pokerMan.PokerNumOfNpc ] != 0 )
+    {
+        return false;
+    }
+    if( GameStage[ pokerMan.PokerNumOfNpc ] == GAME_E_BETROUND1 )
+    {
+        if( MHod[ pokerMan.PokerNumOfNpc ] == 0 )
+        {
+            if( not PlayerCardsInDial[ pokerMan.PokerNumOfNpc ] )
+            {
+                return true;
+            }
+            else
+            {
+                return false;
+            }
+        }
+        else
+        {
+            return false;
+        }
+    }
+    else
+    {
+        if( GameStage[ pokerMan.PokerNumOfNpc ] == GAME_E_REPLACECARD )
+        {
+            if( not PlayerCardsInDial[ pokerMan.PokerNumOfNpc ] )
+            {
+                return true;
+            }
+            else
+            {
+                return false;
+            }
+        }
+        else
+        {
+            return false;
+        }
+    }
+}
+
+bool d_Fraud( Critter& master, Critter@ pokerMan )
+{
+    if( GameStage[ pokerMan.PokerNumOfNpc ] != GAME_E_END )
+    {
+        if( FraudMode[ pokerMan.PokerNumOfNpc ] == 0 )
+        {
+            return true;
+        }
+        else
+        {
+            return false;
+        }
+    }
+    else
+    {
+        return false;
+    }
+}
+bool d_Fraud1( Critter& master, Critter@ pokerMan, int val )
+{
+    if( GameStage[ pokerMan.PokerNumOfNpc ] != GAME_E_END )
+    {
+        if( FraudMode[ pokerMan.PokerNumOfNpc ] == 1 )
+        {
+            if( PlState[ pokerMan.PokerNumOfNpc ][ val + 1 ] == PLST_PASS )
+            {
+                return false;
+            }
+            else
+            {
+                return true;
+            }
+        }
+        else
+        {
+            return false;
+        }
+    }
+    else
+    {
+        return false;
+    }
+}
+bool d_Fraud2( Critter& master, Critter@ pokerMan )
+{
+    if( ( GameStage[ pokerMan.PokerNumOfNpc ] != GAME_E_END ) and ( Fraud2Succ[ pokerMan.PokerNumOfNpc ] ) == 0 )
+    {
+        if( FraudMode[ pokerMan.PokerNumOfNpc ] == 1 )
+        {
+            if( master.CountItem( Content::Item::deck_of_cards ) > 0 )
+            {
+                return true;
+            }
+            else
+            {
+                return false;
+            }
+        }
+        else
+        {
+            return false;
+        }
+    }
+    else
+    {
+        return false;
+    }
+}
+bool d_Fraud3( Critter& master, Critter@ pokerMan )
+{
+    if( GameStage[ pokerMan.PokerNumOfNpc ] != GAME_E_END )
+    {
+        if( FraudMode[ pokerMan.PokerNumOfNpc ] == 2 )
+        {
+            return true;
+        }
+        else
+        {
+            return false;
+        }
+    }
+    else
+    {
+        return false;
+    }
+}
+
+bool d_FraudCancel( Critter& master, Critter@ pokerMan )
+{
+    if( FraudMode[ pokerMan.PokerNumOfNpc ] == 1 )
+    {
+        return true;
+    }
+    else
+    {
+        return false;
+    }
+}
+
+bool d_Fraud2Cancel( Critter& master, Critter@ pokerMan )
+{
+    if( FraudMode[ pokerMan.PokerNumOfNpc ] == 2 )
+    {
+        return true;
+    }
+    else
+    {
+        return false;
+    }
+}
+
+bool d_ManyWinsCheck( Critter& master, Critter@ pokerMan, int val )
+{
+    if( StopGameMoney[ pokerMan.PokerNumOfNpc ] == 0 )
+        return false;
+    auto pokerWincash = pokerMan.PokerWincash;
+    pokerWincash.setIfNotExist( master.Id, 0 );
+    if( pokerWincash[ master.Id ] < StopGameMoney[ pokerMan.PokerNumOfNpc ] )
+        return val == 1;
+    else
+        return val != 1;
+}

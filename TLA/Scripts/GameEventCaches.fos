@@ -1,0 +1,242 @@
+// FOS Server
+
+// Author rifleman17
+// Энкаунтер квест, периодически доступный. В караванах попадается охранник, который за деньги продает карту с координатами запертого ящика.
+
+#include "Tla"
+
+#pragma property Item PrivateServer uint GECachesNumParameters
+
+#pragma property Location PrivateServer bool GECachesCacheChecked
+
+import string GetCode( Item& item ) from "ElectronicLock";
+import void   GenerateCode( Item& item ) from "ElectronicLock";
+
+// Game event
+void StatusOn()
+{
+    Globals.GameEventCaches = true;
+}
+
+// Выдача карты
+void r_GiveCart( Critter& player, Critter@ npc )
+{
+    Item@ item = player.AddItem( Content::Item::map, 1 );
+    if( valid( item ) )
+    {
+        GenerateCode( item );
+        item.Info = 2;
+        item.GECachesNumParameters = Random( 0, parameters.length() - 1 );
+        item.Lexems = "$location@msg gm " + STR_LOC_NAME( parameters[ item.GECachesNumParameters ][ 0 ][ 0 ] ) + "@$code" + GetCode( item );
+        item.SetScript( "_TreasureMapInit" );
+        item.IsQuestItem = true;
+    }
+}
+
+void _TreasureMapInit( Item& item, bool firstTime )
+{
+    __EventItemFinish.SubscribeToItem( item, _TreasureMapFinish );
+}
+
+void _TreasureMapFinish( Item& item, bool deleted )
+{
+    //
+}
+
+const hash[] containerPids = { 42, 43, 44, 66, 67, 68, 69, 70, 128, 129, 130, 131, 132, 133, 134, 135, 157, 180, 188, 189 };
+
+#define aPids_WeaponSmallGuns    ( 1 )
+#define aPids_WeaponPistols      ( 2 )
+#define aPids_WeaponRifles       ( 3 )
+#define aPids_WeaponUnarmed      ( 4 )
+#define aPids_ArmorMedium        ( 5 )
+#define aPids_AmmoOther          ( 6 )
+#define aPids_Drugs              ( 7 )
+
+void PlaceLoot2Container( Map& map, Critter& cr )
+{
+    Location@ loc = map.GetLocation();
+    if( valid( loc ) )
+    {
+        if( loc.IsEncounter && not loc.GECachesCacheChecked )
+        {
+            Item@[] items;
+            Item@[] containers;
+            Item@ container;
+            if( cr.GetItems( -1, items ) > 0 )
+            {
+                for( uint i = 0, l = items.length(); i < l; i++ )
+                {
+                    Item@ item = items[ i ];
+                    if( valid( item ) && item.ProtoId == Content::Item::map )
+                    {
+                        if( item.IsQuestItem )
+                        {
+                            loc.GECachesCacheChecked = true;
+                            // карта найдена, теперь проверяем, что карта подходит и есть контейнеры из списка
+                            // если карт несколько, остальные игнорируются
+                            @container = GetValidContainer( loc );
+                            Location@ locWhere = GetLocationByPid( parameters[ item.GECachesNumParameters ][ 0 ][ 0 ], 0 );
+                            if( valid( container ) && valid( locWhere ) && GlobalDistance( locWhere, loc ) < __GlobalMapZoneLength * 2 )
+                            {
+                                item.IsQuestItem = false;
+                                SavedDeferredCall( HOUR_TICKS( 1 ), DeferredDeleteItem, item.Id );
+                                container.SetScript( "ElectronicLock@_LockedInit" );
+                                for( uint i2 = 0; i2 < parameters[ item.GECachesNumParameters ][ 1 ].length(); i2 += 2 )
+                                    container.AddItem( parameters[ item.GECachesNumParameters ][ 1 ][ i2 ], parameters[ item.GECachesNumParameters ][ 1 ][ i2 + 1 ], 0 );
+
+                                if( parameters[ item.GECachesNumParameters ].length() > 2 )
+                                {
+                                    if( parameters[ item.GECachesNumParameters ][ 2 ].length() >= 3 )
+                                    {
+                                        int pid = 0;
+                                        switch( parameters[ item.GECachesNumParameters ][ 2 ][ 0 ] )
+                                        {
+                                        case aPids_WeaponSmallGuns:
+                                            pid = Pids_WeaponSmallGuns[ Random( 0, Pids_WeaponSmallGuns.length() - 1 ) ];
+                                            break;
+                                        case aPids_WeaponPistols:
+                                            pid = Pids_WeaponPistols[ Random( 0, Pids_WeaponPistols.length() - 1 ) ];
+                                            break;
+                                        case aPids_WeaponRifles:
+                                            pid = Pids_WeaponRifles[ Random( 0, Pids_WeaponRifles.length() - 1 ) ];
+                                            break;
+                                        case aPids_WeaponUnarmed:
+                                            pid = Pids_WeaponUnarmed[ Random( 0, Pids_WeaponUnarmed.length() - 1 ) ];
+                                            break;
+                                        case aPids_ArmorMedium:
+                                            pid = Pids_ArmorMedium[ Random( 0, Pids_ArmorMedium.length() - 1 ) ];
+                                            break;
+                                        case aPids_AmmoOther:
+                                            pid = Pids_AmmoOther[ Random( 0, Pids_AmmoOther.length() - 1 ) ];
+                                            break;
+                                        case aPids_Drugs:
+                                            pid = Pids_Drugs[ Random( 0, Pids_Drugs.length() - 1 ) ];
+                                            break;
+                                        }
+                                        if( pid > 0 )
+                                        {
+                                            container.AddItem( pid, Random( parameters[ item.GECachesNumParameters ][ 2 ][ 1 ], parameters[ item.GECachesNumParameters ][ 2 ][ 2 ] ), 0 );
+                                        }
+                                    }
+                                }
+
+                                cr.SayMsg( SAY_NETMSG, TEXTMSG_TEXT, 7115 );
+                            }
+                        }
+                        return;
+                    }
+                }
+            }
+        }
+    }
+}
+
+uint GlobalDistance( Location@ loc1, Location@ loc2 )
+{
+    if( !valid( loc1 ) || !valid( loc2 ) )
+        return 0;
+    return uint( DISTANCE( loc1.WorldX, loc1.WorldY, loc2.WorldX, loc2.WorldY ) );
+}
+
+void DeferredDeleteItem( uint value )
+{
+    Item@ item = GetItem( value );
+    if( valid( item ) )
+        DeleteItem( item );
+}
+
+Item@ GetValidContainer( Location& loc )
+{
+    Map@ map;
+    Item@[] containers;
+    Item@[] validContainers;
+    for( uint i = 0, l = loc.GetMapCount(); i < l; i++ )
+    {
+        @map = loc.GetMapByIndex( i );
+        if( valid( map ) )
+            map.GetItemsByType( ItemType::Container, containers );
+    }
+    for( uint i = 0, l = containers.length(); i < l; i++ )
+    {
+        if( containerPids.find( containers[ i ].ProtoId ) >= 0 )
+            validContainers.insertLast( containers[ i ] );
+    }
+    if( validContainers.length() == 0 )
+        return null;
+    return validContainers[ Random( 0, validContainers.length() - 1 ) ];
+}
+
+uint[][][] parameters =
+{
+    {
+        { Content::Location::arroyo },
+        { Content::Item::leather_jacket, 1, Content::Item::desert_eagle, 1, Content::Item::_44_magnum_jhp, 100, Content::Item::bottle_caps, 500, Content::Item::stimpak, 5 },
+        { aPids_Drugs, 1, 2 }
+    },
+    {
+        { Content::Location::arroyo },
+        { Content::Item::sawed_off_shotgun, 1, Content::Item::shotgun_shells, 1, Content::Item::_44_magnum_jhp, 100, Content::Item::bottle_caps, 500, Content::Item::stimpak, 3 },
+        { aPids_WeaponPistols, 1, 1 }
+    },
+    {
+        { Content::Location::klamath },
+        { Content::Item::leather_jacket, 1, Content::Item::hunting_rifle, 1, Content::Item::_223_fmj, 50, Content::Item::bottle_caps, 800, Content::Item::nuka_cola, 2, Content::Item::gamma_gulp_beer, 1 },
+        { aPids_WeaponUnarmed, 1, 1 }
+    },
+    {
+        { Content::Location::den },
+        { Content::Item::leather_jacket, 1, Content::Item::louisville_slugger, 1, Content::Item::cookie, 1, Content::Item::bottle_caps, 1000, Content::Item::booze, 2, Content::Item::stimpak, 5 },
+        { aPids_WeaponRifles, 1, 1 }
+    },
+    {
+        { Content::Location::redding },
+        { Content::Item::leather_armor_mk_ii, 1, Content::Item::assault_rifle, 1, Content::Item::_5mm_ap, 300, Content::Item::bottle_caps, 1200, Content::Item::stimpak, 5, Content::Item::antidote, 2 },
+        { aPids_AmmoOther, 50, 90 }
+    },
+    {
+        { Content::Location::modoc },
+        { Content::Item::leather_armor, 1, Content::Item::_14mm_pistol, 1, Content::Item::_14mm_ap, 100, Content::Item::bottle_caps, 1000, Content::Item::stimpak, 5, Content::Item::healing_powder, 2, Content::Item::bottle_empty, 3 },
+        { aPids_WeaponRifles, 1, 1 }
+    },
+    {
+        { Content::Location::barter_ground },
+        { Content::Item::leather_armor_mk_ii, 1, Content::Item::sniper_rifle, 1, Content::Item::_223_fmj, 100, Content::Item::bottle_caps, 3000, Content::Item::stimpak, 10, Content::Item::buffout, 1 },
+        { aPids_Drugs, 4, 5 }
+    },
+    {
+        { Content::Location::barter_ground },
+        { Content::Item::cured_leather_armor, 1, Content::Item::combat_knife, 1, Content::Item::cattle_prod, 1, Content::Item::bottle_caps, 1500, Content::Item::stimpak, 5, Content::Item::jet, 10, Content::Item::bottle_ammiak, 2 },
+        { aPids_ArmorMedium, 1, 1 }
+    },
+    {
+        { Content::Location::new_reno },
+        { Content::Item::metal_armor, 1, Content::Item::combat_shotgun, 1, Content::Item::shotgun_shells, 300, Content::Item::bottle_caps, 1500, Content::Item::stimpak, 5, Content::Item::power_fist, 1 },
+        { aPids_WeaponPistols, 1, 1 }
+    },
+    {
+        { Content::Location::broken_hills },
+        { Content::Item::metal_armor_mk_ii, 1, Content::Item::_223_pistol, 1, Content::Item::_223_fmj, 100, Content::Item::bottle_caps, 1600, Content::Item::stimpak, 5, Content::Item::super_stimpak, 2, Content::Item::spiked_knuckles, 1 },
+        { aPids_WeaponRifles, 1, 1 }
+    },
+    {
+        { Content::Location::gecko },
+        { Content::Item::black_robe, 1, Content::Item::fn_fal, 1, Content::Item::explosive_rocket, 10, Content::Item::bottle_caps, 1500, Content::Item::stimpak, 5, Content::Item::rocket_launcher, 1 },
+        { aPids_WeaponSmallGuns, 1, 1 }
+    },
+    {
+        { Content::Location::vault_city },
+        { Content::Item::tesla_armor, 1, Content::Item::independent, 1, Content::Item::frag_grenade, 10, Content::Item::bottle_caps, 1500, Content::Item::stimpak, 10, Content::Item::mentats, 4 },
+        { aPids_ArmorMedium, 1, 1 }
+    },
+    {
+        { Content::Location::ncr },
+        { Content::Item::combat_armor, 1, Content::Item::minigun, 1, Content::Item::_5mm_ap, 500, Content::Item::bottle_caps, 3500, Content::Item::super_stimpak, 5, Content::Item::mentats, 2, Content::Item::plasma_grenade, 5 },
+        { aPids_AmmoOther, 200, 250 }
+    },
+    {
+        { Content::Location::san_francisco },
+        { Content::Item::brotherhood_combat_armor, 1, Content::Item::flamer, 1, Content::Item::flamethrower_fuel_mk_ii, 10, Content::Item::bottle_caps, 4500, Content::Item::super_stimpak, 5, Content::Item::rad_x, 3, Content::Item::_2mm_ec_ammo, 200, Content::Item::pk12_gauss_pistol, 1 },
+        { aPids_Drugs, 3, 5 }
+    }
+};

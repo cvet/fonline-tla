@@ -1,0 +1,421 @@
+// FOS Server
+
+#include "Tla"
+
+#pragma property Critter Protected     uint8 NcrSantiagoSpyMission Group = Quests, Quest = 4271, Max = 21
+#pragma property Critter PrivateServer uint  QSpyMissonStringNum
+
+#define DL                        # ( str )
+// #define DL #(str) Log(str)
+
+#define PLAYER_Q_ST_BEGINCATCH    ( 17 )             // статус квеста "вы начали процесс слежки
+#define PLAYER_Q_ST_CATCHED       ( 18 )             // статус квеста "вас засекли"
+#define PLAYER_Q_ST_FAILLEFT      ( 19 )             // статус квеста "вы покинули место не дослушав"
+#define PLAYER_Q_ST_COMPLETE      ( 20 )             // статус квеста "вас незаметили!"
+
+// catcher - нпц, который ловит сникера
+// catchRadius - радиус, в котором он его ищет
+// minSneak - навык сника, при котором игрок не будет замечен
+// checkTime - время, в реальных минутах, через которое производится проверка
+// varStatNum - номер переменной, в которой хранится статус поиска сникера (0 = закончен, 1 = активен)
+// varQuest - номер квестовой переменной для игрока
+// strAlarm - номер строки в диалоге нпц с сообщением "поймали сникера"
+// возвращает true - если все нормально, false - если провал
+bool BeginSpyControl( Critter& catcher, uint catchRadius, uint minSneak, uint checkTime, uint varStatNum, uint varQuest, uint strAlarm ) // export
+{
+    uint[] values = { catchRadius, minSneak, checkTime, catcher.Id, varStatNum, varQuest, strAlarm };
+    SpyControl@ sc = GetSpyConFromArgs( values );
+    DL( "spy control created" );
+    Critter@[] critters;
+    // находим всех игроков в доступном радиусе, независимо от того в снике он или нет, и записываем в массив потенциальных сникеров
+    if( !valid( sc ) )
+    {
+        DL( "bad spuy control class" );
+        return false;
+    }
+
+    Map @map = catcher.GetMap();
+    if( !valid( map ) )
+        return false;
+    DL( "map taken. CatchRadius = " + sc.SpyCatchRadius );
+
+    if( map.GetCrittersHex( catcher.HexX, catcher.HexY, sc.SpyCatchRadius, FIND_LIFE_AND_KO | FIND_ONLY_PLAYERS, critters ) > 0 )
+    {
+        DL( "begin find sneakers. Found players: " + critters.length() );
+        for( uint i = 0; i < critters.length(); i++ )
+        {
+            DL( "before pushback" );
+            sc.sneakerIds.insertLast( critters[ i ].Id );
+            DL( "after pushback" );
+
+            uint qVar = critters[ i ].GetAsInt( CritterProperty( sc.QuestVar ) );
+            if( qVar >= PLAYER_Q_ST_BEGINCATCH && qVar != PLAYER_Q_ST_BEGINCATCH && qVar > 0 && qVar <= PLAYER_Q_ST_COMPLETE )
+            {
+                DL( "assign var" );
+                critters[ i ].SetAsInt( CritterProperty( sc.QuestVar ), PLAYER_Q_ST_BEGINCATCH );
+            }
+        }
+    }
+    DL( "event created!" );
+    sc.CreateCatchCheckTimeEvent();
+    return true;
+}
+
+void DefaultHandler( uint[]& values )
+{
+    DL( "default handler fired" );
+    SpyControl@ sc = GetSpyConFromArgs( values );
+
+    if( !valid( sc ) )
+    {
+        Log( "Spy Control Failed. " );
+        return;
+    }
+
+    Critter@ cr = GetCritter( sc.CatcherId );
+    // проверка статуса поиска
+    if( cr.GetAsInt( CritterProperty( sc.CatchStatusVar ) ) == 0 )
+    {
+        // поиск закончен
+        sc.CompleteQuest();
+        return;
+    }
+
+    // нпц убит
+    Critter@ npc = sc.Catcher();
+    if( !valid( npc ) )
+        return;
+
+    if( !npc.IsLife() )
+    {
+        sc.QuestFailedCatchedPlayer();
+        return;
+    }
+
+    // иначе поиск будет всегда
+    uint nextCatch = sc.CreateCatchCheckTimeEvent();
+    DL( "Try to catch. Next Catch = " + nextCatch );
+    sc.QuestFailedLeftPlayers();
+
+    if( sc.TryCatchSpy() )
+    {
+        DL( "catch someione" );
+        sc.QuestFailedCatchedPlayer();
+        sc.BeginAttack();
+        cr.SetAsInt( CritterProperty( sc.CatchStatusVar ), 0 );        // не факт что нужно это делать... но на всякий случай
+        return;
+    }
+}
+
+void _CancelSpyControl( Critter& cr )
+{}
+
+SpyControl@ GetSpyConFromArgs( uint[] values )
+{
+    SpyControl@ sc = SpyControl();
+
+    sc.SpyCatchRadius = values.length() > 0 ? values[ 0 ] : 0;
+    sc.MinSneakToHide = values.length() > 1 ? values[ 1 ] : 0;
+    sc.SpyCheckTime = values.length() > 2 ? values[ 2 ] : 0;
+    sc.CatcherId = values.length() > 3 ? values[ 3 ] : 0;
+    sc.CatchStatusVar = values.length() > 4 ? values[ 4 ] : 0;
+    sc.QuestVar = values.length() > 5 ? values[ 5 ] : 0;
+    sc.DialStrAlarm = values.length() > 6 ? values[ 6 ] : 0;
+
+    if( values.length() > 7 )
+    {
+        for( uint i = 7; i < values.length(); i++ )
+        {
+            sc.sneakerIds.insertLast( values[ i ] );
+        }
+    }
+
+    return sc;
+}
+
+// вспомогательный класс для контроля игроков, находящихся в снике рядом с неким нпц
+// во время растянутого во времени процесса
+class SpyControl
+{
+    SpyControl()
+    {}
+
+    uint SpyCatchRadius; // радиус поиска сникера
+    int  MinSneakToHide; // минимальный уровень, который стропроцентно будет незаметен
+    uint SpyCheckTime;   // время в которое происходит поиск шпиона
+
+    uint CatcherId;      // Id того, кто ловит сникера
+    uint CatchStatusVar; // номер локальной переменной для кетчера, в которой хранится состояние "закончена поимка или нет"
+    uint[] sneakerIds;   // список id игроков в снике/не снике
+    uint DialStrAlarm;   // номер строки, в которой хранится текст, произносимый нпц при обнаружении игрока
+
+    uint QuestVar;       // номер квестовой переменной, в которой хранится статус квеста на сник
+
+    Critter@ Catcher()
+    {
+        return GetCritter( CatcherId );
+    }
+
+    uint CreateCatchCheckTimeEvent()
+    {
+        uint[] values = { SpyCatchRadius, MinSneakToHide, SpyCheckTime, CatcherId, CatchStatusVar, QuestVar, DialStrAlarm };
+        for( uint i = 0; i < sneakerIds.length(); i++ )
+            values.insertLast( sneakerIds[ i ] );
+        return DeferredCall( GAME_SECOND_TO_TICK( SpyCheckTime ), DefaultHandler, values );
+    }
+
+    // true - нашли когото
+    // false - нет
+    bool TryCatchSpy()
+    {
+        Critter@ catcher = Catcher();
+        if( !valid( catcher ) )
+            return false;
+        if( catcher.IsDead() )
+            return false;
+
+        Critter@[] critters;
+        uint dist = 0;
+        Map  @map = catcher.GetMap();
+        if( !valid( map ) )
+            return false;
+        DL( "search for player + " + SpyCatchRadius + "x =" + catcher.HexX + "y " + catcher.HexY + "map:" + map.ProtoId + " dialog" + catcher.DialogId );
+        if( map.GetCrittersHex( catcher.HexX, catcher.HexY, SpyCatchRadius, FIND_LIFE_AND_KO | FIND_ONLY_PLAYERS, critters ) == 0 )
+            return false;
+        DL( "found someone" );
+        for( uint i = 0; i < critters.length(); i++ )
+        {
+            dist = GetCrittersDistantion( catcher, critters[ i ] );
+
+            if( dist > SpyCatchRadius )
+                continue;
+
+            if( !critters[ i ].IsHide )
+                return true;
+
+            if( critters[ i ].SkillSneak < MinSneakToHide )
+                return true;
+        }
+
+        return false;
+    }
+
+    // для тех, кто слинял, квест пропал
+    void QuestFailedLeftPlayers()
+    {
+        Critter@ cr = Catcher();
+        if( !valid( cr ) )
+            return;
+        Map @map = cr.GetMap();
+        if( !valid( map ) )
+            return;
+        Critter@[] critters;
+        map.GetCrittersHex( cr.HexX, cr.HexY, SpyCatchRadius, FIND_LIFE_AND_KO | FIND_ONLY_PLAYERS, critters );
+        bool playerIsHere = true;
+
+        for( uint i = 0; i < sneakerIds.length(); i++ )
+        {
+            playerIsHere = false;
+            for( uint j = 0; j < critters.length(); j++ )
+            {
+                if( sneakerIds[ i ] == critters[ j ].Id )
+                {
+                    j = critters.length();
+                    playerIsHere = true;
+                }
+            }
+            if( !playerIsHere )
+            {
+                Critter@ critter = GetCritter( sneakerIds[ i ] );
+                uint     qVar = critter.GetAsInt( CritterProperty( QuestVar ) );
+                if( qVar >= PLAYER_Q_ST_FAILLEFT && qVar == PLAYER_Q_ST_BEGINCATCH )
+                    critter.SetAsInt( CritterProperty( QuestVar ), PLAYER_Q_ST_FAILLEFT );
+            }
+        }
+    }
+
+    // если кого-то заметили, квест пропал для всех
+    void QuestFailedCatchedPlayer()
+    {
+        for( uint i = 0; i < sneakerIds.length(); i++ )
+        {
+            Critter@ critter = GetCritter( sneakerIds[ i ] );
+            uint     qVar = critter.GetAsInt( CritterProperty( QuestVar ) );
+            if( qVar >= PLAYER_Q_ST_CATCHED && qVar == PLAYER_Q_ST_BEGINCATCH )
+                critter.SetAsInt( CritterProperty( QuestVar ), PLAYER_Q_ST_CATCHED );
+        }
+    }
+
+    // атака всех игроков в радиусе видимости
+    void BeginAttack()
+    {
+        Critter@cr = Catcher();
+        if( !valid( cr ) )
+            return;
+
+        Critter@[] critters;
+        Map @map = cr.GetMap();
+        if( !valid( map ) )
+            return;
+        if( map.GetCrittersHex( cr.HexX, cr.HexY, SpyCatchRadius, FIND_LIFE_AND_KO | FIND_ONLY_PLAYERS, critters ) == 0 )
+            return;
+
+        cr.ErasePlane( AI_PLANE_MISC, true );
+
+        for( uint i = 0; i < critters.length(); i++ )
+        {
+            if( critters[ i ].IsPlayer() )
+            {
+                AddAttackPlane( cr, 0, critters[ i ] );
+            }
+        }
+
+        cr.SayMsg( SAY_SHOUT_ON_HEAD, TEXTMSG_DLG, DLGSTR( cr.DialogId, DialStrAlarm ) );
+    }
+
+    // завершение квеста для всех, кто присутстсвовал при всем докладе
+    void CompleteQuest()
+    {
+        Critter@ cr = Catcher();
+        if( !valid( cr ) )
+            return;
+        Map @map = cr.GetMap();
+        if( !valid( map ) )
+            return;
+        Critter@[] critters;
+        map.GetCrittersHex( cr.HexX, cr.HexY, SpyCatchRadius, FIND_LIFE_AND_KO | FIND_ONLY_PLAYERS, critters );
+        bool playerIsHere = true;
+
+        for( uint i = 0; i < sneakerIds.length(); i++ )
+        {
+            playerIsHere = false;
+            for( uint j = 0; j < critters.length(); j++ )
+            {
+                if( sneakerIds[ i ] == critters[ j ].Id )
+                {
+                    j = critters.length();
+                    playerIsHere = true;
+                }
+            }
+            if( playerIsHere )
+            {
+                Critter@ critter = GetCritter( sneakerIds[ i ] );
+                uint     qVar = critter.GetAsInt( CritterProperty( QuestVar ) );
+                if( qVar >= PLAYER_Q_ST_COMPLETE && qVar == PLAYER_Q_ST_BEGINCATCH )
+                    critter.SetAsInt( CritterProperty( QuestVar ), PLAYER_Q_ST_COMPLETE );
+            }
+        }
+    }
+}
+
+#define STR_ALARM        ( 1 )                               // статус квеста "вас незаметили!"
+#define ROLE_LYNETT      ( 34 )                              // роль - Линетт
+#define ROLE_MACLUR      ( 35 )                              // роль - Макклюр
+
+#define STR_FIRST_RPT    ( 3180 )                            // первая строка доклада в FOTEXT
+#define STR_LAST_RPT     ( 3205 )                            // последняя строка доклада в FOTEXT
+
+#define PLANE_ID_MOVE    ( 124 )                             // ид плана "подойти к линетт"
+
+import uint GetNearFullSecond( uint16 year, uint16 month, uint16 day, uint16 hour, uint16 minute, uint16 second ) from "Time";
+
+void _VCityMapInit( Map& map, bool firstTime )
+{
+    Critter@ maclure = map.GetNpc( ROLE_MACLUR, FIND_LIFE_AND_KO | FIND_ONLY_NPC, 0 );
+    if( !valid( maclure ) )
+        return;
+
+    DeferredCall( GAME_SECOND_TO_TICK( GetNearFullSecond( 0, 0, 0, 18, 0, 0 ) - __FullSecond ), BeginReport, maclure.Id );
+}
+
+// начало сцены рапорта
+void BeginReport( uint value )
+{
+    Critter@ maclure = GetCritter( value );
+    if( !valid( maclure ) )
+        return;
+
+    Map @map = maclure.GetMap();
+    if( !valid( map ) )
+    {
+        DeferredCall( GAME_DAY_TO_TICK( 1 ), BeginReport, value );
+        return;
+    }
+
+    Critter@ lynett = map.GetNpc( ROLE_LYNETT, FIND_LIFE_AND_KO | FIND_ONLY_NPC, 0 );
+    if( !valid( lynett ) )
+    {
+        DeferredCall( GAME_DAY_TO_TICK( 1 ), BeginReport, value );
+        return;
+    }
+
+    if( !maclure.IsLife() || !lynett.IsLife() )
+    {
+        DeferredCall( GAME_DAY_TO_TICK( 1 ), BeginReport, value );
+        return;
+    }
+
+    __EventNpcPlaneEndEx.SubscribeToCritter( maclure, _PlaneEnd );
+    uint hX = lynett.HexX;
+    uint hY = lynett.HexY;
+
+    AddWalkPlane( maclure, 0, PLANE_ID_MOVE, 0, hX, hY, Random( 0, 5 ), false, 3 );
+
+    DeferredCall( GAME_SECOND_TO_TICK( GetNearFullSecond( 0, 0, 0, 18, 0, 0 ) - __FullSecond ), BeginReport, value );
+}
+
+// CRITTER_EVENT_PLANE_END
+bool _PlaneEnd( Critter& cr, NpcPlane& plane, int reason, Critter@ someCr, Item@ someItem )
+{
+    if( plane.Identifier == PLANE_ID_MOVE && reason == REASON_SUCCESS )
+    {
+        Map @map = cr.GetMap();
+        if( !valid( map ) )
+            return true;
+        Critter@ lynett = map.GetNpc( ROLE_LYNETT, FIND_LIFE_AND_KO | FIND_ONLY_NPC, 0 );
+        if( !valid( lynett ) )
+            return true;
+
+        cr.SpyCathActive = 1;
+        lynett.SpyCathActive = 1;
+
+        lynett.SetDir( GetDirection( lynett.HexX, lynett.HexY, cr.HexX, cr.HexY ) );
+        cr.SetDir( GetDirection( cr.HexX, cr.HexY, lynett.HexX, lynett.HexY ) );
+
+        if( BeginSpyControl( cr,         10, 100, 60, uint( CritterProperty::SpyCathActive ), uint( CritterProperty::NcrSantiagoSpyMission ), STR_ALARM ) &&
+            BeginSpyControl( lynett, 10, 100, 60, uint( CritterProperty::SpyCathActive ), uint( CritterProperty::NcrSantiagoSpyMission ), STR_ALARM ) )
+        {
+            lynett.QSpyMissonStringNum = STR_FIRST_RPT;
+            cr.QSpyMissonStringNum = STR_FIRST_RPT + 1;
+            AddMiscPlane( lynett, 0, __FullSecond + 2 * 60, "SpyMission@plane_SayNextPhrase" );
+            AddMiscPlane( cr, 0, __FullSecond + 4 * 60, "SpyMission@plane_SayNextPhrase" );
+
+        }
+        else
+        {
+            Log( "Begin spy control error" );
+        }
+    }
+
+    return true;
+}
+
+void plane_SayNextPhrase( Critter& cr )
+{
+    if( cr.QSpyMissonStringNum > STR_LAST_RPT )
+    {
+        EndReport( cr );
+        return;
+    }
+
+    cr.SayMsg( SAY_NORM_ON_HEAD, TEXTMSG_TEXT, uint( cr.QSpyMissonStringNum ) );
+
+    cr.QSpyMissonStringNum += 2;
+    AddMiscPlane( cr, 0, __FullSecond + 4 * 60, "SpyMission@plane_SayNextPhrase" );
+}
+
+void EndReport( Critter& cr )
+{
+    cr.QSpyMissonStringNum = 0;
+    cr.SpyCathActive = 0;
+}

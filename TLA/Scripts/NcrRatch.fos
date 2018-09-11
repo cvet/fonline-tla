@@ -1,0 +1,174 @@
+// FOS Server
+
+#include "Tla"
+
+#pragma property Critter Protected uint8 NcrRatchBuggy Group = Quests, Quest = 4242, Max = 6
+
+#define HOLO_MSG_ID_BUGGY     ( 53 )
+#define FORCE_DIALOG          return 53
+#define ENTIRE_BUGGY_PLACE    ( 100 )
+
+// **************************************************************************
+// Таймаут для игрока на сдачу мусора Ретчу
+// **************************************************************************
+
+// установка локального таймаута для игрока(не нпц!) на сдачу мусора ретчу
+// v0 - номер переменной
+// v1 - число минут таймаута
+void r_RatchTimeOutSet( Critter& player, Critter@ npc, int v0, int v1 )
+{
+    player.SetAsInt( CritterProperty( v0 ), __FullSecond + v1 * 60 );
+}
+
+// проверка локального таймаута для игрока(не нпц!) на сдачу мусора ретчу
+// номер переменной
+bool d_RatchTimeOutCheck( Critter& player, Critter@ npc, int v0 )
+{
+    return __FullSecond >= uint( player.GetAsInt( CritterProperty( v0 ) ) );
+}
+
+// инверсия
+bool d_NotRatchTimeOutCheck( Critter& player, Critter@ npc, int v0 )
+{
+    return not d_RatchTimeOutCheck( player, npc, v0 );
+}
+
+// **************************************************************************
+// Квест "БАГГИ"
+// чтобы собрать багги, Ретчу нужны схемы подвески, которые можно найти
+// в одном из компьютеров Сьерры
+// игрок должен заюзать скилл "наука" на компьютере - после чего откроется
+// диалог и персонаж получит возможность скачать данные на голодиск
+// голодиск может быть любым, если будет несколько голодисков - изменится
+// один, выбранный случайным образом
+// **************************************************************************
+
+// 79/99 координаты компа на базе Сьерра, первый подземный этаж - спальня
+// PID компьтера 2011
+// скрипт компьютера на базе Сьерра
+// квестовая переменная q_ncr_ratch_buggy (4242)
+bool s_UseComputer( Critter& player, const Item& scenery, CritterProperty skill, Item@ item )
+{
+    // false - передача евента на дальнейшую обработку
+    // true - прекращение обработки
+    // диалог вызывается при использовании навыка "наука"
+    if( skill != CritterProperty::SkillScience )
+        return false;
+
+    // не допускается использование предметов
+    if( valid( item ) )
+        return false;
+
+    // на всякий случай...
+    if( !player.IsPlayer() )
+        return false;
+
+    // если статус квеста неправильный - диалога не произойдет
+    if( player.NcrRatchBuggy != 2 )
+        return false;
+
+    // запуск диалога с компьютером
+    RunDialog( player, Content::Dialog::sad_comp_q_ratch_baggi, scenery.HexX, scenery.HexY, false );
+    return true;
+}
+
+// выдаем голодиск с нужной записью
+void r_GiveBaggiHoloToPlayer( Critter& player, Critter@ npc )
+{
+    // сначала нужно забрать исходный голодиск, неважно какой, тот, который первым попадется
+    if( player.CountItem( Content::Item::holodisk ) == 0 )
+        return;
+
+    // проверка статуса квеста "багги"
+    if( player.NcrRatchBuggy != 2 )
+        return;
+
+    // удаляем существующий голодиск у игрока
+    player.DeleteItem( Content::Item::holodisk, 1 );
+    // даем новый голодиск с нужными данными
+    Item@ holo = player.AddItem( Content::Item::holodisk, 1 );
+    // переключаем статус квеста
+    player.NcrRatchBuggy = 3;
+    holo.SetScript( "_HoloBuggyInit" );
+}
+
+// скрипт инициализации для голодиска
+void _HoloBuggyInit( Item& holo, bool firstTime )
+{
+// ставим нужную запись к голодиску
+    holo.HolodiskNum = HOLO_MSG_ID_BUGGY;
+    // подписываемся на использование голодиска клешней
+    __EventCritterUseItem.SubscribeToItem( holo, _eBuggyHoloUse );
+}
+
+// обработчик использовнаия голодиска
+bool _eBuggyHoloUse( Critter& crit, Item& item, Critter@ onCritter, Item@ onItem, const Item@ onScenery, uint param )
+{
+    // гасим обработку голодиска, не нужно чтобы в пипбой с этого диска что-то записывалось
+    return true;
+}
+
+// отдаем багги игроку!
+// пример из nr_t_ray.fos
+uint r_GiveBuggyToPlayer( Critter& player, Critter@ npc )
+{
+    // квест уже был сдан ранее
+    if( player.NcrRatchBuggy == 6 )
+        FORCE_DIALOG;
+
+    // получаем карту с игроком
+    Map@ map = player.GetMap();
+    if( not valid( map ) )
+        FORCE_DIALOG;
+
+    // создаем массив хексов
+    Entire[] entires;
+    ParseEntires( map, entires, ENTIRE_BUGGY_PLACE );
+
+    uint16 hx, hy, entNum;
+    for( int i = 0, j = entires.length(); i <= j; i++ )
+    {
+        // не найдено свободное место
+        if( i == j )
+            FORCE_DIALOG;
+
+        Entire@ ent = entires[ i ];
+        // проверка, что машина влезет
+        if( map.CheckPlaceForItem( ent.HexX, ent.HexY, Content::Item::buggy ) )
+        {
+            hx = ent.HexX;
+            hy = ent.HexY;
+            entNum = ent.Number;
+            break;
+        }
+    }
+
+    // ключ
+    uint  keyId = Random( 10000, 50000 );
+    // добавление тачки на карту
+    Item@ car = map.AddItem( hx, hy, Content::Item::buggy, 1 );
+
+    if( not valid( car ) )
+        FORCE_DIALOG;
+    car.IsQuestItem = true;
+    car.LockerId = keyId;
+    car.Charge = car.Car_TankVolume;
+
+    Item@ bag = car.GetChild( 0 );
+    if( valid( bag ) )
+    {
+        bag.LockerId = keyId;
+        // крутой багажник
+        bag.LockerComplexity = Random( 95, 100 );
+    }
+
+    Item@ key = player.AddItem( Content::Item::key, 1 );
+    if( valid( key ) )
+        key.LockerId = keyId;
+
+    // изменяем статус квеста
+    player.NcrRatchBuggy = 6;
+    player.Experience += 10000;
+
+    return 0;
+}

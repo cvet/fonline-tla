@@ -1,0 +1,538 @@
+// FOS Server
+// Author: rifleman17
+// Скрипт для НПЦ-жителей города, не защищенных баунтихантерами
+// Периодически, после того, как местные слишком часто умирали, НПЦ будут собираться вместе и принимать решение атаковать всех посетителей города.
+// у НПЦ занимается #pragma property Critter PrivatteServer uint NpcRevengeNpcHxHy под хранение числа простоев.
+
+#include "Tla"
+
+#pragma property Critter PrivateServer uint NpcRevengeNpcHxHy
+#pragma property Critter PrivateServer uint NpcRevengeCountWait
+
+#pragma property Map PrivateServer uint8[] NpcRevengeData
+
+#define MODE_NORMAL          ( 0 )  // Обычный режим
+#define MODE_LEADER_CALLS    ( 1 )  // Лидер призывает игроков
+#define MODE_MEETING         ( 2 )  // Идет митинг
+#define MODE_HOSTILE         ( 3 )  // Враждебный режим, все нпц атакуют любых игроков
+
+#define MAX_LEADER_CALLS     ( 4 )  // Максимальное число призывов лидера
+#define MAX_DEADS_BASE       ( 1 )  // Максимальное число убитых нпц по умолчанию
+#define LEADER_RADIUS        ( 10 ) // Радиус области возле лидера. куда пойдут нпц
+
+#define PLANE_MOVE2LEADER    ( 24 ) // План на перемещение к лидеру в момент MODE_LEADER_CALLS
+#define PLANE_WAITMEETING    ( 25 ) // План на ожидание завершения лекции
+#define CTE_CHECK_GAG        ( 26 ) // Идентификатор события поиска преград при движении.
+#define DL                   # (s) ( Log( "NpcRevenge: " + s ) )
+// #define DL #(s)
+
+import bool GetFreeHex( Map& map, uint radius, uint16& hx, uint16& hy ) from "Caravan";
+
+bool Map2Revenge( Map& map,  uint leaderRole, uint textMsg, uint strCall, uint strCallAns, uint strFirst, uint strLast, uint strAns, uint strKill, uint strEnter )
+{
+    RevengeMapInfo rm = RevengeMapInfo( map.Id, leaderRole, textMsg, strCall, strCallAns, strFirst, strLast, strAns, strKill, strEnter );
+    if( valid( rm ) )
+    {
+        rm.Save();
+        return true;
+    }
+    return false;
+}
+
+RevengeMapInfo@ RevengeFromMap( Map@ map )
+{
+    if( !valid( map ) )
+        return null;
+    RevengeMapInfo@ rm = RevengeMapInfo( map );
+    if( valid( rm ) && rm.Exists() )
+    {
+        rm.Load();
+        return rm;
+    }
+    return null;
+}
+
+int GetRevengeMode( Map& map )
+{
+    RevengeMapInfo@ rm = RevengeFromMap( map );
+    if( !valid( rm ) )
+        return -1;
+    return rm.MapMode;
+}
+
+class RevengeMapInfo
+{
+    uint MapId;                // Карта, на которой происходят все события
+    uint DeadNpcToRevenge;     // Максимальное число убитых на карте НПЦ, после которого местные становястя агрессивны по отношению к игроку.
+    uint DeadsCounter;         // Текущее число убитых на карте НПЦ.
+    uint MapMode;              // Режимы карты: обычный, идет сбор нпц вокруг лидера, идет митинг, враждебный
+    uint LeaderRole;           // Номер роли нпц-лидера, который призывает всех местных жителей.
+    // Текстовые реплики
+    uint TextMsg;              // Номер текстового файла, в котором лежат реплики лидера.
+    uint StrCall;              // Номер строки, в которой лидер призывает местных.
+    uint StrCallAnswer;        // Ответы НПЦ на призывы лидера.
+    uint LeaderCalls;          // Счетчик призывов лидера.
+    uint LastActionTime;       // Время последнего действия, совершенного лидером, например, произнесенной фразы
+
+    uint StrMeetingFirst;      // Первая фраза из монолога лидера во время митинга
+    uint StrMeetingLast;       // Последняя фраза из монолога лидера во время митинга
+    uint StrMeetingCur;        // Текущая активная фраза из монолога лидера
+    uint StrMeetingAnswer;     // Строка ответа НПЦ на реплики лидера во время митинга
+
+    uint StrHostileKill;       // Строка, которую произносит НПЦ, убивший игрока во враждебном режиме.
+    uint StrHostileEnter;      // Строка, которую произносят НПЦ при входе игрока в локацию
+
+    RevengeMapInfo( Map & map )
+    {
+        MapId = map.Id;
+    }
+
+    RevengeMapInfo( uint mapId, uint leaderRole, uint textMsg, uint strCall, uint strCallAns, uint strFirst, uint strLast, uint strAns, uint strKill, uint strEnter )
+    {
+        MapId = mapId;
+        DeadNpcToRevenge = MAX_DEADS_BASE;
+        DeadsCounter = 0;
+        MapMode = MODE_NORMAL;
+        LeaderRole = leaderRole;
+        TextMsg = textMsg;
+        TextMsg = textMsg;
+        StrCall = strCall;
+        StrCallAnswer = strCallAns;
+        LeaderCalls = 0;
+        StrMeetingFirst = strFirst;
+        StrMeetingLast = strLast;
+        StrMeetingCur = 0;
+        StrMeetingAnswer = strAns;
+        StrHostileKill = strKill;
+        StrHostileEnter = strEnter;
+    }
+
+    void SetMode( uint mode )
+    {
+        switch( mode )
+        {
+        case MODE_NORMAL:
+            if( MapMode != MODE_NORMAL )
+                DeadNpcToRevenge += 10;
+            break;
+        case MODE_LEADER_CALLS:
+            LeaderCalls = 0;
+            LastActionTime = 0;
+            break;
+        case MODE_MEETING:
+            LastActionTime = 0;
+            StrMeetingCur = 0;
+            break;
+        case MODE_HOSTILE:
+            LastActionTime = __FullSecond;                     // Используем для последующих проверок, все ли НПЦ добрались домой
+            break;
+        default:
+            break;
+        }
+        MapMode = mode;
+        Save();
+        SetEvents();
+    }
+
+    void SetEvents()
+    {
+        Map@ map = GetMap( MapId );
+        if( !valid( map ) )
+            return;
+        __EventMapCritterDead.SubscribeToMap( map, _MapCritterDead );
+        switch( MapMode )
+        {
+        case MODE_NORMAL:
+            __EventMapCritterIn.UnsubscribeFromMap( map, _MapInCritter );
+            break;
+        case MODE_LEADER_CALLS:
+            __EventMapLoop1.SubscribeToMap( map, _MapLoop0_LeaderCalls );
+            map.LoopTime1 =  15000 ;                    // Раз в 15 секунд
+            break;
+        case MODE_MEETING:
+            __EventMapLoop1.SubscribeToMap( map, _MapLoop0_Meeting );
+            map.LoopTime1 =  10000 ;                   // Раз в 10 секунд
+            break;
+        case MODE_HOSTILE:
+            CancelPlanes( map );
+            __EventMapLoop1.SubscribeToMap( map, _MapLoop0_CheckGag );
+            map.LoopTime1 =  60000 ;                   // Раз в 60 секунд
+            __EventMapCritterIn.SubscribeToMap( map, _MapInCritter );
+            break;
+        default:
+            break;
+        }
+    }
+    void CancelPlanes( Map& map )
+    {
+        DL( "cancel called" );
+        Critter@[] critters;
+        Critter@ cr;
+        map.GetCritters( 0, FIND_ALL | FIND_ONLY_NPC, critters );
+        for( uint i = 0, l = critters.length(); i < l; i++ )
+        {
+            @cr = critters[ i ];
+            if( valid( cr ) )
+            {
+                NpcPlane@[] planes;
+                cr.GetPlanes( AI_PLANE_WALK, planes );
+                uint erased = 0;
+                for( uint j = 0, len = planes.length(); j < len; j++ )
+                {
+                    if( planes[ j ].Identifier == PLANE_MOVE2LEADER )
+                    {
+                        if( cr.ErasePlane( j - erased ) )
+                            erased++;
+                    }
+                }
+            }
+        }
+    }
+    // Serializator
+    void Save()
+    {
+        Serializator save;
+        save.Set( MapId );
+        save.Set( DeadNpcToRevenge );
+        save.Set( DeadsCounter );
+        save.Set( MapMode );
+        save.Set( LeaderRole );
+        save.Set( TextMsg );
+        save.Set( StrCall );
+        save.Set( StrCallAnswer );
+        save.Set( LeaderCalls );
+        save.Set( LastActionTime );
+        save.Set( StrMeetingFirst );
+        save.Set( StrMeetingLast );
+        save.Set( StrMeetingCur );
+        save.Set( StrMeetingAnswer );
+        save.Set( StrHostileKill );
+        save.Set( StrHostileEnter );
+        GetMap( MapId ).NpcRevengeData = save.GetData();
+    }
+
+    void Load()
+    {
+        Serializator load;
+        if( load.SetData( GetMap( MapId ).NpcRevengeData ) == 0 )
+            return;
+        load.Get( MapId );
+        load.Get( DeadNpcToRevenge );
+        load.Get( DeadsCounter );
+        load.Get( MapMode );
+        load.Get( LeaderRole );
+        load.Get( TextMsg );
+        load.Get( StrCall );
+        load.Get( StrCallAnswer );
+        load.Get( LeaderCalls );
+        load.Get( LastActionTime );
+        load.Get( StrMeetingFirst );
+        load.Get( StrMeetingLast );
+        load.Get( StrMeetingCur );
+        load.Get( StrMeetingAnswer );
+        load.Get( StrHostileKill );
+        load.Get( StrHostileEnter );
+    }
+
+    bool Exists()
+    {
+        return GetMap( MapId ).NpcRevengeData.length() > 0;
+    }
+
+    void Erase()
+    {
+        Map@ map = GetMap( MapId );
+        if( !valid( map ) )
+            return;
+        map.NpcRevengeData = array< uint8 >();
+		__EventMapLoop1.UnsubscribeFromMap( map, _MapLoop0_CheckGag );
+        __EventMapCritterIn.UnsubscribeFromMap( map, _MapInCritter );
+        map.SetScript( "" );
+    }
+}
+// События различных стадий
+void _MapInCritter( Map& map, Critter& cr )
+{
+    if( cr.IsPlayer() )
+    {
+        uint            minDist = 50000;
+        int             idx = -1;
+        uint            dist = 0;
+        RevengeMapInfo@ rm = RevengeFromMap( map );
+        if( !valid( rm ) || rm.MapMode != MODE_HOSTILE )
+            return;
+        Critter@[] critters;
+        map.GetCritters( 0, FIND_LIFE | FIND_ONLY_NPC, critters );
+        Critter@ npc;
+        for( uint i = 0, l = critters.length(); i < l; i++ )
+        {
+            @npc = critters[ i ];
+            if( valid( npc ) && IsLocalNpc( npc, map ) )
+            {
+                npc.IsNoSupply = true;
+                AddAttackPlane( npc, 0, cr.Id );
+                dist = GetCrittersDistantion( cr, npc );
+                if( dist < minDist )
+                {
+                    minDist = dist;
+                    idx = i;
+                }
+            }
+        }
+        if( idx > 0 )
+        {
+            @npc = critters[ idx ];
+            if( valid( npc ) )
+            {
+                DL( "npc talk" );
+                npc.SayMsg( SAY_NORM, rm.TextMsg, rm.StrHostileEnter );
+            }
+        }
+    }
+}
+
+// Если нпц загородили друг другу проход
+void _MapLoop0_CheckGag( Map& map )
+{
+    DL( "Checking gag" );
+    RevengeMapInfo@ rm = RevengeFromMap( map );
+    if( ( rm.LastActionTime + __TimeMultiplier * 60 * 3 ) < __FullSecond ) // 3 минуты. Проверок будет 4 шт
+        __EventMapLoop1.UnsubscribeFromMap( map, _MapLoop0_CheckGag );
+    Critter@[] critters;
+    Critter@ cr;
+    map.GetCritters( 0, FIND_LIFE | FIND_ONLY_NPC, critters );
+    for( uint i = 0, l = critters.length(); i < l; i++ )
+    {
+        @cr = critters[ i ];
+        if( valid( cr ) && IsLocalNpc( cr, map ) && !cr.IsNoPlanes() )
+        {
+            DL( "try find" );
+            if( CritterGagHome( cr, map ) && cr.GetTimeEvents( CTE_CHECK_GAG, null, null, null ) == 0 )
+            {
+                DL( "Found gagging npc. Id: " + cr.Id );
+                // Нпц имеет только один план, идти на домашнюю позицию
+                // проход не найден
+                // еще не задано событие проверки нужно ли смещение
+                // сохраняем текущие координаты в NpcRevengeNpcHxHy
+                cr.NpcRevengeNpcHxHy = cr.HexX * cr.HexY;
+                cr.AddTimeEvent( "cte_CheckGag", 15 * __TimeMultiplier, CTE_CHECK_GAG );
+            }
+        }
+    }
+}
+
+uint cte_CheckGag( Critter& cr, int identifier, uint& stage )
+{
+    DL( "Checking gag" );
+    Map@ map = cr.GetMap();
+    if( valid( map ) && CritterGagHome( cr, map ) )
+    {
+        if( cr.HexX * cr.HexY == cr.NpcRevengeNpcHxHy )
+        {
+            DL( "Gag: Move Random" );
+            cr.MoveRandom();
+        }
+    }
+    cr.NpcRevengeNpcHxHy = 0;
+    return 0;
+}
+
+// Предположение: криттер застрял на дороге домой
+bool CritterGagHome( Critter& cr, Map& map )
+{
+    NpcPlane@[] planes;
+    if( cr.GetPlanes( planes ) == 1 && valid( planes[ 0 ] ) && planes[ 0 ].Type == AI_PLANE_WALK && planes[ 0 ].Walk_HexX == cr.HomeHexX &&
+        planes[ 0 ].Walk_HexY == cr.HomeHexY && planes[ 0 ].Walk_Dir == cr.HomeDir && map.GetPathLength( cr.HexX, cr.HexY, cr.HomeHexX, cr.HomeHexY, 0 ) == 0 )
+        return true;
+    DL( "no gag!" );
+    return false;
+}
+
+void _MapLoop0_Meeting( Map& map )
+{
+    RevengeMapInfo@ rm = RevengeFromMap( map );
+    if( rm.LastActionTime > 0 && __FullSecond < ( rm.LastActionTime + 10 * __TimeMultiplier ) )
+        return;         // Иногда MAP_LOOP происходит чаще, чем указано в SetLoopTime. Эта проверка, чтобы НПЦ не частил.
+    if( !valid( rm ) )
+        return;
+    if( map.GetNpcCount( rm.LeaderRole, FIND_LIFE | FIND_ONLY_NPC ) > 0 && ( rm.StrMeetingFirst + rm.StrMeetingCur ) < rm.StrMeetingLast )
+    {
+        Critter@ leader = map.GetNpc( rm.LeaderRole, FIND_LIFE | FIND_ONLY_NPC, 0 );
+        if( valid( leader ) )
+        {
+            leader.SayMsg( SAY_SHOUT, rm.TextMsg, rm.StrMeetingFirst + rm.StrMeetingCur );
+            rm.StrMeetingCur++;
+            rm.Save();
+            uint[] values = { map.Id, leader.HexX, leader.HexY };
+            DeferredCall( 10000, MeetingAnswer, values );
+            return;
+        }
+    }
+    // Лидер не найден, сразу переходим к стадии атаки
+    __EventMapLoop1.UnsubscribeFromMap( map, _MapLoop0_Meeting );    // Сначала сброс, затем новое присвоение уже в rm.SetMode
+    rm.SetMode( MODE_HOSTILE );
+}
+
+void MeetingAnswer( uint[]& values )
+{
+    uint            mapId = values[ 0 ];
+    uint            hx = values[ 1 ];
+    uint            hy = values[ 2 ];
+    Critter@[] npc;
+    Map@            map = GetMap( mapId );
+    RevengeMapInfo@ rm = RevengeFromMap( map );
+    if( valid( map ) && valid( rm ) && rm.MapMode == MODE_MEETING && map.GetCrittersHex( hx, hy, LEADER_RADIUS, FIND_LIFE | FIND_ONLY_NPC, npc ) > 0 && valid( rm ) )
+    {
+        uint     i = Random( 0, npc.length() - 1 );
+        Critter@ cr = npc[ i ];
+        if( valid( cr ) && IsLocalNpc( cr, map ) && uint( cr.NpcRole ) != rm.LeaderRole )
+            cr.SayMsg( SAY_NORM, rm.TextMsg, rm.StrMeetingAnswer );
+    }
+}
+void _MapLoop0_LeaderCalls( Map& map )
+{
+    RevengeMapInfo@ rm = RevengeFromMap( map );
+    if( !valid( rm ) )
+        return;
+    if( rm.LastActionTime > 0 && __FullSecond < ( rm.LastActionTime + 15 * __TimeMultiplier ) )
+        return;         // Иногда MAP_LOOP происходит чаще, чем указано в SetLoopTime. Эта проверка, чтобы НПЦ не частил.
+    rm.LastActionTime = __FullSecond;
+    if( map.GetNpcCount( rm.LeaderRole, FIND_LIFE | FIND_ONLY_NPC ) > 0 )
+    {
+        Critter@ leader = map.GetNpc( rm.LeaderRole, FIND_LIFE | FIND_ONLY_NPC, 0 );
+        if( valid( leader ) && rm.LeaderCalls < MAX_LEADER_CALLS )
+        {
+            rm.LeaderCalls++;
+            rm.Save();
+            leader.SayMsg( SAY_SHOUT, rm.TextMsg, rm.StrCall );           // Лидер кричит созывающую фразу
+            Critter@[] npc;
+            Critter@ cr;
+            uint     l = map.GetCritters( 0, FIND_LIFE | FIND_ONLY_NPC, npc );
+            for( uint i = 0; i < l; i++ )
+            {
+                @cr = npc[ i ];
+                if( valid( cr ) && IsLocalNpc( cr, map ) && cr.IsNoPlanes() && uint( cr.NpcRole ) != rm.LeaderRole )
+                {
+                    if( cr.BodyType != BT_CHILDREN && Random( 0, 5 ) == 0 )   // Детей из реплик исключаем
+                        cr.SayMsg( SAY_NORM, rm.TextMsg, rm.StrCallAnswer );  // Относительная частота произнесения
+                    uint16 hx = leader.HexX;
+                    uint16 hy = leader.HexY;
+                    if( GetFreeHex( map, LEADER_RADIUS, hx, hy ) )
+                    {
+                        if( AddWalkPlane( cr, 0, PLANE_MOVE2LEADER, 0, hx, hy, GetDirection( hx, hy, leader.HexX, leader.HexY ), ( ( Random( 1, 3 ) == 1 ) ? true : false ), Random( 0, 1 ) ) )
+                        {
+                            AddMiscPlane( cr, 0, 0, "NpcRevenge@plane_WaitMeeting" );
+                            cr.NpcRevengeNpcHxHy = 0;
+                        }
+                    }
+                }
+            }
+            return;
+        }
+        else
+        {            
+			__EventMapLoop1.UnsubscribeFromMap( map, _MapLoop0_LeaderCalls );            // Сначала сброс, затем новое присвоение уже в rm.SetMode
+            rm.SetMode( MODE_MEETING );
+            return;
+        }
+    }
+    // Лидер не найден, сразу переходим к стадии атаки
+    
+	__EventMapLoop1.UnsubscribeFromMap( map, _MapLoop0_LeaderCalls );    // Сначала сброс, затем новое присвоение уже в rm.SetMode
+    rm.SetMode( MODE_HOSTILE );
+}
+
+void plane_WaitMeeting( Critter& cr )
+{
+    if( cr.NpcRevengeNpcHxHy > 100 )
+        return;         // Слишком долго ждали, значит, что-то пошло не так
+
+    cr.NpcRevengeNpcHxHy += 1;
+    Map@ map = cr.GetMap();
+    if( !valid( map ) )
+        return;
+
+    RevengeMapInfo@ rm = RevengeFromMap( map );
+    if( !valid( rm ) )
+        return;
+
+    if( rm.MapMode == MODE_LEADER_CALLS || rm.MapMode == MODE_MEETING )   // Продолжаются призывы к сбору от лидера, либо идет митинг
+        AddMiscPlane( cr, 0, __FullSecond + __TimeMultiplier * 10, "NpcRevenge@plane_WaitMeeting" );
+}
+
+void _RevengeMapInit( Map& map, bool firstTime )
+{
+    RevengeMapInfo@ rm = RevengeFromMap( map );
+    if( !valid( rm ) )
+        return;
+
+    rm.SetEvents();
+}
+
+// Признак, это местный НПЦ
+bool IsLocalNpc( Critter@ cr, Map@ map )
+{
+    if( !valid( cr ) || cr.IsPlayer() || !valid( map ) )
+        return false;
+    return cr.HomeMapId == map.Id;
+}
+
+// Признак, все нпц на карте враждебны
+bool IsHostileMap( Map@ map )
+{
+    if( !valid( map ) )
+        return false;
+    RevengeMapInfo@ rm =  RevengeFromMap( map );
+    return valid( rm ) && rm.MapMode == MODE_HOSTILE;
+}
+
+void _MapCritterDead( Map& map, Critter& cr, Critter@ killer )
+{
+    DL( "smbdy dead" );
+    RevengeMapInfo@ rm =  RevengeFromMap( map );
+    if( !valid( rm ) )
+        return;
+    if( IsLocalNpc( cr, map ) && valid( killer ) && killer.IsPlayer() )
+    {
+        rm.DeadsCounter++;
+    }
+    if( cr.IsPlayer() && IsLocalNpc( killer, map ) )
+    {
+        rm.DeadsCounter--;
+        if( rm.MapMode == MODE_HOSTILE )
+            killer.SayMsg( SAY_NORM, rm.TextMsg, rm.StrHostileKill, "$pname" + GetPlayerName( cr.Id ) );
+    }
+    rm.Save();
+    if( rm.DeadsCounter == 0 && rm.MapMode == MODE_HOSTILE )
+        rm.SetMode( MODE_NORMAL );
+    if( rm.DeadsCounter == rm.DeadNpcToRevenge && rm.MapMode == MODE_NORMAL )
+        rm.SetMode( MODE_LEADER_CALLS );
+}
+
+// debug
+void Revenge( Critter& cr, int role, int, int )
+{
+    Map@ map = cr.GetMap();
+    if( valid( RevengeFromMap( map ) ) )
+    {
+        cr.Say( SAY_NETMSG, "revenge already set" );
+        return;
+    }
+    Map2Revenge( map, role, TEXTMSG_TEXT, 7200, 7201, 7202, 7207, 7208, 7209, 7210 );
+    map.SetScript( "_RevengeMapInit" );
+    RevengeMapInfo@ rm = RevengeFromMap( map );
+    rm.SetEvents();
+}
+
+void Erase( Critter& cr, int role, int, int )
+{
+    Map@            map = cr.GetMap();
+    RevengeMapInfo@ rm = RevengeFromMap( map );
+    if( !valid( rm ) )
+    {
+        cr.Say( SAY_NETMSG, "revenge not set" );
+        return;
+    }
+    rm.Erase();
+    map.SetScript( "" );
+}

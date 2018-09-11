@@ -1,0 +1,259 @@
+// FOS Server
+// Generic encounter npc script
+// Author: cvet, rifleman17, Dagnir
+
+#include "Tla"
+
+import void SetDeterioration( Item& item, int deteriorationProcent ) from "Repair";
+import void SaveLoot2Storehouse( uint16 WorldX, uint16 WorldY, Item@[] items ) from "GameEventStorehouse";
+
+#define MESSAGE_COLLECT_NPC    ( 30 )
+#define MESSAGE_ATTACK_HIM     ( 31 )
+#define MESSAGE_ATTACK_ME      ( 32 )
+#define PLANE_LOOT             ( 30 )
+
+uint LastDeadId = 0;
+uint[] CollectedNpcIds;
+
+void _NpcInit( Critter& npc, bool firstTime )
+{
+    uint bt = npc.BodyType;
+    if( bt >= BT_MEN && bt <= BT_GHOUL )
+    {
+        __EventCritterMessage.SubscribeToCritter( npc, _NpcMessage );
+        __EventCritterDead.SubscribeToCritter( npc, _NpcDead );
+        __EventCritterSomeCritterDead.SubscribeToCritter( npc, _NpcSmthDead );
+        __EventCritterSomeCritterUseSkill.SubscribeToCritter( npc, _NpcSmthUseSkill );
+        __EventNpcPlaneEndEx.SubscribeToCritter( npc, _NpcPlaneEnd );
+        __EventCritterStealing.SubscribeToCritter( npc, _NpcStealing );
+        __EventCritterSomeCritterUseItem.SubscribeToCritter( npc, _NpcSmthUseItem );
+        __EventCritterSomeCritterDropItem.SubscribeToCritter( npc, _NpcSmthDropItem );
+
+        Item@[] items;
+        npc.GetItems( -1, items );
+        bool favrtAmmoSet = false;
+        bool favrtWpnSet  = false;
+        for( uint i = 0, j = items.length(); i < j; i++ )
+        {
+            SetDeterioration( items[ i ], Random( 80, 95 ) );
+            if( items[ i ].Type == ItemType::Weapon && !favrtWpnSet )
+            {
+                npc.SetFavoriteItem( SLOT_HAND1, items[ i ].ProtoId );
+                favrtWpnSet = true;
+            }
+            /*	if(items[i].Type == ItemType::Ammo && !favrtAmmoSet)
+                    {
+                            npc.SetFavoriteItem(SLOT_HAND2, items[i].ProtoId);
+                            favrtAmmoSet = true;
+                            continue;
+                    } */
+        }
+    }
+}
+
+Critter@ GetCritterForLooting( Critter& lootCr )
+{
+    // Collect npc
+    Critter@ result = null;
+    lootCr.SendMessage( MESSAGE_COLLECT_NPC, 0, MESSAGE_TO_WHO_SEES_ME );
+    if( CollectedNpcIds.length() > 0 )
+    {
+        // Find better looter
+        for( uint i = 0, j = CollectedNpcIds.length(); i < j; i++ )
+        {
+            Critter@ cr = GetCritter( CollectedNpcIds[ i ] );
+            if( cr.GetPlanes( PLANE_LOOT, null ) == 0 )
+            {
+                @result = cr;
+                break;
+            }
+        }
+
+        // Get random npc
+        if( not valid( result ) )
+            @result = GetCritter( CollectedNpcIds[ Random( 0, CollectedNpcIds.length() - 1 ) ] );
+
+        // Free handles
+        CollectedNpcIds.clear();
+    }
+    return result;
+}
+
+void _NpcSmthUseItem( Critter& npc, Critter& fromCr, Item& item, Critter@ onCritter, Item@ onItem,const Item@ onScenery, uint param )
+{
+    if( fromCr.IsPlayer() && npc.IsLife() )
+    {
+        uint pid = item.ProtoId;
+        if( pid == Content::Item::plastic_explosives || pid == Content::Item::mine || pid == Content::Item::toggle_switch || pid == Content::Item::dynamite )
+        {
+            AddAttackPlane( npc, 0, fromCr, __RunOnCombat );
+            npc.SendMessage( MESSAGE_ATTACK_HIM, fromCr.Id, MESSAGE_TO_ALL_ON_MAP );
+        }
+    }
+}
+
+void _NpcSmthDropItem( Critter& npc, Critter& fromCr, Item& item )
+{
+    if( fromCr.IsPlayer() && npc.IsLife() )
+    {
+        uint pid = item.ProtoId;
+        if( pid == Content::Item::active_plastic_explosive || pid == Content::Item::active_mine || pid == Content::Item::active_dynamite )
+        {
+            AddAttackPlane( npc, 0, fromCr, __RunOnCombat );
+            npc.SendMessage( MESSAGE_ATTACK_HIM, fromCr.Id, MESSAGE_TO_ALL_ON_MAP );
+        }
+    }
+}
+
+void _NpcMessage( Critter& npc, Critter& fromCr, int message, int value )
+{
+    if( message == MESSAGE_COLLECT_NPC )
+    {
+        if( not npc.IsDead() )
+            CollectedNpcIds.insertLast( npc.Id );
+    }
+    else if( message == MESSAGE_ATTACK_HIM )
+    {
+        if( fromCr.TeamId == npc.TeamId && npc.IsLife() )
+        {
+            Critter@ target = GetCritter( value );
+            if( valid( target ) )
+                AddAttackPlane( npc, 0, target, __RunOnCombat );
+        }
+    }
+    else if( message == MESSAGE_ATTACK_ME )
+    {
+        Critter@ target = GetCritter( value );
+        if( valid( target ) )
+            AddAttackPlane( npc, 0, target, __RunOnCombat );
+    }
+}
+
+void _NpcDead( Critter& npc, Critter@ killer )
+{
+    // Loot
+    NpcPlane@[] planes;
+    if( npc.GetPlanes( PLANE_LOOT, planes ) > 0 )
+    {
+        Critter@ cr = GetCritterForLooting( npc );
+        if( valid( cr ) )
+        {
+            // Copy planes
+            for( uint i = 0, j = planes.length(); i < j; i++ )
+                cr.AddPlane( planes[ i ] );
+        }
+    }
+
+    // Encounters loyality
+    if( valid( killer ) && killer.IsPlayer() )
+    {
+        CritterProperty prop = CritterProperty::Invalid;
+        switch( npc.TeamId )
+        {
+        case TEAM_EncounterHubologist:
+            prop = CritterProperty::EncLoyalityHubologists;
+            break;
+        case TEAM_EncounterNCR:
+            prop = CritterProperty::EncLoyalityNcr;
+            break;
+        case TEAM_EncounterVC:
+            prop = CritterProperty::EncLoyalityVCity;
+            break;
+        case TEAM_EncounterRedding:
+            prop = CritterProperty::EncLoyalityRedding;
+            break;
+        case TEAM_EncounterBroken:
+            prop = CritterProperty::EncLoyalityBroken;
+            break;
+        case TEAM_EncounterGecko:
+            prop = CritterProperty::EncLoyalityGecko;
+            break;
+        case TEAM_EncounterArroyo:
+            prop = CritterProperty::EncLoyalityArroyo;
+            break;
+        case TEAM_EncounterKlamath:
+            prop = CritterProperty::EncLoyalityKlamath;
+            break;
+        case TEAM_EncounterModoc:
+            prop = CritterProperty::EncLoyalityModoc;
+            break;
+        case TEAM_EncounterDen:
+            prop = CritterProperty::EncLoyalityDen;
+            break;
+        case TEAM_EncounterReno:
+            prop = CritterProperty::EncLoyalityReno;
+            break;
+        case TEAM_EncounterEnclave:
+            prop = CritterProperty::EncLoyalityEnclave;
+            break;
+        case TEAM_EncounterSF:
+            prop = CritterProperty::EncLoyalitySf;
+            break;
+        default:
+            break;
+        }
+        if( prop != CritterProperty::Invalid )
+            killer.SetAsInt( prop, killer.GetAsInt( prop ) + 1 );
+    }
+}
+
+void _NpcSmthDead( Critter& npc, Critter& fromCrit, Critter@ killer )
+{
+    if( fromCrit.Id != LastDeadId )
+    {
+        if( fromCrit.ItemsCount() > 0 && _CritCanDropItemsOnDead( fromCrit ) )
+        {
+            Critter@ cr = GetCritterForLooting( fromCrit );
+            if( valid( cr ) )
+                AddWalkPlane( cr, 0, PLANE_LOOT, fromCrit.Id, fromCrit.HexX, fromCrit.HexY, 6, false, 1 );
+        }
+        LastDeadId = fromCrit.Id;
+    }
+}
+//t "EventCritterSomeCritterUseSkill( Critter& critter, Critter& whoUse, CritterProperty skill, Critter@ onCritter, Item@ onItem, const Item@ onScenery )" deferred
+void _NpcSmthUseSkill( Critter& npc, Critter& fromCr, CritterProperty skill, Critter@ onCritter, Item@ onItem, const Item@ onScenery )
+{
+    if( ( skill == SKILL_LOOT_CRITTER || skill == CritterProperty::SkillSteal ) && valid( onCritter ) && npc.GetPlanes( PLANE_LOOT, onCritter.Id, null ) > 0 )
+        AddAttackPlane( npc, AI_PLANE_ATTACK_PRIORITY + 1, fromCr, __RunOnCombat );
+
+}
+
+bool _NpcPlaneEnd( Critter& npc, NpcPlane& plane, int reason, Critter@ someCr, Item@ someItem )
+{
+    if( plane.Identifier == PLANE_LOOT && reason == REASON_SUCCESS )
+    {
+        Critter@ cr = GetCritter( plane.IdentifierExt );
+        if( valid( cr ) && cr.IsDead() )
+        {
+            Item@[] items;
+            cr.GetItems( SLOT_INV, items );
+            cr.GetItems( SLOT_HAND1, items );
+            cr.GetItems( SLOT_HAND2, items );
+            npc.GetMap().GetItems( cr.HexX, cr.HexY, items );
+
+            for( uint i = 0, j = items.length(); i < j; i++ )
+            {
+                int type = items[ i ].Type;
+                if( type < ItemType::Armor || type > ItemType::Key )
+                    @items[ i ] = null;                                                              // Skip
+            }
+
+            MoveItems( items, npc );
+            SaveLoot2Storehouse( npc.WorldX, npc.WorldY, items );
+            _CritAnimatePickup( npc );
+            npc.Wait( __Breaktime );
+        }
+        return false;    // Skip global and end plane
+    }
+    return true;     // Run global
+}
+
+void _NpcStealing( Critter& npc, Critter& thief,  Item& item, uint count )
+{
+	bool success = false;
+    if( !success )
+    {
+        AddAttackPlane( npc, 0, thief, __RunOnCombat );
+        npc.SendMessage( MESSAGE_ATTACK_HIM, thief.Id, MESSAGE_TO_ALL_ON_MAP );
+    }
+}

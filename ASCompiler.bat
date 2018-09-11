@@ -1,1 +1,1 @@
-cd "%~dp0" & "%~dp0FOnlineSDK\Tools\ASCompiler\ASCompiler.exe" %*
+cd "%~dp0" & "%~dp0FOnline\Binaries\ASCompiler\ASCompiler.exe" %*

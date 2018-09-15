@@ -1,0 +1,777 @@
+// FOS Client
+
+//#pragma rpc Server UseSneak( bool enable )
+
+#include "Tla"
+
+uint[] ChosenActions;
+uint8[] MovePath;
+
+
+void ModuleInit()
+{
+    __EventLoop.Subscribe( ChosenProcess );
+}
+
+uint GetChosenActions( array< uint >@ actions )
+{
+    if( actions !is null )
+        actions = ChosenActions;
+    return ChosenActions.length();
+}
+
+void SetChosenActions( array< uint >@ actions )
+{
+    ChosenActions.resize( 0 );
+
+    if( actions !is null )
+    {
+        Assert( actions.length() % 7 == 0 );
+        ChosenActions = actions;
+    }
+}
+
+void SetAction( uint[] action, bool append, bool toBeginning )
+{
+    Assert( action.length() == 7 );
+
+    if( !append )
+        ChosenActions.resize( 0 );
+
+    if( toBeginning )
+    {
+        for( int i = int( action.length() ) - 1; i >= 0; i-- )
+            ChosenActions.insertFirst( action[ i ] );
+    }
+    else
+    {
+        for( uint i = 0; i < action.length(); i++ )
+            ChosenActions.insertLast( action[ i ] );
+    }
+}
+
+#define CHECK_NEED_AP                                             \
+    # ( needAp )                                                  \
+    if( chosen.ActionPoints < int(needAp) )                       \
+    {                                                             \
+        /* Message( GetMsgStr( STR_COMBAT_NEED_AP, needAp ) ); */ \
+        break;                                                    \
+    }                                                             \
+    if( chosen.CurrentAp / AP_DIVIDER < int(needAp) )             \
+        return;
+
+void ChosenProcess()
+{
+    Critter@ chosen = GetChosen();
+    if( chosen is null )
+        return;
+
+    if( CurMap !is null )
+    {
+        // Roof
+        CustomCall( "SkipRoof " + chosen.HexX + " " + chosen.HexY );
+
+        // Hidden mode
+        CustomCall( "ChosenAlpha " + ( chosen.IsHide ? 130 : 255 ) );
+    }
+
+    // Actions
+    if( !chosen.IsFree() )
+        return;
+
+    // Game pause
+    // if( __Singleplayer && __GamePaused )
+    //    return;
+
+    // Ap regeneration
+    if( chosen.CurrentAp < chosen.ActionPoints * AP_DIVIDER )
+    {
+        uint tick = GetTick();
+        if( chosen.ApRegenerationTick == 0 )
+            chosen.ApRegenerationTick = tick;
+
+        uint delta = tick - chosen.ApRegenerationTick;
+        if( delta >= 500 )
+        {
+            chosen.ApRegenerationTick = tick;
+
+            uint apRegeneration = chosen.ApRegenerationTime;
+            if( apRegeneration == 0 )
+                apRegeneration = __ApRegeneration;
+
+            uint maxAp = chosen.ActionPoints * AP_DIVIDER;
+            chosen.CurrentAp = chosen.CurrentAp + maxAp * delta / apRegeneration;
+            if( chosen.CurrentAp > int(maxAp) )
+                chosen.CurrentAp = maxAp;
+        }
+    }
+    if( chosen.CurrentAp / AP_DIVIDER > chosen.ActionPoints )
+        chosen.CurrentAp = chosen.ActionPoints * AP_DIVIDER;
+
+    if( ChosenActions.length() == 0 )
+        return;
+
+    if( !chosen.IsLife() )
+    {
+        ChosenActions.clear();
+        return;
+    }
+
+    uint[] curAction = ChosenActions;
+    curAction.resize( 7 );
+    int actionType = curAction[ 0 ];
+
+    // Force end move
+    if( actionType != CHOSEN_MOVE && actionType != CHOSEN_MOVE_TO_CRIT && MovePath.length() > 0 )
+    {
+        MovePath.resize( 0 );
+        CustomCall( "SendMove" );
+    }
+
+    switch( actionType )
+    {
+    case CHOSEN_MOVE_TO_CRIT:
+    case CHOSEN_MOVE:
+    {
+        uint16 hx = ChosenActions[ 1 ];
+        uint16 hy = ChosenActions[ 2 ];
+        bool   isRun = ( ChosenActions[ 3 ] != 0 );
+        uint   cut = ChosenActions[ 4 ];
+        uint   startTick = ChosenActions[ 6 ];
+
+        bool   skipFind = false;
+
+        if( CurMap is null )
+            break;
+
+        // Move to critter
+        if( actionType == CHOSEN_MOVE_TO_CRIT )
+        {
+            Critter@ cr = GetCritter( ChosenActions[ 1 ] );
+            if( cr !is null )
+            {
+                hx = cr.HexX;
+                hy = cr.HexY;
+            }
+            else
+            {
+                skipFind = true;
+            }
+        }
+
+        // Check move
+        if( isRun )
+        {
+            if( !__RunOnCombat && IS_TIMEOUT( chosen.TimeoutBattle ) )
+                isRun = false;
+            else if( !__RunOnTransfer && IS_TIMEOUT( chosen.TimeoutTransfer ) )
+                isRun = false;
+            else if( chosen.IsDamagedRightLeg || chosen.IsDamagedLeftLeg || chosen.IsOverweight )
+                isRun = false;
+            else if( chosen.IsNoRun )
+                isRun = false;
+        }
+        else
+        {
+            if( chosen.IsNoWalk && !chosen.IsNoRun )
+                isRun = true;
+        }
+        chosen.IsRunning = isRun;
+
+        // Can't move
+        if( !isRun && chosen.IsNoWalk )
+        {
+            Message( TEXTMSG_GAME, STR_CRITTER_CANT_MOVE );
+            skipFind = true;
+        }
+
+        // Already here
+        if( !skipFind && GetDistantion( chosen.HexX, chosen.HexY, hx, hy ) <= cut )
+            skipFind = true;
+
+        // Next move hex is free
+        // if( !skipFind && MovePath.length() > 0 )
+        // {
+        //	uint16 nextHx = chosen.HexX;
+        //	uint16 nextHy = chosen.HexY;
+        //	MoveHexByDir( nextHx, nextHy, MovePath[ 0 ], 1 );
+        //	if( IsMapHexPassed( nextHx, nextHy ) )
+        //		skipFind = true;
+        // }
+
+        // Find path
+        if( !skipFind )
+        {
+            uint8[] @ path = GetPath( chosen.HexX, chosen.HexY, hx, hy, cut );
+            if( path is null && GetDistantion( chosen.HexX, chosen.HexY, hx, hy ) > cut + 1 )
+                @path = GetPath( chosen.HexX, chosen.HexY, hx, hy, ++cut );
+
+            if( path !is null )
+                MovePath = path;
+            else
+                MovePath.resize( 0 );
+        }
+
+        // Transit
+        if( MovePath.length() > 0 )
+        {
+            uint16 nextHx = chosen.HexX;
+            uint16 nextHy = chosen.HexY;
+            MoveHexByDir( nextHx, nextHy, MovePath[ 0 ], 1 );
+            CustomCall( "TransitCritter " + nextHx + " " + nextHy + " true false" );
+
+            chosen.ApRegenerationTick = 0;
+            CustomCall( "SetCursorPos" );
+            CustomCall( "RebuildLookBorders" );
+        }
+
+        // Send about move
+        string moveStr = "";
+        for( uint i = 0; i < MovePath.length(); i++ )
+            moveStr += " " + MovePath[ i ];
+        CustomCall( "SendMove" + moveStr );
+
+        if( MovePath.length() > 0 )
+            MovePath.removeAt( 0 );
+
+        // Continue move
+        if( MovePath.length() > 0 )
+            return;
+    }
+    break;
+    case CHOSEN_DIR:
+    {
+        bool cw = ( ChosenActions[ 1 ] == 0 );
+
+        if( CurMap is null )
+            break;
+
+        int dir = chosen.Dir;
+        if( cw )
+        {
+            dir++;
+            if( dir >= 6 )
+                dir = 0;
+        }
+        else
+        {
+            dir--;
+            if( dir < 0 )
+                dir = 5;
+        }
+
+        CustomCall( "ChangeDir " + dir );
+    }
+    break;
+    case CHOSEN_USE_ITEM:
+    {
+        uint  itemId = ChosenActions[ 1 ];
+        uint8 targetType = ChosenActions[ 3 ];
+        uint  targetId = ChosenActions[ 4 ];
+        uint8 rate = ChosenActions[ 5 ];
+        uint  param = ChosenActions[ 6 ];
+        uint8 use = ( rate & 0xF );
+        uint8 aim = ( rate >> 4 );
+
+        // Find item
+        const Item@ item = ( itemId != 0 ? chosen.GetItemById( itemId ) : chosen.GetSlotItem( SLOT_HAND1 ) );
+        if( item is null )
+            break;
+
+        bool isMainItem = ( item.Id == 0 || item.Id == chosen.GetSlotItem( SLOT_HAND1 ).Id );
+
+        // Find target
+        Critter@ targetCr;
+        Item@    targetItem;
+        Item@    targetSelfItem;
+        if( targetType == TARGET_SELF )
+            @targetCr = chosen;
+        else if( targetType == TARGET_SELF_ITEM )
+            @targetSelfItem = chosen.GetItemById( targetId );
+        else if( targetType == TARGET_CRITTER )
+            @targetCr = GetCritter( targetId );
+        else if( targetType == TARGET_ITEM )
+            @targetItem = GetItem( targetId );
+        else
+            break;
+
+        if( targetType == TARGET_CRITTER && chosen is targetCr )
+            targetType = TARGET_SELF;
+        if( targetType == TARGET_SELF )
+            targetId = chosen.Id;
+
+        // Check
+        if( targetType == TARGET_CRITTER && targetCr is null )
+            break;
+        if( targetType == TARGET_ITEM && targetItem is null )
+            break;
+        if( targetType != TARGET_CRITTER && item.Id == 0 )
+            break;
+
+        // Parse use
+        bool isAttack = ( targetType == TARGET_CRITTER && isMainItem && item.Type == ItemType::Weapon && use < MAX_USES );
+        bool isReload = ( targetType == TARGET_SELF_ITEM && use == USE_RELOAD && item.Type == ItemType::Weapon );
+        bool isSelf = ( targetType == TARGET_SELF || targetType == TARGET_SELF_ITEM );
+
+        // Calculate ap cost
+        uint apCost = 1;
+        __EventCritterGetUseApCost.Raise( chosen, item, rate, apCost );
+
+        // Check weapon
+        if( isAttack )
+        {
+            if( CurMap is null )
+                break;
+            if( isSelf )
+                break;
+            if( item.Type != ItemType::Weapon )
+                break;
+            if( targetCr.IsDead() )
+                break;
+            if( !chosen.IsUnlimitedAmmo && item.Weapon_MaxAmmoCount > 0 && item.AmmoCount == 0 )
+            {
+                uint8 sound = ( use == 0 ? item.Weapon_SoundId_0 : ( use == 1 ? item.Weapon_SoundId_1 : item.Weapon_SoundId_2 ) );
+                PlaySound( 'W', 'O', sound, '1' );
+                break;
+            }
+            if( item.Weapon_IsTwoHanded && ( chosen.IsDamagedRightArm || chosen.IsDamagedLeftArm ) )
+            {
+                Message( TEXTMSG_COMBAT, STR_COMBAT_NEED_DMG_ARM );
+                break;
+            }
+            if( chosen.IsDamagedRightArm && chosen.IsDamagedLeftArm && item.Id != 0 )
+            {
+                Message( TEXTMSG_COMBAT, STR_COMBAT_NEED_DMG_TWO_ARMS );
+                break;
+            }
+            if( item.Deteriorable && item.IsBroken )
+            {
+                // Message( TEXTMSG_GAME, STR_INV_WEAR_WEAPON_BROKEN );
+                break;
+            }
+        }
+        else if( isReload )
+        {
+            if( !isSelf )
+                break;
+
+            CHECK_NEED_AP( apCost );
+
+            // if( isMainItem )
+            //    item->SetWeaponMode( USE_PRIMARY );
+
+            if( item.Weapon_MaxAmmoCount == 0 )
+                break;                           // No have holder
+
+            if( targetId == uint( -1 ) )         // Unload
+            {
+                if( item.AmmoCount == 0 )
+                    break;                       // Is empty
+                targetId = 0;
+            }
+            else if( targetSelfItem !is null )   // Reload
+            {
+                if( item.AmmoCount >= item.Weapon_MaxAmmoCount )
+                    break;                       // Is full
+
+                /*if( item.Weapon_Caliber )
+                   {
+                    targetSelfItem = chosen->GetAmmoAvialble( item );
+                    if( !targetSelfItem )
+                        break;
+                    targetId = targetSelfItem->GetId();
+                   }*/
+            }
+            else                // Load
+            {
+                // if( item->WeapGetAmmoCaliber() != targetSelfItem->AmmoGetCaliber() )
+                //    break;      // Different caliber
+                // if( item->WeapGetAmmoPid() == targetSelfItem->GetProtoId() && item->WeapIsFull() )
+                //    break;      // Is full
+            }
+        }
+        else                    // Use
+        {
+            if( use != USE_USE )
+                break;
+        }
+
+        // Find Target
+        if( !isSelf && CurMap !is null )
+        {
+            uint16 hx, hy;
+            if( targetCr !is null )
+            {
+                hx = targetCr.HexX;
+                hy = targetCr.HexY;
+            }
+            else
+            {
+                hx = targetItem.HexX;
+                hy = targetItem.HexY;
+            }
+
+            uint maxDist = 0;
+            if( isAttack )
+            {
+                const Item@ weap = chosen.GetSlotItem( SLOT_HAND1 );
+                __EventCritterGetAttackDistantion.Raise( chosen, weap, weap.Mode, maxDist );
+            }
+            else
+            {
+                maxDist = 1 + chosen.Multihex;
+            }
+            if( targetCr !is null )
+                maxDist += targetCr.Multihex;
+
+            // Target find
+            bool needMove = false;
+            // if( isAttack )
+            //    needMove = !HexMngr.TraceBullet( chosen.HexX, chosen.HexY, hx, hy, maxDist, 0.0f, targetCr, false, nullptr, 0, nullptr, nullptr, nullptr, true );
+            // else
+            //    needMove = !CheckDist( chosen.HexX, chosen.HexY, hx, hy, maxDist );
+
+            if( needMove )
+            {
+                // If target too far, then move to it
+                uint dist = GetDistantion( chosen.HexX, chosen.HexY, hx, hy );
+                if( dist > maxDist )
+                {
+                    bool isRun = ( __AlwaysRun && dist >= __AlwaysRunUseDist );
+                    // if( targetCr !is null )
+                    //    SetAction( array<uint> ={ CHOSEN_MOVE_TO_CRIT, targetCr->GetId(), 0, isRun, maxDist );
+                    // else
+                    //    SetAction( array<uint> ={ CHOSEN_MOVE, hx, hy, isRun, maxDist, 0 );
+
+                    // if( HexMngr.CutPath( chosen, chosen.HexX, chosen.HexY, hx, hy, maxDist ) )
+                    //    SetAction( curAction, false, false );
+
+                    return;
+                }
+
+                Message( TEXTMSG_GAME, STR_FINDPATH_AIMBLOCK );
+                break;
+            }
+
+            // Refresh orientation
+            CHECK_NEED_AP( apCost );
+            uint8 dir = GetDirection( chosen.HexX, chosen.HexY, hx, hy );
+            if( GetDistantion( chosen.HexX, chosen.HexY, hx, hy ) >= 1 && chosen.Dir != dir )
+                CustomCall( "ChangeDir " + dir );
+        }
+
+        // Use
+        CHECK_NEED_AP( apCost );
+
+        /*if( targetItem && targetItem->IsGenericOrGrid() )
+            Net_SendUseItem( apCost, itemId, rate, targetType, ( targetItem.HexX << 16 ) | ( targetItem.HexY & 0xFFFF ), targetItem->GetProtoId(), param );
+           else
+            Net_SendUseItem( apCost, itemId, rate, targetType, targetId, 0, param );  // Item or critter
+         */
+
+        /*if( use >= USE_PRIMARY && use <= USE_THIRD )
+            chosen.Action( ACTION_USE_WEAPON, rate, item );
+           else if( use == USE_RELOAD )
+            chosen.Action( ACTION_RELOAD_WEAPON, 0, item );
+           else
+            chosen.Action( ACTION_USE_ITEM, 0, item );*/
+
+        // chosen->SubAp( apCost );
+
+        /*if( isAttack && !aim && Keyb::ShiftDwn )               // Continue battle after attack
+           {
+            SetAction( curAction, false, false );
+            return;
+           }*/
+    }
+    break;
+    case CHOSEN_MOVE_ITEM:
+    {
+        uint  itemId = ChosenActions[ 1 ];
+        uint  itemCount = ChosenActions[ 2 ];
+        uint8 toSlot = ChosenActions[ 3 ];
+        bool  isSecondTry = ( ChosenActions[ 5 ] != 0 );
+
+        Item@ item = chosen.GetItemById( itemId );
+        if( item is null )
+            break;
+
+        uint8 fromSlot = item.CritSlot;
+        if( fromSlot == toSlot )
+            break;
+        if( toSlot != SLOT_GROUND )
+            break;
+
+        if( toSlot == SLOT_GROUND )
+        {
+            if( !__EventItemCheckMove.Raise( item, itemCount, chosen, chosen ) )
+                break;
+        }
+
+        Item@ itemSwap = null;
+        if( toSlot != SLOT_INV && toSlot != SLOT_GROUND )
+            @itemSwap = chosen.GetItem( 0, toSlot );
+
+        if( !__EventCritterCheckMoveItem.Raise( chosen, item, toSlot, itemSwap ) )
+        {
+            // Gameplay swap workaround
+            if( itemSwap !is null && !isSecondTry )
+            {
+                // Add actions
+                if( __EventCritterCheckMoveItem.Raise( chosen, itemSwap, SLOT_INV, null ) &&
+                    __EventCritterCheckMoveItem.Raise( chosen, item, toSlot, null ) )
+                {
+                    ChosenActions.reverse();
+                    ChosenActions.resize( ChosenActions.length() - 7 );
+                    ChosenActions.reverse();
+
+                    SetAction( array< uint > = { CHOSEN_MOVE_ITEM, itemId, itemCount, toSlot, 0, 1, 0 }, false, true );
+                    SetAction( array< uint > = { CHOSEN_MOVE_ITEM, itemSwap.Id, itemSwap.Count, SLOT_INV, 0, 1, 0 }, false, true );
+                    return;
+                }
+            }
+            break;
+        }
+
+        // Action points
+        uint apCost = __RtApCostMoveItemInventory;
+        if( ( fromSlot == SLOT_HAND1 && toSlot == SLOT_HAND2 ) || ( fromSlot == SLOT_HAND2 && toSlot == SLOT_HAND1 ) )
+            apCost = 0;
+        if( toSlot == SLOT_GROUND )
+            apCost = __RtApCostDropItem;
+        CHECK_NEED_AP( apCost );
+
+        CustomCall( "MoveItem " + apCost + " " + itemCount + " " + itemId + " " + ( itemSwap !is null ? itemSwap.Id : 0 ) + " " + toSlot );
+    }
+    break;
+    case CHOSEN_MOVE_ITEM_CONT:
+    {
+        uint itemId = ChosenActions[ 1 ];
+        uint itemCont = ChosenActions[ 2 ];
+        uint count = ChosenActions[ 3 ];
+
+        Assert( itemCont == ITEMS_PICKUP || itemCont == ITEMS_PICKUP_FROM );
+        Assert( count > 0 );
+
+        Item@[] @ cont = RefreshItemsCollection( itemCont );
+        Item@ item;
+        for( uint i = 0; i < cont.length() && item is null; i++ )
+            if( cont[ i ].Id == itemId )
+                @item = cont[ i ];
+
+        if( count > item.Count )
+            break;
+
+        /*if( itemCont == ITEMS_PICKUP_FROM )
+           {
+            if( chosen->GetFreeWeight() < (int) ( item->GetWeight() * count ) )
+            {
+                AddMess( FOMB_GAME, CurLang.Msg[ TEXTMSG_GAME ].GetStr( STR_OVERWEIGHT ) );
+                break;
+            }
+            if( chosen->GetFreeVolume() < (int) ( item->GetVolume() * count ) )
+            {
+                AddMess( FOMB_GAME, CurLang.Msg[ TEXTMSG_GAME ].GetStr( STR_OVERVOLUME ) );
+                break;
+            }
+           }*/
+
+        Entity@ contEntity;
+        /*uint contId = 0;
+           if( PupTransferType == TRANSFER_CRIT_LOOT || PupTransferType == TRANSFER_CRIT_STEAL || PupTransferType == TRANSFER_FAR_CRIT )
+           @contEntity = GetCritter( contId );
+           else if( PupTransferType == TRANSFER_HEX_CONT_UP || PupTransferType == TRANSFER_HEX_CONT_DOWN || PupTransferType == TRANSFER_SELF_CONT || PupTransferType == TRANSFER_FAR_CONT )
+           @contEntity = GetItem( contId );*/
+
+        Entity@ from = ( itemCont == ITEMS_PICKUP ? cast< Entity >( chosen ) : contEntity );
+        Entity@ to = ( itemCont == ITEMS_PICKUP ? contEntity : cast< Entity >( chosen ) );
+        if( !__EventItemCheckMove.Raise( item, count, from, to ) )
+            break;
+
+        uint apCost = __RtApCostMoveItemContainer;
+        CHECK_NEED_AP( apCost );
+
+        CustomCall( "MoveItemCont " + apCost + " " + count + " " + itemId + " " + itemCont );
+    }
+    break;
+    /*case CHOSEN_TAKE_ALL:
+       {
+        CHECK_NEED_AP( chosen->GetApCostMoveItemContainer() );
+
+        if( PupCont2Init.empty() )
+            break;
+
+        uint c, w, v;
+        ContainerCalcInfo( PupCont2Init, c, w, v, MAX_INT, false );
+        if( chosen->GetFreeWeight() < (int) w )
+        {
+            AddMess( FOMB_GAME, CurLang.Msg[ TEXTMSG_GAME ].GetStr( STR_BARTER_OVERWEIGHT ) );
+            break;
+        }
+        else if( chosen->GetFreeVolume() < (int) v )
+        {
+            AddMess( FOMB_GAME, CurLang.Msg[ TEXTMSG_GAME ].GetStr( STR_BARTER_OVERSIZE ) );
+            break;
+        }
+
+        Net_SendItemCont( PupTransferType, PupContId, 0, 0, CONT_GETALL );
+        chosen->Action( ACTION_OPERATE_CONTAINER, PupTransferType * 10 + 1, nullptr );
+        chosen->SubAp( chosen->GetApCostMoveItemContainer() );
+        WaitPing();
+       }
+       break;*/
+    /*case CHOSEN_PUT_ALL:
+       {
+        CHECK_NEED_AP( chosen->GetApCostMoveItemContainer() );
+
+        if( InvContInit.empty() )
+            break;
+
+        Net_SendItemCont( PupTransferType, PupContId, 0, 0, CONT_PUTALL );
+        chosen->Action( ACTION_OPERATE_CONTAINER, PupTransferType * 10 + 3, nullptr );
+        chosen->SubAp( chosen->GetApCostMoveItemContainer() );
+        WaitPing();
+       }
+       break;*/
+    case CHOSEN_SNEAK:
+    {
+        uint apCost = __RtApCostUseSkill;
+        CHECK_NEED_AP( apCost );
+
+        //CustomCall( "UseCritterSkill " + CritterProperty::UseSneak + " " + apCost + " " + chosen.Id );
+    }
+    break;
+    case CHOSEN_TALK_NPC:
+    {
+        uint     crId = ChosenActions[ 1 ];
+
+        Critter@ cr = GetCritter( crId );
+        if( cr is null )
+            break;
+        if( cr.IsDead() )
+            break;
+
+        uint dist = GetCrittersDistantion( chosen, cr );
+        uint talkDistance = ( cr.TalkDistance > 0 ? cr.TalkDistance : __TalkDistance ) + chosen.Multihex;
+        if( dist > talkDistance )
+        {
+            bool   isRun = ( __AlwaysRun && dist >= __AlwaysRunUseDist );
+            SetAction( array< uint > = { CHOSEN_MOVE_TO_CRIT, cr.Id, 0, isRun ? 1 : 0, talkDistance, 0, 0 }, false, false );
+            uint16 hx = cr.HexX;
+            uint16 hy = cr.HexY;
+            // if( HexMngr.CutPath( chosen, chosen.HexX, chosen.HexY, hx, hy, talkDistance ) )
+            //	SetAction( curAction, false, false );
+            return;
+        }
+
+        // if( !HexMngr.TraceBullet( chosen.GetHexX(), chosen.HexY, cr.HexX, cr.HexY, talkDistance + chosen.Multihex, 0, cr, false, nullptr, 0, nullptr, nullptr, nullptr, true ) )
+        // {
+        //    AddMess( FOMB_GAME, CurLang.Msg[ TEXTMSG_GAME ].GetStr( STR_FINDPATH_AIMBLOCK ) );
+        //    break;
+        // }
+
+        // Refresh orientation
+        uint8 dir = GetDirection( chosen.HexX, chosen.HexY, cr.HexX, cr.HexY );
+        if( GetDistantion( chosen.HexX, chosen.HexY, cr.HexX, cr.HexY ) >= 1 && chosen.Dir != dir )
+            CustomCall( "ChangeDir " + dir );
+
+        CustomCall( "DialogAnswer true " + cr.Id + " " + 240 );
+    }
+    break;
+    case CHOSEN_PICK_ITEM:
+    {
+        hash   pid = ChosenActions[ 1 ];
+        uint16 hx = ChosenActions[ 2 ];
+        uint16 hy = ChosenActions[ 3 ];
+
+        if( CurMap is null )
+            break;
+
+        uint dist = GetDistantion( chosen.HexX, chosen.HexY, hx, hy );
+        uint useDist = 1 + chosen.Multihex;
+        if( dist > useDist )
+        {
+            bool isRun = ( __AlwaysRun && dist >= __AlwaysRunUseDist );
+            SetAction( array< uint > = { CHOSEN_MOVE, hx, hy, isRun ? 1 : 0, useDist, 0, 1 }, false, false );
+            // if( HexMngr.CutPath( chosen, chosen.HexX, chosen.HexY, hx, hy, useDist ) )
+            //    SetAction( curAction, true, false );
+            SetAction( curAction, true, false );
+            return;
+        }
+
+        uint apCost = __RtApCostPickItem;
+        CHECK_NEED_AP( apCost );
+
+        // Refresh orientation
+        uint8 dir = GetDirection( chosen.HexX, chosen.HexY, hx, hy );
+        if( GetDistantion( chosen.HexX, chosen.HexY, hx, hy ) >= 1 && chosen.Dir != dir )
+            CustomCall( "ChangeDir " + dir );
+
+        CustomCall( "PickItem " + apCost + " " + pid + " " + hx + " " + hy );
+    }
+    break;
+    case CHOSEN_PICK_CRIT:
+    {
+        uint crId = ChosenActions[ 1 ];
+        bool isLoot = ( ChosenActions[ 2 ] == 0 );
+
+        if( CurMap is null )
+            break;
+
+        Critter@ cr = GetCritter( crId );
+        if( cr is null )
+            break;
+
+        if( isLoot && ( !cr.IsDead() || cr.IsNoLoot ) )
+            break;
+        if( !isLoot && ( !cr.IsLife() || cr.IsNoPush ) )
+            break;
+
+        uint dist = GetDistantion( chosen.HexX, chosen.HexY, cr.HexX, cr.HexY );
+        uint pickDist = 1 + chosen.Multihex + cr.Multihex;
+        if( dist > pickDist )
+        {
+            bool isRun = ( __AlwaysRun && dist >= __AlwaysRunUseDist );
+            SetAction( array< uint > = { CHOSEN_MOVE_TO_CRIT, cr.Id, 0, isRun ? 1 : 0, pickDist, 0, 0 }, false, false );
+            if( GetPathLength( chosen, cr.HexX, cr.HexY, pickDist ) > 0 )
+                SetAction( curAction, true, false );
+            return;
+        }
+
+        uint apCost = __RtApCostPickCritter;
+        CHECK_NEED_AP( apCost );
+
+        // Refresh orientation
+        uint8 dir = GetDirection( chosen.HexX, chosen.HexY, cr.HexX, cr.HexY );
+        if( GetDistantion( chosen.HexX, chosen.HexY, cr.HexX, cr.HexY ) >= 1 && chosen.Dir != dir )
+            CustomCall( "ChangeDir " + dir );
+
+        CustomCall( "PickCritter " + apCost + " " + crId + " " + isLoot );
+        WaitPing();
+    }
+    break;
+    }
+
+    if( ChosenActions.length() > 0 )
+    {
+        ChosenActions.reverse();
+        ChosenActions.resize( ChosenActions.length() - 7 );
+        ChosenActions.reverse();
+    }
+}
+/*
+void UseSneak( Critter& client, bool enable )
+{
+    if( client.IsHide == enable )
+        return;
+
+    if( !client.IsLife() )
+        ThrowException( "Client is not alive", client );
+    if( enable && IS_TIMEOUT( client.TimeoutSneak ) )
+        ThrowException( "Sneak timeout", client );
+
+    if( enable )
+        client.TimeoutSneak = SNEAK_TIMEOUT( client );
+    client.IsHide = !client.IsHide;
+    client.Wait( __Breaktime );
+}*/

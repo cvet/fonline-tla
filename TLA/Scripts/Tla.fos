@@ -1,0 +1,1562 @@
+// FOS Common  Sort -8
+////Old script name: Tla.fosh. Patched 01.10 22:40:41
+
+#pragma property Global Public string[] BestScores
+
+
+// message specs
+// note: MessageSpecifications::AimedHit must be MessageSpecifications::Hit+1, MessageSpecifications::CritAimedHit must be MessageSpecifications::CritHit+1
+// Message scpecifications
+#pragma enum MessageSpecifications Miss = 1  // length 2: 1   WHO_ID
+#pragma enum MessageSpecifications CritMiss = 2  // length 3: 2   WHO_ID  EFF
+#pragma enum MessageSpecifications CritMissDamage = 3  // length 4: 3   WHO_ID  EFF     DAMAGE
+#pragma enum MessageSpecifications Hit = 4  // length 3: 4   WHO_ID  DAMAGE
+#pragma enum MessageSpecifications AimedHit = 5  // length 4: 5   WHO_ID  LOC     DAMAGE
+#pragma enum MessageSpecifications CritHit = 6  // length 5: 6   WHO_ID  DAMAGE  EFF     MESSAGE
+#pragma enum MessageSpecifications CritAimedHit = 7  // length 6: 7   WHO_ID  LOC     DAMAGE  EFF      MESSAGE
+#pragma enum MessageSpecifications HitDead = 8  // length 3: 8   WHO_ID  DAMAGE
+#pragma enum MessageSpecifications AimedHitDead = 9  // length 4: 9   WHO_ID  LOC     DAMAGE
+#pragma enum MessageSpecifications CritHitDead = 10 // length 4: 10  WHO_ID  DAMAGE  MESSAGE
+#pragma enum MessageSpecifications CritAimedHitDead = 11 // length 5: 11  WHO_ID  LOC     DAMAGE  MESSAGE
+#pragma enum MessageSpecifications Oops = 12 // length 3: 12  WH1_ID  WH2_ID
+#pragma enum MessageSpecifications HitRandomly = 13 // length 2: 13  WHO_ID
+
+// Critical hit/miss flags
+#define HF_KNOCKOUT                ( 0x00000001 )
+#define HF_KNOCKDOWN               ( 0x00000002 )
+#define HF_CRIPPLED_LEFT_LEG       ( 0x00000004 )
+#define HF_CRIPPLED_RIGHT_LEG      ( 0x00000008 )
+#define HF_CRIPPLED_LEFT_ARM       ( 0x00000010 )
+#define HF_CRIPPLED_RIGHT_ARM      ( 0x00000020 )
+#define HF_BLINDED                 ( 0x00000040 )
+#define HF_DEATH                   ( 0x00000080 )
+#define HF_ON_FIRE                 ( 0x00000400 )
+#define HF_BYPASS_ARMOR            ( 0x00000800 )
+#define HF_DROPPED_WEAPON          ( 0x00004000 )
+#define HF_LOST_NEXT_TURN          ( 0x00008000 )
+#define HF_RANDOM                  ( 0x00200000 )
+
+#define MF_KNOCKED_DOWN            ( 0x00000002 )
+#define MF_ON_FIRE                 ( 0x00000400 )
+#define MF_WEAPON_EXPLODED         ( 0x00001000 )
+#define MF_WEAPON_DESTROYED        ( 0x00002000 )
+#define MF_WEAPON_DROPPED          ( 0x00004000 )
+#define MF_LOST_NEXT_TURN          ( 0x00008000 )
+#define MF_HIT_SELF                ( 0x00010000 )
+#define MF_LOST_REST_OF_AMMO       ( 0x00020000 )
+#define MF_FIRED_DUD_SHOT          ( 0x00040000 )
+#define MF_HURT_SELF               ( 0x00080000 )
+#define MF_HIT_RANDOMLY            ( 0x00100000 )
+#define MF_CRIPPLED_RANDOM_LIMB    ( 0x00200000 )
+#define MF_WAS_KILLED              ( 0x10000000 )
+
+//#include "Core/Core"
+//#include "Core/Math"
+//#include "Core/Time"
+//#include "Core/Colors"
+//#include "Core/Tween"
+//#include "Core/Serializator::Serializator"
+//#include "Scores/Scores"
+
+//#include "TlaExtended"
+
+//#include "Animation"
+//#include "MsgStr"
+//#include "Teams"
+//#include "Ai"
+//#include "MsgStr"
+//#include "Maps"
+//#include "Dialogs"
+//#include "ItemPid"
+//#include "NpcPids"
+//#include "PidsGroups"
+//#include "Animation"
+//#include "Bags"
+//#include "UtilsForArray"
+//#include "CritterAnims"
+
+#ifdef __SERVER
+//#include "Core/Entire"
+//#include "Core/LineTracer"
+//#include "Core/NpcPlanes"
+//#include "Merc"
+//#include "Stdlib"
+//#include "Combat"
+#endif
+#ifdef __CLIENT
+//#include "Core/Gui"
+//#include "Core/Input"
+//#include "Core/Sprite"
+//#include "ClientDefines"
+#endif
+// Animation stuff
+// FOS Common
+////Old script name: Animation.fosh. Patched 01.10 22:38:08
+
+// Animation macro
+#define _CritAnimate                    # ( cr, anim )cr.Animate( 0, anim, null, true, true )
+#define _CritAnimateUse                 # (cr) cr.Animate( 0, Anim2Actions::Use, null, true, true )
+#define _CritAnimatePickup              # (cr) cr.Animate( 0, Anim2Actions::Pickup, null, true, true )
+#define _CritAnimatePunch               # (cr) cr.Animate( 0, Anim2Actions::PunchRight, null, true, true )
+#define _CritAnimateKick                # (cr) cr.Animate( 0, Anim2Actions::KickHi, null, true, true )
+#define _CritAnimateThrow               # (cr) cr.Animate( 0, Anim2Actions::Throw, null, true, true )
+#define _CritAnimateThrust              # (cr) cr.Animate( 0, Anim2Actions::Thrust1h, null, true, true )
+#define _CritAnimateSwing               # (cr) cr.Animate( 0, Anim2Actions::Swing1h, null, true, true )
+#define _CritAnimateThrowWeap           # (cr) cr.Animate( 0, Anim2Actions::Throw, null, true, true )
+#define _CritAnimateSingle              # (cr) cr.Animate( 0, Anim2Actions::Single, null, true, true )
+#define _CritAnimateBrust               # (cr) cr.Animate( 0, Anim2Actions::Burst, null, true, true )
+#define _CritAnimateFidget              # (cr) cr.Animate( 0, Anim2Actions::Fidget, null, true, true )
+
+// Anim loading flags
+#define ANIM_FLAG_FIRST_FRAME           ( 0x01 )
+#define ANIM_FLAG_LAST_FRAME            ( 0x02 )
+
+// Anim1 Weapon / Flags
+// 0 1 2 3 4 5 6 7
+// |<  Weapon   >|
+// Manage constants
+#define ANIM1_WEAPON_MASK               ( 0x000000FF )
+#define ANIM1_FLAGS_MASK                ( 0xFFFFFF00 )
+#pragma enum WeaponsAnims FlagsBits = 8
+
+// WeaponsAnims
+#pragma enum WeaponsAnims Unarmed = 1                                      // Hardcoded
+#pragma enum WeaponsAnims Knife = 4
+#pragma enum WeaponsAnims Club = 5
+#pragma enum WeaponsAnims Hammer = 6
+#pragma enum WeaponsAnims Spear = 7
+#pragma enum WeaponsAnims Pistol = 8
+#pragma enum WeaponsAnims Smg = 9
+#pragma enum WeaponsAnims Shootgun = 10
+#pragma enum WeaponsAnims HeavyRifle = 11
+#pragma enum WeaponsAnims Minigun = 12
+#pragma enum WeaponsAnims RocketLauncher = 13
+#pragma enum WeaponsAnims Flamer = 14
+#pragma enum WeaponsAnims Rifle = 15
+#pragma enum WeaponsAnims Sword = 16
+#pragma enum WeaponsAnims LongSword = 17
+#pragma enum WeaponsAnims Axe = 18
+#pragma enum WeaponsAnims Bow = 19
+
+// Manage constants
+// Anim2 Actions
+#pragma enum Anim2Actions DeadBegin = 100
+#pragma enum Anim2Actions DeadEnd = 120
+#pragma enum Anim2Actions Idle = 1                                      // Hardcoded
+#pragma enum Anim2Actions IdleStunned = 2
+#pragma enum Anim2Actions Walk = 3                                      // Hardcoded
+#pragma enum Anim2Actions Limp = 4                                      // Hardcoded
+#pragma enum Anim2Actions Run = 5                                      // Hardcoded
+#pragma enum Anim2Actions PanicRun = 6                                      // Hardcoded
+#pragma enum Anim2Actions SneakWalk = 7                                      // Hardcoded
+#pragma enum Anim2Actions SneakRun = 8                                      // Hardcoded
+#pragma enum Anim2Actions Stand = 10
+#pragma enum Anim2Actions Crouch = 11
+#pragma enum Anim2Actions Prone = 12
+#pragma enum Anim2Actions ShowWeapon = 20
+#pragma enum Anim2Actions HideWeapon = 21
+#pragma enum Anim2Actions PrepareWeapon = 22
+#pragma enum Anim2Actions TurnoffWeapon = 23
+#pragma enum Anim2Actions Fidget = 24
+#pragma enum Anim2Actions Climbing = 26
+#pragma enum Anim2Actions Pickup = 27
+#pragma enum Anim2Actions Use = 28
+#pragma enum Anim2Actions SwitchItems = 29
+#pragma enum Anim2Actions Reload = 30
+#pragma enum Anim2Actions Repair = 31
+#pragma enum Anim2Actions Loot = 35
+#pragma enum Anim2Actions Steal = 36
+#pragma enum Anim2Actions Push = 37
+#pragma enum Anim2Actions BeginCombat = 40
+#pragma enum Anim2Actions IdleCombat = 41
+#pragma enum Anim2Actions EndCombat = 42
+#pragma enum Anim2Actions PunchRight = 43
+#pragma enum Anim2Actions PunchLeft = 44
+#pragma enum Anim2Actions PunchCombo = 45
+#pragma enum Anim2Actions KickHi = 46
+#pragma enum Anim2Actions KickLo = 47
+#pragma enum Anim2Actions KickCombo = 48
+#pragma enum Anim2Actions Thrust1h = 49
+#pragma enum Anim2Actions Thrust2h = 50
+#pragma enum Anim2Actions Swing1h = 51
+#pragma enum Anim2Actions Swing2h = 52
+#pragma enum Anim2Actions Throw = 53
+#pragma enum Anim2Actions Single = 54
+#pragma enum Anim2Actions Burst = 55
+#pragma enum Anim2Actions Sweep = 56
+#pragma enum Anim2Actions Butt = 57
+#pragma enum Anim2Actions Flame = 58
+#pragma enum Anim2Actions NoRecoil = 59
+#pragma enum Anim2Actions DodgeFront = 70
+#pragma enum Anim2Actions DodgeBack = 71
+#pragma enum Anim2Actions DamageFront = 72
+#pragma enum Anim2Actions DamageBack = 73
+#pragma enum Anim2Actions DamageMulFront = 74
+#pragma enum Anim2Actions DamageMulBack = 75
+#pragma enum Anim2Actions WalkDamageFront = 76
+#pragma enum Anim2Actions WalkDamageBack = 77
+#pragma enum Anim2Actions LimpDamageFront = 78
+#pragma enum Anim2Actions LimpDamageBack = 79
+#pragma enum Anim2Actions RunDamageFront = 80
+#pragma enum Anim2Actions RunDamageBack = 81
+#pragma enum Anim2Actions KnockFront = 82
+#pragma enum Anim2Actions KnockBack = 83
+#pragma enum Anim2Actions LaydownFront = 84
+#pragma enum Anim2Actions LaydownBack = 85
+#pragma enum Anim2Actions IdleProneFront = 86                                      // Hardcoded
+#pragma enum Anim2Actions IdleProneBack = 87                                      // Hardcoded
+#pragma enum Anim2Actions StandupFront = 88
+#pragma enum Anim2Actions StandupBack = 89
+#pragma enum Anim2Actions DamageProneFront = 90
+#pragma enum Anim2Actions DamageProneBack = 91
+#pragma enum Anim2Actions DamageMulProneFront = 92
+#pragma enum Anim2Actions DamageMulProneBack = 93
+#pragma enum Anim2Actions TwitchProneFront = 94
+#pragma enum Anim2Actions TwitchProneBack = 95
+#pragma enum Anim2Actions DeadProneFront = 100
+#pragma enum Anim2Actions DeadProneBack = 101
+#pragma enum Anim2Actions DeadFront = 102                                      // Hardcoded
+#pragma enum Anim2Actions DeadBack = 103                                      // Hardcoded
+#pragma enum Anim2Actions DeadBloodySingle = 110
+#pragma enum Anim2Actions DeadBloodyBurst = 111
+#pragma enum Anim2Actions DeadBurst = 112
+#pragma enum Anim2Actions DeadPulse = 113
+#pragma enum Anim2Actions DeadPulseDust = 114
+#pragma enum Anim2Actions DeadLaser = 115
+#pragma enum Anim2Actions DeadFused = 116
+#pragma enum Anim2Actions DeadExplode = 117
+#pragma enum Anim2Actions DeadBurn = 118
+#pragma enum Anim2Actions DeadBurnRun = 119
+
+// Fallout anims1
+#pragma enum FalloutAnims1 Unarmed = 1
+#pragma enum FalloutAnims1 Dead = 2
+#pragma enum FalloutAnims1 Knockout = 3
+#pragma enum FalloutAnims1 Knife = 4
+#pragma enum FalloutAnims1 Club = 5
+#pragma enum FalloutAnims1 Hammer = 6
+#pragma enum FalloutAnims1 Spear = 7
+#pragma enum FalloutAnims1 Pistol = 8
+#pragma enum FalloutAnims1 Uzi = 9
+#pragma enum FalloutAnims1 Shootgun = 10
+#pragma enum FalloutAnims1 Rifle = 11
+#pragma enum FalloutAnims1 Minigun = 12
+#pragma enum FalloutAnims1 RocketLauncher = 13
+#pragma enum FalloutAnims1 Aim = 14
+// Fallout anims2
+#pragma enum FalloutAnims2 Stay = 1
+#pragma enum FalloutAnims2 Walk = 2
+#pragma enum FalloutAnims2 Show = 3
+#pragma enum FalloutAnims2 Hide = 4
+#pragma enum FalloutAnims2 DodgeWeapon = 5
+#pragma enum FalloutAnims2 Thrust = 6
+#pragma enum FalloutAnims2 Swing = 7
+#pragma enum FalloutAnims2 PrepareWeapon = 8
+#pragma enum FalloutAnims2 TurnoffWeapon = 9
+#pragma enum FalloutAnims2 Shoot = 10
+#pragma enum FalloutAnims2 Burst = 11
+#pragma enum FalloutAnims2 Flame = 12
+#pragma enum FalloutAnims2 ThrowWeapon = 13
+#pragma enum FalloutAnims2 DamageFront = 15
+#pragma enum FalloutAnims2 DamageBack = 16
+#pragma enum FalloutAnims2 KnockFront = 1  // Only with FalloutAnims1::Dead
+#pragma enum FalloutAnims2 KnockBack = 2
+#pragma enum FalloutAnims2 StandupBack = 8  // Only with FalloutAnims1::Knockout
+#pragma enum FalloutAnims2 StandupFront = 10
+#pragma enum FalloutAnims2 Pickup = 11 // Only with FalloutAnims1::Unarmed
+#pragma enum FalloutAnims2 Use = 12
+#pragma enum FalloutAnims2 DodgeEmpty = 14
+#pragma enum FalloutAnims2 Punch = 17
+#pragma enum FalloutAnims2 Kick = 18
+#pragma enum FalloutAnims2 ThrowEmpty = 19
+#pragma enum FalloutAnims2 Run = 20
+#pragma enum FalloutAnims2 DeadFront = 1 // Only with FalloutAnims1::Dead
+#pragma enum FalloutAnims2 DeadBack = 2
+#pragma enum FalloutAnims2 DeadBloodySingle = 4
+#pragma enum FalloutAnims2 DeadBurn = 5
+#pragma enum FalloutAnims2 DeadBloodyBurst = 6
+#pragma enum FalloutAnims2 DeadBurst = 7
+#pragma enum FalloutAnims2 DeadPulse = 8
+#pragma enum FalloutAnims2 DeadLaser = 9
+#pragma enum FalloutAnims2 DeadBurn2 = 10
+#pragma enum FalloutAnims2 DeadPulseDust = 11
+#pragma enum FalloutAnims2 DeadExplode = 12
+#pragma enum FalloutAnims2 DeadFused = 13
+#pragma enum FalloutAnims2 DeadBurnRun = 14
+#pragma enum FalloutAnims2 DeadFront2 = 15
+#pragma enum FalloutAnims2 DeadBack2 = 16
+// //////////////////////////////////////////////////////////////////////////////////////////////////
+// Knockout animations, f - face up/down
+#define KNOCKOUT_ANIM2_DEFAULT          # (f)  ( ( f ) ? Anim2Actions::KnockFront : Anim2Actions::KnockBack ), ( ( f ) ? Anim2Actions::IdleProneFront : Anim2Actions::IdleProneBack ), ( ( f ) ? Anim2Actions::StandupFront : Anim2Actions::StandupBack )
+#define KNOCKOUT_ANIM2_STUNNED          # (f)  ( ( f ) ? Anim2Actions::DamageFront : Anim2Actions::DamageBack ), Anim2Actions::IdleStunned, Anim2Actions::IdleStunned
+
+
+
+// Damage types
+#pragma enum DamageTypes Reserved = 0
+#pragma enum DamageTypes Normal = 1
+#pragma enum DamageTypes Laser = 2
+#pragma enum DamageTypes Fire = 3
+#pragma enum DamageTypes Plasma = 4
+#pragma enum DamageTypes Electricity = 5
+#pragma enum DamageTypes Emp = 6
+#pragma enum DamageTypes Explode = 7
+#pragma enum DamageTypes Poison = 8
+#pragma enum DamageTypes Radiation = 9
+#define MAX_DAMAGES                      ( 10 )
+
+// Gender
+#pragma enum Gender Male = 0
+#pragma enum Gender Female = 1
+#pragma enum Gender It = 2
+
+// Age
+const hash AgeMax = 60;
+const hash AgeMin = 14;
+
+// Item perks
+#pragma enum ItemPerks ItemPerkNone = 0
+#pragma enum ItemPerks LongRange = 1
+#pragma enum ItemPerks Accurate = 2
+#pragma enum ItemPerks Penetrate = 3
+#pragma enum ItemPerks Knockback = 4
+#pragma enum ItemPerks ScopeRange = 5
+#pragma enum ItemPerks FastReload = 6
+#pragma enum ItemPerks NightSight = 7
+#pragma enum ItemPerks Flameboy = 8
+#pragma enum ItemPerks EnhancedKnockout = 9
+#pragma enum ArmorPerks Powered = 1            // +3 strength, +30 radiation resist
+#pragma enum ArmorPerks Combat = 2            // +20 radiation resist
+#pragma enum ArmorPerks AdvancedI = 3            // +4 strength, +60 radiation resist
+#pragma enum ArmorPerks AdvancedII = 4            // +4 strength, +75 radiation resist
+#pragma enum ArmorPerks Charisma = 5            // 1+ charisma
+#define SLOT_PERK_MIRROR_SHADES          ( 0x01 )         // +1 charisma
+#define SLOT_PERK_COSMETIC_CASE          ( 0x02 )         // +1 charisma to female
+#define SLOT_PERK_MOTION_SENSOR          ( 0x04 )         // +20 outdoorsman
+#define SLOT_PERK_STEALTH_BOY            ( 0x08 )         // +20 sneak
+
+// Critter timeevents identifiers
+const hash CtePoison = 1;
+const hash CteRadiation = 2;
+const hash CteTrader = 3;
+const hash CteObserving = 4;
+const hash CteAutokill = 5;
+// Drugs time events                40 (PID_STIMPAK) .. 1000
+
+// Timeouts in real seconds, generic values
+#define FIRST_AID_TIMEOUT                # (cr) ( __FullSecond + ( __TimeMultiplier * 100 / ( ( ( cr.SkillFirstAid ) > 3 ? cr.SkillFirstAid : 3 ) * 100 / MAX_SKILL_VAL ) ) * 60 )         // Orig 3 time on day, 5 min - sk
+#define DOCTOR_TIMEOUT                   # (cr) ( __FullSecond + ( __TimeMultiplier * 100 / ( ( ( cr.SkillDoctor ) > 3 ? cr.SkillDoctor : 3 ) * 100 / MAX_SKILL_VAL ) * 3 ) * 60 )         // Orig 1 time on day, 20 min - sk
+#define REPAIR_TIMEOUT                   # (cr) ( __FullSecond + REAL_MINUTE( 1 ) )                                                                                                        // Orig 4 time on day, 1 min
+#define SCIENCE_TIMEOUT                  # (cr) ( __FullSecond + REAL_MINUTE( 1 ) )                                                                                                        // Orig 6 time on day, 1 min
+#define LOCKPICK_TIMEOUT                 # (cr) ( __FullSecond + REAL_MINUTE( 2 ) )                                                                                                        // Orig 15 minutes, 2 min
+#define STEAL_TIMEOUT                    # (cr) ( __FullSecond + REAL_MINUTE( 2 ) )                                                                                                        // 2 minutes
+#define TRANSFER_TIMEOUT                 # (cr) ( __FullSecond + __TimeoutTransfer )
+#define BATTLE_TIMEOUT                   # (cr) ( __FullSecond + MAX( __TimeoutBattle - REAL_SECOND( cr.ArmorClass ), int( REAL_SECOND( 12 ) ) ) )
+#define TRAPS_TIMEOUT                    # (cr) ( __FullSecond + REAL_MINUTE( 1 ) )
+#define SNEAK_TIMEOUT                    # (cr) ( __FullSecond + REAL_SECOND( MAX( 34 - cr.Sequence, 3 ) ) )         // 34 second - sequence
+#define HEALING_TIMEOUT                  # (cr) ( __FullSecond + REAL_MINUTE( 2 ) )                                  // 2 minutes
+
+const hash MaxDeterioration = 10000;
+const hash MaxBrokens = 10;
+
+// Car flags
+#define CAR_BIO_ENGINE                   ( 0x0001 )
+#define CAR_NO_LOCKPICK                  ( 0x0002 )
+
+// Body types
+#pragma enum BodyTypes Men = 0
+#pragma enum BodyTypes Women = 1
+#pragma enum BodyTypes Children = 2
+#pragma enum BodyTypes SuperMutant = 3
+#pragma enum BodyTypes Ghoul = 4
+#pragma enum BodyTypes Brahmin = 5
+#pragma enum BodyTypes Radscorpion = 6
+#pragma enum BodyTypes Rat = 7
+#pragma enum BodyTypes Floater = 8
+#pragma enum BodyTypes Centaur = 9
+#pragma enum BodyTypes Robot = 10
+#pragma enum BodyTypes Dog = 11
+#pragma enum BodyTypes Manti = 12
+#pragma enum BodyTypes Deadclaw = 13
+#pragma enum BodyTypes Plant = 14
+#pragma enum BodyTypes Gecko = 15
+#pragma enum BodyTypes Alien = 16
+#pragma enum BodyTypes GiantAnt = 17
+#pragma enum BodyTypes BigBadBoss = 18
+#pragma enum BodyTypes GiantBeetle = 19
+#pragma enum BodyTypes GiantWasp = 20
+const hash MaxBodyTypes = 21;
+
+// Locomotion types
+#define LOCOMOTION_BIPED                 ( 0 )
+#define LOCOMOTION_QUADRUPED             ( 1 )
+#define LOCOMOTION_ROBOTIC               ( 2 )
+const hash LocomotionFly = 3;
+
+// Game images
+const hash ImageRelief = 0;         // Global map relief
+
+// Other
+#define FLUSH_SCREEN_DEFAULT             ( 1000 )      // Flush screen time
+
+// Ouput: it is 'uint param' in Critter::ShowScreen.
+// Input: I - integer value 'uint answerI', S - string value 'string& answerS' in 'answer_' function.
+// Show screen modes
+#pragma enum ShowScreenModes Close = 0          // Close top window.
+#pragma enum ShowScreenModes Timer = 1          // Timer box. Output: picture index in INVEN.LST. Input I: time in game minutes (1..599).
+#pragma enum ShowScreenModes Dialogbox = 2          // Dialog box. Output: buttons count - 0..20 (exit button added automatically). Input I: Choosed button - 0..19.
+#pragma enum ShowScreenModes Skillbox = 3          // Skill box. Input I: selected skill.
+#pragma enum ShowScreenModes Bag = 4          // Bag box. Input I: id of selected item.
+#pragma enum ShowScreenModes Say = 5          // Say box. Output: all symbols - 0 or only numbers - any other number. Input S: typed string.
+#pragma enum ShowScreenModes Elevator = 6          // Elevator. Output: look ELEVATOR_* macro. Input I: Choosed level button.
+#pragma enum ShowScreenModes Inventory = 7          // Inventory.
+#pragma enum ShowScreenModes Character = 8          // Character.
+#pragma enum ShowScreenModes Fixboy = 9          // Fix-boy.
+#pragma enum ShowScreenModes Pipboy = 10         // Pip-boy.
+#pragma enum ShowScreenModes Minimap = 11         // Mini-map.
+
+// Hit locations
+#pragma enum HitLocations LocationNone = 0
+#pragma enum HitLocations LocationHead = 1
+#pragma enum HitLocations LocationLeftArm = 2
+#pragma enum HitLocations LocationRightArm = 3
+#pragma enum HitLocations LocationTorso = 4
+#pragma enum HitLocations LocationRightLeg = 5
+#pragma enum HitLocations LocationLeftLeg = 6
+#pragma enum HitLocations LocationEyes = 7
+#pragma enum HitLocations LocationGroin = 8
+#pragma enum HitLocations LocationUncalled = 9
+
+// Fix boy function call states
+const hash FixboyList = 0;
+const hash FixboyButton = 1;
+const hash FixboyCraft = 2;
+
+// Fix boy craft results
+#define FIXBOY_ALLOW_CRAFT               ( 0x0001 )
+#define FIXBOY_CHECK_TIMEOUT             ( 0x0002 )
+#define FIXBOY_SET_TIMEOUT               ( 0x0004 )
+#define FIXBOY_CHECK_PARAMS              ( 0x0008 )
+#define FIXBOY_CHECK_MATERIALS           ( 0x0010 )
+#define FIXBOY_CHECK_TOOLS               ( 0x0020 )
+#define FIXBOY_SUB_MATERIALS             ( 0x0040 )
+#define FIXBOY_ADD_CRAFT_ITEMS           ( 0x0080 )
+#define FIXBOY_ADD_EXPERIENCE            ( 0x0100 )
+#define FIXBOY_SEND_SUCC_MESSAGE         ( 0x0200 )
+#define FIXBOY_SEND_FAIL_MESSAGE         ( 0x0400 )
+#define FIXBOY_DEFAULT                   ( 0xFFFF )
+
+// Elevators
+#define ELEVATOR_X                       # ( elevator, current_level )( ( uint( ( current_level ) & 0xFFFF ) << 16 ) | ( elevator ) & 0xFFFF )
+#define ELEVATOR_BOS_1234                # (current_level)     ( ELEVATOR_X( 0, current_level ) )
+#define ELEVATOR_BOS_01                  # (current_level)     ( ELEVATOR_X( 1, current_level ) )
+#define ELEVATOR_MASTER_123              # (current_level)     ( ELEVATOR_X( 2, current_level ) )
+#define ELEVATOR_MASTER_34               # (current_level)     ( ELEVATOR_X( 3, current_level ) )
+#define ELEVATOR_MILITARY_123            # (current_level)     ( ELEVATOR_X( 4, current_level ) )
+#define ELEVATOR_MILITARY_34             # (current_level)     ( ELEVATOR_X( 5, current_level ) )
+#define ELEVATOR_MILITARY_346            # (current_level)     ( ELEVATOR_X( 6, current_level ) )         // Use 6 level as 5
+#define ELEVATOR_MILITARY_456            # (current_level)     ( ELEVATOR_X( 7, current_level ) )
+#define ELEVATOR_VAULT_123               # (current_level)     ( ELEVATOR_X( 8, current_level ) )
+
+#define CRTYPE_DEFAULT_M                 ( CRTYPE_DW_JUMPSUIT_M )
+#define CRTYPE_DEFAULT_M                 ( CRTYPE_TACTICS_RHUMANOID ) // Temporary test FT anims vs fallout anims
+#define CRTYPE_DEFAULT_F                 ( CRTYPE_DW_JUMPSUIT_F )
+
+// Dweller
+#define CRTYPE_DW_JUMPSUIT_M             ( GetStrHash( "art/critters/hmjmps" ) )
+#define CRTYPE_DW_JUMPSUIT_F             ( GetStrHash( "art/critters/hfjmps" ) )
+#define CRTYPE_DW_LEATHER_JACKET_F       ( GetStrHash( "art/critters/hfmaxx" ) )
+#define CRTYPE_DW_LEATHER_ARMOR_M        ( GetStrHash( "art/critters/hmlthr" ) )
+#define CRTYPE_DW_LEATHER_JACKET_M       ( GetStrHash( "art/critters/hmmaxx" ) )
+#define CRTYPE_DW_METAL_ARMOR_M          ( GetStrHash( "art/critters/hmmetl" ) )
+#define CRTYPE_DW_TRIBAL_F               ( GetStrHash( "art/critters/nfprim" ) )
+#define CRTYPE_DW_TRIBAL_M               ( GetStrHash( "art/critters/nmwarr" ) )
+// Vault citizen
+#define CRTYPE_VAULT_M                   ( GetStrHash( "art/critters/nmvalt" ) )
+#define CRTYPE_VAULT_F                   ( GetStrHash( "art/critters/nfvalt" ) )
+// Robots
+#define CRTYPE_ROBOT                     ( GetStrHash( "art/critters/marobt" ) )
+// Long Hair Dude
+#define CRTYPE_LHD_JUMPSUIT              ( GetStrHash( "art/critters/hmljmp" ) )
+#define CRTYPE_LHD_LEATHER_ARMOR         ( GetStrHash( "art/critters/hmllth" ) )
+#define CRTYPE_LHD_LEATHER_JACKET        ( GetStrHash( "art/critters/hmlmax" ) )
+#define CRTYPE_LHD_METAL_ARMOR           ( GetStrHash( "art/critters/hmlmet" ) )
+#define CRTYPE_LHD_TRIBAL                ( GetStrHash( "art/critters/hmlwar" ) )
+// Mobs
+#define CRTYPE_RAT                       ( GetStrHash( "art/critters/masrat" ) )
+#define CRTYPE_MOLESKIN_RAT_BIG          ( GetStrHash( "art/critters/mamrat" ) )
+
+// Weapon calibers
+#pragma enum Caliber None
+#pragma enum Caliber Rocket
+#pragma enum Caliber FlameThrowerFuel
+#pragma enum Caliber C_EnergyCell
+#pragma enum Caliber D_EnergyCell
+#pragma enum Caliber Bullet_223
+#pragma enum Caliber Bullet_5mm
+#pragma enum Caliber Bullet_40
+#pragma enum Caliber Bullet_10mm
+#pragma enum Caliber Bullet_44
+#pragma enum Caliber Bullet_14mm
+#pragma enum Caliber Bullet_12Gauge
+#pragma enum Caliber Bullet_9mm
+#pragma enum Caliber Bullet_BB
+#pragma enum Caliber Bullet_45
+#pragma enum Caliber Bullet_2mm
+#pragma enum Caliber Bullet_47mmCaseless
+#pragma enum Caliber Bullet_HNNeedler
+#pragma enum Caliber Bullet_762mm
+#pragma enum Caliber Bullet_700NitroExpress
+#pragma enum Caliber SignalRocket
+
+// Addictions
+#pragma enum Addictions NukaCola = 0
+#pragma enum Addictions Buffout = 1
+#pragma enum Addictions Mentats = 2
+#pragma enum Addictions Psycho = 3
+#pragma enum Addictions Radaway = 4
+#pragma enum Addictions Jet = 5
+#pragma enum Addictions Tragic = 6
+const hash MaxAddictions = 7;
+
+// Scores
+#pragma enum Scores EvilOfHour = 0
+#pragma enum Scores HeroOfHour = 1
+#pragma enum Scores KarmaOnHour = 2
+#pragma enum Scores Speaker = 3
+#pragma enum Scores Trader = 4
+#pragma enum Scores Zomby = 5
+#pragma enum Scores Paty = 6
+#pragma enum Scores Maniac = 7
+#pragma enum Scores Scaut = 8
+#pragma enum Scores Doctor = 9
+#pragma enum Scores Shooter = 10
+#pragma enum Scores Melee = 11
+#pragma enum Scores Unarmed = 12
+#pragma enum Scores Thief = 13
+#pragma enum Scores Driver = 14
+#pragma enum Scores Killer = 15
+#pragma enum Scores Sniper = 16
+#pragma enum Scores Adventurer = 17
+#pragma enum Scores Cracker = 18
+#pragma enum Scores UnarmedDamage = 19
+#pragma enum Scores Ritch = 20
+#pragma enum Scores ChosenOne = 21
+#pragma enum Scores SierraCur = 40
+#pragma enum Scores MariposaCur = 41
+#pragma enum Scores CathedralCur = 42
+#pragma enum Scores SierraBest = 43
+#pragma enum Scores MariposaBest = 44
+#pragma enum Scores CathedralBest = 45
+#pragma enum Scores SierraOrg = 46
+#pragma enum Scores MariposaOrg = 47
+#pragma enum Scores CathedralOrg = 48
+#pragma enum Scores BaseBestOrg = 49
+
+// Holodisk numbers
+#pragma enum HoloBax MainInfo = 100
+#pragma enum HoloBax SermonDead = 101
+#pragma enum HoloBax SermonCharacter = 102
+#pragma enum HoloBax SermonNasty = 103
+#pragma enum HoloBax SermonBehavior = 104
+#pragma enum HoloBax MythNeutral = 105
+
+// Anim1 enums
+#pragma enum Anim1 Unarmed = 1
+#pragma enum Anim1 Knife = 2
+#pragma enum Anim1 Club = 3
+#pragma enum Anim1 Hammer = 4
+#pragma enum Anim1 Spear = 5
+#pragma enum Anim1 Pistol = 6
+#pragma enum Anim1 SMG = 7
+#pragma enum Anim1 Shootgun = 8
+#pragma enum Anim1 HeavyRifle = 9
+#pragma enum Anim1 Minigun = 10
+#pragma enum Anim1 RocketLauncher = 11
+#pragma enum Anim1 Flamer = 12
+#pragma enum Anim1 Rifle = 13
+#pragma enum Anim1 Sword = 14
+#pragma enum Anim1 LongSword = 15
+#pragma enum Anim1 Axe = 16
+
+// Anim2 enums
+#pragma enum Anim2 None = 0
+#pragma enum Anim2 Idle = 1
+#pragma enum Anim2 IdleStunned = 2
+#pragma enum Anim2 Walk = 3
+#pragma enum Anim2 Limp = 4
+#pragma enum Anim2 Run = 5
+#pragma enum Anim2 PanicRun = 6
+#pragma enum Anim2 SneakWalk = 7
+#pragma enum Anim2 SneakRun = 8
+#pragma enum Anim2 Stand = 10
+#pragma enum Anim2 Crouch = 11
+#pragma enum Anim2 Prone = 12
+#pragma enum Anim2 ShowWeapon = 20
+#pragma enum Anim2 HideWeapon = 21
+#pragma enum Anim2 PrepareWeapon = 22
+#pragma enum Anim2 TurnOffWeapon = 23
+#pragma enum Anim2 Fidget = 24
+#pragma enum Anim2 Climbing = 26
+#pragma enum Anim2 PickUp = 27
+#pragma enum Anim2 Use = 28
+#pragma enum Anim2 SwitchItems = 29
+#pragma enum Anim2 Reload = 30
+#pragma enum Anim2 Repair = 31
+#pragma enum Anim2 Loot = 35
+#pragma enum Anim2 Steal = 36
+#pragma enum Anim2 Push = 37
+#pragma enum Anim2 BeginCombat = 40
+#pragma enum Anim2 IdleCombat = 41
+#pragma enum Anim2 EndCombat = 42
+#pragma enum Anim2 PunchRight = 43
+#pragma enum Anim2 PunchLeft = 44
+#pragma enum Anim2 PunchCombo = 45
+#pragma enum Anim2 KickHi = 46
+#pragma enum Anim2 KickLo = 47
+#pragma enum Anim2 KickCombo = 48
+#pragma enum Anim2 Thrust1H = 49
+#pragma enum Anim2 Thrust2H = 50
+#pragma enum Anim2 Swing1H = 51
+#pragma enum Anim2 Swing2H = 52
+#pragma enum Anim2 Throw = 53
+#pragma enum Anim2 Single = 54
+#pragma enum Anim2 Burst = 55
+#pragma enum Anim2 Sweep = 56
+#pragma enum Anim2 Butt = 57
+#pragma enum Anim2 Flame = 58
+#pragma enum Anim2 NoRecoil = 59
+#pragma enum Anim2 DodgeFront = 70
+#pragma enum Anim2 DodgeBack = 71
+#pragma enum Anim2 DamageFront = 72
+#pragma enum Anim2 DamageBack = 73
+#pragma enum Anim2 DamageMulFront = 74
+#pragma enum Anim2 DamageMulBack = 75
+#pragma enum Anim2 WalkDamageFront = 76
+#pragma enum Anim2 WalkDamageBack = 77
+#pragma enum Anim2 LimpDamageFront = 78
+#pragma enum Anim2 LimpDamageBack = 79
+#pragma enum Anim2 RunDamageFront = 80
+#pragma enum Anim2 RunDamageBack = 81
+#pragma enum Anim2 KnockFront = 82
+#pragma enum Anim2 KnockBack = 83
+#pragma enum Anim2 LaydownFront = 84
+#pragma enum Anim2 LaydownBack = 85
+#pragma enum Anim2 IdleProneFront = 86
+#pragma enum Anim2 IdleProneBack = 87
+#pragma enum Anim2 StandupFront = 88
+#pragma enum Anim2 StandupBack = 89
+#pragma enum Anim2 DamageProneFront = 90
+#pragma enum Anim2 DamageProneBack = 91
+#pragma enum Anim2 DamageMulProneFront = 92
+#pragma enum Anim2 DamageMulProneBack = 93
+#pragma enum Anim2 TwitchProneFront = 94
+#pragma enum Anim2 TwitchProneBack = 95
+#pragma enum Anim2 DeadProneFront = 100
+#pragma enum Anim2 DeadProneBack = 101
+#pragma enum Anim2 DeadFront = 102
+#pragma enum Anim2 DeadBack = 103
+#pragma enum Anim2 DeadBloodySingle = 110
+#pragma enum Anim2 DeadBloodyBurst = 111
+#pragma enum Anim2 DeadBurst = 112
+#pragma enum Anim2 DeadPulse = 113
+#pragma enum Anim2 DeadPulseDust = 114
+#pragma enum Anim2 DeadLaser = 115
+#pragma enum Anim2 DeadFused = 116
+#pragma enum Anim2 DeadExplode = 117
+#pragma enum Anim2 DeadBurn = 118
+#pragma enum Anim2 DeadBurnRun = 119
+#pragma enum Anim2 Dance = 150
+#pragma enum Anim2 Punch = 43
+#pragma enum Anim2 Kick = 46
+
+// /
+// / Global variables
+// /
+
+// Possible types:
+// int8, int16, int32, int64, int,
+// uint8, uint16, uint32, uint64, uint,
+// bool, float, double, string.
+// Default value is zero.
+// To set start value use '=' after var name.
+// This vars works like engine global vars.
+// Also recommended use "__" prefix in var name.
+#pragma globalvar bool __MainStoryLineActive = true
+#pragma globalvar uint __PermanentDeath = 0 // Number of deaths to account blocking, zero to disable
+#pragma globalvar uint __HitAimEyes  = 60
+#pragma globalvar uint __HitAimHead  = 40
+#pragma globalvar uint __HitAimGroin = 30
+#pragma globalvar uint __HitAimTorso = 0
+#pragma globalvar uint __HitAimArms  = 30
+#pragma globalvar uint __HitAimLegs  = 20
+#pragma globalvar bool __NoPvpMaps = false       // Отключение нопвп режима активно
+#pragma globalvar uint __MaxLifeLevelSoftCap = 0 // Максимальный уровень персонажа, на котором происходит увеличение хп. 0  = не используется
+#pragma globalvar uint __EncounterTime = 0       // Как часто пробовать создать энкаунтер, в миллисекундах
+
+// Test function
+#ifdef __SERVER
+// #  pragma bindfunc "void TestFunc(string&) -> fonline_test.dll TestFunc"
+#endif
+#ifdef __CLIENT
+// Next line produce error due to disabled AllowClientNativeCalls
+// #  pragma bindfunc void TestFunc(string&) -> fonline_test_client.dll TestFunc
+#endif
+
+// Item
+// Armor
+#pragma property Item Public hash Armor_CrTypeMale
+#pragma property Item Public hash Armor_CrTypeFemale
+#pragma property Item Public int  Armor_AC
+#pragma property Item Public uint Armor_Perk
+#pragma property Item Public int  Armor_DRNormal
+#pragma property Item Public int  Armor_DRLaser
+#pragma property Item Public int  Armor_DRFire
+#pragma property Item Public int  Armor_DRPlasma
+#pragma property Item Public int  Armor_DRElectr
+#pragma property Item Public int  Armor_DREmp
+#pragma property Item Public int  Armor_DRExplode
+#pragma property Item Public int  Armor_DTNormal
+#pragma property Item Public int  Armor_DTLaser
+#pragma property Item Public int  Armor_DTFire
+#pragma property Item Public int  Armor_DTPlasma
+#pragma property Item Public int  Armor_DTElectr
+#pragma property Item Public int  Armor_DTEmp
+#pragma property Item Public int  Armor_DTExplode
+// Weapon
+#pragma property Item Public bool  Weapon_IsUnarmed
+#pragma property Item Public int   Weapon_UnarmedTree
+#pragma property Item Public int   Weapon_UnarmedPriority
+#pragma property Item Public int   Weapon_UnarmedMinAgility
+#pragma property Item Public int   Weapon_UnarmedMinUnarmed
+#pragma property Item Public int   Weapon_UnarmedMinLevel
+#pragma property Item Public Anim1 Weapon_Anim1
+#pragma property Item Public uint  Weapon_MaxAmmoCount
+#pragma property Item Public Caliber Weapon_Caliber
+#pragma property Item Public hash  Weapon_DefaultAmmoPid
+#pragma property Item Public int   Weapon_MinStrength
+#pragma property Item Public ItemPerks   Weapon_Perk
+#pragma property Item Public bool  Weapon_IsTwoHanded
+#pragma property Item Public uint  Weapon_ActiveUses
+#pragma property Item Public CritterProperty Weapon_Skill_0
+#pragma property Item Public CritterProperty Weapon_Skill_1
+#pragma property Item Public CritterProperty Weapon_Skill_2
+#pragma property Item Public hash  Weapon_PicUse_0
+#pragma property Item Public hash  Weapon_PicUse_1
+#pragma property Item Public hash  Weapon_PicUse_2
+#pragma property Item Public uint  Weapon_MaxDist_0
+#pragma property Item Public uint  Weapon_MaxDist_1
+#pragma property Item Public uint  Weapon_MaxDist_2
+#pragma property Item Public uint  Weapon_Round_0
+#pragma property Item Public uint  Weapon_Round_1
+#pragma property Item Public uint  Weapon_Round_2
+#pragma property Item Public uint  Weapon_ApCost_0
+#pragma property Item Public uint  Weapon_ApCost_1
+#pragma property Item Public uint  Weapon_ApCost_2
+#pragma property Item Public bool  Weapon_Aim_0
+#pragma property Item Public bool  Weapon_Aim_1
+#pragma property Item Public bool  Weapon_Aim_2
+#pragma property Item Public uint8 Weapon_SoundId_0
+#pragma property Item Public uint8 Weapon_SoundId_1
+#pragma property Item Public uint8 Weapon_SoundId_2
+#pragma property Item Public int   Weapon_DmgType_0
+#pragma property Item Public int   Weapon_DmgType_1
+#pragma property Item Public int   Weapon_DmgType_2
+#pragma property Item Public Anim2 Weapon_Anim2_0
+#pragma property Item Public Anim2 Weapon_Anim2_1
+#pragma property Item Public Anim2 Weapon_Anim2_2
+#pragma property Item Public int   Weapon_DmgMin_0
+#pragma property Item Public int   Weapon_DmgMin_1
+#pragma property Item Public int   Weapon_DmgMin_2
+#pragma property Item Public int   Weapon_DmgMax_0
+#pragma property Item Public int   Weapon_DmgMax_1
+#pragma property Item Public int   Weapon_DmgMax_2
+#pragma property Item Public bool  Weapon_Remove_0
+#pragma property Item Public bool  Weapon_Remove_1
+#pragma property Item Public bool  Weapon_Remove_2
+#pragma property Item Public uint  Weapon_ReloadAp
+#pragma property Item Public int   Weapon_UnarmedCriticalBonus
+#pragma property Item Public uint  Weapon_CriticalFailture
+#pragma property Item Public bool  Weapon_UnarmedArmorPiercing
+#pragma property Item Public hash  Weapon_Effect_0
+#pragma property Item Public hash  Weapon_Effect_1
+#pragma property Item Public hash  Weapon_Effect_2
+// Ammo
+#pragma property Item Public Caliber Ammo_Caliber
+#pragma property Item Public int  Ammo_AcMod
+#pragma property Item Public int  Ammo_DrMod
+#pragma property Item Public uint Ammo_DmgMult
+#pragma property Item Public uint Ammo_DmgDiv
+// Car
+#pragma property Item Public uint Car_Speed
+#pragma property Item Public uint Car_Passability
+#pragma property Item Public uint Car_DeteriorationRate
+#pragma property Item Public uint Car_CrittersCapacity
+#pragma property Item Public uint Car_TankVolume
+#pragma property Item Public uint Car_MaxDeterioration
+#pragma property Item Public uint Car_FuelConsumption
+#pragma property Item Public uint Car_Entrance
+#pragma property Item Public uint Car_MovementType
+// Lockers and doors
+#pragma property Item Protected        uint    LockerId
+#pragma property Item PrivateServer    uint16  LockerComplexity
+#pragma property Item Public           bool    Locker_Locked
+#pragma property Item Public           bool    Locker_Jammed
+#pragma property Item Public           bool    Locker_Broken
+#pragma property Item Public           bool    Locker_NoOpen
+#pragma property Item Public           bool    Locker_IsElectro
+// Deterioration
+#pragma property Item Public    bool Deteriorable
+#pragma property Item Protected bool IsBroken
+
+#pragma property Item Protected bool BrokenEternal
+#pragma property Item Protected bool BrokenLowBroken
+#pragma property Item Protected bool BrokenNormBroken
+#pragma property Item Protected bool BrokenHighBroken
+#pragma property Item Protected bool BrokenNotresc
+#pragma property Item Protected bool BrokenService
+#pragma property Item Protected bool BrokenServiceExt
+
+#pragma property Item Protected uint BrokenCount
+#pragma property Item Protected uint Deterioration
+
+// Critter
+#pragma property Critter VirtualPublic    int   Strength
+#pragma property Critter Public           int   StrengthBase   Group = SpecialBase
+#pragma property Critter VirtualProtected int   Perception
+#pragma property Critter Protected        int   PerceptionBase Group = SpecialBase
+#pragma property Critter VirtualPublic    int   Endurance
+#pragma property Critter Public           int   EnduranceBase  Group = SpecialBase
+//#pragma property Critter VirtualProtected int   Charisma
+#pragma property Critter Protected        int   CharismaBase   Group = SpecialBase
+#pragma property Critter VirtualProtected int   Intellect
+#pragma property Critter Protected        int   IntellectBase  Group = SpecialBase
+#pragma property Critter VirtualPublic    int   Agility
+#pragma property Critter Public           int   AgilityBase    Group = SpecialBase
+#pragma property Critter VirtualProtected int   Luck
+#pragma property Critter Protected        int   LuckBase       Group = SpecialBase
+#pragma property Critter VirtualProtected int   ArmorClass
+#pragma property Critter VirtualPublic    int   MaxLife
+#pragma property Critter Public           int   MaxLifeBase
+#pragma property Critter Protected        int   ActionPointsBase
+#pragma property Critter Protected        int   ArmorClassBase
+#pragma property Critter VirtualProtected int   MeleeDamage
+#pragma property Critter Protected        int   MeleeDamageBase
+#pragma property Critter VirtualProtected bool  IsOverweight
+#pragma property Critter VirtualProtected int   CarryWeight
+#pragma property Critter Protected        int   CarryWeightBase
+#pragma property Critter VirtualProtected int   Sequence
+#pragma property Critter Protected        int   SequenceBase
+#pragma property Critter VirtualProtected int   HealingRate
+#pragma property Critter Protected        int   HealingRateBase
+#pragma property Critter VirtualProtected int   CriticalChance
+#pragma property Critter Protected        int   CriticalChanceBase
+#pragma property Critter VirtualProtected int   MaxCritical
+#pragma property Critter Protected        int   MaxCriticalBase
+#pragma property Critter Protected        int   Toxic
+#pragma property Critter Protected        int   Radioactive
+#pragma property Critter Protected        int   KillExperience
+#pragma property Critter Protected        uint  BodyType
+#pragma property Critter Protected        int   LocomotionType
+#pragma property Critter Protected        int   DamageType
+#pragma property Critter Public           int   Age
+#pragma property Critter Public           int8  Gender
+#pragma property Critter Protected        int   PoisoningLevel
+#pragma property Critter Protected        int   RadiationLevel
+#pragma property Critter Protected        int   UnspentSkillPoints
+#pragma property Critter Protected        int   UnspentPerks
+#pragma property Critter Protected        int   Karma
+#pragma property Critter Protected        int   ReplicationMoney
+#pragma property Critter Protected        int   ReplicationCount
+#pragma property Critter Protected        int   ReplicationCost
+#pragma property Critter Protected        int   RateObject
+#pragma property Critter Protected        int   BonusLook
+#pragma property Critter Protected        int   NpcRole
+#pragma property Critter Protected        int   AiId
+#pragma property Critter Protected        int   TeamId
+#pragma property Critter Protected        int   NextCrType
+#pragma property Critter PrivateServer    uint  DeadBlockerId
+#pragma property Critter Protected        int   CurrentArmorPerk
+#pragma property Critter PrivateServer    uint  NextReplicationMap
+#pragma property Critter PrivateServer    uint  NextReplicationEntire
+#pragma property Critter Public           int   PlayerKarma
+#pragma property Critter Public           int   ArmorPerk
+#pragma property Critter PrivateServer    uint  LastStealCrId
+#pragma property Critter PrivateServer    uint  StealCount
+#pragma property Critter PrivateServer    uint  GlobalMapMoveCounter
+#pragma property Critter Protected        int   Experience
+
+// Models
+#pragma property Critter PrivateCommon const uint CrTypeAlias
+#pragma property Critter Public hash ModelNameBase
+#pragma property Critter Protected bool IsNoArmor
+#pragma property Critter PrivateCommon const bool[] Anims
+
+// Modes
+//#pragma property Critter Protected bool IsNoAim
+
+// Kills
+#pragma property Critter Protected uint[] Kills
+#pragma property Critter Defaults Group = Kills
+#pragma property Critter Protected uint KillMen
+#pragma property Critter Protected uint KillWomen
+#pragma property Critter Protected uint KillAlien
+#pragma property Critter Protected uint KillChildren
+#pragma property Critter Protected uint KillFloater
+#pragma property Critter Protected uint KillRat
+#pragma property Critter Protected uint KillCentaur
+#pragma property Critter Defaults
+
+// Reputations
+#pragma property Critter Defaults Group = Reputations
+#pragma property Critter Protected int ReputationDen
+#pragma property Critter Protected int ReputationKlamath
+#pragma property Critter Protected int ReputationModoc
+#pragma property Critter Protected int ReputationVaultCity
+#pragma property Critter Protected int ReputationGecko
+#pragma property Critter Protected int ReputationBrokenHills
+#pragma property Critter Protected int ReputationNewReno
+#pragma property Critter Protected int ReputationSierra
+#pragma property Critter Protected int ReputationVault15
+#pragma property Critter Protected int ReputationNCR
+#pragma property Critter Protected int ReputationCathedral
+#pragma property Critter Protected int ReputationSAD
+#pragma property Critter Protected int ReputationRedding
+#pragma property Critter Protected int ReputationSF
+#pragma property Critter Protected int ReputationNavarro
+#pragma property Critter Protected int ReputationArroyo
+#pragma property Critter Protected int ReputationPrimalTribe
+#pragma property Critter Protected int ReputationRangers
+#pragma property Critter Protected int ReputationVault13
+#pragma property Critter Protected int ReputationSacramento
+#pragma property Critter Defaults
+
+// Addictions
+#pragma property Critter Protected bool[] Addictions
+#pragma property Critter VirtualProtected bool IsAddicted
+#pragma property Critter Protected bool IsJetAddicted
+#pragma property Critter Protected bool IsBuffoutAddicted
+#pragma property Critter Protected bool IsMentatsAddicted
+#pragma property Critter Protected bool IsPsychoAddicted
+#pragma property Critter Protected bool IsRadawayAddicted
+
+// Damage resistance
+#pragma property Critter VirtualProtected int[] DamageResistance
+#pragma property Critter VirtualProtected int   NormalResistance
+#pragma property Critter VirtualProtected int   PoisonResistance
+#pragma property Critter VirtualProtected int   RadiationResistance
+#pragma property Critter VirtualProtected int   ExplodeResistance
+#pragma property Critter Protected        int   NormalResistanceBase      Group = ResistsBase
+#pragma property Critter Protected        int   LaserResistanceBase       Group = ResistsBase
+#pragma property Critter Protected        int   FireResistanceBase        Group = ResistsBase
+#pragma property Critter Protected        int   PlasmaResistanceBase      Group = ResistsBase
+#pragma property Critter Protected        int   ElectricityResistanceBase Group = ResistsBase
+#pragma property Critter Protected        int   EmpResistanceBase         Group = ResistsBase
+#pragma property Critter Protected        int   ExplodeResistanceBase     Group = ResistsBase
+#pragma property Critter Protected        int   PoisonResistanceBase      Group = ResistsBase
+#pragma property Critter Protected        int   RadiationResistanceBase   Group = ResistsBase
+#pragma property Critter VirtualProtected int[] DamageThreshold
+#pragma property Critter Protected        int   NormalThresholdBase      Group = ThresholdsBase
+#pragma property Critter Protected        int   LaserThresholdBase       Group = ThresholdsBase
+#pragma property Critter Protected        int   FireThresholdBase        Group = ThresholdsBase
+#pragma property Critter Protected        int   PlasmaThresholdBase      Group = ThresholdsBase
+#pragma property Critter Protected        int   ElectricityThresholdBase Group = ThresholdsBase
+#pragma property Critter Protected        int   EmpThresholdBase         Group = ThresholdsBase
+#pragma property Critter Protected        int   ExplodeThresholdBase     Group = ThresholdsBase
+#pragma property Critter Protected        int   PoisonThresholdBase      Group = ThresholdsBase
+#pragma property Critter Protected        int   RadiationThresholdBase   Group = ThresholdsBase
+
+// Damages
+#pragma property Critter Protected     bool IsPoisoned
+#pragma property Critter Protected     bool IsRadiated
+#pragma property Critter VirtualPublic bool IsInjured
+#pragma property Critter Public        bool IsDamagedEye
+#pragma property Critter Public        bool IsDamagedRightArm
+#pragma property Critter Public        bool IsDamagedLeftArm
+#pragma property Critter Public        bool IsDamagedRightLeg
+#pragma property Critter Public        bool IsDamagedLeftLeg
+
+// Custom vars
+#pragma property Critter Public int Var0
+#pragma property Critter Public int Var1
+#pragma property Critter Public int Var2
+#pragma property Critter Public int Var3
+#pragma property Critter Public int Var4
+#pragma property Critter Public int Var5
+#pragma property Critter Public int Var6
+#pragma property Critter Public int Var7
+#pragma property Critter Public int Var8
+#pragma property Critter Public int Var9
+
+// Skills
+#pragma property Critter Defaults Group = Skills
+#pragma property Critter Protected int SkillSmallGuns
+#pragma property Critter Protected int SkillBigGuns
+#pragma property Critter Protected int SkillEnergyWeapons
+#pragma property Critter Protected int SkillUnarmed
+#pragma property Critter Protected int SkillMeleeWeapons
+#pragma property Critter Protected int SkillThrowing
+#pragma property Critter Protected int SkillFirstAid
+#pragma property Critter Protected int SkillDoctor
+#pragma property Critter Protected int SkillSneak
+#pragma property Critter Protected int SkillLockpick
+#pragma property Critter Protected int SkillSteal
+#pragma property Critter Protected int SkillTraps
+#pragma property Critter Protected int SkillScience
+#pragma property Critter Protected int SkillRepair
+#pragma property Critter Protected int SkillSpeech
+#pragma property Critter Protected int SkillBarter
+#pragma property Critter Protected int SkillGambling
+#pragma property Critter Protected int SkillOutdoorsman
+#pragma property Critter Defaults
+
+// Tag skills
+#pragma property Critter VirtualProtected CritterProperty[] TagSkills
+#pragma property Critter Protected        CritterProperty TagSkill1
+#pragma property Critter Protected        CritterProperty TagSkill2
+#pragma property Critter Protected        CritterProperty TagSkill3
+
+// Perks
+#pragma property Critter Defaults Group = Perks
+#pragma property Critter Protected uint8 PerkBookworm
+#pragma property Critter Protected uint8 PerkAwareness
+#pragma property Critter Protected uint8 PerkBonusHthAttacks
+#pragma property Critter Protected uint8 PerkBonusHthDamage
+#pragma property Critter Protected uint8 PerkBonusRangedDamage
+#pragma property Critter Protected uint8 PerkBonusRateOfFire
+#pragma property Critter Protected uint8 PerkEarlierSequence
+#pragma property Critter Protected uint8 PerkFasterHealing
+#pragma property Critter Protected uint8 PerkMoreCriticals
+#pragma property Critter Protected uint8 PerkNightVision
+#pragma property Critter Protected uint8 PerkRadResistance
+#pragma property Critter Protected uint8 PerkToughness
+#pragma property Critter Protected uint8 PerkStrongBack
+#pragma property Critter Protected uint8 PerkSharpshooter
+#pragma property Critter Protected uint8 PerkSurvivalist
+#pragma property Critter Protected uint8 PerkEducated
+#pragma property Critter Protected uint8 PerkHealer
+#pragma property Critter Protected uint8 PerkFortuneFinder
+#pragma property Critter Protected uint8 PerkBetterCriticals
+#pragma property Critter Protected uint8 PerkEmpathy
+#pragma property Critter Protected uint8 PerkSlayer
+#pragma property Critter Protected uint8 PerkSniper
+#pragma property Critter Protected uint8 PerkSilentDeath
+#pragma property Critter Protected uint8 PerkActionBoy
+#pragma property Critter Protected uint8 PerkMentalBlock
+#pragma property Critter Protected uint8 PerkLifegiver
+#pragma property Critter Protected uint8 PerkDodger
+#pragma property Critter Protected uint8 PerkSnakeater
+#pragma property Critter Protected uint8 PerkMrFixit
+#pragma property Critter Protected uint8 PerkMedic
+#pragma property Critter Protected uint8 PerkMasterThief
+#pragma property Critter Protected uint8 PerkSpeaker
+#pragma property Critter Protected uint8 PerkHeaveHo
+#pragma property Critter Protected uint8 PerkFriendlyFoe
+#pragma property Critter Protected uint8 PerkPickpocket
+#pragma property Critter Protected uint8 PerkGhost
+#pragma property Critter Protected uint8 PerkCultOfPersonality
+#pragma property Critter Protected uint8 PerkScrounger
+#pragma property Critter Protected uint8 PerkExplorer
+#pragma property Critter Protected uint8 PerkFlowerChild
+#pragma property Critter Protected uint8 PerkPathfinder
+#pragma property Critter Protected uint8 PerkAnimalFriend
+#pragma property Critter Protected uint8 PerkScout
+#pragma property Critter Protected uint8 PerkMysteriousStranger
+#pragma property Critter Protected uint8 PerkRanger
+
+#pragma property Critter Protected uint8 PerkSmoothTalker
+#pragma property Critter Protected uint8 PerkSwiftLearner
+#pragma property Critter Protected uint8 PerkTag
+#pragma property Critter Protected uint8 PerkMutate
+#pragma property Critter Public    uint8 PerkAdrenalineRush
+#pragma property Critter Protected uint8 PerkCautiousNature
+#pragma property Critter Protected uint8 PerkComprehension
+#pragma property Critter Protected uint8 PerkDemolitionExpert
+#pragma property Critter Protected uint8 PerkGambler
+#pragma property Critter Protected uint8 PerkGainStrength
+#pragma property Critter Protected uint8 PerkGainPerception
+#pragma property Critter Protected uint8 PerkGainEndurance
+#pragma property Critter Protected uint8 PerkGainCharisma
+#pragma property Critter Protected uint8 PerkGainIntelligence
+#pragma property Critter Protected uint8 PerkGainAgility
+#pragma property Critter Protected uint8 PerkGainLuck
+#pragma property Critter Protected uint8 PerkHarmless
+#pragma property Critter Protected uint8 PerkHereAndNow
+#pragma property Critter Protected uint8 PerkHthEvade
+#pragma property Critter Protected uint8 PerkKamaSutraMaster
+#pragma property Critter Protected uint8 PerkKarmaBeacon
+#pragma property Critter Protected uint8 PerkLightStep
+#pragma property Critter Protected uint8 PerkLivingAnatomy
+#pragma property Critter Protected uint8 PerkMagneticPersonality
+#pragma property Critter Protected uint8 PerkNegotiator
+#pragma property Critter Protected uint8 PerkPackRat
+#pragma property Critter Protected uint8 PerkPyromaniac
+#pragma property Critter Protected uint8 PerkQuickRecovery
+#pragma property Critter Protected uint8 PerkSalesman
+#pragma property Critter Protected uint8 PerkStonewall
+#pragma property Critter Protected uint8 PerkThief
+#pragma property Critter Protected uint8 PerkWeaponHandling
+#pragma property Critter Protected uint8 PerkVaultCityTraining
+#pragma property Critter Protected uint8 PerkExpertExcrement
+#pragma property Critter Protected uint8 PerkTerminator
+#pragma property Critter Protected uint8 PerkGeckoSkinning
+#pragma property Critter Protected uint8 PerkVaultCityInoculations
+#pragma property Critter Protected uint8 PerkDermalImpact
+#pragma property Critter Protected uint8 PerkDermalImpactEnh
+#pragma property Critter Protected uint8 PerkPhoenixImplants
+#pragma property Critter Protected uint8 PerkPhoenixImplantsEnh
+#pragma property Critter Protected uint8 PerkNcrPerception
+#pragma property Critter Protected uint8 PerkNcrEndurance
+#pragma property Critter Protected uint8 PerkNcrBarter
+#pragma property Critter Protected uint8 PerkNcrRepair
+#pragma property Critter Protected uint8 PerkVampireAccuracy
+#pragma property Critter Protected uint8 PerkVampireRegeneration
+#pragma property Critter Defaults
+
+// Karma perks
+#pragma property Critter Defaults Group = KarmaPerks
+#pragma property Critter Protected uint8 KarmaPerkBerserker
+#pragma property Critter Protected uint8 KarmaPerkChampion
+#pragma property Critter Protected uint  KarmaPerkChildkiller
+#pragma property Critter Protected uint8 KarmaPerkSexpert
+#pragma property Critter Protected uint8 KarmaPerkPrizefighter
+#pragma property Critter Protected uint8 KarmaPerkGigolo
+#pragma property Critter Protected uint8 KarmaPerkGraveDigger
+#pragma property Critter Protected uint8 KarmaPerkMarried
+#pragma property Critter Protected uint8 KarmaPerkPornStar
+#pragma property Critter Protected uint8 KarmaPerkSlaver
+#pragma property Critter Protected uint8 KarmaPerkVirginWastes
+#pragma property Critter Protected uint8 KarmaPerkManSalvatore
+#pragma property Critter Protected uint8 KarmaPerkManBishop
+#pragma property Critter Protected uint8 KarmaPerkManMordino
+#pragma property Critter Protected uint8 KarmaPerkManWright
+#pragma property Critter Protected uint8 KarmaPerkSeparated
+#pragma property Critter Protected uint8 KarmaPerkPedobear
+#pragma property Critter Protected uint8 KarmaPerkVcGuardsman
+#pragma property Critter Defaults
+
+// Traits
+#pragma property Critter Defaults Group = Traits
+#pragma property Critter Protected bool IsTraitFastMetabolism
+#pragma property Critter Protected bool IsTraitBruiser
+#pragma property Critter Protected bool IsTraitSmallFrame
+#pragma property Critter Protected bool IsTraitOneHander
+#pragma property Critter Protected bool IsTraitFinesse
+#pragma property Critter Protected bool IsTraitKamikaze
+#pragma property Critter Protected bool IsTraitHeavyHanded
+#pragma property Critter Protected bool IsTraitFastShot
+#pragma property Critter Protected bool IsTraitBloodyMess
+#pragma property Critter Protected bool IsTraitJinxed
+#pragma property Critter Protected bool IsTraitJinxedII
+#pragma property Critter Protected bool IsTraitGoodNatured
+#pragma property Critter Protected bool IsTraitChemReliant
+#pragma property Critter Protected bool IsTraitChemResistant
+#pragma property Critter Protected bool IsTraitSexAppeal
+#pragma property Critter Protected bool IsTraitSkilled
+#pragma property Critter Protected bool IsTraitNightPerson
+#pragma property Critter Defaults
+
+// Timeouts
+#pragma property Critter Defaults Group = Timeouts
+#pragma property Critter Protected uint TimeoutSkFirstAid
+#pragma property Critter Protected uint TimeoutSkDoctor
+#pragma property Critter Protected uint TimeoutSkRepair
+#pragma property Critter Protected uint TimeoutSkScience
+#pragma property Critter Protected uint TimeoutSkLockpick
+#pragma property Critter Protected uint TimeoutSkSteal
+#pragma property Critter Protected uint TimeoutSkOutdoorsman
+#pragma property Critter Protected uint TimeoutReplication
+#pragma property Critter Protected uint TimeoutKarmaVoting
+#pragma property Critter Protected uint TimeoutSneak
+#pragma property Critter Protected uint TimeoutHealing
+#pragma property Critter Protected uint TimeoutStealing
+#pragma property Critter Protected uint TimeoutAggressor
+#pragma property Critter Defaults
+
+// Mercs
+#pragma property Critter Defaults Group = Mercs
+#pragma property Critter PrivateServer uint MercMasterId       // Id хозяина мерка
+#pragma property Critter PrivateServer bool MercAlwaysRun      // Признак, мерк перемещаетя бегом при следовании за хозяином
+#pragma property Critter PrivateServer bool MercCancelOnAttack // Признак, отменяет ли мерк службу, если хозяин атакует самого мерка
+#pragma property Critter PrivateServer uint MercLoseDist       // Дистанция, при превышении которой мерк "отстает" от хозяина и отменяет режиме мерка
+#pragma property Critter PrivateServer uint MercMasterDist     // Дистанция, которой придерживается мерк в режиме следования за хозяином
+#pragma property Critter PrivateServer int  MercType           // Тип мерка, см. Merch
+#pragma property Critter PrivateServer bool MercDefendMaster   // Признак: мерк защищает хозяина, если тот атакован
+#pragma property Critter PrivateServer bool MercAssistMaster   // Признак: если хозяин атакует цель, мерк присоединяется к атаке
+#pragma property Critter PrivateServer uint MercCancelTime     // Время завершения службы
+#pragma property Critter PrivateServer bool MercCancelOnGlobal // Признак: мерк отменяет службу, если хозяин вышел на глобальную карту
+#pragma property Critter PrivateServer bool MercWaitForMaster  // Признак: мерк ожидает хозяина на конкретном месте
+#pragma property Critter Defaults
+
+// Quest
+#pragma property Critter Protected     uint8    ArroyoMynocDefence          Group = Quests, Quest = 4702,    Max = 8
+#pragma property Critter Protected     uint8    ArroyoCassidyLetter         Group = Quests, Quest = 4705,    Max = 4
+#pragma property Critter Protected     uint8    ArroyoMynocOil              Group = Quests, Quest = 4701,    Max = 3
+#pragma property Critter Protected     uint8    ArroyoProofOfDeath          Group = Quests, Quest = 4706,    Max = 4
+#pragma property Critter Protected     uint8    ArroyoLetterToLinnett       Group = Quests, Quest = 4707,    Max = 4
+
+#pragma property Critter Protected     uint8    KlamSallyFindProstitute     Group = Quests, Quest = 3224,    Max = 3
+#pragma property Critter Protected     uint8    KlamBobWater                Group = Quests, Quest = 3201,    Max = 3
+#pragma property Critter Protected     uint8    KlamFindTrappers            Group = Quests, Quest = 3223,    Max = 11
+#pragma property Critter Protected     uint8    KlamBugenLure               Group = Quests, Quest = 3230,    Max = 9
+#pragma property Critter Protected     uint8    KlamNotifyHusband           Group = Quests, Quest = 3229,    Max = 4
+#pragma property Critter Protected     uint8    KlamEidenBramin             Group = Quests, Quest = 3221,    Max = 6
+#pragma property Critter Protected     uint8    KlamSmilyModoc              Group = Quests, Quest = 3206,    Max = 2
+
+#pragma property Critter Protected     uint8    DenBillRacingWin            Group = Quests, Quest = 3152,    Max = 7
+#pragma property Critter Protected     uint8    DenLeannaCondom             Group = Quests, Quest = 3100,    Max = 3
+#pragma property Critter Protected     uint8    QDenAnanDoll                Group = Quests, Quest = 3145,    Max = 3
+#pragma property Critter Protected     uint8    DenAnanRedoll               Group = Quests, Quest = 3146,    Max = 3
+#pragma property Critter Protected     uint8    DenGhost                    Group = Quests, Quest = 3103,    Max = 11
+#pragma property Critter Protected     uint8    DenBillRacingOpening        Group = Quests, Quest = 3151,    Max = 2
+#pragma property Critter Protected     uint8    DenCarstopJeffry            Group = Quests, Quest = 3106,    Max = 4
+#pragma property Critter Protected     uint8    DenCarstopBrahmin           Group = Quests, Quest = 3127,    Max = 11
+#pragma property Critter Protected     uint8    DenCarstopBreeder           Group = Quests, Quest = 3126,    Max = 3
+#pragma property Critter Protected     uint8    DenJoeySteal                Group = Quests, Quest = 3112,    Max = 4
+#pragma property Critter Protected     uint8    DenJaneDolg                 Group = Quests, Quest = 3117,    Max = 3
+#pragma property Critter Protected     uint8    DenJanePsycho               Group = Quests, Quest = 3116,    Max = 3
+#pragma property Critter Protected     uint8    DenLaraPostal               Group = Quests, Quest = 3131,    Max = 4
+#pragma property Critter Protected     uint8    DenFlikJet                  Group = Quests, Quest = 3135,    Max = 4
+#pragma property Critter Protected     uint8    DenLaraBand                 Group = Quests, Quest = 3134,    Max = 3
+#pragma property Critter Protected     uint8    DenJoeyLoan                 Group = Quests, Quest = 3107,    Max = 3
+#pragma property Critter Protected     uint8    DenLaraBos                  Group = Quests, Quest = 3132,    Max = 3
+#pragma property Critter Protected     uint8    QDenCliffDealer             Group = Quests, Quest = 3144,    Max = 4
+#pragma property Critter Protected     uint8    DenFredStim                 Group = Quests, Quest = 3137,    Max = 2
+#pragma property Critter Protected     uint8    DenJaneVodka                Group = Quests, Quest = 3122,    Max = 4
+#pragma property Critter Protected     uint8    DenMomSlut                  Group = Quests, Quest = 3101,    Max = 3
+#pragma property Critter Protected     uint8    DenSmittyBatt               Group = Quests, Quest = 3139,    Max = 3
+#pragma property Critter Protected     uint8    DenJaneMeat                 Group = Quests, Quest = 3121,    Max = 4
+#pragma property Critter Protected     uint8    DenJaneStim                 Group = Quests, Quest = 3123,    Max = 4
+#pragma property Critter Protected     uint8    DenLaraMolotovCoctail       Group = Quests, Quest = 3105,    Max = 3
+#pragma property Critter Protected     uint8    DenLeannaBuy                Group = Quests, Quest = 3142,    Max = 4
+#pragma property Critter Protected     uint8    DenSmittyBoots              Group = Quests, Quest = 3128,    Max = 3
+#pragma property Critter Protected     uint8    DenJaneGuns                 Group = Quests, Quest = 3124,    Max = 4
+#pragma property Critter Protected     uint8    DenSmittyKey                Group = Quests, Quest = 3140,    Max = 3
+#pragma property Critter Protected     uint8    DenJaneArmor                Group = Quests, Quest = 3125,    Max = 4
+#pragma property Critter Protected     uint8    DenSmittyAmmo               Group = Quests, Quest = 3141,    Max = 4
+#pragma property Critter Protected     uint8    DenJaneHunt                 Group = Quests, Quest = 3115,    Max = 3
+#pragma property Critter Protected     uint8    DenJoeyKnife                Group = Quests, Quest = 3109,    Max = 3
+#pragma property Critter Protected     uint8    DenJoeyLara                 Group = Quests, Quest = 3111,    Max = 4
+#pragma property Critter Protected     uint8    DenJaneRadio                Group = Quests, Quest = 3113,    Max = 4
+#pragma property Critter Protected     uint8    DenJoeyJet                  Group = Quests, Quest = 3110,    Max = 4
+#pragma property Critter Protected     uint8    DenLaraTrust                Group = Quests, Quest = 3130,    Max = 2
+#pragma property Critter Protected     uint8    DenLeannaWine               Group = Quests, Quest = 3143,    Max = 4
+#pragma property Critter Protected     uint8    DenMomRadscorp              Group = Quests, Quest = 3102,    Max = 2
+#pragma property Critter Protected     uint8    DenSmittyFixit              Group = Quests, Quest = 3104,    Max = 4
+#pragma property Critter Protected     uint8    QDenLeannaThief             Group = Quests, Quest = 3138,    Max = 4
+
+#pragma property Critter Protected     uint8    ModJoeFarm                  Group = Quests, Quest = 3306,    Max = 3
+#pragma property Critter Protected     uint8    ModHose                     Group = Quests, Quest = 3300,    Max = 3
+#pragma property Critter Protected     uint8    ModBaltasGecko              Group = Quests, Quest = 3302,    Max = 3
+#pragma property Critter Protected     uint8    ModLourenceRatsColony       Group = Quests, Quest = 3324,    Max = 4
+#pragma property Critter Protected     uint8    ModLourenceFloater          Group = Quests, Quest = 3320,    Max = 4
+#pragma property Critter Protected     uint8    ModJoeVampire               Group = Quests, Quest = 3308,    Max = 11
+
+#pragma property Critter Protected     uint8    BHMarcusEscort              Group = Quests, Quest = 3608,    Max = 5
+#pragma property Critter Protected     uint8    BHSuperNewTechnology        Group = Quests, Quest = 3604,    Max = 5
+
+#pragma property Critter Protected     uint8    ReddDocRadio                Group = Quests, Quest = 4330,    Max = 6
+#pragma property Critter Protected     uint8    ReddDocRadioTroy            Group = Quests, Quest = 4331,    Max = 1
+#pragma property Critter Protected     uint8    ReddDocRadioFung            Group = Quests, Quest = 4332,    Max = 1
+#pragma property Critter Protected     uint8    ReddDocRadioHoliday         Group = Quests, Quest = 4333,    Max = 1
+#pragma property Critter Protected     uint8    ReddDocRadioJubiley         Group = Quests, Quest = 4334,    Max = 1
+#pragma property Critter Protected     uint8    ReddHubbChildkiller         Group = Quests, Quest = 4312,    Max = 7
+#pragma property Critter Protected     uint8    ReddMarionVinamingo         Group = Quests, Quest = 4303,    Max = 18
+#pragma property Critter Protected     uint8    ReddDoctorDelivery          Group = Quests, Quest = 5310,    Max = 3
+
+#pragma property Critter Protected     uint8    NavHenryProtoMaterials      Group = Quests, Quest = 4509,    Max = 2
+#pragma property Critter Protected     uint8    NavSoftJob                  Group = Quests, Quest = 4506,    Max = 2
+
+#pragma property Critter Protected     uint8    NcrHatePatrol               Group = Quests, Quest = 4292,    Max = 11
+#pragma property Critter Protected     uint8    NcrSantiagaFindSpyStatus    Group = Quests, Quest = 4273,    Max = 21
+#pragma property Critter Protected     uint8    NcrBusterBrokenrifles       Group = Quests, Quest = 4286,    Max = 15
+#pragma property Critter Protected     uint8    NcrKessMedBoardStatus       Group = Quests, Quest = 4232,    Max = 3
+#pragma property Critter Protected     uint8    NcrDorotyFindHenryPapers    Group = Quests, Quest = 4288,    Max = 2
+#pragma property Critter Protected     uint8    NcrLeadSmit2Dustybar        Group = Quests, Quest = 4218,    Max = 4
+#pragma property Critter Protected     uint8    NcrKyleReddRecon            Group = Quests, Quest = 4270,    Max = 2
+#pragma property Critter Protected     uint8    NcrDuppoFindDasies          Group = Quests, Quest = 4289,    Max = 2
+#pragma property Critter Protected     uint8    NcrDappoLostC               Group = Quests, Quest = 4228,    Max = 5
+
+#pragma property Critter Protected     uint8    QChosen                     Group = Quests, Quest = 5003,    Max = 15
+
+#pragma property Critter Protected     uint8    NRBarmenEscort              Group = Quests, Quest = 3714,    Max = 4
+
+#pragma property Critter Protected     uint8    SFAhs7ImperatorFormat       Group = Quests, Quest = 4421,    Max = 7
+#pragma property Critter Protected     uint8    SFEvaHelpWithZax            Group = Quests, Quest = 4402,    Max = 10
+#pragma property Critter Protected     uint8    SFKenliImperatorRestore     Group = Quests, Quest = 4420,    Max = 10
+#pragma property Critter Protected     uint8    SFLoPanBlackmail            Group = Quests, Quest = 4411,    Max = 3
+#pragma property Critter Protected     uint8    SFTigangRecipe              Group = Quests, Quest = 4440,    Max = 2
+#pragma property Critter Protected     uint8    SFNarcoman                  Group = Quests, Quest = 4410,    Max = 2
+#pragma property Critter Protected     uint8    SFAhs7Invitations           Group = Quests, Quest = 4428,    Max = 5
+#pragma property Critter Protected     uint8    SFSlimSidnancy              Group = Quests, Quest = 4424,    Max = 6
+
+#pragma property Critter Protected     uint8    VCLetterToTodd              Group = Quests, Quest = 8848,    Max = 10
+#pragma property Critter Protected     uint8    VCValeryMail                Group = Quests, Quest = 8811,    Max = 4
+#pragma property Critter Protected     uint8    VCCindyLetter               Group = Quests, Quest = 8847,    Max = 6
+#pragma property Critter Protected     uint8    VCHartmannRecon             Group = Quests, Quest = 8829,    Max = 5
+#pragma property Critter Protected     uint8    VCHartmanNcrHelp            Group = Quests, Quest = 8834,    Max = 4
+#pragma property Critter Protected     uint8    VCBarmenDelivery            Group = Quests, Quest = 8805,    Max = 2
+#pragma property Critter Protected     uint8    VCCharlie                   Group = Quests, Quest = 8802,    Max = 4
+#pragma property Critter Protected     uint8    VCTroyFreshBlood            Group = Quests, Quest = 8808,    Max = 8
+#pragma property Critter Protected     uint8    VCAndrewDeliveries          Group = Quests, Quest = 8803,    Max = 3
+#pragma property Critter Protected     uint8    VCBlackEscort               Group = Quests, Quest = 8817,    Max = 5
+#pragma property Critter Protected     uint8    VCHartmanFight              Group = Quests, Quest = 8819,    Max = 2
+#pragma property Critter Protected     uint8    VCLynettScareNewcomers      Group = Quests, Quest = 8841,    Max = 5
+#pragma property Critter Protected     uint8    VCHartmanRifles             Group = Quests, Quest = 8822,    Max = 3
+#pragma property Critter Protected     uint8    VCHeleneTroyBeauty          Group = Quests, Quest = 8813,    Max = 4
+
+#pragma property Critter Protected     uint8    TribSulikStuff              Group = Quests, Quest = 4602,    Max = 10
+#pragma property Critter Protected     uint8    TribMuscoTest               Group = Quests, Quest = 4605,    Max = 10
+#pragma property Critter Protected     uint8    TribShamanPowder            Group = Quests, Quest = 4603,    Max = 10
+#pragma property Critter Protected     uint8    TribMaiaraBook              Group = Quests, Quest = 4604,    Max = 10
+#pragma property Critter Protected     uint8    TribManotaNecklace          Group = Quests, Quest = 4601,    Max = 10
+
+// Other
+#pragma property Critter PrivateServer uint     BHDeadSaboteursCounter  Max = 40
+#pragma property Critter PrivateServer uint8    SpecialAndroid          Max = 3
+#pragma property Critter PrivateServer uint8    VCLynettRefuse          Max = 2
+#pragma property Critter PrivateServer uint     DialogTimeout
+#pragma property Critter PrivateServer uint     EncLoyalityHubologists
+#pragma property Critter PrivateServer uint     EncLoyalityNcr
+#pragma property Critter PrivateServer uint     EncLoyalityVCity
+#pragma property Critter PrivateServer uint     EncLoyalityRedding
+#pragma property Critter PrivateServer uint     EncLoyalityBroken
+#pragma property Critter PrivateServer uint     EncLoyalityGecko
+#pragma property Critter PrivateServer uint     EncLoyalityArroyo
+#pragma property Critter PrivateServer uint     EncLoyalityKlamath
+#pragma property Critter PrivateServer uint     EncLoyalityModoc
+#pragma property Critter PrivateServer uint     EncLoyalityDen
+#pragma property Critter PrivateServer uint     EncLoyalityReno
+#pragma property Critter PrivateServer uint     EncLoyalityEnclave
+#pragma property Critter PrivateServer uint     EncLoyalitySf
+#pragma property Critter PrivateServer uint8    ModLourenceToxinRecipe                             Max = 1
+#pragma property Critter PrivateServer uint8    SFChitinArmorRecipeKnown                           Max = 1
+#pragma property Critter PrivateServer uint8    SpyCathActive                                      Max = 1
+#pragma property Critter PrivateServer uint8    HasNotCard                                         Max = 1
+#pragma property Critter PrivateServer uint     SexExp                                             Max = 501
+#pragma property Critter PrivateServer uint     ScenFraction                                       Max = 10
+#pragma property Critter PrivateServer uint8    ArroyoDocHealing                                   Max = 2
+#pragma property Critter PrivateServer uint8    AtollTesla                                         Max = 2
+#pragma property Critter PrivateServer uint8    AtollMoney                                         Max = 2
+#pragma property Critter PrivateServer uint     BHEscortNpcId
+#pragma property Critter PrivateServer uint8    ScenBosSoldier                                     Max = 10
+#pragma property Critter PrivateServer uint8    SFInvasionBadge                                    Max = 1
+#pragma property Critter PrivateServer uint8    ScenBosScriber                                     Max = 10
+#pragma property Critter PrivateServer uint8    ScenEnclaveSoldier                                 Max = 10
+#pragma property Critter PrivateServer uint8    ScenEnclaveScient                                  Max = 10
+#pragma property Critter PrivateServer uint8    DenJaneTraderFred                                  Max = 10
+#pragma property Critter PrivateServer uint8    DenJaneJobCounter                                  Max = 10
+#pragma property Critter PrivateServer uint8    DenJoeyCounter               Default = 3,          Max = 10
+#pragma property Critter PrivateServer uint8    DenLaraBosCounter            Default = 2,          Max = 10
+#pragma property Critter PrivateServer uint8    DenJaneTraderMom                                   Max = 10
+#pragma property Critter PrivateServer uint8    DenNarcCommMember                                  Max = 10
+#pragma property Critter PrivateServer uint8    DenJaneTraderLean                                  Max = 10
+#pragma property Critter PrivateServer uint8    EncOceanTraderFamiliar                             Max = 5
+#pragma property Critter PrivateServer uint8    ModBaltasArmor1                                    Max = 10
+#pragma property Critter PrivateServer uint8    GeckGaroldTrain                                    Max = 1
+#pragma property Critter PrivateServer uint8    GeckSkitrTransit                                   Max = 3
+#pragma property Critter PrivateServer uint8    KlamBaknerBeer                                     Max = 1
+#pragma property Critter Protected     uint8    ModBaltasArmor                                     Max = 10
+#pragma property Critter PrivateServer uint8    KlamVaccination                                    Max = 2
+#pragma property Critter PrivateServer uint8    KlamVaccinationB1                                  Max = 1
+#pragma property Critter PrivateServer uint8    KlamVaccinationB2                                  Max = 1
+#pragma property Critter PrivateServer uint8    KlamVaccinationB3                                  Max = 1
+#pragma property Critter PrivateServer uint8    KlamGoldBeer                                       Max = 1
+#pragma property Critter PrivateServer uint8    KlamSallyPay                                       Max = 5
+#pragma property Critter PrivateServer uint8    ModBaltasArmor2                                    Max = 10
+#pragma property Critter PrivateServer uint8    KlamVicFixittrash                                  Max = 1
+#pragma property Critter PrivateServer uint8    ModHoseTools                                       Max = 1
+#pragma property Critter PrivateServer uint8    ModVampireReaction                                 Max = 2
+#pragma property Critter PrivateServer uint8    NcrAlexQuestStatus                                 Max = 7
+#pragma property Critter PrivateServer uint8    NcrDustyPartyStatusChar                            Max = 2
+#pragma property Critter PrivateServer uint8    NcrMiraTroubleStatusChar                           Max = 4
+#pragma property Critter PrivateServer uint8    NcrBeggarTalk                                      Max = 1
+#pragma property Critter PrivateServer uint8    NcrDorothyGammaStatusChar                          Max = 2
+#pragma property Critter PrivateServer uint8    NcrDumontBrkradioStatusChar                        Max = 10
+#pragma property Critter PrivateServer uint8    NcrCaptainFlirtStatusChar                          Max = 1
+#pragma property Critter PrivateServer uint8    NcrIsNightGuardAccessFranted                       Max = 1
+#pragma property Critter PrivateServer uint8    NcrClausHistory                                    Max = 1
+#pragma property Critter PrivateServer uint8    NcrJubileyTailsStatus                              Max = 15
+#pragma property Critter PrivateServer uint8    NcrRondoDorotyStatus                               Max = 3
+#pragma property Critter PrivateServer uint8    NcrFergusStory                                     Max = 1
+#pragma property Critter PrivateServer uint8    NcrCaptainSmitAccessGranted                        Max = 1
+#pragma property Critter PrivateServer uint8    NcrJubileyTailsCounter                             Max = 15
+#pragma property Critter PrivateServer uint8    NcrBusterDorotyStatus                              Max = 3
+#pragma property Critter PrivateServer uint8    NcrFergusSecret                                    Max = 1
+#pragma property Critter PrivateServer uint8    NcrGunterStory                                     Max = 1
+#pragma property Critter PrivateServer uint     ScenRangerRank               Default = 2000,       Max = 13000
+#pragma property Critter PrivateServer uint8    NcrDustyFoodDeliveryStatus                         Max = 3
+#pragma property Critter PrivateServer uint8    NcrPlayerLeadSmit2Dustybar                         Max = 5
+#pragma property Critter PrivateServer uint8    NcrKarlStory                                       Max = 1
+#pragma property Critter PrivateServer uint8    NcrCarlsonStory                                    Max = 1
+#pragma property Critter PrivateServer uint8    NcrKukComp                                         Max = 1
+#pragma property Critter PrivateServer uint8    NcrMicQStatus                                      Max = 2
+#pragma property Critter PrivateServer uint8    ScenRanger                                         Max = 5
+#pragma property Critter PrivateServer uint8    NcrDumontHistory                                   Max = 1
+#pragma property Critter PrivateServer uint8    NcrMicQCptnDumbCounter                             Max = 10
+#pragma property Critter PrivateServer uint8    NcrPlayerHasMultipass                              Max = 1
+#pragma property Critter PrivateServer uint8    NcrSmitVsVestinResult                              Max = 5
+#pragma property Critter PrivateServer uint8    NRJukeboxSeen                                      Max = 1
+#pragma property Critter PrivateServer uint8    VCTrainigAccess                                    Max = 1
+#pragma property Critter PrivateServer uint8    NcrLennyFight                                      Max = 1
+#pragma property Critter PrivateServer uint8    NcrRatchPlayerPoints                               Max = 15
+#pragma property Critter PrivateServer uint8    NRJesusTrain                                       Max = 10
+#pragma property Critter PrivateServer uint8    PurgSuppluysTaken                                  Max = 1
+#pragma property Critter PrivateServer uint8    NcrWestinPillsStatus                               Max = 6
+#pragma property Critter PrivateServer uint8    NcrWestinPlayerGetPrepayment                       Max = 2
+#pragma property Critter PrivateServer uint8    SFHubJudgementIgnatStory                           Max = 1
+#pragma property Critter PrivateServer uint8    ReddMinesPlayerThief                               Max = 1
+#pragma property Critter PrivateServer uint8    ReddDocMedicals              Default = 50,         Max = 100
+#pragma property Critter PrivateServer uint8    NcrWestinPills                                     Max = 2
+#pragma property Critter PrivateServer uint8    SFHubbStatus                                       Max = 9
+#pragma property Critter PrivateServer uint8    SFInvasionSandbagsTaken                            Max = 6
+#pragma property Critter PrivateServer uint8    SFInvasionSandbagsGiven      Default = 50,         Max = 50
+#pragma property Critter PrivateServer uint8    SFImperatorCancelNum                               Max = 4
+#pragma property Critter PrivateServer uint8    VCShiComputerAccess                                Max = 1
+#pragma property Critter PrivateServer uint8    TribManotaStory                                    Max = 1
+#pragma property Critter PrivateServer uint8    VCKnowsAboutDelivery                               Max = 1
+#pragma property Critter PrivateServer uint8    VCCitizenship                                      Max = 1
+#pragma property Critter PrivateServer uint8    VCHartmanFightStatus                               Max = 3
+#pragma property Critter PrivateServer uint8    VCFreshBloodCounter                                Max = 3
+#pragma property Critter PrivateServer uint8    VCForgeryWitnessInhome                             Max = 1
+#pragma property Critter PrivateServer uint8    VCLynetOrMaclure                                   Max = 2
+#pragma property Critter PrivateServer uint8    VCMutCharleyHired                                  Max = 1
+#pragma property Critter PrivateServer uint8    VCCavesCounter                                     Max = 4
+#pragma property Critter PrivateServer uint8    VCPrisonerBulled                                   Max = 3
+#pragma property Critter PrivateServer uint8    VCLynettTalk                                       Max = 1
+#pragma property Critter PrivateServer uint8    VCPatrolCounter                                    Max = 3
+#pragma property Critter PrivateServer uint     CaravanCrvId
+#pragma property Critter PrivateServer uint     NpcDialogTimeWait
+// Unicum vars
+#pragma property Critter PrivateServer dict< uint, uint8 > Loyality
+#pragma property Critter PrivateServer dict< uint, bool >  NpcStory
+#pragma property Critter PrivateServer dict< uint, bool >  NameMemNpcPlayer
+#pragma property Critter PrivateServer dict< uint, bool >  NameMemPlayerNpc
+#pragma property Critter PrivateServer dict< uint, bool >  TradeWas
+#pragma property Critter PrivateServer dict< uint, uint8 > ChanceOneFromTwo
+#pragma property Critter PrivateServer dict< uint, uint8 > ChanceOneFromThree
+#pragma property Critter PrivateServer dict< uint, uint8 > ChanceOneFromFive
+#pragma property Critter PrivateServer dict< uint, bool >  DenKliffBlessWas
+#pragma property Critter PrivateServer dict< uint, bool >  DenVirginiaSexWas
+#pragma property Critter PrivateServer dict< uint, bool >  NcrPlayerTalkPoliceman
+#pragma property Critter PrivateServer dict< uint, bool >  SFLoPanPayed
+
+// Items
+#pragma property Item PrivateServer    uint   V13GorisEggPlayerId
+
+// Global
+#pragma property Global PrivateServer int    ArroyoRaidersCount
+#pragma property Global PrivateServer uint[] ArroyoLastDefenceGroup
+#pragma property Global PrivateServer uint   ArroyoMynocMap
+#pragma property Global PrivateServer bool   EncOceanTraderAlive
+#pragma property Global PrivateServer bool   GameEventCaches
+#pragma property Global PrivateServer uint8  RacingEvent
+#pragma property Global PrivateServer bool   GEReplStationStatus
+#pragma property Global PrivateServer uint8  NCRSiegeCampsNum   Max = 10
+#pragma property Global PrivateServer uint8  SFBosArmourCounter Max = 3
+#pragma property Global PrivateServer uint8  SFInvasionStatus   Max = 3
+#pragma property Global PrivateServer uint8  DenLeannaThief
+#pragma property Global PrivateServer uint8  DenCliffDealer
+#pragma property Global PrivateServer uint8  DenAnanDollUse
+#pragma property Global PrivateServer uint   KlamSmilyGeckoCounter
+#pragma property Global PrivateServer int8   KlamTrappersRadaway
+#pragma property Global PrivateServer uint   EndingArroyoTodd
+#pragma property Global PrivateServer uint   EndingV13DclawRevival
+#pragma property Global PrivateServer uint   GeckSkitrHired
+#pragma property Global PrivateServer uint   NRBbarmenHired
+#pragma property Global PrivateServer uint   NcrIsCurfewActive
+#pragma property Global PrivateServer uint   NcrMicGuaranteeCounter
+#pragma property Global PrivateServer uint   SFImperatorMemory  Default = 50, Max = 100
+#pragma property Global PrivateServer uint8  GCityGeckSold      Max = 1
+#pragma property Global PrivateServer uint8  VCBlackHired       Max = 1
+
+// Pointer validation macro
+// Example: if(valid(ptr))... if(not valid(ptr))...
+#define valid                        # (ptr) ( @ptr != null )
+
+// Flags
+#define FLAG                         # ( x, flag )( ( ( x ) & ( flag ) ) != 0 )
+#define SETFLAG                      # ( x, flag )( x = ( x ) | ( flag ) )
+#define UNSETFLAG                    # ( x, flag )( x = ( ( x ) & ( ~( flag ) ) ) )
+
+// Move
+#define _NpcWalk                     # ( npc, hexX, hexY )npc.MoveToHex( hexX, hexY, 0xFF, false, 0 )
+#define _NpcRun                      # ( npc, hexX, hexY )npc.MoveToHex( hexX, hexY, 0xFF, true, 0 )
+
+// Items
+#define _CritCountItem               # ( cr, pid )cr.CountItem( pid )
+#define _CritAddItem                 # ( cr, pid, count )cr.AddItem( pid, count )
+#define _CritDeleteItem              # ( cr, pid, count )cr.DeleteItem( pid, count )
+#define _CritGetItem                 # ( cr, pid )cr.GetItem( pid, -1 )
+#define _CritGetItemHand             # (cr)             cr.GetItem( 0, SLOT_HAND1 )
+#define _CritGetItemHandExt          # (cr)             cr.GetItem( 0, SLOT_HAND2 )
+#define _CritGetItemArmor            # (cr)             cr.GetItem( 0, SLOT_ARMOR )
+#define _CritGetItemInv              # ( cr, pid )cr.GetItem( pid, SLOT_INV )
+#define _CritMoveItem                # ( cr, item, toSlot )cr.MoveItem( item.Id, item.Count, toSlot )
+#define _CritDropItem                # ( cr, item )cr.MoveItem( item.Id, item.Count, 0xFF )
+#define _CritDropItemCount           # ( cr, item, count )cr.MoveItem( item.Id, count, 0xFF )
+#define _CritChangeHand                                                                                                                  \
+    # ( cr )             do { Item@ item = cr.GetItem( 0, SLOT_HAND1 ); if( valid( item ) )                                              \
+                                  _CritMoveItem( cr, item, SLOT_HAND2 ); else { @item = cr.GetItem( 0, SLOT_HAND2 ); if( valid( item ) ) \
+                                                                                    _CritMoveItem( cr, item, SLOT_HAND1 ); } } while( false )
+#define _IncItem                     # ( item, count )item.Count = item.Count + ( count )
+#define _SubItem                                                             \
+    # ( item, count )     do { if( item.Count > ( count ) )                  \
+                                   item.Count = item.Count - ( count ); else \
+                                   DeleteItem( item ); } while( false )
+#define _CritCanDropItemsOnDead      # (cr)             ( !cr.IsNoSteal && !cr.IsNoDrop )
+
+// Parameters
+#define _CritIsInjured               # (cr)          ( cr.IsDamagedEye || cr.IsDamagedRightArm || cr.IsDamagedLeftArm || cr.IsDamagedRightLeg || cr.IsDamagedLeftLeg )
+#define _CritFingersDoorId           # (critterId)   ( 0x80000000 | ( critterId ) )
+#define _CritEyesDoorId              # (critterId)   ( 0x40000000 | ( critterId ) )
+
+// Npc planes
+#define _NpcEraseFirstPlane          # (npc) npc.ErasePlane( -1, false )
+#define _NpcEraseAllPlanes           # (npc) npc.ErasePlane( -1, true )
+#define _NpcEraseFirstPlaneWalk      # (npc) npc.ErasePlane( AI_PLANE_WALK, false )
+#define _NpcEraseAllPlanesWalk       # (npc) npc.ErasePlane( AI_PLANE_WALK, true )
+#define _NpcEraseFirstPlaneAttack    # (npc) npc.ErasePlane( AI_PLANE_ATTACK, false )
+#define _NpcEraseAllPlanesAttack     # (npc) npc.ErasePlane( AI_PLANE_ATTACK, true )
+#define _NpcEraseFirstPlanePick      # (npc) npc.ErasePlane( AI_PLANE_PICK, false )
+#define _NpcEraseAllPlanesPick       # (npc) npc.ErasePlane( AI_PLANE_PICK, true )
+
+// Weapon
+#define _WeaponIsHtHAttack           # ( item, use )( _WeaponSkill( item, use ) == CritterProperty::SkillUnarmed || _WeaponSkill( item, use ) == CritterProperty::SkillMeleeWeapons )
+#define _WeaponIsGunAttack           # ( item, use )( _WeaponSkill( item, use ) == CritterProperty::SkillSmallGuns || _WeaponSkill( item, use ) == CritterProperty::SkillBigGuns || _WeaponSkill( item, use ) == CritterProperty::SkillEnergyWeapons )
+#define _WeaponIsRangedAttack        # ( item, use )( _WeaponIsGunAttack( weap, use ) || _WeaponSkill( item, use ) == CritterProperty::SkillThrowing )
+#define _WeaponIsPrimaryAviable      # (item) ( ( item.Weapon_ActiveUses & 1 ) != 0 )
+#define _WeaponIsSecondaryAviable    # (item) ( ( item.Weapon_ActiveUses & 2 ) != 0 )
+#define _WeaponIsThirdAviable        # (item) ( ( item.Weapon_ActiveUses & 4 ) != 0 )
+#define _WeaponSkill                 # ( item, use )( ( use ) == 0 ? item.Weapon_Skill_0 : ( ( use ) == 1 ? item.Weapon_Skill_1 : ( ( use ) == 2 ? item.Weapon_Skill_2 : CritterProperty::Invalid ) ) )
+#define _WeaponDmgType               # ( item, use )( ( use ) == 0 ? item.Weapon_DmgType_0 : ( ( use ) == 1 ? item.Weapon_DmgType_1 : ( ( use ) == 2 ? item.Weapon_DmgType_2 : 0 ) ) )
+#define _WeaponAnim2                 # ( item, use )( ( use ) == 0 ? item.Weapon_Anim2_0 : ( ( use ) == 1 ? item.Weapon_Anim2_1 : ( ( use ) == 2 ? item.Weapon_Anim2_2 : Anim2::None ) ) )
+#define _WeaponDmgMin                # ( item, use )( ( use ) == 0 ? item.Weapon_DmgMin_0 : ( ( use ) == 1 ? item.Weapon_DmgMin_1 : ( ( use ) == 2 ? item.Weapon_DmgMin_2 : 0 ) ) )
+#define _WeaponDmgMax                # ( item, use )( ( use ) == 0 ? item.Weapon_DmgMax_0 : ( ( use ) == 1 ? item.Weapon_DmgMax_1 : ( ( use ) == 2 ? item.Weapon_DmgMax_2 : 0 ) ) )
+#define _WeaponMaxDist               # ( item, use )( ( use ) == 0 ? item.Weapon_MaxDist_0 : ( ( use ) == 1 ? item.Weapon_MaxDist_1 : ( ( use ) == 2 ? item.Weapon_MaxDist_2 : 0 ) ) )
+#define _WeaponEffect                # ( item, use )( ( use ) == 0 ? item.Weapon_Effect_0 : ( ( use ) == 1 ? item.Weapon_Effect_1 : ( ( use ) == 2 ? item.Weapon_Effect_2 : 0 ) ) )
+#define _WeaponRound                 # ( item, use )( ( use ) == 0 ? item.Weapon_Round_0 : ( ( use ) == 1 ? item.Weapon_Round_1 : ( ( use ) == 2 ? item.Weapon_Round_2 : 0 ) ) )
+#define _WeaponApCost                # ( item, use )( ( use ) == 0 ? item.Weapon_ApCost_0 : ( ( use ) == 1 ? item.Weapon_ApCost_1 : ( ( use ) == 2 ? item.Weapon_ApCost_2 : 0 ) ) )
+#define _WeaponSoundId               # ( item, use )( ( use ) == 0 ? item.Weapon_SoundId_0 : ( ( use ) == 1 ? item.Weapon_SoundId_1 : ( ( use ) == 2 ? item.Weapon_SoundId_2 : 0 ) ) )
+#define _WeaponRemove                # ( item, use )( ( use ) == 0 ? item.Weapon_Remove_0 : ( ( use ) == 1 ? item.Weapon_Remove_1 : ( ( use ) == 2 ? item.Weapon_Remove_2 : false ) ) )
+#define _WeaponAim                   # ( item, use )( ( use ) == 0 ? item.Weapon_Aim_0 : ( ( use ) == 1 ? item.Weapon_Aim_1 : ( ( use ) == 2 ? item.Weapon_Aim_2 : false ) ) )
+#define _WeaponPicUse                # ( item, use )( ( use ) == 0 ? item.Weapon_PicUse_0 : ( ( use ) == 1 ? item.Weapon_PicUse_1 : ( ( use ) == 2 ? item.Weapon_PicUse_2 : 0 ) ) )
+#define _WeaponModeUse               # (weaponMode) ( ( weaponMode ) & 0xF )
+#define _WeaponModeAim               # (weaponMode) ( ( ( weaponMode ) >> 4 ) & 0xF )
+#define _WeaponModeMake              # ( use, aim )( ( ( ( aim ) << 4 ) | ( ( use ) & 0xF ) ) & 0xFF )
+
+// Locker
+#define _LockerIsOpen                # (door) ( ( door.LockerCondition & LOCKER_ISOPEN ) != 0 )
+#define _LockerIsClose               # (door) ( not _LockerIsOpen( door ) )
+
+// Light
+#define _LightIsIgnoreDir            # ( lightItem, dir )( FLAG( lightItem.LightFlags, 1 << CLAMP( dir, 0, 5 ) ) )
+#define _LightSetIgnoreDir           # ( lightItem, dir )( SETFLAG( lightItem.LightFlags, 1 << CLAMP( dir, 0, 5 ) ) )
+#define _LightUnsetIgnoreDir         # (lightItem)     ( UNSETFLAG( lightItem.LightFlags, 1 << CLAMP( dir, 0, 5 ) ) )
+#define _LightIsGlobal               # (lightItem)     ( FLAG( lightItem.LightFlags, 1 << 6 ) )
+#define _LightSetGlobal              # (lightItem)     ( SETFLAG( lightItem.LightFlags, 1 << 6 ) )
+#define _LightUnsetGlobal            # (lightItem)     ( UNSETFLAG( lightItem.LightFlags, 1 << 6 ) )
+#define _LightIsInverse              # (lightItem)     ( FLAG( lightItem.LightFlags, 1 << 7 ) )
+#define _LightSetInverse             # (lightItem)     ( SETFLAG( lightItem.LightFlags, 1 << 7 ) )
+#define _LightUnsetInverse           # (lightItem)     ( UNSETFLAG( lightItem.LightFlags, 1 << 7 ) )
+

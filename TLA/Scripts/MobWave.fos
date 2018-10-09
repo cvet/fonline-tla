@@ -1,9 +1,9 @@
-// FOS Server
+// FOS Server Sort 2
 // Author: rifleman17
 // Специальный скрипт для реализации волновых нападений агрессивных мобов на некоей карте
 
-#include "Tla"
-#include "TeamsTable"
+//#include "Tla"
+//#include "TeamsTable"
 
 #pragma property Global PrivateServer dict< uint, uint8[] > MobWaveData
 
@@ -20,7 +20,7 @@
 // #define DL #(s) (Log(s))
 #define DL                        # ( s )
 
-import bool GetFreeHex( Map& map, uint radius, uint16& hx, uint16& hy ) from "Caravan";
+////import bool GetFreeHex0( Map& map, uint radius, uint16& hx, uint16& hy ) from "Caravan";
 
 // Добавление или обновление существующего описания волны мобов.
 // waveNum       - Номер волны, не должны пересекаться
@@ -86,7 +86,7 @@ void _AddStep( int waveNum, uint8 type, uint8 radius, uint timeNext, uint timeRe
 // items         - Набор итемов моба, если он будет добавлен на карту при начале волны
 // script        - Скрипт моба, если будет добавлен пр иначале волны
 // pid           - Код прототипа НПЦ
-void _AddMob( int waveNum, uint mobId, int[] @ params, int[] @ items, string@ script, uint pid )
+void _AddMob( int waveNum, uint mobId, int[] @ params, int[] @ items, CritterInitFunc@ script, uint pid )
 {
     MobWave@ mw = MobWave( waveNum );
     mw.Load();
@@ -97,14 +97,14 @@ void _AddMob( int waveNum, uint mobId, int[] @ params, int[] @ items, string@ sc
     if( valid( params ) )
     {
         DL( "params valid" );
-        MergeArrays( mi.MobParams, params );
+        UtilsForArray::MergeArrays( mi.MobParams, params );
     }
     DL( "items" );
     if( valid( items ) )
-        MergeArrays( mi.MobItems, items );
+        UtilsForArray::MergeArrays( mi.MobItems, items );
     DL( "script" );
     if( valid( script ) )
-        mi.Script = script;
+        @mi.Script = script;
     mi.Pid = pid;
     mw._AddMob2Wave( mi );
     mw.Save();
@@ -116,7 +116,7 @@ class MobInfo
     uint MobId;          // Id моба (криттера) в составе волны. Все параметры моба должны настраиваться вне волны.
     int[] MobParams;     // Описания итемов у спавнящегося моба. Необязательный параметр
     int[] MobItems;      // Описания итемов у спавнящегося моба. Необязательный параметр
-    string Script;       // Скрипт у спавнящегося моба. Необязательный параметр
+    CritterInitFunc@ Script;       // Скрипт у спавнящегося моба. Необязательный параметр
     uint   Pid;          // Прототип НПЦ
 
     Critter@ Mob()
@@ -124,19 +124,19 @@ class MobInfo
         return GetCritter( MobId );
     }
 
-    void Save( Serializator& save )
+    void Save( Serializator::Serializator& save )
     {
         save.Set( MobId );
-        save.Set( Script );
+        //save.Set( Script );
         save.Set( Pid );
         save.Set( MobParams );
         save.Set( MobItems );
     }
 
-    void Load( Serializator& load )
+    void Load( Serializator::Serializator& load )
     {
         load.Get( MobId );
-        load.Get( Script );
+        //load.Get( Script );
         load.Get( Pid );
         load.Get( MobParams );
         load.Get( MobItems );
@@ -162,7 +162,7 @@ class TargetInfo
             return;
         if( mob.IsDead() || mob.IsPlayer() )
             return;
-        AddAttackPlane( mob, Priority, TargetId );
+        NpcPlanes::AddAttackPlane( mob, Priority, TargetId );
         __EventNpcPlaneEndEx.SubscribeToCritter( mob, _PE );
         for( uint i = 0, l = MobsAttack.length(); i < l; i++ )
         {
@@ -188,14 +188,14 @@ class TargetInfo
         return attackers;
     }
 
-    void Save( Serializator& save )
+    void Save( Serializator::Serializator& save )
     {
         save.Set( TargetId );
         save.Set( Priority );
         save.Set( MobsAttack );
     }
 
-    void Load( Serializator& load )
+    void Load( Serializator::Serializator& load )
     {
         load.Get( TargetId );
         load.Get( Priority );
@@ -227,7 +227,7 @@ class WavePoint
         }
     }
 
-    void Save( Serializator& save )
+    void Save( Serializator::Serializator& save )
     {
         save.Set( Type );
         save.Set( Entire );
@@ -235,7 +235,7 @@ class WavePoint
         save.Set( HexY );
     }
 
-    void Load( Serializator& load )
+    void Load( Serializator::Serializator& load )
     {
         load.Get( Type );
         load.Get( Entire );
@@ -297,9 +297,11 @@ class WaveStep
         Point.GetCoords( map, x, y );
         Critter@ mob;
         DL( "Triing get mob. radius =" + Radius + "x" + x + "Pid =" + mi.Pid );
-        if( GetFreeHex( map, Radius, x, y ) && mi.Pid > 0 )
+        if( Caravan::GetFreeHex( map, Radius, x, y ) && mi.Pid > 0 )
         {
-            @mob = map.AddNpc( mi.Pid, x, y, 6, mi.MobParams, mi.Script );
+            @mob = map.AddNpc( mi.Pid, x, y, 6, TlaExtended::GetCritPropsDict(mi.MobParams));
+			if(mi.Script !is null)
+				mob.SetScript( mi.Script );
             mi.MobId = mob.Id;
             for( uint i = 0; i < mi.MobItems.length(); i += 3 )
             {
@@ -324,13 +326,13 @@ class WaveStep
         while( tries < 20 )
         {
             tries++;
-            if( GetFreeHex( map, Radius, x, y ) )
+            if( Caravan::GetFreeHex( map, Radius, x, y ) )
             {
                 if( map.GetPathLength( mob, x, y, 1 ) > 0 )
                     break;
             }
         }
-        AddWalkPlane( mob, 0, x, y, 6, true, 1 );
+        NpcPlanes::AddWalkPlane( mob, 0, x, y, 6, true, 1 );
 
         mob.IsNoHome = true;
         DL( "plan move added" );
@@ -346,7 +348,7 @@ class WaveStep
         uint16 x = mob.HexX;
         uint16 y = mob.HexY;
         Point.GetCoords( map, x, y );
-        if( GetFreeHex( map, Radius, x, y ) )
+        if( Caravan::GetFreeHex( map, Radius, x, y ) )
         {
             mob.HomeMapId = map.Id;
             mob.HomeHexX = x;
@@ -391,7 +393,7 @@ class WaveStep
         DL( "Mob transit success" );
     }
 
-    void Save( Serializator& save )
+    void Save( Serializator::Serializator& save )
     {
         save.Set( Type );
         save.Set( Radius );
@@ -403,7 +405,7 @@ class WaveStep
         Point.Save( save );
     }
 
-    void Load( Serializator& load )
+    void Load( Serializator::Serializator& load )
     {
         load.Get( Type );
         load.Get( Radius );
@@ -439,7 +441,7 @@ class MobWave
 
     void Save()
     {
-        Serializator save;
+        Serializator::Serializator save;
         uint         len = Steps.length();
         save.Set( len );
         for( uint i = 0; i < len; i++ )
@@ -465,7 +467,7 @@ class MobWave
 
     void Load()
     {
-        Serializator load;
+        Serializator::Serializator load;
         if( load.SetData( Globals.MobWaveData.get( Number, array< uint8 >() ) ) == 0 )
             return;
         uint len = 0;
@@ -532,7 +534,7 @@ class MobWave
             return;
 
         uint targetId = target.Id;
-        int[] mobs = { TEAM_Mob0, TEAM_Mob1, TEAM_Mob2, TEAM_Mob3, TEAM_Mob4, TEAM_Mob5, TEAM_Mob6, TEAM_Mob7, TEAM_Mob8, TEAM_Mob9 };
+        int[] mobs = { Teams::Mob0, Teams::Mob1, Teams::Mob2, Teams::Mob3, Teams::Mob4, Teams::Mob5, Teams::Mob6, Teams::Mob7, Teams::Mob8, Teams::Mob9 };
 
         DL( "Check target valid" );
         for( uint i = 0, l = Mobs.length(); i < l; i++ )
@@ -543,9 +545,9 @@ class MobWave
                 if( mob.Id == targetId )
                     return;                                   // Цель=свой. Не атакуем.
                 // Для мобов-животных отмена атаки всех других мобов животных
-                if( Present( mob.TeamId, mobs ) && Present( target.TeamId, mobs ) )
+                if( UtilsForArray::Present( mob.TeamId, mobs ) && UtilsForArray::Present( target.TeamId, mobs ) )
                     return;
-                if( TEAM_PARITY( mob.TeamId, target.TeamId ) != Ignore )
+                if( TEAM_PARITY( mob.TeamId, target.TeamId ) != TeamsTable::Ignore )
                     return;                                                                                    // Команда своя, не атакуем
             }
         }

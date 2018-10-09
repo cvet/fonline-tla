@@ -1,9 +1,1163 @@
 // FOS Server
+////Old script name: Poker.fosh. Patched 01.10 21:52:48
 // Author: Tab10id
 
-#include "Tla"
-#include "Poker"
-#include "PokerGameList"
+//
+// Dro-Poker
+// Using in poker
+//
+
+// Функции
+// int8 GetBit(int64 dig,uint8 bnum) получаем значение заданного бита в числе.
+// int64 SetBit(int64 digit, uint8 bit_num, bool value) устанавливаем бит числа в заданное значение.
+// uint8 GetSuit(uint8 CNum) получаем масть карты
+// uint8 GetRank(uint8 CNum) получаем ранг карты
+// string GetStrCard(uint8 num) возвращает строковое наименование карты
+// uint8 GetCombo(uint8 plNum) возвращает комбинацию и ранг высшей карты
+
+#define PLAYERS_COUNT              ( 4 )
+#define CARD_COUNT                 ( 5 )                                           // В некоторых видах покера раздается по 7 карт
+#define GAMEVAR_COUNT              ( 16 + ( PLAYERS_COUNT * ( CARD_COUNT + 3 ) ) ) // 48 для PLAYERS_COUNT = 4
+// Масти
+#define CARD_SPADES                ( 0 )                                           // пики
+#define CARD_HEARTS                ( 1 )                                           // чирвы
+#define CARD_DIAMONDS              ( 2 )                                           // бубны
+#define CARD_CLUBS                 ( 3 )                                           // крести
+#define NPC_ROLE_START_VALUE       ( 1600 )                                        // Минимальное значение NpcRole (указывает на номер настроек покера)
+#define STR_INVALID_MONEY_COUNT    ( DLGSTR( Content::Dialog::all_poker, 43 ) )
+#define STR_OPERATION_SUCCESS      ( DLGSTR( Content::Dialog::all_poker, 44 ) )
+#define STR_CHEAT_DEFAULT          ( DLGSTR( Content::Dialog::all_poker, 47 ) )
+#define STR_CHEAT_1                ( DLGSTR( Content::Dialog::all_poker, 48 ) )
+
+// Ранги
+#define CARD_2                     ( 0 )
+#define CARD_3                     ( 1 )
+#define CARD_4                     ( 2 )
+#define CARD_5                     ( 3 )
+#define CARD_6                     ( 4 )
+#define CARD_7                     ( 5 )
+#define CARD_8                     ( 6 )
+#define CARD_9                     ( 7 )
+#define CARD_10                    ( 8 )
+#define CARD_JACK                  ( 9 )  // Валет
+#define CARD_LADY                  ( 10 ) // Дама
+#define CARD_KING                  ( 11 ) // Король
+#define CARD_ACE                   ( 12 ) // Туз
+
+// ////////////////////////////КОМБИНАЦИИ:///////////////////////////////////////////////////////////////////////////
+// 0 - Старшая карта /High Card/ (5-12) старшая карта от 7 до туза (7) - низшая категория					//
+// 1 - Пара /One Pair/ (0-12) пары существуют для каждого ранга (12) - пара карт одинакового ранга			//
+// 2 - Две пары /Two Pair/ (1-12) высшая пара как минимум - тройки (11)	- 2 разные пары карт				//
+// 3 - Сет или тройка /Three of a kind/ (0-12) сеты существуют  для каждого ранга (12) - три карты одного ранга	//
+// 4 - Стрейт /Straight/ (4-12) минимальная высшая карта стрейта - 6 (8) - карты идущие по порядку			//
+// 5 - Флаш /Flush/ (5-12) старшая карта от 7 до туза (7) - карты одной масти							//
+// 6 - Фул Хаус /Full House/ (1-12) старшая карта может быть от 3ки (11) - три карты одного ранга + пара		//
+// 7 - Каре /Four of a Kind/ (0-12) (12) - четыре карты одного ранга								//
+// 8 - Стрейт Флаш /Straight Flush/ (4-12) (8) - карты одной масти идущие по порядку					//
+// 9 - Королевский Флаш /Royal Flush/ (12) (0) - туз, король, дама, валет, десять одной масти				//
+// //////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+#define CARD_COMBO_HIGHCARD        ( 0 )
+#define CARD_COMBO_ONEPAIR         ( 1 )
+#define CARD_COMBO_TWOPAIR         ( 2 )
+#define CARD_COMBO_SET             ( 3 )
+#define CARD_COMBO_STRAIGHT        ( 4 )
+#define CARD_COMBO_FLUSH           ( 5 )
+#define CARD_COMBO_FULLHOUSE       ( 6 )
+#define CARD_COMBO_FOAK            ( 7 )
+#define CARD_COMBO_STRFLUSH        ( 8 )
+#define CARD_COMBO_ROYALFLUSH      ( 9 )
+
+#define D_VA_BANK                  ( 1 )
+#define D_PRIN                     ( 2 )
+
+// Этап игры
+#define GAME_E_BETROUND1           ( 0 )
+#define GAME_E_REPLACECARD         ( 1 )
+#define GAME_E_BETROUND2           ( 2 )
+#define GAME_E_END                 ( 3 )
+
+// Состояние игроков
+#define PLST_WAIT                  ( 0 )
+#define PLST_RAISE                 ( 1 )
+#define PLST_PASS                  ( 2 )
+#define PLST_CALL                  ( 3 )
+
+#define PL_START_GAME              ( 1 )
+#define PL_RESUME_GAME             ( 0 )
+
+#define DID                        (Content::Dialog::all_poker)
+#define STR_DLGREPLY               ( 41 )
+#define STR_CARDS                  ( 0 )
+#define STR_COMBO                  ( 1 )
+#define STR_BANK                   ( 2 )
+#define STR_BET                    ( 3 )
+#define STR_MBET                   ( 4 )
+#define STR_FOLD                   ( 5 )
+#define STR_RAISE                  ( 6 )
+#define STR_WAIT                   ( 7 )
+#define STR_CALL                   ( 8 )
+#define STR_PL                     ( 9 )
+#define STR_WINCOMBO               ( 10 )
+#define STR_WINERS                 ( 11 )
+#define STR_YOUWIN                 ( 12 )
+#define STR_WINPLNUM               ( 13 )
+#define STR_CARD_SPADES            ( 14 )
+#define STR_CARD_HEARTS            ( 15 )
+#define STR_CARD_DIAMONDS          ( 16 )
+#define STR_CARD_CLUBS             ( 17 )
+#define STR_CARD_2                 ( 18 )
+#define STR_CARD_3                 ( 19 )
+#define STR_CARD_4                 ( 20 )
+#define STR_CARD_5                 ( 21 )
+#define STR_CARD_6                 ( 22 )
+#define STR_CARD_7                 ( 23 )
+#define STR_CARD_8                 ( 24 )
+#define STR_CARD_9                 ( 25 )
+#define STR_CARD_10                ( 26 )
+#define STR_CARD_JACK              ( 27 )
+#define STR_CARD_LADY              ( 28 )
+#define STR_CARD_KING              ( 29 )
+#define STR_CARD_ACE               ( 30 )
+#define STR_COMBO_HIGHCARD         ( 31 )
+#define STR_COMBO_ONEPAIR          ( 32 )
+#define STR_COMBO_TWOPAIR          ( 33 )
+#define STR_COMBO_SET              ( 34 )
+#define STR_COMBO_STRAIGHT         ( 35 )
+#define STR_COMBO_FLUSH            ( 36 )
+#define STR_COMBO_FULLHOUSE        ( 37 )
+#define STR_COMBO_FOAK             ( 38 )
+#define STR_COMBO_STRFLUSH         ( 39 )
+#define STR_COMBO_ROYALFLUSH       ( 40 )
+#define STR_ACCEPT                 ( 42 )
+#define STR_CARDS_PL               ( 45 )
+#define STR_COMBO_PL               ( 46 )
+#define STR_FRAUD_ON               ( 49 )
+#define STR_FRAUD_OFF              ( 50 )
+#define STR_CARD_IN_SLEEVE         ( 51 )
+#define STR_SELECT                 ( 52 )
+#define STR_UNSELECT               ( 53 )
+#define STR_MANYWINS_ON            ( 54 )
+#define STR_MANYWINS_OFF           ( 55 )
+
+#define D_MANYWINS                 ( 19 )
+
+
+int8 GetBit( int64 digit, uint8 bnum )
+{
+    return ( digit >> ( bnum - 1 ) ) & 1;
+}
+
+uint64 SetBit( uint64 digit, uint8 bnum, bool value )
+{
+    if( value )
+        digit |= ( 1 << ( bnum - 1 ) );
+    else
+        digit &= ~( 1 << ( bnum - 1 ) );
+    return digit;
+}
+
+uint8 SetBit5( uint8 digit, uint8 bnum, bool value )
+{
+    if( value )
+        digit |= ( 1 << ( bnum - 1 ) );
+    else
+        digit &= ~( 1 << ( bnum - 1 ) );
+    return digit;
+}
+
+uint8 GetSuit( uint8 CNum )
+{
+    // 0 - пики (Spades)
+    // 1 - чирвы  (Hearts)
+    // 2 - бубны  (Diamonds)
+    // 3 - крести  (Clubs)
+    if( CNum <= 13 )
+    {
+        return CARD_SPADES;
+    }
+    else
+    {
+        if( CNum <= 26 )
+        {
+            return CARD_HEARTS;
+        }
+        else
+        {
+            if( CNum <= 39 )
+            {
+                return CARD_DIAMONDS;
+            }
+            else
+            {
+                return CARD_CLUBS;
+            }
+        }
+    }
+}
+
+uint8 GetRank( uint8 CNum )
+{
+    // 0-8 - 2-10
+    // 9 - валет
+    // 10 - дама
+    // 11 - король
+    // 12 - туз
+    return ( CNum - 1 ) % 13;
+}
+
+string GetStrCard( uint8 num )
+{
+    uint8  i, m;
+    string Suit, Rank;
+    i = GetSuit( num );
+    m = GetRank( num );
+    switch( i )
+    {
+    case CARD_SPADES:
+        Suit = "@msg dlg " + DLGSTR( DID, STR_CARD_SPADES ) + "@";
+        break;
+    case CARD_HEARTS:
+        Suit = "@msg dlg " + DLGSTR( DID, STR_CARD_HEARTS ) + "@";
+        break;
+    case CARD_DIAMONDS:
+        Suit = "@msg dlg " + DLGSTR( DID, STR_CARD_DIAMONDS ) + "@";
+        break;
+    case CARD_CLUBS:
+        Suit = "@msg dlg " + DLGSTR( DID, STR_CARD_CLUBS ) + "@";
+        break;
+    default:
+        Suit = "error";
+        break;
+    }
+    switch( m )
+    {
+    case CARD_2:
+        Rank = "@msg dlg " + DLGSTR( DID, STR_CARD_2 ) + "@";
+        break;
+    case CARD_3:
+        Rank = "@msg dlg " + DLGSTR( DID, STR_CARD_3 ) + "@";
+        break;
+    case CARD_4:
+        Rank = "@msg dlg " + DLGSTR( DID, STR_CARD_4 ) + "@";
+        break;
+    case CARD_5:
+        Rank = "@msg dlg " + DLGSTR( DID, STR_CARD_5 ) + "@";
+        break;
+    case CARD_6:
+        Rank = "@msg dlg " + DLGSTR( DID, STR_CARD_6 ) + "@";
+        break;
+    case CARD_7:
+        Rank = "@msg dlg " + DLGSTR( DID, STR_CARD_7 ) + "@";
+        break;
+    case CARD_8:
+        Rank = "@msg dlg " + DLGSTR( DID, STR_CARD_8 ) + "@";
+        break;
+    case CARD_9:
+        Rank = "@msg dlg " + DLGSTR( DID, STR_CARD_9 ) + "@";
+        break;
+    case CARD_10:
+        Rank = "@msg dlg " + DLGSTR( DID, STR_CARD_10 ) + "@";
+        break;
+    case CARD_JACK:
+        Rank = "@msg dlg " + DLGSTR( DID, STR_CARD_JACK ) + "@";
+        break;
+    case CARD_LADY:
+        Rank = "@msg dlg " + DLGSTR( DID, STR_CARD_LADY ) + "@";
+        break;
+    case CARD_KING:
+        Rank = "@msg dlg " + DLGSTR( DID, STR_CARD_KING ) + "@";
+        break;
+    case CARD_ACE:
+        Rank = "@msg dlg " + DLGSTR( DID, STR_CARD_ACE ) + "@";
+        break;
+    default:
+        Rank = "error" + m;
+        break;
+    }
+    return Rank + " " + Suit;
+}
+
+uint8 GetCombo( uint8 plNum, uint8[] GC )
+{
+    // PlNum - номер игрока (0 - живой игрок)
+    // uint8 plNum=1;
+    // uint8[] GC={0,0,0,0,0,9,10,11,12,13};// ДЛЯ ОТЛАДКИ СКРИПТА	| флаш рояль
+    // uint8[] GC={0,0,0,0,0,8,9,10,11,12};// ДЛЯ ОТЛАДКИ СКРИПТА	| стрейт флаш
+    // uint8[] GC={1,14,27,40,5,1,14,27,40,5};// ДЛЯ ОТЛАДКИ СКРИПТА	| каре
+    // uint8[] GC={0,0,0,0,0,1,14,27,2,15};// ДЛЯ ОТЛАДКИ СКРИПТА	| фул хаус
+    // uint8[] GC={0,0,0,0,0,1,2,3,4,6};// ДЛЯ ОТЛАДКИ СКРИПТА		| флаш
+    // uint8[] GC={0,0,0,0,0,1,15,3,4,5};// ДЛЯ ОТЛАДКИ СКРИПТА	| стрейт
+    // uint8[] GC={0,0,0,0,0,1,14,27,4,5};// ДЛЯ ОТЛАДКИ СКРИПТА	| сет
+    // uint8[] GC={0,0,0,0,0,1,14,3,16,5};// ДЛЯ ОТЛАДКИ СКРИПТА	| 2 пары
+    // uint8[] GC={0,0,0,0,0,1,14,3,4,5};// ДЛЯ ОТЛАДКИ СКРИПТА	| пара
+    // uint8[] GC={0,0,0,0,0,1,15,3,4,6};// ДЛЯ ОТЛАДКИ СКРИПТА	| ничего
+    uint8 HC = 0;
+    uint8 res = 0;
+    bool  comboStreight = true; // Считаем что у нас стрейт, пока не подтваердится обратное.
+    bool  comboFlush = true;    // Аналогично для флаша
+    bool  comboFoak = false;    // каре
+    for( uint8 i = plNum * CARD_COUNT; i < plNum * CARD_COUNT + CARD_COUNT; i++ )
+    {
+        if( GetRank( GC[ i ] ) > HC )
+        {
+            HC = GetRank( GC[ i ] );
+        }
+    }
+// /////ПРОВЕРКА НА СТРЕЙТ///////////////
+    if( HC >= CARD_6 ) // Если ранг высшей карты меньше 6ти, значит стрейта нет
+    {
+        uint8 cardStr = 0;
+        for( uint8 i = 0; i < CARD_COUNT; i++ )
+        {
+            for( uint8 m = plNum * CARD_COUNT; m < plNum * CARD_COUNT + CARD_COUNT; m++ )
+            {
+                if( GetRank( GC[ m ] ) == HC - i )
+                {
+                    cardStr++;
+                    break;
+                }
+            }
+        }
+        if( cardStr != 5 )
+        {
+            comboStreight = false;
+        }
+    }
+    else
+    {
+        comboStreight = false;
+    }
+// ///////////*ПРОВЕРКА НА СТРЕЙТ////////////
+// ////////////ПРОВЕРКА НА ФЛАШ//////////////
+    for( uint8 i = plNum * CARD_COUNT; i < plNum * CARD_COUNT + CARD_COUNT - 1; i++ )
+    {
+        if( GetSuit( GC[ i ] ) != GetSuit( GC[ i + 1 ] ) )
+        {
+            comboFlush = false;
+            break;
+        }
+    }
+// ///////////*ПРОВЕРКА НА ФЛАШ//////////////
+// ВЫВОД РЕЗУЛЬТАТОВ В СЛУЧАЕ КОРОЛЕВСКОГО ФЛАША, СТРЕЙТ ФЛАША, ПРОСТО ФЛАША И ПРОСТО СТРЕЙТА
+    if( comboStreight )
+    {
+        if( comboFlush )
+        {
+            if( HC == CARD_ACE )
+            {
+                return CARD_COMBO_ROYALFLUSH;
+            }
+            else
+            {
+                return HC * 10 + CARD_COMBO_STRFLUSH;
+            }
+        }
+        else
+        {
+            return HC * 10 + CARD_COMBO_STRAIGHT;
+        }
+    }
+    else
+    {
+        if( comboFlush )
+        {
+            return HC * 10 + CARD_COMBO_FLUSH;
+        }
+    }
+// *ВЫВОД РЕЗУЛЬТАТОВ В СЛУЧАЕ КОРОЛЕВСКОГО ФЛАША, СТРЕЙТ ФЛАША, ПРОСТО ФЛАША И ПРОСТО СТРЕЙТА
+// ////////////ПРОВЕРКА НА ПАРУ,2 ПАРЫ, СЕТ, КАРЕ, ФУЛ///
+    uint8[] cardCount = { 1, 1 };
+    int8[] cardRank = { -1, -1 };
+    for( uint8 i = plNum * CARD_COUNT; i < plNum * CARD_COUNT + CARD_COUNT - 1; i++ )
+    {
+        if( ( cardRank[ 0 ] == int( GetRank( GC[ i ] ) ) ) or ( cardRank[ 1 ] == int( GetRank( GC[ i ] ) ) ) )
+        {
+            continue;
+        }
+        for( uint8 m = i + 1; m < plNum * CARD_COUNT + CARD_COUNT; m++ )
+        {
+            if( GetRank( GC[ i ] ) == GetRank( GC[ m ] ) )
+            {
+                if( cardRank[ 0 ] == -1 )
+                {
+                    cardRank[ 0 ] = GetRank( GC[ i ] );
+                }
+                if( cardRank[ 0 ] == int( GetRank( GC[ i ] ) ) )
+                {
+                    if( cardCount[ 0 ] < 3 )
+                    {
+                        cardCount[ 0 ] = cardCount[ 0 ] + 1;
+                    }
+                    else
+                    {
+                        comboFoak = true;
+                        break;
+                    }
+                }
+                else
+                {
+                    if( cardRank[ 1 ] == -1 )
+                    {
+                        cardRank[ 1 ] = GetRank( GC[ i ] );
+                    }
+                    cardCount[ 1 ] = cardCount[ 1 ] + 1;
+                }
+            }
+        }
+    }
+    if( comboFoak )
+    {
+        return cardRank[ 0 ] * 10 + CARD_COMBO_FOAK;
+    }
+    else
+    {
+        if( ( ( cardCount[ 0 ] == 3 ) and ( cardCount[ 1 ] == 2 ) ) or ( ( cardCount[ 0 ] == 2 ) and ( cardCount[ 1 ] == 3 ) ) )
+        {
+            if( cardCount[ 0 ] == 3 )
+            {
+                return cardRank[ 0 ] * 10 + CARD_COMBO_FULLHOUSE;
+            }
+            else
+            {
+                return cardRank[ 1 ] * 10 + CARD_COMBO_FULLHOUSE;
+            }
+        }
+        else
+        {
+            if( cardCount[ 0 ] == 3 )
+            {
+                return cardRank[ 0 ] * 10 + CARD_COMBO_SET;
+            }
+            else
+            {
+                if( ( cardCount[ 0 ] == 2 ) and ( cardCount[ 1 ] == 2 ) )
+                {
+                    if( cardRank[ 0 ] > cardRank[ 1 ] )
+                    {
+                        return cardRank[ 0 ] * 10 + CARD_COMBO_TWOPAIR;
+                    }
+                    else
+                    {
+                        return cardRank[ 1 ] * 10 + CARD_COMBO_TWOPAIR;
+                    }
+                }
+                else
+                {
+                    if( cardCount[ 0 ] == 2 )
+                    {
+                        return cardRank[ 0 ] * 10 + CARD_COMBO_ONEPAIR;
+                    }
+                    else
+                    {
+                        return HC * 10;                      // Комбинаций нет, возвращаем только старшую карту
+                    }
+                }
+            }
+        }
+    }
+// ///////////*ПРОВЕРКА НА ПАРУ,2 ПАРЫ, СЕТ, КАРЕ, ФУЛ///
+}
+
+uint8 GetHighCard( uint8 plNum, uint8[] GC )
+{
+    uint8 HC = 0;
+    for( uint8 i = plNum * CARD_COUNT; i < plNum * CARD_COUNT + CARD_COUNT; i++ )
+    {
+        if( GetRank( GC[ i ] ) > HC )
+        {
+            HC = GetRank( GC[ i ] );
+        }
+    }
+    return HC;
+}
+
+string GetStrCombo( uint8 combo )
+{
+    // GetCombo выдает комбинацию и ее ранг, надо получить номер комбинации:
+    int    num = combo % 10;
+    string res;
+    switch( num )
+    {
+    case CARD_COMBO_HIGHCARD:
+        res = "@msg dlg " + DLGSTR( DID, STR_COMBO_HIGHCARD ) + "@";
+        break;
+    case CARD_COMBO_ONEPAIR:
+        res = "@msg dlg " + DLGSTR( DID, STR_COMBO_ONEPAIR ) + "@";
+        break;
+    case CARD_COMBO_TWOPAIR:
+        res = "@msg dlg " + DLGSTR( DID, STR_COMBO_TWOPAIR ) + "@";
+        break;
+    case CARD_COMBO_SET:
+        res = "@msg dlg " + DLGSTR( DID, STR_COMBO_SET ) + "@";
+        break;
+    case CARD_COMBO_STRAIGHT:
+        res = "@msg dlg " + DLGSTR( DID, STR_COMBO_STRAIGHT ) + "@";
+        break;
+    case CARD_COMBO_FLUSH:
+        res = "@msg dlg " + DLGSTR( DID, STR_COMBO_FLUSH ) + "@";
+        break;
+    case CARD_COMBO_FULLHOUSE:
+        res = "@msg dlg " + DLGSTR( DID, STR_COMBO_FULLHOUSE ) + "@";
+        break;
+    case CARD_COMBO_FOAK:
+        res = "@msg dlg " + DLGSTR( DID, STR_COMBO_FOAK ) + "@";
+        break;
+    case CARD_COMBO_STRFLUSH:
+        res = "@msg dlg " + DLGSTR( DID, STR_COMBO_STRFLUSH ) + "@";
+        break;
+    case CARD_COMBO_ROYALFLUSH:
+        res = "@msg dlg " + DLGSTR( DID, STR_COMBO_ROYALFLUSH ) + "@";
+        break;
+    default:
+        res = "error";
+        break;
+    }
+    return res;
+}
+
+void PrintCards( Critter@ master, Critter& pokerMan, uint8 pl ) // Вывод на экран игровой информации (карты игрока, комбинация игрока, ставки)
+{
+    if( valid( master ) )
+    {
+        // GetNpcBet(master);
+        InGamePl[ pokerMan.PokerNumOfNpc ] = master.Id;
+    }
+    // _SaveAD(slave,false);
+    if( GameStage[ pokerMan.PokerNumOfNpc ] != GAME_E_END )
+    {
+        // Map@ map=master.GetMap();
+        DlgTxt[ pokerMan.PokerNumOfNpc ] = "";
+        DlgTxtNet[ pokerMan.PokerNumOfNpc ] = "";
+        DlgTxt2[ pokerMan.PokerNumOfNpc ] = "";
+        if( pl == 0 )
+        {
+            DialStrCards = "@msg dlg " + DLGSTR( DID, STR_CARDS ) + "@\n";
+            DialStrCardsNet = "@msg dlg " + DLGSTR( DID, STR_CARDS ) + "@\n";
+            DialStrCombo = "@msg dlg " + DLGSTR( DID, STR_COMBO ) + "@ ";
+        }
+        else
+        {
+            DialStrCards = "@msg dlg " + DLGSTR( DID, STR_CARDS_PL ) + "@\n";
+            DialStrCardsNet = "@msg dlg " + DLGSTR( DID, STR_CARDS_PL ) + "@\n";
+            DialStrCombo = "@msg dlg " + DLGSTR( DID, STR_COMBO_PL ) + "@ ";
+        }
+
+        for( uint8 i = 0; i < CARD_COUNT; i++ )
+        {
+            // map.SetText(master.HexX+(i),master.HexY+(i),COLOR_RED,GetStrCard(GameCards[pokerMan.ParamBase[ST_PokerNumOfNpc]][i]));
+            DialStrCards += "\t" + ( i + 1 ) + ". " + GetStrCard( GameCards[ pokerMan.PokerNumOfNpc ][ ( pl * CARD_COUNT ) + i ] );
+            DialStrCardsNet += GetStrCard( GameCards[ pokerMan.PokerNumOfNpc ][ ( pl * CARD_COUNT ) + i ] );
+            if( i != CARD_COUNT - 1 )
+            {
+                DialStrCardsNet += " ";
+            }
+            if( ( i % 2 == 1 ) or ( i == CARD_COUNT - 1 ) )
+            {
+                DialStrCards += "\n";
+            }
+        }
+        DialStrCombo += GetStrCombo( GetCombo( pl, GameCards[ pokerMan.PokerNumOfNpc ] ) );
+        // master.Say(SAY_DIALOG,DialStrCards+DialStrCombo);
+        // map.SetText(master.HexX,master.HexY,COLOR_GREEN,dialStr);
+        DlgTxt[ pokerMan.PokerNumOfNpc ] += DialStrCards + " " + DialStrCombo + "\n" + DialStrBank + Bank[ pokerMan.PokerNumOfNpc ] + " " + DialStrBet + Bet[ pokerMan.PokerNumOfNpc ] + " " + DialStrMineBet + PlBet[ pokerMan.PokerNumOfNpc ][ 0 ];
+        PlayerCardsInDial[ pokerMan.PokerNumOfNpc ] = true;
+        DlgTxtNet[ pokerMan.PokerNumOfNpc ] += DialStrCardsNet + " " + DialStrCombo + " " + DialStrBank + Bank[ pokerMan.PokerNumOfNpc ] + " " + DialStrBet + Bet[ pokerMan.PokerNumOfNpc ] + " " + DialStrMineBet + PlBet[ pokerMan.PokerNumOfNpc ][ 0 ];
+        if( valid( master ) )
+        {
+            master.SayMsg( SAY_NETMSG, TEXTMSG_DLG, DLGSTR( DID, STR_DLGREPLY ), "$gametext" + DialStrCardsNet );
+            master.SayMsg( SAY_NETMSG, TEXTMSG_DLG, DLGSTR( DID, STR_DLGREPLY ), "$gametext" + DialStrCombo );
+/*		for(uint8 m=1;m<PLAYERS_COUNT;m++)
+                {
+                        switch(PlState[pokerMan.ParamBase[ST_PokerNumOfNpc]][m])
+                        {
+                                case PLST_WAIT:
+                                        master.SayMsg(SAY_NETMSG,TEXTMSG_DLG,DLGSTR(DID,STR_DLGREPLY),"$gametext"+DialStrPl+m+" "+DialStrWait);
+                                        break;
+                                case PLST_REISE:
+                                        master.SayMsg(SAY_NETMSG,TEXTMSG_DLG,DLGSTR(DID,STR_DLGREPLY),"$gametext"+DialStrPl+m+" "+DialStrRaise);
+                                        break;
+                                case PLST_PASS:
+                                        master.SayMsg(SAY_NETMSG,TEXTMSG_DLG,DLGSTR(DID,STR_DLGREPLY),"$gametext"+DialStrPl+m+" "+DialStrFold);
+                                        break;
+                                case PLST_CALL:
+                                        master.SayMsg(SAY_NETMSG,TEXTMSG_DLG,DLGSTR(DID,STR_DLGREPLY),"$gametext"+DialStrPl+m+" "+DialStrCall);
+                                        break;
+                        }
+                }*/
+            master.SayMsg( SAY_NETMSG, TEXTMSG_DLG, DLGSTR( DID, STR_DLGREPLY ), "$gametext" + DialStrBank + Bank[ pokerMan.PokerNumOfNpc ] );
+            master.SayMsg( SAY_NETMSG, TEXTMSG_DLG, DLGSTR( DID, STR_DLGREPLY ), "$gametext" + DialStrBet + Bet[ pokerMan.PokerNumOfNpc ] );
+            master.SayMsg( SAY_NETMSG, TEXTMSG_DLG, DLGSTR( DID, STR_DLGREPLY ), "$gametext" + DialStrMineBet + PlBet[ pokerMan.PokerNumOfNpc ][ 0 ] );
+        }
+    }
+}
+
+void PrintFraud2Text( Critter& master, Critter& pokerMan )
+{
+    if( CardInSleeve[ pokerMan.PokerNumOfNpc ] == 0 )
+    {
+        do
+        {
+            CardInSleeve[ pokerMan.PokerNumOfNpc ] = Random( 1, 52 );
+        }
+        while( GetBit( Koloda[ pokerMan.PokerNumOfNpc ], CardInSleeve[ pokerMan.PokerNumOfNpc ] ) != 1 );
+    }
+    Koloda[ pokerMan.PokerNumOfNpc ] = SetBit( Koloda[ pokerMan.PokerNumOfNpc ], CardInSleeve[ pokerMan.PokerNumOfNpc ], false );
+
+    PrintCards( master, pokerMan, 0 );
+    DlgTxt[ pokerMan.PokerNumOfNpc ] = "@msg dlg " + DLGSTR( DID, STR_CARD_IN_SLEEVE ) + "@ " + GetStrCard( CardInSleeve[ pokerMan.PokerNumOfNpc ] ) + "\n" + DlgTxt[ pokerMan.PokerNumOfNpc ];
+    #ifdef __DEBUG__
+    Log( "\n<Poker> PrintFraud2Text: " + DlgTxt[ pokerMan.PokerNumOfNpc ] );
+    #endif
+}
+
+bool ChWinFold( Critter& pokerMan )
+{
+    bool winFold = true;
+
+    for( uint8 i = 1; i < PLAYERS_COUNT; i++ )
+    {
+        if( PlState[ pokerMan.PokerNumOfNpc ][ i ] != PLST_PASS )
+        {
+            winFold = false;
+        }
+    }
+    if( winFold )   // Все противники спасовали
+    {
+        return true;
+    }
+    else
+    {
+        return false;
+    }
+}
+
+void NpcReplaceCards( Critter& pokerMan ) // Замена карт у противников игрока
+{
+    // royal flush - ничего не менять
+    // straight flush - ничего не менять
+    // four of a kind - ничего не менять
+    // full house - 90% ничего не менять 10% менять пару
+    // flush - если до straight flush не хватает одной карты, то с 20% вероятностью меняем карту.
+    // straight - если 4 карты одной масти, то 5% обмена последней
+    // three of a kind - обмен оставшихся 2ух карт
+    // two pairs - 90% обмен последней карты, 10% обмен трех карт
+    // one pair - если номинал пары ниже 6, то 90% обмен оставшихся карт, 10% обмен всех карт, кроме высшей
+    // high card - 70% обмен карт кроме наивысшего ранга, 30% обмен случайных карт
+    // int8[] tpCard={4,-1,-1};
+    // int8 tpPair=-1;
+    // uint8[] cSuits={0,0,0,0};
+    // uint8[] sortedStreight={0,0,0,0,0};
+    // int8 strfl1Card=-1;
+    // uint8 min1Straight=13;
+    // int8 min2Straight=-1;
+    // uint8 iStraight=0;
+    // bool chStraight=false;
+    for( uint8 i = 1; i < PLAYERS_COUNT; i++ )
+    {
+        uint8 p = GetCombo( i, GameCards[ pokerMan.PokerNumOfNpc ] );
+        uint8 hc = p / 10;
+        p = p % 10;
+        switch( p )
+        {
+        case CARD_COMBO_HIGHCARD:            // 70% обмен карт кроме наивысшего ранга, 30% обмен случайных карт (перед этим, проверка на "почти флаш" и "почти стрейт")
+            HighCardReplace( hc, i, pokerMan );
+            break;
+        case CARD_COMBO_ONEPAIR:             // если номинал пары ниже 6, то 90% обмен оставшихся карт, 10% обмен всех карт, кроме высшей
+            OnePairReplace( hc, i, pokerMan );
+            break;
+        case CARD_COMBO_TWOPAIR:             // 90% обмен последней карты, 10% обмен трех карт
+            TwoPairReplace( i, pokerMan );
+            break;
+        case CARD_COMBO_SET:                 // обмен оставшихся 2ух карт
+            SetReplace( hc, i, pokerMan );
+            break;
+        case CARD_COMBO_STRAIGHT:            // если 4 карты одной масти, то 5% обмена последней
+            StraightReplace( i, pokerMan );
+            break;
+        case CARD_COMBO_FLUSH:               // если до straight flush не хватает одной карты, то с 5% вероятностью меняем карту.
+            FlushReplace( i, pokerMan );
+            break;
+
+
+
+        case CARD_COMBO_FULLHOUSE:
+            break;
+        case CARD_COMBO_FOAK:
+            break;
+        case CARD_COMBO_STRFLUSH:
+            break;
+        case CARD_COMBO_ROYALFLUSH:
+            break;
+        default:
+            Log( "Error" );
+            break;
+        }
+    }
+}
+
+void HighCardReplace( uint8 hc, uint8 i, Critter& pokerMan )
+{
+    uint8[] cSuits = { 0, 0, 0, 0 };
+    int8  strfl1Card = -1;
+    uint8 min1Straight = 13;
+    int8  min2Straight = -1;
+    uint8[] sortedStreight = { 0, 0, 0, 0, 0 };
+    uint8 iStraight = 0;
+    bool  chStraight = false;
+    for( uint8 c = 0; c < CARD_COUNT; c++ ) // Проверка на "почти флаш"
+    {
+        cSuits[ GetSuit( GameCards[ pokerMan.PokerNumOfNpc ][ i * CARD_COUNT + c ] ) ]++;
+    }
+    for( uint8 c = 0; c < 4; c++ )
+    {
+        if( cSuits[ c ] == 4 )
+        {
+            strfl1Card = c;
+            break;
+        }
+    }
+    if( strfl1Card != -1 )
+    {
+        for( uint8 c = 1; c <= CARD_COUNT; c++ )
+        {
+            if( not ( int( GetSuit( GameCards[ pokerMan.PokerNumOfNpc ][ i * CARD_COUNT + c - 1 ] ) ) == strfl1Card ) )
+            {
+                ReplCards[ pokerMan.PokerNumOfNpc ][ i ] = SetBit5( ReplCards[ pokerMan.PokerNumOfNpc ][ i ], c, true );
+            }
+        }
+    }
+    else     // Проверка на "почти стрейт"
+    {
+        for( uint8 c = 0; c < CARD_COUNT; c++ )
+        {
+            for( uint8 t = 0; t < CARD_COUNT; t++ )
+            {
+                if( ( GetRank( GameCards[ pokerMan.PokerNumOfNpc ][ i * CARD_COUNT + t ] ) < min1Straight ) and ( int( GetRank( GameCards[ pokerMan.PokerNumOfNpc ][ i * CARD_COUNT + t ] ) ) > min2Straight ) )
+                {
+                    min1Straight = GetRank( GameCards[ pokerMan.PokerNumOfNpc ][ i * CARD_COUNT + c ] );
+                }
+            }
+            sortedStreight[ c ] = min1Straight;
+            min2Straight = sortedStreight[ c ];
+            min1Straight = 13;
+        }
+        for( uint8 c = 0; c < CARD_COUNT - 1; c++ )
+        {
+            if( GetRank( GameCards[ pokerMan.PokerNumOfNpc ][ i * CARD_COUNT + c ] ) == GetRank( GameCards[ pokerMan.PokerNumOfNpc ][ i * CARD_COUNT + c + 1 ] ) - 1 )
+            {
+                iStraight++;
+            }
+        }
+        if( iStraight == 3 )     // Если 4 карты идут по порядку, значит, это почти стрейт
+        {
+            if( GetRank( GameCards[ pokerMan.PokerNumOfNpc ][ i * CARD_COUNT ] ) != GetRank( GameCards[ pokerMan.PokerNumOfNpc ][ i * CARD_COUNT + 1 ] ) - 1 )
+            {
+                ReplCards[ pokerMan.PokerNumOfNpc ][ i ] = SetBit5( ReplCards[ pokerMan.PokerNumOfNpc ][ i ], 1, true );
+            }
+            else
+            {
+                ReplCards[ pokerMan.PokerNumOfNpc ][ i ] = SetBit5( ReplCards[ pokerMan.PokerNumOfNpc ][ i ], 5, true );
+            }
+            chStraight = true;
+        }
+        else                    // В противном случае требуются дополнительные проверки
+        {
+            if( iStraight > 1 ) // До стрейта далеко, если подряд идут только 2 карты (или таковых вообще нет).
+            {
+                if( ( GetRank( GameCards[ pokerMan.PokerNumOfNpc ][ i * CARD_COUNT ] ) == GetRank( GameCards[ pokerMan.PokerNumOfNpc ][ i * CARD_COUNT + 1 ] ) - 1 ) and ( GetRank( GameCards[ pokerMan.PokerNumOfNpc ][ i * CARD_COUNT + 1 ] ) == GetRank( GameCards[ pokerMan.PokerNumOfNpc ][ i * CARD_COUNT + 2 ] ) - 1 ) )
+                {
+                    if( GetRank( GameCards[ pokerMan.PokerNumOfNpc ][ i * CARD_COUNT + 2 ] ) == GetRank( GameCards[ pokerMan.PokerNumOfNpc ][ i * CARD_COUNT + 4 ] ) - 2 )
+                    {
+                        ReplCards[ pokerMan.PokerNumOfNpc ][ i ] = SetBit5( ReplCards[ pokerMan.PokerNumOfNpc ][ i ], 4, true );
+                        chStraight = true;
+                    }
+                }
+                else
+                {
+                    if( ( GetRank( GameCards[ pokerMan.PokerNumOfNpc ][ i * CARD_COUNT + 2 ] ) == GetRank( GameCards[ pokerMan.PokerNumOfNpc ][ i * CARD_COUNT + 3 ] ) - 1 ) and ( GetRank( GameCards[ pokerMan.PokerNumOfNpc ][ i * CARD_COUNT + 3 ] ) == GetRank( GameCards[ pokerMan.PokerNumOfNpc ][ i * CARD_COUNT + 4 ] ) - 1 ) )
+                    {
+                        if( GetRank( GameCards[ pokerMan.PokerNumOfNpc ][ i * CARD_COUNT ] ) == GetRank( GameCards[ pokerMan.PokerNumOfNpc ][ i * CARD_COUNT + 2 ] ) - 2 )
+                        {
+                            ReplCards[ pokerMan.PokerNumOfNpc ][ i ] = SetBit5( ReplCards[ pokerMan.PokerNumOfNpc ][ i ], 2, true );
+                            chStraight = true;
+                        }
+                    }
+                    else
+                    {
+                        if( ( GetRank( GameCards[ pokerMan.PokerNumOfNpc ][ i * CARD_COUNT ] ) == GetRank( GameCards[ pokerMan.PokerNumOfNpc ][ i * CARD_COUNT + 1 ] ) - 1 ) and ( GetRank( GameCards[ pokerMan.PokerNumOfNpc ][ i * CARD_COUNT + 3 ] ) == GetRank( GameCards[ pokerMan.PokerNumOfNpc ][ i * CARD_COUNT + 4 ] ) - 1 ) )
+                        {
+                            if( GetRank( GameCards[ pokerMan.PokerNumOfNpc ][ i * CARD_COUNT + 1 ] ) == GetRank( GameCards[ pokerMan.PokerNumOfNpc ][ i * CARD_COUNT + 3 ] ) - 2 )
+                            {
+                                ReplCards[ pokerMan.PokerNumOfNpc ][ i ] = SetBit5( ReplCards[ pokerMan.PokerNumOfNpc ][ i ], 3, true );
+                                chStraight = true;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        if( not ( chStraight ) )       // Проверка на "почти стрейт"
+        {
+            if( Random( 1, 10 ) <= 7 ) // обмен карт кроме наивысшего ранга
+            {
+                for( uint8 c = 1; c <= CARD_COUNT; c++ )
+                {
+                    if( not ( GetRank( GameCards[ pokerMan.PokerNumOfNpc ][ i * CARD_COUNT + c - 1 ] ) == hc ) )
+                    {
+                        ReplCards[ pokerMan.PokerNumOfNpc ][ i ] = SetBit5( ReplCards[ pokerMan.PokerNumOfNpc ][ i ], c, true );
+                    }
+                }
+            }
+            else             // обмен случайных карт
+            {
+                for( uint8 c = 1; c <= CARD_COUNT; c++ )
+                {
+                    if( Random( 0, 1 ) == 1 )
+                    {
+                        ReplCards[ pokerMan.PokerNumOfNpc ][ i ] = SetBit5( ReplCards[ pokerMan.PokerNumOfNpc ][ i ], c, true );
+                    }
+                }
+            }
+        }
+    }
+}
+
+void OnePairReplace( uint8 hc, uint8 i, Critter& pokerMan )
+{
+    if( hc < CARD_6 )              // если номинал пары ниже 6
+    {
+        if( Random( 1, 10 ) <= 9 ) // обмен оставшихся карт
+        {
+            for( uint8 c = 1; c <= CARD_COUNT; c++ )
+            {
+                if( GetRank( GameCards[ pokerMan.PokerNumOfNpc ][ i * CARD_COUNT + c - 1 ] ) != hc )
+                {
+                    ReplCards[ pokerMan.PokerNumOfNpc ][ i ] = SetBit5( ReplCards[ pokerMan.PokerNumOfNpc ][ i ], c, true );
+                }
+            }
+        }
+        else         // обмен всех карт, кроме высшей
+        {
+            uint8 highC = GetHighCard( i, GameCards[ pokerMan.PokerNumOfNpc ] );
+            for( uint8 c = 1; c <= CARD_COUNT; c++ )
+            {
+                if( not ( GetRank( GameCards[ pokerMan.PokerNumOfNpc ][ i * CARD_COUNT + c - 1 ] ) == highC ) )
+                {
+                    ReplCards[ pokerMan.PokerNumOfNpc ][ i ] = SetBit5( ReplCards[ pokerMan.PokerNumOfNpc ][ i ], c, true );
+                }
+            }
+        }
+    }
+}
+
+void TwoPairReplace( uint8 i, Critter& pokerMan )
+{
+    int8[] tpCard = { 4, -1, -1 };
+    int8 tpPair = -1;
+    for( uint8 c = 0; c < CARD_COUNT - 1; c++ )
+    {
+        bool notPair = true;
+        for( uint8 t = c + 1; t < CARD_COUNT; t++ )
+        {
+            if( GetRank( GameCards[ pokerMan.PokerNumOfNpc ][ i * CARD_COUNT + c ] ) == GetRank( GameCards[ pokerMan.PokerNumOfNpc ][ i * CARD_COUNT + t ] ) )
+            {
+                notPair = false;
+                break;
+            }
+            if( notPair )
+            {
+                tpCard[ 0 ] = c;
+            }
+        }
+    }
+    for( uint8 c = 0; c < CARD_COUNT; c++ )
+    {
+        if( GetRank( GameCards[ pokerMan.PokerNumOfNpc ][ i * CARD_COUNT + c ] ) != GetRank( GameCards[ pokerMan.PokerNumOfNpc ][ i * CARD_COUNT + tpCard[ 0 ] ] ) )
+        {
+            if( tpPair == -1 )
+            {
+                tpPair = GetRank( GameCards[ pokerMan.PokerNumOfNpc ][ i * CARD_COUNT + c ] );
+            }
+            else
+            {
+                if( int( GetRank( GameCards[ pokerMan.PokerNumOfNpc ][ i * CARD_COUNT + c ] ) ) < tpPair )
+                {
+                    tpPair = GetRank( GameCards[ pokerMan.PokerNumOfNpc ][ i * CARD_COUNT + c ] );
+                }
+            }
+        }
+    }
+    for( uint8 c = 0; c < CARD_COUNT; c++ )
+    {
+        if( int( GetRank( GameCards[ pokerMan.PokerNumOfNpc ][ i * CARD_COUNT + c ] ) ) == tpPair )
+        {
+            if( tpCard[ 1 ] == -1 )
+            {
+                tpCard[ 1 ] = c;
+            }
+            else
+            {
+                tpCard[ 2 ] = c;
+            }
+        }
+    }
+    if( Random( 1, 10 ) <= 9 ) // обмен последней карты
+    {
+        ReplCards[ pokerMan.PokerNumOfNpc ][ i ] = SetBit5( ReplCards[ pokerMan.PokerNumOfNpc ][ i ], tpCard[ 0 ], true );
+    }
+    else     // обмен трех карт
+    {
+        ReplCards[ pokerMan.PokerNumOfNpc ][ i ] = SetBit5( ReplCards[ pokerMan.PokerNumOfNpc ][ i ], tpCard[ 0 ], true );
+        ReplCards[ pokerMan.PokerNumOfNpc ][ i ] = SetBit5( ReplCards[ pokerMan.PokerNumOfNpc ][ i ], tpCard[ 1 ], true );
+        ReplCards[ pokerMan.PokerNumOfNpc ][ i ] = SetBit5( ReplCards[ pokerMan.PokerNumOfNpc ][ i ], tpCard[ 2 ], true );
+    }
+}
+
+void SetReplace( uint8 hc, uint8 i, Critter& pokerMan )
+{
+    for( uint8 c = 1; c <= CARD_COUNT; c++ )
+    {
+        if( not ( GetRank( GameCards[ pokerMan.PokerNumOfNpc ][ i * CARD_COUNT + c - 1 ] ) == hc ) )
+        {
+            ReplCards[ pokerMan.PokerNumOfNpc ][ i ] = SetBit5( ReplCards[ pokerMan.PokerNumOfNpc ][ i ], c, true );
+        }
+    }
+}
+
+void StraightReplace( uint8 i, Critter& pokerMan )
+{
+    uint8[] cSuits = { 0, 0, 0, 0 };
+    int8 strfl1Card = -1;
+    for( uint8 c = 0; c < CARD_COUNT; c++ )
+    {
+        cSuits[ GetSuit( GameCards[ pokerMan.PokerNumOfNpc ][ i * CARD_COUNT + c ] ) ]++;
+    }
+    for( uint8 c = 0; c < 4; c++ )
+    {
+        if( cSuits[ c ] == 4 )
+        {
+            strfl1Card = c;
+            break;
+        }
+    }
+    if( strfl1Card != -1 )
+    {
+        if( Random( 1, 20 ) == 1 )
+        {
+            for( uint8 c = 1; c <= CARD_COUNT; c++ )
+            {
+                if( not ( int( GetSuit( GameCards[ pokerMan.PokerNumOfNpc ][ i * CARD_COUNT + c - 1 ] ) ) == strfl1Card ) )
+                {
+                    ReplCards[ pokerMan.PokerNumOfNpc ][ i ] = SetBit5( ReplCards[ pokerMan.PokerNumOfNpc ][ i ], c, true );
+                }
+            }
+        }
+    }
+}
+
+void FlushReplace( uint8 i, Critter& pokerMan )
+{
+    uint8 min1Straight = 13;
+    int8  min2Straight = -1;
+    uint8[] sortedStreight = { 0, 0, 0, 0, 0 };
+    uint8 iStraight = 0;
+    for( uint8 c = 0; c < CARD_COUNT; c++ )
+    {
+        for( uint8 t = 0; t < CARD_COUNT; t++ )
+        {
+            if( ( GetRank( GameCards[ pokerMan.PokerNumOfNpc ][ i * CARD_COUNT + t ] ) < min1Straight ) and ( int( GetRank( GameCards[ pokerMan.PokerNumOfNpc ][ i * CARD_COUNT + t ] ) ) > min2Straight ) )
+            {
+                min1Straight = GetRank( GameCards[ pokerMan.PokerNumOfNpc ][ i * CARD_COUNT + c ] );
+            }
+        }
+        sortedStreight[ c ] = min1Straight;
+        min2Straight = sortedStreight[ c ];
+        min1Straight = 13;
+    }
+    for( uint8 c = 0; c < CARD_COUNT - 1; c++ )
+    {
+        if( GetRank( GameCards[ pokerMan.PokerNumOfNpc ][ i * CARD_COUNT + c ] ) == GetRank( GameCards[ pokerMan.PokerNumOfNpc ][ i * CARD_COUNT + c + 1 ] ) - 1 )
+        {
+            iStraight++;
+        }
+    }
+    if( iStraight == 3 ) // Если 4 карты идут по порядку, значит, это почти стрейт
+    {
+        if( GetRank( GameCards[ pokerMan.PokerNumOfNpc ][ i * CARD_COUNT ] ) != GetRank( GameCards[ pokerMan.PokerNumOfNpc ][ i * CARD_COUNT + 1 ] ) - 1 )
+        {
+            ReplCards[ pokerMan.PokerNumOfNpc ][ i ] = SetBit5( ReplCards[ pokerMan.PokerNumOfNpc ][ i ], 1, true );
+        }
+        else
+        {
+            ReplCards[ pokerMan.PokerNumOfNpc ][ i ] = SetBit5( ReplCards[ pokerMan.PokerNumOfNpc ][ i ], 5, true );
+        }
+    }
+    else                    // В противном случае требуются дополнительные проверки
+    {
+        if( iStraight > 1 ) // До стрейта далеко, если подряд идут только 2 карты (или таковых вообще нет).
+        {
+            if( ( GetRank( GameCards[ pokerMan.PokerNumOfNpc ][ i * CARD_COUNT ] ) == GetRank( GameCards[ pokerMan.PokerNumOfNpc ][ i * CARD_COUNT + 1 ] ) - 1 ) and ( GetRank( GameCards[ pokerMan.PokerNumOfNpc ][ i * CARD_COUNT + 1 ] ) == GetRank( GameCards[ pokerMan.PokerNumOfNpc ][ i * CARD_COUNT + 2 ] ) - 1 ) )
+            {
+                if( GetRank( GameCards[ pokerMan.PokerNumOfNpc ][ i * CARD_COUNT + 2 ] ) == GetRank( GameCards[ pokerMan.PokerNumOfNpc ][ i * CARD_COUNT + 4 ] ) - 2 )
+                {
+                    ReplCards[ pokerMan.PokerNumOfNpc ][ i ] = SetBit5( ReplCards[ pokerMan.PokerNumOfNpc ][ i ], 4, true );
+                }
+            }
+            else
+            {
+                if( ( GetRank( GameCards[ pokerMan.PokerNumOfNpc ][ i * CARD_COUNT + 2 ] ) == GetRank( GameCards[ pokerMan.PokerNumOfNpc ][ i * CARD_COUNT + 3 ] ) - 1 ) and ( GetRank( GameCards[ pokerMan.PokerNumOfNpc ][ i * CARD_COUNT + 3 ] ) == GetRank( GameCards[ pokerMan.PokerNumOfNpc ][ i * CARD_COUNT + 4 ] ) - 1 ) )
+                {
+                    if( GetRank( GameCards[ pokerMan.PokerNumOfNpc ][ i * CARD_COUNT ] ) == GetRank( GameCards[ pokerMan.PokerNumOfNpc ][ i * CARD_COUNT + 2 ] ) - 2 )
+                    {
+                        ReplCards[ pokerMan.PokerNumOfNpc ][ i ] = SetBit5( ReplCards[ pokerMan.PokerNumOfNpc ][ i ], 2, true );
+                    }
+                }
+                else
+                {
+                    if( ( GetRank( GameCards[ pokerMan.PokerNumOfNpc ][ i * CARD_COUNT ] ) == GetRank( GameCards[ pokerMan.PokerNumOfNpc ][ i * CARD_COUNT + 1 ] ) - 1 ) and ( GetRank( GameCards[ pokerMan.PokerNumOfNpc ][ i * CARD_COUNT + 3 ] ) == GetRank( GameCards[ pokerMan.PokerNumOfNpc ][ i * CARD_COUNT + 4 ] ) - 1 ) )
+                    {
+                        if( GetRank( GameCards[ pokerMan.PokerNumOfNpc ][ i * CARD_COUNT + 1 ] ) == GetRank( GameCards[ pokerMan.PokerNumOfNpc ][ i * CARD_COUNT + 3 ] ) - 2 )
+                        {
+                            ReplCards[ pokerMan.PokerNumOfNpc ][ i ] = SetBit5( ReplCards[ pokerMan.PokerNumOfNpc ][ i ], 3, true );
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+void LoadSettings( uint npcRole, Critter& pokerMan )
+{
+    uint SettNum = npcRole - NPC_ROLE_START_VALUE;
+    if( SettNum >= PGamers.length() )
+    {
+        SettNum = 0;
+    }
+    if( PGamers.length() > 0 )
+    {
+        MoneyForStartGame[ pokerMan.PokerNumOfNpc ] = PGamers[ SettNum ].MoneyForStartGame;
+        MinBet[ pokerMan.PokerNumOfNpc ] = PGamers[ SettNum ].MinBet;
+        Raise_1[ pokerMan.PokerNumOfNpc ] = PGamers[ SettNum ].Raise1;
+        Raise_2[ pokerMan.PokerNumOfNpc ] = PGamers[ SettNum ].Raise2;
+        Raise_3[ pokerMan.PokerNumOfNpc ] = PGamers[ SettNum ].Raise3;
+        MaxBet[ pokerMan.PokerNumOfNpc ] = PGamers[ SettNum ].MaxBet;
+        OnCheat1[ pokerMan.PokerNumOfNpc ] = PGamers[ SettNum ].OnCheat1;
+        OnCheat2[ pokerMan.PokerNumOfNpc ] = PGamers[ SettNum ].OnCheat2;
+        OnCheat3[ pokerMan.PokerNumOfNpc ] = PGamers[ SettNum ].OnCheat3;
+        PMLevel[ pokerMan.PokerNumOfNpc ] = PGamers[ SettNum ].PMLevel;
+        StopGameMoney[ pokerMan.PokerNumOfNpc ] = PGamers[ SettNum ].StopGameMoney;
+        WaitForGame[ pokerMan.PokerNumOfNpc ] = PGamers[ SettNum ].WaitForGame;
+    }
+    else
+    {
+        Log( "\n\n<Poker> Error: Settings not found!" );
+    }
+    #ifdef __DEBUG__
+    Log( "\n\n<Poker> Number of game settings: " + PGamers.length() + "\nSelected setting - " + SettNum + "\nNpcRole - " + npcRole + "\nMoneyForStartGame - " + MoneyForStartGame[ pokerMan.PokerNumOfNpc ] + "\nMinBet - " + MinBet[ pokerMan.PokerNumOfNpc ] + "\nMaxBet - " + MaxBet[ pokerMan.PokerNumOfNpc ] + "\n\n" );
+    #endif
+}
+////// FOS Server
+////Old script name: PokerGameList.fosh. Patched 01.10 21:52:48
+// Author: Tab10id
+
+//
+// Dro-Poker
+// Using in poker
+//
+
+// В этом файле хранятся настройки игры для различных НПЦ (минимальные/максимальные ставки и тп)
+// Для того чтобы заставить нпц играть с теми или иными настойкам, необходимо указать ему соответствующее значение NpcRole
+#define NPC_ROLE_START_VALUE    ( 71600 )
+
+class PokerGamer
+{
+    uint   MoneyForStartGame; // Деньги которые необходимо поставить для начала игры
+    uint   MinBet;            // Минимальная ставка
+    uint   MaxBet;            // Максимальная ставка
+    uint   Raise1;            // Стандартное повышение 1
+    uint   Raise2;            // Стандартное повышение 2
+    uint   Raise3;            // Стандартное повышение 3
+    uint16 OnCheat1;          // Реакция на обнаружение жульничества типа 1
+    uint16 OnCheat2;          // Реакция на обнаружение жульничества типа 2
+    uint16 OnCheat3;          // Дополнительное поле
+    uint8  PMLevel;           // Способность покермана заметить жульничество (от 1 до 10)
+    uint   StopGameMoney;     // Сумма, проигрывая которую покерман перестает играть с Дудом. Если 0, то ограничений нет.
+    uint16 WaitForGame;       // Количество игровых дней, которые необходимо подождать, чтобы покерман снова начал играть с Дудом, после того как он его обыграл на сумму StopGameMoney
+
+
+    PokerGamer( uint moneyForStartGame, uint minBet, uint maxBet, uint raise1, uint raise2, uint raise3, uint16 onCheat1, uint16 onCheat2, uint16 onCheat3, uint8 pMLevel, uint stopGameMoney, uint16 waitForGame )
+    {
+        MoneyForStartGame = moneyForStartGame;
+        MinBet = minBet;
+        MaxBet = maxBet;
+        Raise1 = raise1;
+        Raise2 = raise2;
+        Raise3 = raise3;
+        OnCheat1 = onCheat1;
+        OnCheat2 = onCheat2;
+        OnCheat3 = onCheat3;
+        PMLevel = pMLevel;
+        StopGameMoney = stopGameMoney;
+        WaitForGame = waitForGame;
+    }
+};
+PokerGamer@[] PGamers;
+
+class Starter
+{
+    Starter()
+    {
+        InitPGemers();
+    }
+};
+Starter aStarter;
+
+void InitPGemers()
+{
+    PGamers.insertLast( @PokerGamer( 120, 20, 750, 20, 50, 100, 1, 0, 0, 1, 3000, 2 ) );
+    PGamers.insertLast( @PokerGamer( 130, 30, 850, 30, 60, 200, 1, 0, 0, 3, 6000, 3 ) );
+}
+
+void RunCheatScript( uint16 funcNum, Critter& player, Critter& pokerMan )
+{
+    switch( funcNum )
+    {
+    case 1:
+        _OnCheat1_npc1( player, pokerMan );
+        break;
+    default:
+        _OnCheatDefault( player, pokerMan );
+        break;
+    }
+}
+
+void _OnCheat1_npc1( Critter& player, Critter& pokerMan )
+{
+    pokerMan.SayMsg( SAY_NORM_ON_HEAD, TEXTMSG_DLG, STR_CHEAT_1 );
+    NpcPlanes::AddAttackPlane( pokerMan, 0, player );
+    InGame[ pokerMan.PokerNumOfNpc ] = false;
+    auto pokerFraud = pokerMan.PokerFraud;
+    pokerFraud[ player.Id ] = __FullSecond + ( 60 * 60 * 24 * 3 );
+    pokerMan.PokerFraud = pokerFraud;
+}
+
+void _OnCheatDefault( Critter& player, Critter& pokerMan )
+{
+    pokerMan.SayMsg( SAY_NORM_ON_HEAD, TEXTMSG_DLG, STR_CHEAT_DEFAULT );
+    InGame[ pokerMan.PokerNumOfNpc ] = false;
+    auto pokerFraud = pokerMan.PokerFraud;
+    pokerFraud[ player.Id ] = __FullSecond + ( 60 * 60 * 24 * 1 );
+    pokerMan.PokerFraud = pokerFraud;
+}
+////// FOS Server
+////Old script name: Poker.fos. Patched 01.10 21:52:48
+// Author: Tab10id
+
+//#include "Tla"
+////#include "Poker"
+////#include "PokerGameList"
 
 #pragma property Critter PrivateServer int  PokerWins
 #pragma property Critter PrivateServer uint PokerNumOfNpc

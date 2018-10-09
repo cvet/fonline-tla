@@ -1,12 +1,36 @@
-// FOS Server
+// FOS Server Sort 2
+////Old script name: Merc.fosh. Patched 01.10 22:40:05
+
+// Базовые типы мерков, для использования без дополнительного скриптования
+#define MERC_CUSTOM               ( 0 )  // произвольный, без выраженного типа
+const hash MercFollowerDefault = 1;  // по умолчанию, отменяет следование при атаке со стороны игрока
+const hash MercFollowerHarmless = 2;  // безобидный, не отменяет следование при агрессии со стороны игрока
+const hash MercFollowerCanLose = 3;  // то же, что и №1 - но может отставать при превышении расстояния между игроком и нпц значения LostDist
+const hash MercGuardDefault = 4;  // Охранник по умолчанию. При атаке кем-то хозяина присоединяется к бою
+
+// Базовые расстояния от мерка до хозяина.
+#define MMDistNone                ( 0 )  // Не установлена
+#define MMDistClose               ( 1 )  // Вплотную
+#define MMDistShort               ( 3 )  // Короткая дистанция - 3 гекса
+const hash MMDistMedium = 8;  // Средняя дистанция - 8 гексов
+#define MMDistFar                 ( 20 ) // Дальняя дистанция - 20 гексов
+
+#define MasterId                  MercMasterId
+#define LoseDist                  MercLoseDist
+
+#define _CancelOnMasterAttack     # (cr) ( cr.MercCancelOnAttack )
+#define _CanLose                  # (cr) ( cr.MercLoseDist > 0 )
+#define _AlwaysRun                # (cr) ( cr.MercAlwaysRun )
+////// FOS Server
+////Old script name: Merc.fosh. Patched 01.10 22:40:05
 // Author: rifleman17
 
-#include "Tla"
+//#include "Tla"
 
 uint8       GetDir( Critter& cr0, Critter& cr1 ) { return GetDirection( cr0.HexX, cr0.HexY, cr1.HexX, cr1.HexY ); }
-import bool GetFreeHex( Map& map, uint radius, uint16& hx, uint16& hy ) from "Caravan";
-import bool IsKnownLoc( Critter& cr, bool byId, uint locNum ) from "Location";
-import bool SetKnownLoc( Critter& cr, bool byId, uint locNum ) from "Location";
+////import bool GetFreeHex0( Map& map, uint radius, uint16& hx, uint16& hy ) from "Caravan";
+////import bool IsKnownLoc0( Critter& cr, bool byId, uint locNum ) from "Location";
+////import bool SetKnownLoc0( Critter& cr, bool byId, uint locNum ) from "Location";
 
 // Debug Log
 // #define DL#(s) (Log(s))
@@ -17,7 +41,7 @@ import bool SetKnownLoc( Critter& cr, bool byId, uint locNum ) from "Location";
 
 #define MERC_PARAM_COUNT             ( 7 )                                                                                                                      // число параметров мерка для некоего типа. Если потребуется добавить новый параметр,нужно изменить это число и дописать параметры для каждого типа мерков
 #define MERC_TYPE_COUNT              ( 4 )                                                                                                                      // число типов мерков. При добавлении нового типа, увеличивайте число вручную
-#define MERC_CELL                    # ( type, col )( _mercInfo[ ( ( type > MERC_TYPE_COUNT ? MERC_FOLLOWER_DEFAULT : type ) - 1 ) * MERC_PARAM_COUNT + col ] ) // ячейка таблицы (строка+1, колонка)
+#define MERC_CELL                    # ( type, col )( _mercInfo[ ( ( type > MERC_TYPE_COUNT ? Merc::MercFollowerDefault : type ) - 1 ) * MERC_PARAM_COUNT + col ] ) // ячейка таблицы (строка+1, колонка)
 #define RELEASE_TIME                 ( __FullSecond + 60 * 60 )                                                                                                 // 60 минут = время в игровых минутах до уничтожения/или переноса на домашнюю позицию мерка после вызова CancelMerc.
 #define FIRE_TIME                    ( 60 * 60 * 24 * 30 * 3 )                                                                                                  // Время службы по умолчанию - 3 месяца
 /*
@@ -33,10 +57,10 @@ import bool SetKnownLoc( Critter& cr, bool byId, uint locNum ) from "Location";
 const uint[] _mercInfo =
 {
 //  type,                   loseDist,  alwaysRun,  cancelOnMasterDead,  cancelOnMasterAttack,  defendMaster,  assistMaster
-    MERC_FOLLOWER_DEFAULT,      0,         0,          1,                   1,                     0,             0,
-    MERC_FOLLOWER_HARMLESS,     0,         0,          0,                   0,                     0,             0,
-    MERC_FOLLOWER_CAN_LOSE,     MMDistFar, 0,          1,                   1,                     0,             0,
-    MERC_GUARD_DEFAULT,         0,         0,          1,                   1,                     1,             0
+    Merc::MercFollowerDefault,      0,         0,          1,                   1,                     0,             0,
+    Merc::MercFollowerHarmless,     0,         0,          0,                   0,                     0,             0,
+    Merc::MercFollowerCanLose,     MMDistFar, 0,          1,                   1,                     0,             0,
+    Merc::MercGuardDefault,         0,         0,          1,                   1,                     1,             0
 };
 
 #define _MercCanLose                 # (type) ( MERC_CELL( type, 1 ) > MMDistNone )
@@ -66,7 +90,7 @@ void _MercInit( Critter& merc, bool firstTime )
 
 bool _MercGlobalProcess( int type, Critter& cr, Item@, float&, float&, float&, float&, float&, uint&, bool& )
 {
-    if( type == GLOBAL_PROCESS_NPC_IDLE )
+    if( type == TlaExtended::GlobalProcessNpcIdle )
     {
         e_MercIdle( cr );
     }
@@ -82,13 +106,13 @@ void e_MercSmthAttacked( Critter& merc, Critter& fromCr, Critter& attacker )
     if( merc.MasterId == fromCr.Id ) // Атакован хозяин мерка
     {
         if( merc.MercDefendMaster )
-            AddAttackPlane( merc, 0, attacker );
+            NpcPlanes::AddAttackPlane( merc, 0, attacker );
         return;
     }
     if( merc.MasterId == attacker.Id ) // Атакующий - хозяин мерка
     {
         if( merc.MercDefendMaster )
-            AddAttackPlane( merc, 0, fromCr );
+            NpcPlanes::AddAttackPlane( merc, 0, fromCr );
         return;
     }
 }
@@ -142,7 +166,7 @@ void e_MercIdle( Critter& merc )
     {
         uint16 hX = master.HexX;
         uint16 hY = master.HexY;
-        GetFreeHex( map_master, 1, hX, hY );
+        Caravan::GetFreeHex( map_master, 1, hX, hY );
         if( valid( map_merc ) )
         {
             if( map_master.Id == map_merc.Id )
@@ -160,7 +184,7 @@ void e_MercIdle( Critter& merc )
                 if( dist > merc.MercMasterDist )
                 {
                     if( !merc.MercWaitForMaster )
-                        AddWalkPlane( merc, 0, hX, hY, GetDir( merc, master ), _AlwaysRun( merc ), 1 );
+                        NpcPlanes::AddWalkPlane( merc, 0, hX, hY, GetDir( merc, master ), _AlwaysRun( merc ), 1 );
                 }
             }
             else
@@ -185,8 +209,8 @@ void e_MercIdle( Critter& merc )
         // хозяин на глобале
         if( merc.MercWaitForMaster )
             return;
-        Critter@[] globalGroup = GetGlobalGroup( master );
-        if( valid( GetGlobalGroup( merc ) ) || !valid( globalGroup ) )
+        Critter@[] globalGroup = GlobalmapGroupExtended::GetGlobalGroup( master );
+        if( valid( GlobalmapGroupExtended::GetGlobalGroup( merc ) ) || !valid( globalGroup ) )
             return;
         Critter@ leader = globalGroup[ 0 ];
         if( valid( leader ) && leader.Charisma > int( globalGroup.length() ) )
@@ -205,12 +229,12 @@ bool Merc2Player( Critter& player, Critter& merc, uint16 type ) // Predefined Me
 
 }
 
-// Добавление мерка игроку. Тип мерка MERC_FOLLOWER_DEFAULT.
+// Добавление мерка игроку. Тип мерка Merc::MercFollowerDefault.
 // player - хозяин мерка
 // merc - мерк
 bool Merc2Player( Critter& player, Critter& merc ) // Default follower
 {
-    return Merc2Player( player, merc, MERC_FOLLOWER_DEFAULT );
+    return Merc2Player( player, merc, Merc::MercFollowerDefault );
 }
 bool Merc2Player( Critter& player, Critter& merc, bool alwaysRun, bool cancelOnAttack, uint loseDist, uint16 mercMasterDist, uint16 type, bool defendMaster, bool assistMaster ) // Custom Mercs
 {
@@ -246,8 +270,8 @@ bool Merc2Player( Critter& player, Critter& merc, bool alwaysRun, bool cancelOnA
     merc.MercDefendMaster = defendMaster;
     merc.MercAssistMaster = assistMaster;
     merc.MercCancelTime = __FullSecond + ( fireTime == 0 ? FIRE_TIME : fireTime );
-    merc.TeamId = TEAM_Default;
-    merc.SetScript( "_MercInit" );
+    merc.TeamId = Teams::Default;
+    merc.SetScript ( _MercInit );
 
     return true;
 }
@@ -272,7 +296,7 @@ void CancelMerc( Critter& merc )
     for( uint i = 0; i < CritterPropertyMercs.length(); i++ )
         merc.SetAsInt( CritterPropertyMercs[ i ], 0 );
 
-    merc.SetScript( "" );
+    merc.SetScript(null );
     __EventCritterIdle.UnsubscribeFromCritter( merc, e_MercIdle );   // Обязательный скрипт. В нем контролируется положение мерка относительно игрока
     __EventCritterSomeCritterDead.UnsubscribeFromCritter( merc, e_MercSmthDead );
     __EventCritterAttacked.UnsubscribeFromCritter( merc, e_MercAttacked );
@@ -318,7 +342,7 @@ uint GetPlayerMercs( Critter& player, Critter@[]& mercs )
     {
         // Игрок на глобале
         // можно и не найти всех мерков - поскольку после выхода на глобал у них уходит какоето время на присоедиение в группу
-        Critter@[] globalGrp = GetGlobalGroup( player );
+        Critter@[] globalGrp = GlobalmapGroupExtended::GetGlobalGroup( player );
         if( valid( globalGrp ) )
         {
             for( uint i = 0; i < globalGrp.length(); i++ )
@@ -486,10 +510,10 @@ bool d_CheckMercParamIsNotValue( Critter& player, Critter@npc, int param, int va
 // Проверка: У лидера группы, в которой находится игрок, достаточно харизмы для найма ОДНОГО нпц
 bool d_CharismaOk( Critter& player, Critter@ npc )
 {
-    Critter@ leader = GetFollowLeader( player );
+    Critter@ leader = GlobalmapGroupExtended::GetFollowLeader( player );
     if( !valid( leader ) )
         @leader = player;
-    int grLen = GetFollowGroup(leader, FIND_ALL, null );
+    int grLen = GlobalmapGroupExtended::GetFollowGroup(leader, FIND_ALL, null );
     return ( grLen < leader.Charisma );
 }
 
@@ -612,8 +636,8 @@ void r_WaitMaster( Critter& player, Critter@ npc )
     if( !valid( map ) || !valid( npc ) )
         return;
     Location@ loc = map.GetLocation();
-    if( loc !is null && loc.AutoGarbage == true && !IsKnownLoc( player, true, loc.Id ) )
-        SetKnownLoc( player, true, loc.Id );
+    if( loc !is null && loc.AutoGarbage == true && !Location::IsKnownLoc( player, true, loc.Id ) )
+        Location::SetKnownLoc( player, true, loc.Id );
     npc.MercWaitForMaster = true;
 }
 

@@ -120,7 +120,7 @@ const int[] DialogData =
 #define MSG_DIALOG      ( 4022 )
 #define MSG_DIALOG_END( 4023 )
 
-void BeginDialog( Critter& cr, int dialog )
+void BeginDialog( Critter cr, int dialog )
 {
     SayPhrase( cr, dialog, StrFirst );
 }
@@ -141,7 +141,7 @@ int GetPhrase( int dialog, int phrase )
 // cr - говорящий криттер
 // dialog - порядковый номер диалога в таблице
 // num - номер строки
-void SayPhrase( Critter& cr, int dialog, int num )
+void SayPhrase( Critter cr, int dialog, int num )
 {
     DL( "SayPhrase called" );
     int r = GetPhrase( dialog, num );
@@ -154,26 +154,26 @@ void SayPhrase( Critter& cr, int dialog, int num )
     NpcPlanes::AddMiscPlane( cr, 0, __FullSecond + wait, NpcDialog::plane_NextPhrase );
 }
 
-bool DialogEnded( Critter& cr )
+bool DialogEnded( Critter cr )
 {
     return D_PhraseType( cr.NpcDialogStringNum ) == T_NoAction;
 }
 
-void plane_NextPhrase( Critter& cr )
+void plane_NextPhrase( Critter cr )
 {
     DL( "plane_NextPhrase called. CrittedId:" + cr.Id + " type" + D_PhraseType( cr.NpcDialogStringNum ) );
     if( D_PhraseType( cr.NpcDialogStringNum ) == T_NoAction )
     {
-        cr.SendMessage( MSG_DIALOG_END, D_Dialog( cr.NpcDialogStringNum ), MESSAGE_TO_ALL_ON_MAP );
+        SendMessage::SendMessage( cr,  MSG_DIALOG_END, D_Dialog( cr.NpcDialogStringNum  ), MESSAGE_TO_ALL_ON_MAP );
         return;
     }
     if( D_PhraseType( cr.NpcDialogStringNum ) == T_SaySelf )
         SayPhrase( cr, D_Dialog( cr.NpcDialogStringNum ), D_NextPhrase( cr.NpcDialogStringNum ) );
     else if( D_PhraseType( cr.NpcDialogStringNum ) == T_SendMsg )
-        cr.SendMessage( MSG_DIALOG, D_Dialog( cr.NpcDialogStringNum ), MESSAGE_TO_WHO_SEES_ME );
+        SendMessage::SendMessage( cr,  MSG_DIALOG, D_Dialog( cr.NpcDialogStringNum  ), MESSAGE_TO_WHO_SEES_ME );
 }
 
-void _NpcMessage( Critter& cr, Critter& fromCr, int message, int value )
+void _NpcMessage( Critter cr, Critter fromCr, int message, int value )
 {
     DL( "message rec" );
     if( message == MSG_DIALOG && fromCr.Id != cr.Id )
@@ -193,9 +193,9 @@ void _NpcMessage( Critter& cr, Critter& fromCr, int message, int value )
 // waitSeconds - паузы между диалогами
 // radius - радиус поиска вокруг триггера для поиска участников диалога
 #define TIME_WAIT       ( REAL_MINUTE( 5 ) )
-void t_NpcDialog( Critter& player, const Item& trigger, bool entered, uint8 dir )
+void t_NpcDialog( Critter player, const Item trigger, bool entered, uint8 dir )
 {
-    auto params = trigger.SceneryParams;
+    auto params = trigger.SceneryParams.clone();
     int  npcRole = params[ 0 ];
     int  firstStr = params[ 1 ];
     int  lastStr = params[ 2 ];
@@ -204,23 +204,23 @@ void t_NpcDialog( Critter& player, const Item& trigger, bool entered, uint8 dir 
 
     if( radius == 0 )
         radius = 20;
-    Critter@[] critters;
-    Map@ map = player.GetMap();
+    Critter[] critters;
+    Map map = player.GetMap();
     if( valid( map ) && entered && player.IsPlayer() )
     {
-        if( map.GetCrittersHex( trigger.HexX, trigger.HexY, radius, FIND_LIFE | FIND_ONLY_NPC, critters ) > 1 )
+        if( Obsolete::GetCrittersHex ( map,  trigger.HexX, trigger.HexY, radius, FIND_LIFE | FIND_ONLY_NPC, critters  ) > 1 )
         {
-            Critter@ npc1;
-            Critter@ npc2;
+            Critter npc1;
+            Critter npc2;
             for( uint i = 0, l = critters.length(); i < l; i++ )
             {
-                Critter@ cr = critters[ i ];
-                if( valid( cr ) && cr.NpcRole == npcRole && cr.IsNoPlanes() )
+                Critter cr = critters[ i ];
+                if( valid( cr ) && cr.NpcRole == uint(npcRole) && NpcPlanes::IsNoPlanes( cr ) )
                 {
                     if( valid( npc1 ) )
-                        @npc2 = cr;
+                        npc2 = cr;
                     else
-                        @npc1 = cr;
+                        npc1 = cr;
                 }
                 if( valid( npc1 ) && valid( npc2 ) )
                     break;
@@ -250,19 +250,19 @@ void t_NpcDialog( Critter& player, const Item& trigger, bool entered, uint8 dir 
     }
 }
 
-void NpcTimerDialog( uint[]& values )
+void NpcTimerDialog( uint[] values )
 {
     if( valid( values ) && values.length() == 5 )
     {
         uint     firstStr = values[ 0 ];
         uint     lastStr = values[ 1 ];
         uint     waitSec = values[ 2 ];
-        Critter@ npc1 = GetCritter( values[ 3 ] );
-        Critter@ npc2;
+        Critter npc1 = GetCritter( values[ 3 ] );
+        Critter npc2;
         if( values[ 4 ] > 0 )
-            @npc2 = GetCritter( values[ 4 ] );
-        if( valid( npc1 ) && npc1.IsLife() && npc1.IsNoPlanes() && npc1.GetTalkedPlayers( null ) == 0 &&
-            valid( npc2 ) && npc2.IsLife() && npc2.IsNoPlanes() && npc2.GetTalkedPlayers( null ) == 0 )
+            npc2 = GetCritter( values[ 4 ] );
+        if( valid( npc1 ) && npc1.IsLife() && NpcPlanes::IsNoPlanes( npc1 ) && npc1.GetTalkedPlayers().length() == 0 &&
+            valid( npc2 ) && npc2.IsLife() && NpcPlanes::IsNoPlanes( npc2 ) && npc2.GetTalkedPlayers().length() == 0 )
         {
             npc1.SayMsg( SAY_NORM_ON_HEAD, TEXTMSG_TEXT, firstStr );
             firstStr++;
@@ -274,7 +274,7 @@ void NpcTimerDialog( uint[]& values )
             DeferredCall( waitSec * 1000, NpcTimerDialog, values );
             return;
         }
-        if( valid( npc1 ) && !valid( npc2 ) && npc1.IsNoPlanes() && npc1.GetTalkedPlayers( null ) == 0 )
+        if( valid( npc1 ) && !valid( npc2 ) && NpcPlanes::IsNoPlanes( npc1 ) && npc1.GetTalkedPlayers().length() == 0 )
         {
             npc1.SayMsg( SAY_NORM_ON_HEAD, TEXTMSG_TEXT, firstStr );
             firstStr++;

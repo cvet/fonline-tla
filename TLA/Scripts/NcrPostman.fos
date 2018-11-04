@@ -1,8 +1,6 @@
 // FOS Server
 // Author: rifleman17
 
-//#include "Tla"
-
 #pragma property Critter Protected     uint8 MailDelivery Group = Quests, Quest = 4248, Max = 3
 #pragma property Critter PrivateServer uint  NcrMailRecieverId
 #pragma property Critter PrivateServer uint  NcrMailTimeout
@@ -34,7 +32,7 @@
 
 // случайное письмо
 // startLoc - код прототипа стартовой локации (чтобы не было доставления письма в ту же локацию, этот прототип исключается из возможных вариантов)
-LetterInfo@ GetRandomLetterInfo( uint startLoc )
+LetterInfo GetRandomLetterInfo( uint startLoc )
 {
     uint locPid = startLoc;
     while( locPid == startLoc )
@@ -43,16 +41,15 @@ LetterInfo@ GetRandomLetterInfo( uint startLoc )
         if( !LOCATION_IS_CITY( locPid ) || locPid == Content::Location::navarro || locPid == Content::Location::vault_15 )
             locPid = startLoc;
     }
-    Location@ loc = GetLocationByPid( locPid, 0 );
+    Location loc = GetLocationByPid( locPid, 0 );
     if( !valid( loc ) || loc.GetMapCount() == 0 )
         return null;
-    Map@[] maps;
-    loc.GetMaps( maps );
-    Map@ map = maps[ uint( Random( 0, uint( maps.length() - 1 ) ) ) ];
-    Critter@[] critters;
-    if( map.GetCritters( 0, FIND_LIFE | FIND_ONLY_NPC, critters ) == 0 )
+    Map[] maps = loc.GetMaps();
+    Map map = maps[ uint( Random( 0, uint( maps.length() - 1 ) ) ) ];
+    Critter[] critters;
+    if( Obsolete::GetCritters( map,  0, FIND_LIFE | FIND_ONLY_NPC, critters  ) == 0 )
         return null;
-    Critter@ cr = critters[ Random( 0, critters.length() - 1 ) ];
+    Critter cr = critters[ Random( 0, critters.length() - 1 ) ];
     if( cr.DialogId == 0 )
         return null;
     switch( cr.BodyType )
@@ -70,7 +67,7 @@ LetterInfo@ GetRandomLetterInfo( uint startLoc )
     default:
         return null;
     }
-    LetterInfo@ li = LetterInfo();
+    LetterInfo li = LetterInfo();
     li.NpcDidRec = uint( cr.DialogId );
     li.LocPidRec = locPid;
     li.MapPidRec = map.ProtoId;
@@ -81,13 +78,13 @@ LetterInfo@ GetRandomLetterInfo( uint startLoc )
 // получает новое описание письма
 // locPid - код локации, в которой начинаетсся квест
 // playerId - id игрока
-LetterInfo@ GetNewLetterInfo( uint locPid, uint playerId )
+LetterInfo GetNewLetterInfo( uint locPid, uint playerId )
 {
     uint numTry;
     numTry = 10;    // максимально число попыток составить описание нового письма
     for( uint i = 0; i < numTry; i++ )
     {
-        LetterInfo@ li = GetRandomLetterInfo( locPid );
+        LetterInfo li = GetRandomLetterInfo( locPid );
         if( valid( li ) )
         {
             li.PlayerID = playerId;
@@ -104,7 +101,7 @@ class LetterInfo
     LetterInfo()
     {}
     // создает экземпляр описания письма на основе итема
-    LetterInfo( Item & item )
+    LetterInfo( Item  item )
     {
         LocPidStart = item.NCRPostmanLocPidStart;
         LocPidRec = item.NCRPostmanLocPidRec;
@@ -134,7 +131,7 @@ class LetterInfo
     uint PlayerID;              // Id игрока, выполняющего квест
 
     // сохраняет описание письма в итеме
-    void SetItemLetterInfo( Item& item )
+    void SetItemLetterInfo( Item item )
     {
         if( item.ProtoId != Content::Item::postman_letter )
         {
@@ -191,27 +188,27 @@ class LetterInfo
 // вспомогательная функция - измеряет расстояние между двумя локациями с указанием прототипов локаций
 float MeasureDist( uint pidLocFrom, uint pidLocTo )
 {
-    Location@ fromLoc = GetLocationByPid( pidLocFrom, 0 );
-    Location@ toLoc = GetLocationByPid( pidLocTo, 0 );
+    Location fromLoc = GetLocationByPid( pidLocFrom, 0 );
+    Location toLoc = GetLocationByPid( pidLocTo, 0 );
     if( !valid( toLoc ) || !valid( fromLoc ) )
         return 0;
     return sqrt( POW2( toLoc.WorldX - fromLoc.WorldX ) + POW2( toLoc.WorldY - fromLoc.WorldY ) );
 }
 
 // использование письма на криттера
-bool _OnMailUseOnCritter( Critter& cr, Item& item, Critter@ onCritter, Item@ onItem, const Item@ onScenery, uint param )
+bool _OnMailUseOnCritter( Critter cr, Item item, Critter onCritter, Item onItem, const Item onScenery, uint param )
 {
     if( !valid( onCritter ) || onCritter.IsDead() )
         return false;
-    LetterInfo@li = LetterInfo( item );
-    Map@ map = onCritter.GetMap();
+    LetterInfo li = LetterInfo( item );
+    Map map = onCritter.GetMap();
     if( !valid( map ) )
         return false;
-    Location@ loc = map.GetLocation();
+    Location loc = map.GetLocation();
     if( !valid( loc ) )
         return false;
     if( !valid( li ) || uint( onCritter.DialogId ) != li.NpcDidRec ||
-        !cr.IsPlayer() || onCritter.CheckEnemyInStack( cr.Id ) || li.LocPidRec != loc.ProtoId )
+        !cr.IsPlayer() || EnemyStack::CheckEnemyInStack( onCritter, cr.Id  ) || li.LocPidRec != loc.ProtoId )
         return false;
     // if (cr.Id != li.PlayerID){return false;} сдать письмо может любой
     // нужный нам нпц - тот самый, что прописан в итеме. Нужно открывать диалог получателя письма.
@@ -222,13 +219,13 @@ bool _OnMailUseOnCritter( Critter& cr, Item& item, Critter@ onCritter, Item@ onI
 }
 
 // выброшенное письмо. Отменено, выброшенные письма тоже можно сдать
-void _OnItemDrop( Item& item, Critter& cr )
+void _OnItemDrop( Item item, Critter cr )
 {
     // если игрок выбрасывает письмо, переключаем квестовую переменную и стираем информацию о почтальоне
     // можно было бы и не стирать, но в этом случае игрок может накопить тонну конвертов и потом их сдавать оптом - мгновенная прокачка до космических высот
     if( cr.MailDelivery == 1 )
         cr.MailDelivery = 2;
-    LetterInfo@ li = LetterInfo( item );
+    LetterInfo li = LetterInfo( item );
     if( li.PlayerID == cr.Id )
     {
         li.PlayerID = 0;
@@ -237,16 +234,16 @@ void _OnItemDrop( Item& item, Critter& cr )
 }
 
 // инициализация письма
-void _LetterInit( Item& letter, bool firstTime )
+void _LetterInit( Item letter, bool firstTime )
 {
-    LetterInfo@ li = LetterInfo( letter );
+    LetterInfo li = LetterInfo( letter );
     // __EventCritterDropItem.SubscribeToItem( letter, _OnItemDrop ); отменено
     __EventCritterUseItem.SubscribeToItem( letter, _OnMailUseOnCritter );
 }
 
 // **************************************Диалоги*******************************************//
 // диалог с почтальоном, фраза в которой он называет адрес и получателя
-void dlg_GenLetter2Postman( Critter& player, Critter@ postman, string@ lexems )
+void dlg_GenLetter2Postman( Critter player, Critter postman, string lexems )
 {
     if( IS_DIALOG_END( lexems ) or IS_DIALOG_SAY_MODE( lexems ) )
         return;
@@ -254,55 +251,55 @@ void dlg_GenLetter2Postman( Critter& player, Critter@ postman, string@ lexems )
     postman.IsNoSteal = true;
     postman.IsNoBarter = true;
     postman.IsNoDrop = true;
-    Item@       item;
-    LetterInfo@ li;
+    Item       item;
+    LetterInfo li;
     if( postman.CountItem( Content::Item::postman_letter ) == 0 )
     {
-        @item = postman.AddItem( Content::Item::postman_letter, 1 );
-        @li = GetNewLetterInfo( postman.GetMap().GetLocation().ProtoId, player.Id );
+        item = postman.AddItem( Content::Item::postman_letter, 1 );
+        li = GetNewLetterInfo( postman.GetMap().GetLocation().ProtoId, player.Id );
         li.SetItemLetterInfo( item );
         item.SetScript ( _LetterInit );
     }
     else
     {
-        @item = postman.GetItem( Content::Item::postman_letter, -1 );
-        @li = LetterInfo( item );
+        item = Obsolete::GetSlotItem( postman, Content::Item::postman_letter, -1 );
+        li = LetterInfo( item );
     }
     lexems = li.GetLetterLexems();
 }
 
 // функция для использования в диалоге
 // передача письма, которое уже есть в инвентаре почтальона игроку
-void r_GiveLetter( Critter& player, Critter@ postman )
+void r_GiveLetter( Critter player, Critter postman )
 {
-    Item@ letter = postman.GetItem( Content::Item::postman_letter, -1 );
+    Item letter = Obsolete::GetSlotItem( postman, Content::Item::postman_letter, -1 );
     if( !valid( letter ) )
         return;
     MoveItem( letter, 1, player );
 }
 
 // награждение игрока
-void r_GrantPlayer( Critter& player, Critter@ npc_null, int needMoney )
+void r_GrantPlayer( Critter player, Critter npc_null, int needMoney )
 {
     // npc_null - null, поскольку диалог открыт скриптом без выбора нпц
     if( player.NcrMailRecieverId == 0 )
         return;
-    Critter@ npc = GetCritter( player.NcrMailRecieverId );
+    Critter npc = GetCritter( player.NcrMailRecieverId );
     player.NcrMailRecieverId = 0;
     if( !valid( npc ) || !npc.IsLife() || player.CountItem( Content::Item::postman_letter ) == 0 )
         return;
 
     // писем может быть несколько, нам нужно именно наше
-    Item@[] items;
-    player.GetItems( -1, items );
+    Item[] items;
+    Obsolete::GetItems( player, -1, items );
     for( uint i = 0; i  <  items.length(); i++ )
     {
-        Item@ letter = items[ i ];
+        Item letter = items[ i ];
         if( !valid( letter ) )
             continue;
         if( letter.ProtoId == Content::Item::postman_letter )
         {
-            LetterInfo@li = LetterInfo( letter );
+            LetterInfo li = LetterInfo( letter );
             if( !valid( li ) )
                 continue;
             if( li.NpcDidRec == uint( npc.DialogId ) )
@@ -326,23 +323,23 @@ void r_GrantPlayer( Critter& player, Critter@ npc_null, int needMoney )
     }
 }
 
-////import bool d_RatchTimeOutCheck0( Critter& player, Critter@ npc, int v0 ) from "NcrRatch";
-////import void r_RatchTimeOutSet0( Critter& player, Critter@ npc, int v0, int v1 ) from "NcrRatch";
+////import bool d_RatchTimeOutCheck0( Critter player, Critter npc, int v0 ) from "NcrRatch";
+////import void r_RatchTimeOutSet0( Critter player, Critter npc, int v0, int v1 ) from "NcrRatch";
 
 // проверка: таймаут пустой или свободен
-bool d_QTimeOutOK( Critter& player, Critter@ postman )
+bool d_QTimeOutOK( Critter player, Critter postman )
 {
     return NcrRatch::d_RatchTimeOutCheck( player, postman, CritterProperty::NcrMailTimeout );
 }
 
 // таймаут занят
-bool d_NotQTimeOutOK( Critter& player, Critter@ postman )
+bool d_NotQTimeOutOK( Critter player, Critter postman )
 {
     return !d_QTimeOutOK( player, postman );
 }
 
 // установка таймаута
-void r_SetQTimeOut( Critter& player, Critter@ postman )
+void r_SetQTimeOut( Critter player, Critter postman )
 {
     NcrRatch::r_RatchTimeOutSet( player, postman, CritterProperty::NcrMailTimeout, int( TIME_Q( player.SkillSpeech ) ) );
 }

@@ -7,12 +7,6 @@
    Периодически перемещаются в случайном направлении на 1 гекс с использованием Critter::MoveRandom
  */
 
-//#include "Tla"
-
-////import bool GetFreeHex0( Map& map, uint radius, uint16& hx, uint16& hy ) from "Caravan";
-////import bool IsSandBag0( uint pid ) from "Sandbag";
-////import bool _SandBagSkill0( Critter& cr, CritterProperty skill, Critter@ onCritter, Item@ item, const Item@ onScenery ) from "Sandbag";
-
 #define DL
 #define ENTIRE_EXIT_SF              ( 160 )
 
@@ -48,28 +42,28 @@
 #define _AttackPriority             # (target) ( target.IsPlayer() ? ATTACK_PLAYER_PRIORITY : ( target.TeamId == Teams::BoSTrooper ? ATTACK_BOS_DEF_PRIORITY : ATTACK_NPC_PRIORITY ) )
 
 
-void _MirelurkInit( Critter& cr, bool firstTime )
+void _MirelurkInit( Critter cr, bool firstTime )
 {
     cr.MirelurkCombatCurStage = 1;
     cr.MirelurkCombatTimeNextStage = __FullSecond + TIME_TO_NEXT_STAGE;
     cr.IsNoHome = true;
     __EventCritterIdle.SubscribeToCritter( cr, _MirelurkIdle );
-    __EventNpcPlaneEndEx.SubscribeToCritter( cr, _MirelurkPlaneEnd );
+    __EventNpcPlaneEnd.SubscribeToCritter( cr, _MirelurkPlaneEnd );
     //__EventCritterDead.SubscribeToCritter( cr, _Dead );
 }
 
 // Основной скрипт болотника
 // В нем переключаются состояния, выбираются цели для атаки и разрушения баррикад
 // В нем же принимаются решения о том, что пора линять с карты
-void _MirelurkIdle( Critter& cr )
+void _MirelurkIdle( Critter cr )
 {
     // Обработчики срабатывают только, если на карте есть игроки
     if( !IsPlayerOnMap( cr ) )
         return;
     // Если есть какие-то планы, тоже не обрабатывается
-    if( !cr.IsNoPlanes() )
+    if( !NpcPlanes::IsNoPlanes( cr ) )
         return;
-    Map@ map = cr.GetMap();
+    Map map = cr.GetMap();
     if( !valid( map ) )
         return;
     // Если нужно, делаем изменение стадии модели поведения
@@ -77,11 +71,11 @@ void _MirelurkIdle( Critter& cr )
     // Ищем цель, доступную для атаки
     TryFoundAccessibleTarget( cr, map );
     // Если так и нет никаких планов
-    if( cr.IsNoPlanes() )
+    if( NpcPlanes::IsNoPlanes( cr ) )
     {
         // Чем позже стадия, тем ниже шанс на случайное перемещение
         if( Random( 3 - cr.MirelurkCombatCurStage, 4 ) == 4 )
-            cr.MoveRandom();
+            MoveRandom::CritterMoveRandom( cr );
         // Во время третьей стадии болотники начинают уходить с карты
         TryMoveOut( map, cr );
     }
@@ -89,8 +83,10 @@ void _MirelurkIdle( Critter& cr )
 
 // Завершение плана перемещения к мешкам, чтобы разрушить
 // Или перемещения к сетке выхода
-bool _MirelurkPlaneEnd( Critter& cr, NpcPlane& plane, int reason, Critter@ someCr, Item@ someItem )
+bool _MirelurkPlaneEnd( Critter cr, int planeId, int reason, Critter someCr, Item someItem )
 {
+	NpcPlanes::NpcPlane plane = NpcPlanes::GetCritterPlane(cr, planeId);
+
     if( reason == REASON_GAG_ITEM )  // Болотники должны ломать баррикады по-другому, не так, как обычные криттеры
     {
         return false;
@@ -120,7 +116,7 @@ bool _MirelurkPlaneEnd( Critter& cr, NpcPlane& plane, int reason, Critter@ someC
 }
 
 // Изменение стадии поведения, если подошло время
-void ChangeStageIfNeaded( Critter& cr )
+void ChangeStageIfNeaded( Critter cr )
 {
     if( cr.MirelurkCombatCurStage < MAX_STAGE_NUM )
     {
@@ -135,20 +131,20 @@ void ChangeStageIfNeaded( Critter& cr )
 }
 
 // Попытка найти цель для атаки, до которой можно дойти
-void TryFoundAccessibleTarget( Critter& cr, Map& map )
+void TryFoundAccessibleTarget( Critter cr, Map map )
 {
     DL( "searching target" );
     uint   radius = _SearchRadius( cr.MirelurkCombatCurStage );
-    Critter@[] crits;
+    Critter[] crits;
     uint16 crX = cr.HexX;
     uint16 crY = cr.HexY;
     // Первоочередная цель - игроки
-    map.GetCrittersHex( crX, crY, radius, FIND_LIFE_AND_KO | FIND_ONLY_PLAYERS, crits );
-    map.GetCrittersHex( crX, crY, radius, FIND_LIFE_AND_KO | FIND_ONLY_NPC, crits );
-    Critter@ target;
+    Obsolete::GetCrittersHex ( map,  crX, crY, radius, FIND_LIFE_AND_KO | FIND_ONLY_PLAYERS, crits  );
+    Obsolete::GetCrittersHex ( map,  crX, crY, radius, FIND_LIFE_AND_KO | FIND_ONLY_NPC, crits  );
+    Critter target;
     for( uint i = 0, l = crits.length(); i < l; i++ )
     {
-        @ target = crits[ i ];
+         target = crits[ i ];
         if( !valid( target ) )
             continue;
         if( cr.Id == target.Id )
@@ -167,7 +163,7 @@ void TryFoundAccessibleTarget( Critter& cr, Map& map )
         }
     }
     // Если стадия 2я и дальше, болотники будут ломать мешки (если нет доступных целей для атаки). Иначе выход
-    if( !cr.IsNoPlanes() || cr.MirelurkCombatCurStage < 2 )
+    if( !NpcPlanes::IsNoPlanes( cr ) || cr.MirelurkCombatCurStage < 2 )
         return;
     // Если таймаут на поломку баррикады - выход
     if( __FullSecond < cr.MirelurkCombatLastBrokenBag )
@@ -176,7 +172,7 @@ void TryFoundAccessibleTarget( Critter& cr, Map& map )
     // Проверяем, не было ли уже попыток что-то сломать, если было, код предмета сохранен в cr.MirelurkCombatDestroyingItem
     if( cr.MirelurkCombatDestroyingItem > 0 )
     {
-        Item@sb = map.GetItem( cr.MirelurkCombatDestroyingItem );
+        Item sb = map.GetItem( cr.MirelurkCombatDestroyingItem );
         if( valid( sb ) )
         {
             // Действительно, мешок найден.
@@ -190,19 +186,19 @@ void TryFoundAccessibleTarget( Critter& cr, Map& map )
         }
     }
     // Собираем элементы баррикады в радиусе атаки
-    Item@[] gagItems;
-    map.GetItems( crX, crY, radius, Content::Item::sandbag_1, gagItems );
-    map.GetItems( crX, crY, radius, Content::Item::sandbag_2, gagItems );
-    map.GetItems( crX, crY, radius, Content::Item::sandbag_3, gagItems );
-    map.GetItems( crX, crY, radius, Content::Item::sandbag_4, gagItems );
-    map.GetItems( crX, crY, radius, Content::Item::sandbag_5, gagItems );
+    Item[] gagItems;
+    Obsolete::GetItems( map, crX, crY, radius, Content::Item::sandbag_1, gagItems );
+    Obsolete::GetItems( map, crX, crY, radius, Content::Item::sandbag_2, gagItems );
+    Obsolete::GetItems( map, crX, crY, radius, Content::Item::sandbag_3, gagItems );
+    Obsolete::GetItems( map, crX, crY, radius, Content::Item::sandbag_4, gagItems );
+    Obsolete::GetItems( map, crX, crY, radius, Content::Item::sandbag_5, gagItems );
     uint16 counter = 0;     // максимум 300 попыток
     DL( "trying found sandbags" );
-    Item@  item;
+    Item  item;
     for( uint i = 0, l = crits.length(); i < l && counter < 300; i++ )
     {
 
-        @ target = crits[ i ];
+         target = crits[ i ];
         if( target.IsDead() )
             continue;
         if( target.Id == cr.Id )
@@ -215,7 +211,7 @@ void TryFoundAccessibleTarget( Critter& cr, Map& map )
                 break;
             }
             counter++;
-            @ item = gagItems[ j ];
+             item = gagItems[ j ];
             if( !valid( target ) || !valid( item ) )
                 continue;
             // НПЦ может дойти до мешка?
@@ -232,7 +228,7 @@ void TryFoundAccessibleTarget( Critter& cr, Map& map )
 }
 
 // Добавление плана "подойти, чтобы сломать баррикаду в таком-то месте"
-bool AddDestroyBarricadePlane( Critter& cr, Map& map, Item& barricade )
+bool AddDestroyBarricadePlane( Critter cr, Map map, Item barricade )
 {
     uint16 bX = barricade.HexX;
     uint16 bY = barricade.HexY;
@@ -258,7 +254,7 @@ bool AddDestroyBarricadePlane( Critter& cr, Map& map, Item& barricade )
 }
 
 // Попытка добавить план на выход с локации
-void TryMoveOut( Map& map, Critter& cr )
+void TryMoveOut( Map map, Critter cr )
 {
     if( cr.MirelurkCombatCurStage < 3 )
         return;
@@ -290,20 +286,20 @@ void TryMoveOut( Map& map, Critter& cr )
 
 /* Вспомогательные методы */
 // Вспомогательная проверка. Если на карте нет игроков, болотники ничего не делают
-bool IsPlayerOnMap( Critter& cr )
+bool IsPlayerOnMap( Critter cr )
 {
-    Map@ map = cr.GetMap();
+    Map map = cr.GetMap();
     if( !valid( map ) )
         return false;
 
-    return ( map.GetCritters( 0, FIND_ALL | FIND_ONLY_PLAYERS, null ) > 0 );
+    return ( Obsolete::GetCritters( map,  0, FIND_ALL | FIND_ONLY_PLAYERS, null  ) > 0 );
 }
 
 // Разрушение баррикады из мешков по коду предмета
-void DestroyBarricade( Critter& cr, uint itemId )
+void DestroyBarricade( Critter cr, uint itemId )
 {
 // Log("destroy!");
-    Item@ sandbag = GetItem( itemId );
+    Item sandbag = GetItem( itemId );
     if( valid( sandbag ) )
     {
         if( Sandbag::IsSandBag( sandbag.ProtoId ) )
@@ -313,7 +309,7 @@ void DestroyBarricade( Critter& cr, uint itemId )
             cr.SetDir( GetDirection( cr.HexX, cr.HexY, sandbag.HexX, sandbag.HexY ) );
             _CritAnimateUse( cr );
             Sandbag::_SandBagSkill( cr, CritterProperty::SkillRepair,null,sandbag,null );
-			//bool Sandbag::_SandBagSkill( Critter& cr, CritterProperty skill, Critter@ onCritter, Item@ item, const Item@ onScenery )
+			//bool Sandbag::_SandBagSkill( Critter cr, CritterProperty skill, Critter onCritter, Item item, const Item onScenery )
         }
     }
 }

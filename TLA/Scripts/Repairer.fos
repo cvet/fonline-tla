@@ -14,16 +14,12 @@
 // VAR_CAN_REPAIR_SPECIAL_ARMOUR - признак, может ремонтировать редкую броню
 // Для настройки возможностей ремонта НПЦ используйте диалог и установку переменных, либо один из заготовленных скриптов (см. конец файла).
 
-//#include "Tla"
-
 #pragma property Critter PrivateServer uint8 CanRepairWeapons        Max = 1
 #pragma property Critter PrivateServer uint8 CanRepairWeaponsSpecial Max = 1
 #pragma property Critter PrivateServer uint8 CanRepairArmor          Max = 1
 #pragma property Critter PrivateServer uint8 CanRepairArmorSpecial   Max = 1
 #pragma property Critter PrivateServer dict< uint, uint > RepairCompleteTime
 #pragma property Critter PrivateServer dict< uint, hash > RepairItemPid
-
-////import int GetDeteriorationProcent0( Item& item ) from "Repair";
 
 #define GAME_DAY            # (day) ( day * 24 * 60 * 60 )              // Игровых дней в секундах
 #define GAME_HOUR           # (hour) ( hour * 60 * 60 )                 // Игровых часов в секундах
@@ -46,7 +42,7 @@ const hash[] SpecialWeapons =
     Content::Item::end_boss_plasma_gun, Content::Item::holy_hand_grenade, Content::Item::solar_scorcher
 };
 
-bool CanRepair( Item@ item, Critter@ npc )
+bool CanRepair( Item item, Critter npc )
 {
     if( !valid( item ) || !valid( npc ) )
         return false;
@@ -55,11 +51,11 @@ bool CanRepair( Item@ item, Critter@ npc )
     switch( type )
     {
     case ItemType::Armor:
-        if( npc.GetAsInt( UtilsForArray::Present( pid, SpecialWeapons ) ? CritterProperty::CanRepairArmorSpecial : CritterProperty::CanRepairArmor ) == 1 )
+        if( npc.GetAsInt( SpecialWeapons.exists( pid ) ? CritterProperty::CanRepairArmorSpecial : CritterProperty::CanRepairArmor ) == 1 )
             return true;
         break;
     case ItemType::Weapon:
-        if( npc.GetAsInt( UtilsForArray::Present( pid, SpecialWeapons ) ? CritterProperty::CanRepairWeaponsSpecial : CritterProperty::CanRepairWeapons ) == 1 )
+        if( npc.GetAsInt( SpecialWeapons.exists( pid )  ? CritterProperty::CanRepairWeaponsSpecial : CritterProperty::CanRepairWeapons ) == 1 )
             return true;
         break;
     default:
@@ -68,13 +64,13 @@ bool CanRepair( Item@ item, Critter@ npc )
     return false;
 }
 
-void TakeItemToRepair( Critter@ player, Critter@ npc, Item@ item )
+void TakeItemToRepair( Critter player, Critter npc, Item item )
 {
     if( !valid( player ) || !valid( npc ) || !valid( item ) )
         return;
 
-    auto repairCompleteTime = player.RepairCompleteTime;
-    auto repairItemPid = player.RepairItemPid;
+    auto repairCompleteTime = player.RepairCompleteTime.clone();
+    auto repairItemPid = player.RepairItemPid.clone();
     repairCompleteTime[ npc.Id ] = __FullSecond + _RepairTime( item, npc );
     player.RepairCompleteTime = repairCompleteTime;
     repairItemPid[ npc.Id ] = item.ProtoId;
@@ -83,7 +79,7 @@ void TakeItemToRepair( Critter@ player, Critter@ npc, Item@ item )
     DeleteItem( item );
 }
 
-bool SomeItemWasRepaired( Critter@ player, Critter@ npc )
+bool SomeItemWasRepaired( Critter player, Critter npc )
 {
     if( !valid( player ) || !valid( npc ) )
         return false;
@@ -92,28 +88,28 @@ bool SomeItemWasRepaired( Critter@ player, Critter@ npc )
     return ( __FullSecond >= player.RepairCompleteTime.get( npc.Id, 0 ) );
 }
 
-bool HasSomeItemToRepair( Critter@ player, Critter@ npc )
+bool HasSomeItemToRepair( Critter player, Critter npc )
 {
     if( !valid( player ) || !valid( npc ) )
         return false;
     return player.RepairItemPid.get( npc.Id, 0 ) > 0;
 }
 
-void GetItemFromRepair( Critter@ player, Critter@ npc )
+void GetItemFromRepair( Critter player, Critter npc )
 {
     if( !valid( player ) || !valid( npc ) )
         return;
-    auto repairItemPid = player.RepairItemPid;
+    auto repairItemPid = player.RepairItemPid.clone();
     if( repairItemPid.get( npc.Id, 0 ) == 0 )
         return;
-    Item@ item = player.AddItem( repairItemPid[ npc.Id ], 1 );
+    Item item = player.AddItem( repairItemPid[ npc.Id ], 1 );
     if( valid( item ) && item.Type == ItemType::Weapon )
         item.AmmoCount = 0;
     repairItemPid[ npc.Id ] = 0;
     player.RepairItemPid = repairItemPid;
 }
 
-uint GetRepairCost( Critter@ player, Critter@ npc, Item@ item )
+uint GetRepairCost( Critter player, Critter npc, Item item )
 {
     if( !valid( player ) || !valid( npc ) || !valid( item ) )
         return 0;
@@ -124,73 +120,73 @@ uint GetRepairCost( Critter@ player, Critter@ npc, Item@ item )
 // Диалоги. Условия, результаты, генерация лексем
 
 // Условия
-bool d_IsItemInHand( Critter& player, Critter@ npc )
+bool d_IsItemInHand( Critter player, Critter npc )
 {
     return ( valid( _CritGetItemHand( player ) ) );
 }
 
-bool d_CanRepair( Critter& player, Critter@ npc )
+bool d_CanRepair( Critter player, Critter npc )
 {
-    Item@ item = _CritGetItemHand( player );
+    Item item = _CritGetItemHand( player );
     if( !valid( item ) )
         return false;
     return CanRepair( item, npc );
 }
 
-bool d_CanNotRepair( Critter& player, Critter@ npc )
+bool d_CanNotRepair( Critter player, Critter npc )
 {
     return ( !d_CanRepair( player, npc ) );
 }
 
-bool d_HasEnoughMoney( Critter& player, Critter@ npc )
+bool d_HasEnoughMoney( Critter player, Critter npc )
 {
-    Item@ item = _CritGetItemHand( player );
+    Item item = _CritGetItemHand( player );
     if( !valid( item ) || !CanRepair( item, npc ) )
         return false;
     return ( GetRepairCost( player, npc, item ) <= _CritCountItem( player, Content::Item::bottle_caps ) );
 }
 
-bool d_HasNotEnoughMoney( Critter& player, Critter@ npc )
+bool d_HasNotEnoughMoney( Critter player, Critter npc )
 {
     return ( !d_HasEnoughMoney( player, npc ) );
 }
 
-bool d_ItemWasRepaired( Critter& player, Critter@ npc )
+bool d_ItemWasRepaired( Critter player, Critter npc )
 {
     return SomeItemWasRepaired( player, npc );
 }
 
-bool d_NoItemWasRepaired( Critter& player, Critter@ npc )
+bool d_NoItemWasRepaired( Critter player, Critter npc )
 {
     return ( !d_ItemWasRepaired( player, npc ) );
 }
 
-bool d_SomeItemIsRepairing( Critter& player, Critter@ npc )
+bool d_SomeItemIsRepairing( Critter player, Critter npc )
 {
     return HasSomeItemToRepair( player, npc );
 }
 
-bool d_NoItemIsRepairing( Critter& player, Critter@ npc )
+bool d_NoItemIsRepairing( Critter player, Critter npc )
 {
     return ( !d_SomeItemIsRepairing( player, npc ) );
 }
 
 // Диалог
-// Имя предмета и цена, который игрок держит в руке будет отображено с помощью лексемы @lex item_name@ @lex price@
+// Имя предмета и цена, который игрок держит в руке будет отображено с помощью лексемы lex item_name lex price
 // Функция для сдачи предмета
-void dlg_CallItemBefore( Critter& player, Critter@ npc, string@ lexems )
+void dlg_CallItemBefore( Critter player, Critter npc, string lexems )
 {
     if( !IS_DIALOG_GENERATED( lexems ) )
         return;
     lexems = "$item_name _";
-    Item@ item = _CritGetItemHand( player );
+    Item item = _CritGetItemHand( player );
     if( !valid( item ) )
         return;
     lexems = "$item_name@msg ITEM " + STR_ITEM_NAME( item.ProtoId ) + "@$price" + GetRepairCost( player, npc, item );
 }
 
 // Функция для проверки, отремонтирован ли предмет
-void dlg_CallItemAfter( Critter& player, Critter@ npc, string@ lexems )
+void dlg_CallItemAfter( Critter player, Critter npc, string lexems )
 {
     if( !IS_DIALOG_GENERATED( lexems ) )
         return;
@@ -204,7 +200,7 @@ void dlg_CallItemAfter( Critter& player, Critter@ npc, string@ lexems )
 
 // Время и дата, когда будет отремонтирован предмет для случая, когда предмет уже взят на ремонт
 // Время указывается в формате "@lex time@"
-void dlg_GetRepairTime( Critter& player, Critter@ npc, string@ lexems )
+void dlg_GetRepairTime( Critter player, Critter npc, string lexems )
 {
     if( !IS_DIALOG_GENERATED( lexems ) )
         return;
@@ -225,9 +221,9 @@ void dlg_GetRepairTime( Critter& player, Critter@ npc, string@ lexems )
 // Результаты
 // free - признак, что ремонт бесплатный
 // 0 - платный, остальное бесплатный
-void r_TakeForRepair( Critter& player, Critter@ npc, int free )
+void r_TakeForRepair( Critter player, Critter npc, int free )
 {
-    Item@ item = _CritGetItemHand( player );
+    Item item = _CritGetItemHand( player );
     if( !valid( item ) )
         return;
     if( free == 0 )
@@ -239,7 +235,7 @@ void r_TakeForRepair( Critter& player, Critter@ npc, int free )
 }
 
 // Получение отремонтированного предмета
-void r_TakeItemFromRepair( Critter& player, Critter@ npc )
+void r_TakeItemFromRepair( Critter player, Critter npc )
 {
     GetItemFromRepair( player, npc );
 }

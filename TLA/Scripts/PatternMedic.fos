@@ -63,28 +63,28 @@ const int[] medicStats_ =
 
 #define NEED_HEAL                          # (cr) ( ( 100 * cr.CurrentHp < cr.MaxLife * 50 ) ) // здоровье ниже 50%
 
-void _CritterInit( Critter& cr, bool firstTime )
+void _CritterInit( Critter cr, bool firstTime )
 {
     pattern.SetEvents( cr );
 }
 
 class MedicPattern : PatternCommon::CommonPattern
 {
-    void _Dead( Critter& cr, Critter@ killer )
+    void _Dead( Critter cr, Critter killer )
     {
         PatternCommon::CommonPattern::_Dead( cr, killer );
         // У медика полно стимпаков, игрокам не нужна подобная халява
         if( cr.CountItem( Content::Item::super_stimpak ) > 0 )
         {
-            _SubItem( cr.GetItem( Content::Item::super_stimpak, -1 ), cr.CountItem( Content::Item::super_stimpak ) );
+            _SubItem( Obsolete::GetSlotItem( cr, Content::Item::super_stimpak, -1 ), cr.CountItem( Content::Item::super_stimpak ) );
         }
         if( cr.CountItem( Content::Item::stimpak ) > 0 )
         {
-            _SubItem( cr.GetItem( Content::Item::stimpak, -1 ), cr.CountItem( Content::Item::stimpak ) );
+            _SubItem( Obsolete::GetSlotItem( cr, Content::Item::stimpak, -1 ), cr.CountItem( Content::Item::stimpak ) );
         }
     }
 
-    void _Message( Critter& medic, Critter& fromCr, int message, int value )
+    void _Message( Critter medic, Critter fromCr, int message, int value )
     {
         // DL("message recieved/ value="+value);
 
@@ -107,13 +107,15 @@ class MedicPattern : PatternCommon::CommonPattern
         }
     }
 
-    bool _PlaneEnd( Critter& medic, NpcPlane& plane, int reason, Critter@ someCr, Item@ someItem )
-    {
+    bool _PlaneEnd( Critter medic, int planeId, int reason, Critter someCr, Item someItem )
+{
+	NpcPlanes::NpcPlane plane = NpcPlanes::GetCritterPlane(medic, planeId);
+
         DL( "medic plane end" );
 
         if( plane.Identifier == ID_PLANE_HEAL_TEAMMATE && reason == REASON_SUCCESS )
         {
-            Critter@ teammate = GetCritter( plane.IdentifierExt );
+            Critter teammate = GetCritter( plane.IdentifierExt );
             if( valid( teammate ) )
             {
                 uint dist = GetCrittersDistantion( medic, teammate );
@@ -133,38 +135,38 @@ class MedicPattern : PatternCommon::CommonPattern
         return true;         // основной обработчик
     }
 
-    bool _Attacked( Critter& cr, Critter& attacker )
+    bool _Attacked( Critter cr, Critter attacker )
     {
         _TryUseStim( cr );
-        cr.SendMessage( PatternCommon::MsgHealme, 0, MESSAGE_TO_ALL_ON_MAP );
+        SendMessage::SendMessage( cr,  PatternCommon::MsgHealme, 0, MESSAGE_TO_ALL_ON_MAP  );
         return false;
     }
 
-    void SetEvents( Critter& cr )
+    void SetEvents( Critter cr )
     {
         cr.IsNoHome = true;
         __EventCritterMessage.SubscribeToCritter( cr, _MedicMessage );
-        __EventNpcPlaneEndEx.SubscribeToCritter( cr, _MedicPlaneEnd );
+        __EventNpcPlaneEnd.SubscribeToCritter( cr, _MedicPlaneEnd );
         __EventCritterAttacked.SubscribeToCritter( cr, _MedicAttacked );
-        __EventNpcPlaneBeginEx.SubscribeToCritter( cr, _MedicPlaneBegin );
+        __EventNpcPlaneBegin.SubscribeToCritter( cr, _MedicPlaneBegin );
         __EventCritterDead.SubscribeToCritter( cr, _MedicDead );
     }
 
     // лечение напарников
-    bool CheckTeamMateNeedHeal( Critter& medic, Critter& teammate )
+    bool CheckTeamMateNeedHeal( Critter medic, Critter teammate )
     {
         if( teammate.IsDead() )
             return false;
 
         // DL("Планов с таким ид, и доп ид.: "+ medic.GetPlanes(ID_PLANE_HEAL_TEAMMATE, teammate.Id, null));
 
-        if( medic.GetPlanes( ID_PLANE_HEAL_TEAMMATE, teammate.Id, null ) > 0 )
+        if( NpcPlanes::GetPlanes( medic, ID_PLANE_HEAL_TEAMMATE, teammate.Id, null ) > 0 )
             return false;
 
         return NEED_HEAL( teammate );
     }
 
-    void MoveForHealTeamMate( Critter& medic, Critter& teammate )
+    void MoveForHealTeamMate( Critter medic, Critter teammate )
     {
         // DL("begin move");
         if( teammate.IsDead() )
@@ -173,10 +175,10 @@ class MedicPattern : PatternCommon::CommonPattern
             return;
         // DL("coming!");
         // В IdentifierEx сохраняется Id напарника, которого нужно вылечить
-        NpcPlanes::AddWalkPlane( medic, AI_PLANE_HEAL_TEAMMATE_PRIORITY, ID_PLANE_HEAL_TEAMMATE, teammate.Id, teammate.HexX, teammate.HexY, Merc::GetDir( medic, teammate ), ( medic.IsCurPlane( AI_PLANE_ATTACK ) ? false : true ), 1 );
+        NpcPlanes::AddWalkPlane( medic, AI_PLANE_HEAL_TEAMMATE_PRIORITY, ID_PLANE_HEAL_TEAMMATE, teammate.Id, teammate.HexX, teammate.HexY, Merc::GetDir( medic, teammate ), ( NpcPlanes::IsCurPlane( medic, AI_PLANE_ATTACK ) ? false : true ), 1 );
     }
 
-    void HealTeammate( Critter& medic, Critter& teammate )
+    void HealTeammate( Critter medic, Critter teammate )
     {
         uint stims = medic.CountItem( Content::Item::super_stimpak );
 
@@ -198,11 +200,11 @@ class MedicPattern : PatternCommon::CommonPattern
         {
             if( stims > 0 )
             {
-                Item@ stim = medic.GetItem( Content::Item::super_stimpak, -1 );
+                Item stim = Obsolete::GetSlotItem( medic, Content::Item::super_stimpak, -1 );
                 if( valid( stim ) )
                 {
                     DL( "Принудительно лечим стимпаками" );
-                    // medic.EventUseItem(stim, teammate, null, null);GetDir(Critter & cr0, Critter & cr1)
+                    // medic.EventUseItem(stim, teammate, null, null);GetDir(Critter  cr0, Critter  cr1)
                     medic.SetDir( Merc::GetDir( medic, teammate ) );
                     _CritAnimateUse( medic );
                     Drugs::UseDrugOn( medic, teammate, stim );
@@ -219,32 +221,36 @@ class MedicPattern : PatternCommon::CommonPattern
 MedicPattern pattern; // Для наследников нужно определить _NoBaseInstance
 #endif
 
-void _MedicDead( Critter& cr, Critter@ killer )
+void _MedicDead( Critter cr, Critter killer )
 {
     pattern._Dead( cr, killer );
 }
 
-bool _MedicPlaneBegin( Critter& cr, NpcPlane& plane, int reason, Critter@ someCr, Item@ someItem )
+bool _MedicPlaneBegin( Critter cr, int planeId, int reason, Critter someCr, Item someItem )
 {
+	NpcPlanes::NpcPlane plane = NpcPlanes::GetCritterPlane(cr, planeId);
+
     return pattern._PlaneBegin( cr, plane, reason, someCr, someItem );
 }
 
-void _MedicMessage( Critter& medic, Critter& fromCr, int message, int value )
+void _MedicMessage( Critter medic, Critter fromCr, int message, int value )
 {
     pattern._Message( medic, fromCr, message, value );
 }
 
-bool _MedicAttacked( Critter& cr, Critter& attacker )
+bool _MedicAttacked( Critter cr, Critter attacker )
 {
     return pattern._Attacked( cr, attacker );
 }
 
-bool _MedicPlaneEnd( Critter& medic, NpcPlane& plane, int reason, Critter@ someCr, Item@ someItem )
+bool _MedicPlaneEnd( Critter medic, int planeId, int reason, Critter someCr, Item someItem )
 {
+	NpcPlanes::NpcPlane plane = NpcPlanes::GetCritterPlane(medic, planeId);
+
     return pattern._PlaneEnd( medic, plane, reason, someCr, someItem );
 }
 
-void SetMedicStats( Critter& cr, uint8 lvl )
+void SetMedicStats( Critter cr, uint8 lvl )
 {
     lvl = CLAMP( lvl, 0, M_COUNT - 1 );
     if( lvl < 1 )
@@ -275,16 +281,16 @@ void SetMedicStats( Critter& cr, uint8 lvl )
     cr.PerkBonusRangedDamage = 1;
 }
 
-void _MedicInit( Critter& cr, bool firstTime )
+void _MedicInit( Critter cr, bool firstTime )
 {
     _CritterInit( cr, firstTime );
 }
 
 /* ************************************************* DEBUG ************************************************* */
-void testMedic( Critter& cr, int lvl, int team, int bag )
+void testMedic( Critter cr, int lvl, int team, int bag )
 {
     int[] props = { CritterProperty::BagId, bag, CritterProperty::TeamId, team };
-    Critter@ npc = cr.GetMap().AddNpc( Content::Critter::VaultCityPatrolMale, cr.HexX - 3, cr.HexY - 3, 0, TlaExtended::GetCritPropsDict(props));
+    Critter npc = cr.GetMap().AddNpc( Content::Critter::VaultCityPatrolMale, cr.HexX - 3, cr.HexY - 3, 0, TlaExtended::GetCritPropsDict(props));
         npc.SetScript ( _MedicInit );
     npc.AddItem( Content::Item::super_stimpak, 20 );
     SetMedicStats( npc, lvl );

@@ -20,8 +20,6 @@
 //   - обработать убийство игроком союзников после того, как задача квеста выполнена
 //   - изменть реализацию поведения криттеров, чтобы они допускали использование своих скриптов
 
-//#include "Tla"
-
 #pragma property Critter PrivateServer bool HostileLQIsStoped
 #pragma property Critter PrivateServer dict< uint, uint8[] > HostileLQData
 #pragma property Map PrivateServer uint HostileLQPlayerId
@@ -44,9 +42,6 @@
 
 // #define DL #(s) (Log(s))
 #define DL                        # ( s )
-
-////import bool GetFreeHex0( Map& map, uint radius, uint16& hx, uint16& hy ) from "Caravan";
-////import bool SetKnownLoc0( Critter& cr, bool byId, uint locNum ) from "Location";
 
 class HostileLocationInfo
 {
@@ -89,7 +84,7 @@ class HostileLocationInfo
         save.Set( LocY );
         save.Set( CoordDelta );
         save.Set( LocCreated );
-        auto hostileLQData = GetCritter( PlayerId ).HostileLQData;
+        auto hostileLQData = GetCritter( PlayerId ).HostileLQData.clone();
         hostileLQData[ QVarNum ] = save.GetData();
         GetCritter( PlayerId ).HostileLQData = hostileLQData;
     }
@@ -112,7 +107,7 @@ class HostileLocationInfo
 
     void Erase()
     {
-        auto hostileLQData = GetCritter( PlayerId ).HostileLQData;
+        dict< uint, uint8[] > hostileLQData = GetCritter( PlayerId ).HostileLQData.clone();
         hostileLQData.remove( QVarNum );
         GetCritter( PlayerId ).HostileLQData = hostileLQData;
     }
@@ -121,10 +116,10 @@ class HostileLocationInfo
     {
         if( PlayerId == 0 || LocCreated || LocPid == 0 )
             return false;             // Игрок неизвестен или локация создана ранее, или код прототипа неизвестен
-        Critter@ player = GetCritter( PlayerId );
+        Critter player = GetCritter( PlayerId );
         if( !valid( player ) )
             return false;             // Не найден игрок
-        LocId = CreateLocation( LocPid, LocX + Random( -1 * int(CoordDelta), CoordDelta ), LocY + Random( -1 * int(CoordDelta), CoordDelta ), null );
+        LocId = CreateLocation( LocPid, LocX + Random( -1 * int(CoordDelta), CoordDelta ), LocY + Random( -1 * int(CoordDelta), CoordDelta ), null ).Id;
         if( LocId == 0 )
             return false;             // Ошибка при создании локации
         DL( "Location created ok. LocId = " + LocId );
@@ -132,12 +127,12 @@ class HostileLocationInfo
         Save();
         Location::SetKnownLoc( player, true, LocId );
         // Прописывание скриптов для карт локации, а также сохранение ключевой информации о квесте в Map::Data
-        Location@ loc = GetLocation( LocId );
+        Location loc = GetLocation( LocId );
         if( valid( loc ) )
         {
             for( uint i = 0, l = loc.GetMapCount(); i < l; i++ )
             {
-                Map@ map = loc.GetMapByIndex( i );
+                Map map = loc.GetMapByIndex( i );
                 if( valid( map ) )
                 {
                     _SetPlayerId( map, PlayerId );
@@ -154,26 +149,26 @@ class HostileLocationInfo
         return true;
     }
 
-    uint GetNpc( Critter@[]& critters, bool ally, int findType )
+    uint GetNpc( Critter[] critters, bool ally, int findType )
     {
         uint len = critters.length();         // Первоначальная длина массива
         if( LocId == 0 )
             return 0;
         DL( "Locvald? LocId" + LocId );
-        Location@ loc = GetLocation( LocId );
+        Location loc = GetLocation( LocId );
         if( !valid( loc ) )
             return 0;
         for( uint i = 0, l = loc.GetMapCount(); i < l; i++ )
         {
             DL( "Map#" + i );
-            Map@ map = loc.GetMapByIndex( i );
+            Map map = loc.GetMapByIndex( i );
             if( valid( map ) )
                 for( uint j = 0, m = map.GetNpcCount( ( ally ? NPC_ROLE_ALLY : NPC_ROLE_HOSTILE ), findType ); j < m; j++ )
                 {
                     DL( "j =" + j );
-                    Critter@ cr = map.GetNpc( ( ally ? NPC_ROLE_ALLY : NPC_ROLE_HOSTILE ), findType, j );
+                    Critter cr = map.GetNpc( ( ally ? NPC_ROLE_ALLY : NPC_ROLE_HOSTILE ), findType, j );
                     if( valid( cr ) )
-                        critters.insertLast( @cr );
+                        critters.insertLast( cr );
                 }
         }
         DL( "array length" + ( critters.length() - len ) );
@@ -182,7 +177,7 @@ class HostileLocationInfo
 
     uint DeadPercent( bool ally )
     {
-        Critter@[] critters;
+        Critter[] critters;
         uint all = GetNpc( critters, ally, FIND_ALL | FIND_ONLY_NPC );
         uint dead = GetNpc( critters, ally, FIND_KO_AND_DEAD | FIND_ONLY_NPC );
         DL( "perce" + ( dead == 0 ? 0 : uint( 100 * dead / all ) ) + "dead:" + dead + "; all:" + all );
@@ -191,7 +186,7 @@ class HostileLocationInfo
 
     void ResetQuest()
     {
-        Critter@ player = GetCritter( PlayerId );
+        Critter player = GetCritter( PlayerId );
         if( valid( player ) )
         {
             player.SetAsInt( CritterProperty( QVarNum ), QUEST_FAIL_LOC_DELETED );
@@ -199,7 +194,7 @@ class HostileLocationInfo
             if( CVarNum != 0 )                   // Сброс счетчика, если назначен
                 player.SetAsInt( CritterProperty( CVarNum ), 0 );
         }
-        Location@ loc = GetLocation( LocId );
+        Location loc = GetLocation( LocId );
         if( valid( loc ) )
             loc.AutoGarbage = true;
         Erase();
@@ -208,22 +203,22 @@ class HostileLocationInfo
     void CompleteQuest()
     {
         DL( "complete quest called" );
-        Critter@ player = GetCritter( PlayerId );
+        Critter player = GetCritter( PlayerId );
         if( valid( player ) )
         {
             player.SetAsInt( CritterProperty( QVarNum ), QUEST_COMPLETE );
             DL( "counter quest called" );
             if( CVarNum != 0 && player.GetAsInt( CritterProperty( CVarNum ) ) == 0 )             // Установка счетчика, если назначен
             {
-                Critter@[] critters;
+                Critter[] critters;
                 uint count = GetNpc( critters, true, FIND_DEAD | FIND_ONLY_NPC );
                 player.SetAsInt( CritterProperty( CVarNum ), count );
             }
         }
-        Location@ loc = GetLocation( LocId );
+        Location loc = GetLocation( LocId );
         if( valid( loc ) )
             loc.AutoGarbage = true;
-        Critter@[] critters;
+        Critter[] critters;
         GetNpc( critters, true, FIND_ALL | FIND_ONLY_NPC );
         GetNpc( critters, false, FIND_ALL | FIND_ONLY_NPC );
         for( uint i = 0, l = critters.length(); i < l; i++ )
@@ -232,9 +227,9 @@ class HostileLocationInfo
     }
 }
 
-void ResetHostileLoc( uint[]& values ) // Очистка
+void ResetHostileLoc( uint[] values ) // Очистка
 {
-    HostileLocationInfo@ info = HostileLocationInfo( values[ 0 ], values[ 1 ] );
+    HostileLocationInfo info = HostileLocationInfo( values[ 0 ], values[ 1 ] );
     if( valid( info ) && info.Serialized() )
     {
         info.Load();
@@ -242,16 +237,16 @@ void ResetHostileLoc( uint[]& values ) // Очистка
     }
 }
 
-void _HostileMapInit( Map& map, bool firstTime )
+void _HostileMapInit( Map map, bool firstTime )
 {
     DL( "map init. Pid:" + map.ProtoId );
     __EventMapCritterDead.SubscribeToMap( map, _HostileMapCritterDead );
     __EventMapCritterIn.SubscribeToMap( map, _HostileMapInCritter );
-    HostileLocationInfo@ info = _InfoFromMap( map );
+    HostileLocationInfo info = _InfoFromMap( map );
     if( !valid( info ) || !info.Serialized() )
         return;
     info.Load();
-    Critter@[] allies;
+    Critter[] allies;
     if( info.GetNpc( allies, true, FIND_LIFE_AND_KO | FIND_ONLY_NPC ) > 0 )
     {
         for( uint i = 0, l = allies.length(); i < l; i++ )
@@ -260,7 +255,7 @@ void _HostileMapInit( Map& map, bool firstTime )
             allies[ i ].SetScript ( _AllyInit );
         }
     }
-    Critter@[] hostiles;
+    Critter[] hostiles;
     if( info.GetNpc( hostiles, false, FIND_LIFE_AND_KO | FIND_ONLY_NPC ) > 0 )
     {
         for( uint i = 0, l = hostiles.length(); i < l; i++ )
@@ -270,16 +265,16 @@ void _HostileMapInit( Map& map, bool firstTime )
     }
 }
 
-void _HostileMapInCritter( Map& map, Critter& cr )
+void _HostileMapInCritter( Map map, Critter cr )
 {}
 
-void _HostileMapCritterDead( Map& map, Critter& cr, Critter@ killer )
+void _HostileMapCritterDead( Map map, Critter cr, Critter killer )
 {
-    HostileLocationInfo@ info = _InfoFromMap( map );
+    HostileLocationInfo info = _InfoFromMap( map );
     if( !valid( info ) || !info.Serialized() )
         return;
     info.Load();
-    Critter@[] hostiles;
+    Critter[] hostiles;
     if( info.GetNpc( hostiles, false, FIND_LIFE_AND_KO | FIND_ONLY_NPC ) == 0 ) // Все мобы мертвы
     {
         DL( "completed" );
@@ -293,9 +288,9 @@ void _HostileMapCritterDead( Map& map, Critter& cr, Critter@ killer )
     {
         for( uint i = 0, l = hostiles.length(); i < l; i++ )
         {
-            hostiles[ i ].DropPlanes();
+            hostiles[ i NpcPlanes::DropPlanes( ] );
         }
-        Critter@[] allies;
+        Critter[] allies;
         if( info.GetNpc( allies, true, FIND_LIFE_AND_KO | FIND_ONLY_NPC ) > 0 )
         {
             for( uint i = 0, l = allies.length(); i < l; i++ )
@@ -309,7 +304,7 @@ void _HostileMapCritterDead( Map& map, Critter& cr, Critter@ killer )
 }
 
 // Скрипты союзника
-void _AllyInit( Critter& cr, bool firstTime )
+void _AllyInit( Critter cr, bool firstTime )
 {
     DL( "Ally init" );
     cr.HostileLQIsStoped = true;
@@ -319,27 +314,27 @@ void _AllyInit( Critter& cr, bool firstTime )
     __EventCritterShow.SubscribeToCritter( cr, _AllyShowCritter );
 }
 
-void _AllyIdle( Critter& cr )
+void _AllyIdle( Critter cr )
 {
     if( cr.HostileLQIsStoped || !valid( cr.GetMap() ) )
         return;
-    HostileLocationInfo@ info = _InfoFromCr( cr );
+    HostileLocationInfo info = _InfoFromCr( cr );
     if( !valid( info ) || !info.Serialized() )
         return;
     info.Load();
-    Critter@ player = GetCritter( info.PlayerId );
+    Critter player = GetCritter( info.PlayerId );
     if( !valid( player ) )
     {
         SendAllyHome( cr );
         return;
     }
-    Map@ map = player.GetMap();
+    Map map = player.GetMap();
     if( !valid( map ) )
     {
         SendAllyHome( cr );
         return;
     }
-    Location@ loc = map.GetLocation();
+    Location loc = map.GetLocation();
     if( !valid( loc ) || loc.Id != info.LocId )
     {
         SendAllyHome( cr );
@@ -356,29 +351,29 @@ void _AllyIdle( Critter& cr )
         uint16 hY = player.HexY;
         if( Caravan::GetFreeHex( map, 4, hX, hY ) )
         {
-            cr.TransitToMap( map.Id, hX, hY, Random( 0, 5 ) );
+            Obsolete::CritterTransitToMapCoords( cr, map.Id, hX, hY, Random( 0, 5 )  );
         }
     }
 }
 
-void SendAllyHome( Critter& cr )
+void SendAllyHome( Critter cr )
 {
-    cr.DropPlanes();
+    NpcPlanes::DropPlanes( cr );
     cr.HostileLQIsStoped = true;
     cr.IsNoHome = false;
-    cr.TransitToMap( cr.HomeMapId, cr.HomeHexX, cr.HomeHexY, cr.HomeDir );
+    Obsolete::CritterTransitToMapCoords( cr, cr.HomeMapId, cr.HomeHexX, cr.HomeHexY, cr.HomeDir );
 }
 
-void _AllySmthAttacked( Critter& cr, Critter& fromCr, Critter& attacker )
+void _AllySmthAttacked( Critter cr, Critter fromCr, Critter attacker )
 {
     if( cr.HostileLQIsStoped )
         return;
 }
 
-void _AllyShowCritter( Critter& cr, Critter& showCrit )
+void _AllyShowCritter( Critter cr, Critter showCrit )
 {
     DL( "Show critter" );
-    HostileLocationInfo@ info = _InfoFromCr( cr );
+    HostileLocationInfo info = _InfoFromCr( cr );
     if( !valid( info ) && !info.Serialized() )
         return;
     info.Load();
@@ -400,7 +395,7 @@ void _AllyShowCritter( Critter& cr, Critter& showCrit )
 
 // Диалоги с союзниками
 // val = 1, следовать, val = 0, стоять на месте
-void r_SetFollow( Critter& player, Critter@ npc, int val )
+void r_SetFollow( Critter player, Critter npc, int val )
 {
     if( valid( npc ) )
     {
@@ -410,7 +405,7 @@ void r_SetFollow( Critter& player, Critter@ npc, int val )
 }
 
 // Скрипты противника
-void _HostileInit( Critter& cr, bool firstTime )
+void _HostileInit( Critter cr, bool firstTime )
 {
     __EventCritterIdle.SubscribeToCritter( cr, _AllyIdle );
     __EventCritterAttacked.SubscribeToCritter( cr, _HostileAttacked );
@@ -420,7 +415,7 @@ void _HostileInit( Critter& cr, bool firstTime )
     cr.ShowCritterDist1 = 10;
 }
 
-void _HostileMessage( Critter& cr, Critter& fromCr, int message, int value )
+void _HostileMessage( Critter cr, Critter fromCr, int message, int value )
 {
     if( message == MSG_KILL_EM && fromCr.NpcRole == cr.NpcRole )
     {
@@ -428,7 +423,7 @@ void _HostileMessage( Critter& cr, Critter& fromCr, int message, int value )
     }
 }
 
-void _HostileShowCritter( Critter& cr, Critter& showCrit )
+void _HostileShowCritter( Critter cr, Critter showCrit )
 {
     if( showCrit.IsPlayer() || showCrit.NpcRole == NPC_ROLE_ALLY )
     {
@@ -436,19 +431,19 @@ void _HostileShowCritter( Critter& cr, Critter& showCrit )
     }
 }
 
-bool _HostileAttacked( Critter& cr, Critter& attacker )
+bool _HostileAttacked( Critter cr, Critter attacker )
 {
     if( attacker.IsPlayer() || attacker.NpcRole == NPC_ROLE_ALLY )
     {
-        cr.SendMessage( MSG_KILL_EM, attacker.Id, MESSAGE_TO_WHO_SEES_ME );
+        SendMessage::SendMessage( cr,  MSG_KILL_EM, attacker.Id, MESSAGE_TO_WHO_SEES_ME  );
     }
     return false;
 }
 
-void _HostileDead( Critter& cr, Critter@ killer )
+void _HostileDead( Critter cr, Critter killer )
 {
     bool                 toAll = false;
-    HostileLocationInfo@ info = _InfoFromCr( cr );
+    HostileLocationInfo info = _InfoFromCr( cr );
     if( valid( info ) && info.Serialized() )
     {
         info.Load();
@@ -457,14 +452,14 @@ void _HostileDead( Critter& cr, Critter@ killer )
     }
     if( valid( killer ) )
     {
-        cr.SendMessage( MSG_KILL_EM, killer.Id, ( toAll ? MESSAGE_TO_ALL_ON_MAP : MESSAGE_TO_WHO_SEES_ME ) );
+        SendMessage::SendMessage( cr,  MSG_KILL_EM, killer.Id, ( toAll ? MESSAGE_TO_ALL_ON_MAP : MESSAGE_TO_WHO_SEES_ME  ) );
     }
 }
 
 // Диалог
-void r_ShowLocation( Critter& player, Critter@ npc, int qVar, int counterVar, int locPid, int locX, int locY )
+void r_ShowLocation( Critter player, Critter npc, int qVar, int counterVar, int locPid, int locX, int locY )
 {
-    HostileLocationInfo@ info = HostileLocationInfo( player.Id, qVar );
+    HostileLocationInfo info = HostileLocationInfo( player.Id, qVar );
     if( !valid( info ) )
         return;
     info.CVarNum = counterVar;
@@ -477,9 +472,9 @@ void r_ShowLocation( Critter& player, Critter@ npc, int qVar, int counterVar, in
 }
 
 // То же, но с рандомным смещением в пределах одной координатной зоны
-void r_ShowLocation2( Critter& player, Critter@ npc, int qVar, int counterVar, int locPid, int locX, int locY )
+void r_ShowLocation2( Critter player, Critter npc, int qVar, int counterVar, int locPid, int locX, int locY )
 {
-    HostileLocationInfo@ info = HostileLocationInfo( player.Id, qVar );
+    HostileLocationInfo info = HostileLocationInfo( player.Id, qVar );
     if( !valid( info ) )
         return;
     info.CVarNum = counterVar;

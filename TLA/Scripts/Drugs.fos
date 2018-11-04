@@ -2,15 +2,12 @@
 // Author: cvet
 // Original Fallout2 system
 
-//#include "Tla"
-
 #pragma property Critter Protected dict< CritterProperty, int > DrugEffects
 #pragma property Critter Protected uint8 DoughnutsCounter Max = 20
 
-#ifdef __SERVER
+#define LBS_TO_GRAMM        # (lbs)       ( ( lbs ) * 453 )
 
-////import void AffectRadiation0( Critter& cr, int value ) from "Radiation";
-////import void AffectPoison0( Critter& cr, int value ) from "Poison";
+#ifdef __SERVER
 
 // Chem Reliant
 // benefit: Faster recovery from chem side effects
@@ -219,13 +216,13 @@ const int[] DrugEffects =
 # define TABLE_STAT           # (stat)           ( 6 + ( stat ) * 6 )
 # define TABLE_AMOUNT         # ( stat, stage )( 7 + ( stage ) + ( stat ) * 6 )
 
-void UseDrug( Critter& cr, Item& drug ) // Export
+void UseDrug( Critter cr, Item drug ) // Export
 {
     SetDrug( cr, drug.ProtoId );
     _SubItem( drug, 1 );
 }
 
-void UseDrugOn( Critter& cr, Critter& onCr, Item& drug ) // Export
+void UseDrugOn( Critter cr, Critter onCr, Item drug ) // Export
 {
     if( onCr.IsDead() )
     {
@@ -249,7 +246,7 @@ void UseDrugOn( Critter& cr, Critter& onCr, Item& drug ) // Export
         cr.TimeoutSkFirstAid = FIRST_AID_TIMEOUT( cr );
 }
 
-void SetDrug( Critter& cr, hash drugPid )
+void SetDrug( Critter cr, hash drugPid )
 {
     // Special drugs
     if( drugPid == Content::Item::box_of_doughnuts )
@@ -271,7 +268,7 @@ void SetDrug( Critter& cr, hash drugPid )
         cr.EraseTimeEvents( Content::Item::jet );
         if( count > 0 && cr.Addictions[ Addictions::Jet ] )
         {
-            bool[] addictions = cr.Addictions;
+            bool[] addictions = cr.Addictions.clone();
             addictions[ Addictions::Jet ] = false;
             cr.Addictions = addictions;
             cr.SayMsg( SAY_NETMSG, TEXTMSG_GAME, MsgStr::StrDrugAddictionEnd );
@@ -320,7 +317,7 @@ void SetDrug( Critter& cr, hash drugPid )
                 addictProc /= 2;
             if( !cr.Addictions[ addict ] && Random( 1, 100 ) <= addictProc )
             {
-                bool[] addictions = cr.Addictions;
+                bool[] addictions = cr.Addictions.clone();
                 addictions[ addict ] = true;
                 cr.Addictions = addictions;
             }
@@ -387,7 +384,7 @@ int GetDrugTableIndex( hash drugPid )
     return index != -1 ? index * 30 : 0;
 }
 
-uint ProcessDrug( Critter& cr, hash drugPid, uint& rate )
+uint ProcessDrug( Critter cr, hash drugPid, uint rate )
 {
     uint stage = RATE_TO_STAGE( rate );
     uint flags = RATE_TO_FLAGS( rate );
@@ -421,7 +418,7 @@ uint ProcessDrug( Critter& cr, hash drugPid, uint& rate )
             {
                 cr.CurrentHp = CLAMP( propVal + amount, -9999, cr.MaxLife );
                 if( amount < 0 && cr.CurrentHp < 0 )
-                    cr.ToDead( Random( 0, 1 ) == 0 ? Anim2Actions::DeadFront : Anim2Actions::DeadBack, null );
+                    CritterState::ToDead( cr, Random( 0, 1  ) == 0 ? Anim2Actions::DeadFront : Anim2Actions::DeadBack, null );
             }
             else if( prop == CritterProperty::PoisoningLevel )
             {
@@ -457,7 +454,7 @@ uint ProcessDrug( Critter& cr, hash drugPid, uint& rate )
                 addictProc /= 2;
             if( stage == 0 && addict >= 0 && Random( 1, 100 ) <= addictProc )
             {
-                bool[] addictions = cr.Addictions;
+                bool[] addictions = cr.Addictions.clone();
                 addictions[ addict ] = true;
                 cr.Addictions = addictions;
             }
@@ -496,7 +493,7 @@ uint ProcessDrug( Critter& cr, hash drugPid, uint& rate )
             cr.SayMsg( SAY_NETMSG, TEXTMSG_GAME, MsgStr::StrDrugAddictionEnd );
             if( addict >= 0 && cr.Addictions[ addict ] )
             {
-                bool[] addictions = cr.Addictions;
+                bool[] addictions = cr.Addictions.clone();
                 addictions[ addict ] = false;
                 cr.Addictions = addictions;
             }
@@ -508,7 +505,7 @@ uint ProcessDrug( Critter& cr, hash drugPid, uint& rate )
     return duration * 60;
 }
 
-void DropDrug( Critter& cr, hash drugPid, uint stage )
+void DropDrug( Critter cr, hash drugPid, uint stage )
 {
     if( stage == 0 || stage == 3 )
         return;                           // Instant effect not happens or already normalize or wait Addidional effect
@@ -535,45 +532,45 @@ void DropDrug( Critter& cr, hash drugPid, uint stage )
     }
 }
 
-uint cte_Drug( Critter& cr, int identifier, uint& rate )
+uint cte_Drug( Critter cr, int identifier, uint& rate )
 {
     return ProcessDrug( cr, identifier, rate );
 }
 
-void SetDrugEffect( Critter& cr, CritterProperty prop, int value ) // Export
+void SetDrugEffect( Critter cr, CritterProperty prop, int value ) // Export
 {
-    auto drugEffects = cr.DrugEffects;
+    auto drugEffects = cr.DrugEffects.clone();
     drugEffects[ prop ] = value;
     cr.DrugEffects = drugEffects;
 }
 
-void ChangeDrugEffect( Critter& cr, CritterProperty prop, int value ) // Export
+void ChangeDrugEffect( Critter cr, CritterProperty prop, int value ) // Export
 {
-    auto drugEffects = cr.DrugEffects;
+    auto drugEffects = cr.DrugEffects.clone();
     drugEffects.setIfNotExist( prop, 0 );
     drugEffects[ prop ] = drugEffects[ prop ] + value;
     cr.DrugEffects = drugEffects;
 }
 
-void DropDrugEffects( Critter& cr ) // Export
+void DropDrugEffects( Critter cr ) // Export
 {
     // Clear drug effects
-    auto drugEffects = cr.DrugEffects;
+    auto drugEffects = cr.DrugEffects.clone();
     drugEffects.clear();
     cr.DrugEffects = drugEffects;
 
     // Erase all events
-    cr.EraseTimeEvents( DrugsIdentifiers );
+    cr.EraseTimeEvents( DrugsIdentifiers.clone() );
 
     // Unset addictions perks
-    bool[] addictions = cr.Addictions;
+    bool[] addictions = cr.Addictions.clone();
     for( uint i = 0, j = addictions.length(); i < j; i++ )
         addictions[ i ] = false;
     cr.Addictions = addictions;
 }
 #endif
 
-int GetDrugEffect( const Critter& cr, const CritterProperty prop ) // Export
+int GetDrugEffect( const Critter cr, const CritterProperty prop ) // Export
 {
     return cr.DrugEffects.get( prop, 0 );
 }

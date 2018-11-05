@@ -3,13 +3,6 @@
 // Скрипты для города, который можно построить, использовав ГЕКК.
 // ГЭКК нужно использовать на пустынном энкаунтере (Content::Location::desert_1..Content::Location::desert_12)
 
-//#include "Tla"
-
-////import void AutoCloseDoor0( uint value ) from "Item";
-////import void DisableForceField0( uint[] values ) from "EnergyBarier";
-////import void EnableForceField0( uint[] values ) from "EnergyBarier";
-////import bool SwitchLocker0( Item locker, bool toOpen ) from "Lockers";
-
 // Свойство, по которому будет проверяться, житель ли это города из ГЕКК или нет
 #pragma property Critter PrivateServer uint GCityCitizen
 #pragma property Critter PrivateServer uint MapGeckCityTraderSkillBarter
@@ -125,11 +118,7 @@ void CreateCity( Critter player, Item geck )
     grp.insertLast( leader );
     GlobalmapGroupExtended::GetFollowGroup(leader, FIND_LIFE, grp );
 
-    uint locId = CreateLocation( LOC_PID_GECK_CITY, player.WorldX, player.WorldY, grp );
-    if( locId == 0 )
-        return;
-
-    Location loc = GetLocation( locId );
+    Location loc = CreateLocation( LOC_PID_GECK_CITY, player.WorldX, player.WorldY, grp );
     if( !valid( loc ) )
         return;
 
@@ -185,7 +174,7 @@ bool IsPlayerCitizen( Critter cr, Location loc )
     if( !valid( cr ) || !valid( loc ) )
         return false;
 
-    uint[] acceptedPlayers = loc.GeckCityMembers;
+    uint[] acceptedPlayers = loc.GeckCityMembers.clone();
     for( uint i = 0; i < acceptedPlayers.length(); i++ )
         if( cr.Id == acceptedPlayers[ i ] )
             return true;
@@ -224,7 +213,7 @@ bool AddCitizen( Critter leader, Critter player )
     if( !valid( loc ) )
         return false;
 
-    uint[] acceptedPlayers = loc.GeckCityMembers;
+    uint[] acceptedPlayers = loc.GeckCityMembers.clone();
     for( uint i = 0; i < acceptedPlayers.length(); i++ )
         if( player.Id == acceptedPlayers[ i ] )
             return true;
@@ -249,7 +238,7 @@ bool RemoveCitizen( Critter leader, Critter player )
     if( !valid( loc ) )
         return false;
 
-    uint[] acceptedPlayers = loc.GeckCityMembers;
+    uint[] acceptedPlayers = loc.GeckCityMembers.clone();
     for( uint i = 0; i < acceptedPlayers.length(); i++ )
     {
         if( player.Id == acceptedPlayers[ i ] )
@@ -293,24 +282,31 @@ uint dlg_RemoveCitizen( Critter player, Critter npc, string playerName )
 {
     if( !IS_DIALOG_SAY_MODE( playerName ) )
         return 0;
-
-    Critter cr = GetPlayer( playerName );
-    if( valid( cr ) )
-    {
-        if( cr.Id == player.Id )
-        {
-            return FORCE_DIALOG_PLAYER_NOTFOUND;
-        }
-        if( RemoveCitizen( player, cr ) )
-        {
-            cr.SayMsg( SAY_NETMSG, TEXTMSG_TEXT, STR_CITIZEN_REMOVED, "$leadername" + Obsolete::GetPlayerName( player.Id ) );
-            return FORCE_DIALOG_PLAYER_REMOVED;
-        }
-        else
-        {
-            return FORCE_DIALOG_ERROR;
-        }
-    }
+	const Critter crConst = GetPlayer( playerName );
+	if(valid(crConst))
+	{
+		Critter cr = GetCritter( crConst.Id );
+		if( valid( cr ) )
+		{
+			if( cr.Id == player.Id )
+			{
+				return FORCE_DIALOG_PLAYER_NOTFOUND;
+			}
+			if( RemoveCitizen( player, cr ) )
+			{
+				cr.SayMsg( SAY_NETMSG, TEXTMSG_TEXT, STR_CITIZEN_REMOVED, "$leadername" + Obsolete::GetPlayerName( player.Id ) );
+				return FORCE_DIALOG_PLAYER_REMOVED;
+			}
+			else
+			{
+				return FORCE_DIALOG_ERROR;
+			}
+		}
+	}
+	else
+	{
+		return FORCE_DIALOG_ERROR;
+	}
     return FORCE_DIALOG_PLAYER_NOTFOUND;
 }
 
@@ -319,7 +315,7 @@ uint dlg_AddCitizen( Critter player, Critter npc, string playerName )
     if( !IS_DIALOG_SAY_MODE( playerName ) )
         return 0;
 
-    Critter cr = GetPlayer( playerName );
+    Critter cr = GetCritter( GetPlayer( playerName ).Id );
     if( valid( cr ) )
     {
         if( cr.Id == player.Id )
@@ -568,7 +564,7 @@ bool entrance_Geck( Location geck, Critter[] critters, uint8 entrance )
         for( int k = 0, l = critters.length(); k < l; k++ )
         {
             Critter cr = critters[ k ];
-            if( valid( cr )  !IsPlayerCitizen( cr, geck ) )
+            if( valid( cr ) && !IsPlayerCitizen( cr, geck ) )
                 return false;
         }
     }
@@ -580,7 +576,7 @@ bool entrance_Geck( Location geck, Critter[] critters, uint8 entrance )
 // Оставлено на будущее, возможно будет логика для автомобилей
 void _GeckMapInCritter( Map map, Critter cr ) // obsolete
 {
-    if( cr.IsPlayer()  cr.IsNpc() )
+    if( cr.IsPlayer() && cr.IsNpc() )
     {
         if( IsPlayerCitizen( cr ) )
         {
@@ -618,8 +614,8 @@ void TryMoveCar( Critter cr, Map map )
             Obsolete::ParseEntires( map, entires, ENTIRE_BIG_CAR );
             for( int i = 0, j = entires.length(); i < j; i++ )
             {
-                Item car = map.GetCar( entires[ i ].HexX, entires[ i ].HexY );
-                if( valid( car )  car.LockerId == key.LockerId )
+                Item car = Obsolete::GetMapCar( map, entires[ i ].HexX, entires[ i ].HexY );
+                if( valid( car ) && car.LockerId == key.LockerId )
                 {
                     entires.clear();
                     Obsolete::ParseEntires( map, entires, ENTIRE_CITIZEN_CAR );
@@ -660,7 +656,7 @@ bool d_NoGeneratoreCharges( Critter player, Critter npc )
 bool s_TerminalOuter( Critter player, const Item terminal, Item item, int skill )
 {
     Map map = player.GetMap();
-    if( valid( map )  map.GeckCityTimeBroken > __FullSecond )
+    if( valid( map ) && map.GeckCityTimeBroken > __FullSecond )
     {
         player.SayMsg( SAY_NETMSG, TEXTMSG_TEXT, STR_CONSOLE_OUT_OF_ORDER );
         return true;
@@ -791,7 +787,7 @@ bool _GeckTraderBarter( Critter cr, Critter player, bool attach, uint barterCoun
     if( cr.MapGeckCityTraderSkillBarter == 0 )
         cr.MapGeckCityTraderSkillBarter = cr.SkillBarter;
 
-    if( attach  barterCount < 2  IsPlayerCitizen( player ) )
+    if( attach && barterCount < 2 && IsPlayerCitizen( player ) )
         cr.SkillBarter = CITIZENS_TRADING_SKILL;
     else
         cr.SkillBarter = cr.MapGeckCityTraderSkillBarter;
@@ -838,7 +834,7 @@ void r_AddReplicator( Critter player, Critter npc )
         if( valid( map ) )
         {
             Entire::Entire entire = Entire::GetEntire( map, ENTIRE_REPLICATOR_TANK, 0 );
-            if( valid( entire )  !valid( map.GetItem( entire.HexX, entire.HexY, Content::Item::replicator_tank ) ) )
+            if( valid( entire ) && !valid( map.GetItem( entire.HexX, entire.HexY, Content::Item::replicator_tank ) ) )
             {
                 map.AddItem( entire.HexX, entire.HexY, Content::Item::replicator_tank, 1 );
                 return;
@@ -856,7 +852,7 @@ void r_SetGeckReplication( Critter player, Critter npc )
     for( uint i = 0, l = loc.GetMapCount(); i < l; i++ )
     {
         Map map = loc.GetMapByIndex( i );
-        if( valid( map )  !loc.AutoGarbage )
+        if( valid( map ) && !loc.AutoGarbage )
         {
             Entire::Entire entire = Entire::GetEntire( map, ENTIRE_REPLICATOR_SPAWN, 0 );
             if( valid( entire ) )

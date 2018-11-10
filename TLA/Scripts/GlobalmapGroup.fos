@@ -1,0 +1,494 @@
+// FOS Server
+// Author: cvet
+
+// //////////////////////////////////////////////////////////////////////////////////////////////////
+// int processType    - see in Global map events in _defines.fos;
+// Critter cr        - who called this function, in most times is leader of group;
+// Item car          - group car, can be null;
+// float curX, curY - current position;
+// float toX, toY   - destination position;
+// float speed       - speed of group, must set in TlaExtended::GlobalProcessSetMove,
+//                      also you can type zero to stop group;
+// uint encounterDescriptor - if encounterDescriptor != 0 than global_invite calls;
+// bool waitForAnswer       - if waitForAnswer == false than global_invite calls after this function,
+//                            else call after leader confirm invite;
+void global_process( int processType, Critter cr, Item car,
+                     float curX, float curY, float toX, float toY, float speed,
+                     uint encounterDescriptor, bool waitForAnswer )
+{
+    int movementType = ( valid( car ) ? car.Car_MovementType : TlaExtended::GmWalkGround );
+    int curXi = int(curX);
+    int curYi = int(curY);
+
+    if( processType == TlaExtended::GlobalProcessMove )
+    {
+        // Save current distantion to compare in the end
+        float lastDist = DISTANCE( curX, curY, toX, toY );
+
+        // Calcuate speed
+        float speedPix = speed * float(__GlobalMapMoveTime) / 1000.0f;
+        float speedAngle = atan2( toY - curY, toX - curX );
+        float speedX = cos( speedAngle ) * speedPix;
+        float speedY = sin( speedAngle ) * speedPix;
+
+        float speedMod = 1.0f;
+        if( movementType == TlaExtended::GmWalkGround )
+        {
+            // Speed modifiers
+            //  F   E   D   C   B   A   9    8   7    6   5    4   3    2   1    0
+            // 1.5 1.4 1.3 1.2 1.1 1.0 0.95 0.9 0.85 0.8 0.75 0.7 0.65 0.6 0.55 0.0
+            switch( Worldmap::GetGlobalMapRelief( curXi, curYi ) )
+            {
+            case 0x0:
+                speedMod = 1.00f;
+                break;
+            case 0x1:
+                speedMod = 0.55f;
+                break;
+            case 0x2:
+                speedMod = 0.60f;
+                break;
+            case 0x3:
+                speedMod = 0.65f;
+                break;
+            case 0x4:
+                speedMod = 0.70f;
+                break;
+            case 0x5:
+                speedMod = 0.75f;
+                break;
+            case 0x6:
+                speedMod = 0.80f;
+                break;
+            case 0x7:
+                speedMod = 0.85f;
+                break;
+            case 0x8:
+                speedMod = 0.90f;
+                break;
+            case 0x9:
+                speedMod = 0.95f;
+                break;
+            case 0xA:
+                speedMod = 1.00f;
+                break;
+            case 0xB:
+                speedMod = 1.10f;
+                break;
+            case 0xC:
+                speedMod = 1.20f;
+                break;
+            case 0xD:
+                speedMod = 1.30f;
+                break;
+            case 0xE:
+                speedMod = 1.40f;
+                break;
+            case 0xF:
+                speedMod = 1.50f;
+                break;
+            default:
+                break;
+            }
+        }
+
+        if( valid( car ) && speedMod != 1.0f )
+        {
+            float pass = float(car.Car_Passability);
+            if(     pass > 100.0f && speedMod < 1.0f )
+                speedMod += ( 1.0f - speedMod ) * ( pass - 100.0f ) / 100.0f;
+            else if( pass > 100.0f && speedMod > 1.0f )
+                speedMod -= ( speedMod - 1.0f ) * ( pass - 100.0f ) / 100.0f;
+            else if( pass < 100.0f && speedMod < 1.0f )
+                speedMod -= ( 1.0f - speedMod ) * ( 100.0f - pass ) / 100.0f;
+            else if( pass < 100.0f && speedMod > 1.0f )
+                speedMod += ( speedMod - 1.0f ) * ( 100.0f - pass ) / 100.0f;
+        }
+
+        // Apply step
+        curX += speedX * speedMod;
+        curY += speedY * speedMod;
+
+        int oldXi = curXi;
+        int oldYi = curYi;
+        curXi = int(curX);         // Round
+        curYi = int(curY);         // Round
+
+        // Check new position
+        if( oldXi != curXi || oldYi != curYi )
+        {
+            // Check borders
+            int gmWidth = __GlobalMapWidth * __GlobalMapZoneLength;
+            int gmHeight = __GlobalMapHeight * __GlobalMapZoneLength;
+            if( curXi < 0 || curYi < 0 || curXi >= gmWidth || curYi >= gmHeight )
+            {
+                if( curXi < 0 )
+                    curXi = 0;
+                if( curXi >= gmWidth )
+                    curXi = gmWidth - 1;
+                if( curYi < 0 )
+                    curYi = 0;
+                if( curYi >= gmHeight )
+                    curYi = gmHeight - 1;
+
+                // Stop group
+                curX = float(curXi);
+                curY = float(curYi);
+                speed = 0.0f;
+                return;
+            }
+
+            // Move from old to new and find last correct position
+            int relief = Worldmap::GetGlobalMapRelief( oldXi, oldYi );
+            int steps = MAX( ABS( curXi - oldXi ), ABS( curYi - oldYi ) );
+            int newXi = oldXi;
+            int newYi = oldYi;
+            if( steps > 0 )
+            {
+                float xx = float(oldXi);
+                float yy = float(oldYi);
+                float oxx = float(curXi - oldXi) / float(steps);
+                float oyy = float(curYi - oldYi) / float(steps);
+
+                for( int i = 0; i < steps; i++ )
+                {
+                    xx += oxx;
+                    yy += oyy;
+                    int  xxi = int(xx >= 0.0f ? xx + 0.5f : xx - 0.5f);
+                    int  yyi = int(yy >= 0.0f ? yy + 0.5f : yy - 0.5f);
+
+                    uint relief_ = Worldmap::GetGlobalMapRelief( xxi, yyi );
+                    if( movementType == TlaExtended::GmWalkGround && relief != 0 && relief_ == 0 )
+                        break;
+                    if( movementType == TlaExtended::GmWalkWater && relief_ != 0 )
+                        break;
+
+                    newXi = xxi;
+                    newYi = yyi;
+                }
+            }
+
+            if( newXi != curXi || newYi != curYi )
+            {
+                // Stop group
+                curX = float(newXi);
+                curY = float(newYi);
+                speed = 0.0f;
+                return;
+            }
+
+            // Zone
+            int oldZoneX = oldXi / __GlobalMapZoneLength;
+            int oldZoneY = oldYi / __GlobalMapZoneLength;
+            int curZoneX = curXi / __GlobalMapZoneLength;
+            int curZoneY = curYi / __GlobalMapZoneLength;
+
+            // Change zone
+            if( oldZoneX != curZoneX || oldZoneY != curZoneY )
+            {
+                Critter[]  group = GlobalmapGroupExtended::GetGlobalGroup( cr );
+                ScanZone( group, curZoneX, curZoneY );
+            }
+
+            // Check for complete travelling
+            float curDist = DISTANCE( curX, curY, toX, toY );
+            if( curDist <= 0.01f || curDist > lastDist )
+            {
+                curX = toX;
+                curY = toY;
+                speed = 0.0f;
+                return;
+            }
+        }
+
+        // Car processing
+        if( valid( car ) )
+        {
+            int fuel = car.Charge;
+            int deterioration = car.Deterioration;
+
+            if( fuel <= 0 || deterioration >= int(car.Car_MaxDeterioration) )
+            {
+                uint str = ( fuel <= 0 ? MsgStr::StrCarFuelEmpty : MsgStr::StrCarBroken );
+                cr.SayMsg( SAY_NETMSG, TEXTMSG_GAME, str );
+                speed = 0.0f;
+                return;
+            }
+
+            // Car values created for the call every 500 ms
+            fuel -= car.Car_FuelConsumption * __GlobalMapMoveTime / 500;
+            deterioration += car.Car_DeteriorationRate * __GlobalMapMoveTime / 500;
+            if( fuel < 0 )
+                fuel = 0;
+            if( deterioration > int(car.Car_MaxDeterioration) )
+                deterioration = int(car.Car_MaxDeterioration);
+
+            if( fuel != int(car.Charge) || deterioration != int(car.Deterioration) )
+            {
+                car.Charge = fuel;
+                car.Deterioration = deterioration;
+            }
+        }
+
+        cr.GlobalMapMoveCounter += 1;
+        if( cr.GlobalMapMoveCounter % ( __EncounterTime / __GlobalMapMoveTime ) == 0 )
+        {
+            Critter[]  group = GlobalmapGroupExtended::GetGlobalGroup( cr );
+
+            // Validate charisma
+            Critter leader = group[ 0 ];
+            if( int( group.length() ) > leader.Charisma + leader.PerkMagneticPersonality )
+            {
+                leader.SayMsg( SAY_NETMSG, TEXTMSG_GAME, MsgStr::StrCritBadCharisma );
+                speed = 0.0f;                 // Stop
+                return;
+            }
+
+            // Try find encounter
+            if( GetVisibleLocations( curXi, curYi, 0, cr ).length() == 0 )
+                Worldmap::FindEncounter( group, car, curXi, curYi, encounterDescriptor, waitForAnswer, false );
+        }
+    }
+    else if( processType == TlaExtended::GlobalProcessEnter )
+    {
+        // Enter to empty encounter
+        if( movementType == TlaExtended::GmWalkWater && Worldmap::GetGlobalMapRelief( curXi, curYi ) == 0 )
+        {
+            // Find land
+            bool      landFounded = false;
+            const int maxx = __GlobalMapWidth * __GlobalMapZoneLength;
+            const int maxy = __GlobalMapHeight * __GlobalMapZoneLength;
+            for( int ox = -1; ox <= 1; ox++ )
+            {
+                for( int oy = -1; oy <= 1; oy++ )
+                {
+                    int xx = curXi + ox;
+                    int yy = curYi + oy;
+                    if( xx >= 0 && xx < maxx && yy >= 0 && yy < maxy && Worldmap::GetGlobalMapRelief( xx, yy ) != 0 )
+                    {
+                        Worldmap::FindEncounter( GlobalmapGroupExtended::GetGlobalGroup( cr ), car, xx, yy, encounterDescriptor, waitForAnswer, true );
+                        ox = oy = 2;                         // Exit from loop
+                        landFounded = true;
+                    }
+                }
+            }
+
+            if( !landFounded )
+                Worldmap::FindEncounter( GlobalmapGroupExtended::GetGlobalGroup( cr ), car, curXi, curYi, encounterDescriptor, waitForAnswer, true );
+        }
+        else
+        {
+            Worldmap::FindEncounter( GlobalmapGroupExtended::GetGlobalGroup( cr ), car, curXi, curYi, encounterDescriptor, waitForAnswer, true );
+        }
+    }
+    else if( processType == TlaExtended::GlobalProcessSetMove )
+    {
+        Critter[]  group = GlobalmapGroupExtended::GetGlobalGroup( cr );
+
+        // Validate charisma
+        Critter leader = group[ 0 ];
+        if( int( group.length() ) > leader.Charisma + leader.PerkMagneticPersonality )
+        {
+            leader.SayMsg( SAY_NETMSG, TEXTMSG_GAME, MsgStr::StrCritBadCharisma );
+            if( valid( car ) )
+                CheckForLocationWithoutParking( cr, car, curX, curY );
+            return;
+        }
+
+        // Calculate speed
+        speed = GLOBAL_MAP_BASE_SPEED;
+        if( cr.GetAccess() >= ACCESS_TESTER )
+            speed *= 20.0f;                                         // All, exclude clients have highly speed
+
+        if( valid( car ) )
+        {
+            // Validate car
+            uint strNum = 0;
+            if( group.length() > car.Car_CrittersCapacity )
+                strNum = MsgStr::StrCarCritOverload;
+            else if( car.Charge == 0 )
+                strNum = MsgStr::StrCarFuelEmpty;
+            else if( car.Deterioration >= car.Car_MaxDeterioration )
+                strNum = MsgStr::StrCarBroken;
+            if( strNum != 0 )
+            {
+                leader.SayMsg( SAY_NETMSG, TEXTMSG_GAME, strNum );
+                speed = 0.0f;
+                CheckForLocationWithoutParking( cr, car, curX, curY );
+                return;
+            }
+
+            speed = car.Car_Speed * GLOBAL_MAP_BASE_SPEED / 20.0f;
+
+            // Find near water for boats
+            // In radius of one zone (left, top, right, bottom)
+            if( car.Car_MovementType == TlaExtended::GmWalkWater )
+            {
+                if( Worldmap::GetGlobalMapRelief( curXi, curYi ) != 0 )
+                {
+                    const int   maxx = __GlobalMapWidth * __GlobalMapZoneLength;
+                    const int   maxy = __GlobalMapHeight * __GlobalMapZoneLength;
+                    const int[] ox = { -1,  0, 1, 0 };
+                    const int[] oy = { 0, -1, 0, 1 };
+                    for( int i = 1, ii = __GlobalMapZoneLength; i <= ii; i++ )
+                    {
+                        for( int j = 0; j < 4; j++ )
+                        {
+                            int xx = curXi + ox[ j ] * i;
+                            int yy = curYi + oy[ j ] * i;
+                            if( xx >= 0 && xx < maxx && yy >= 0 && yy < maxy && Worldmap::GetGlobalMapRelief( xx, yy ) == 0 )
+                            {
+                                curX = float(xx);
+                                curY = float(yy);
+                                // Exit from loop
+                                j = 4;
+                                i = ii;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        else
+        {
+            // Pathfinder perk bonus
+            int speedDiv = 100 - cr.PerkPathfinder * 25;
+            if( speedDiv <= 0 )
+                speedDiv = 1;
+            speed = speed * 100.0f / float(speedDiv);
+        }
+    }
+    else if( processType == TlaExtended::GlobalProcessNpcIdle )
+    {
+        // Critter cr - is npc who call idle
+        // Process npc group on global map
+        if( curX == toX && curY == toY )       // Stopped
+        {
+            // If you want enter to location under group than type
+            // encounterDescriptor = uint(-1);
+            // waitForAnswer = false;
+        }
+    }
+    else if( processType == TlaExtended::GlobalProcessKick )
+    {
+        if( Worldmap::GetGlobalMapRelief( curXi, curYi ) == 0 )
+        {
+            // Say to leader
+            Critter[]  group = GlobalmapGroupExtended::GetGlobalGroup( cr );
+            group[ 0 ].SayMsg( SAY_NETMSG, TEXTMSG_GAME, MsgStr::StrCantKickOnWater );
+            return;
+        }
+
+        GlobalmapGroupExtended::LeaveGlobalGroup( cr );
+    }
+}
+
+// //////////////////////////////////////////////////////////////////////////////////////////////////
+// Call on invite to encaunter.
+// If mapId != 0 than group enter to it.
+void global_invite( Critter leader, Item car, uint encounterDescriptor, int combatMode, uint mapId, uint16 hexX, uint16 hexY, uint8 dir )
+{
+    // Enter to map under group
+    if( encounterDescriptor == uint( -1 ) )
+    {
+        Location[] locations = GetLocations( leader.WorldX, leader.WorldY, 0 );
+        if(  locations.length()  != 0 )
+        {
+            Location loc = locations[ 0 ];
+            Map      map = loc.GetMapByIndex( 0 );
+            if( valid( map ) && map.GetEntireCoords( 0, 0, hexX, hexY ) )
+            {
+                mapId = map.Id;
+                dir = 0xFF;
+            }
+        }
+        return;
+    }
+
+    // Find encounter
+    Worldmap::InviteToEncounter( GlobalmapGroupExtended::GetGlobalGroup( leader ), car, encounterDescriptor, combatMode, mapId, hexX, hexY, dir );
+}
+
+void ScanZone( Critter[] group, int zx, int zy )
+{
+    uint[] locIds1, locIds2;
+    bool locIds2Founded = false;
+
+    locIds1 = GetZoneLocationIds( zx, zy, 1 );
+
+    for( uint i = 0; i < group.length(); i++ )
+    {
+        Critter cr = group[ i ];
+        if( !cr.IsPlayer() )
+            continue;
+
+        int lookLen = cr.PerkScout != 0 ? 2 : 1;
+
+        if( lookLen == 2 && !locIds2Founded )
+        {
+            locIds2 = GetZoneLocationIds( zx, zy, 2 );
+            locIds2Founded = true;
+        }
+
+        // Open fog
+        int mapw = __GlobalMapWidth;
+        int maph = __GlobalMapHeight;
+        for( int x = -lookLen; x <= lookLen; x++ )
+        {
+            for( int y = -lookLen; y <= lookLen; y++ )
+            {
+                int zx_ = zx + x;
+                int zy_ = zy + y;
+                if( zx_ >= 0 && zx_ < mapw && zy_ >= 0 && zy_ < maph )
+                {
+                    int fog = ( zx == zx_ && zy == zy_ ? FOG_NONE : FOG_HALF );
+                    if( cr.GetFog( zx_, zy_ ) < fog )
+                        cr.SetFog( zx_, zy_, fog );
+                }
+            }
+        }
+
+        // Find new locations
+        uint[]  locIds = lookLen == 1 ? locIds1 : locIds2;
+        for( uint j = 0; j < locIds.length(); j++ )
+        {
+            uint locId = locIds[ j ];
+            if( !Location::IsKnownLoc( cr, true, locId ) )
+            {
+                Location loc = GetLocation( locId );
+                if( valid( loc ) )
+                    Location::SetKnownLoc( cr, true, locId );
+            }
+        }
+    }
+}
+
+void CheckForLocationWithoutParking( Critter cr, Item car, float curX, float curY )
+{
+    Location[] locations = {};
+	locations = GetVisibleLocations( int(curX), int(curY), 0, cr);
+    if( locations.length() != 0 )
+    {
+        Location loc = locations[ 0 ];
+        Map      map = loc.GetMapByIndex( 0 );
+
+        bool      placeFounded = false;
+        Entire::Entire[] entires = {};
+        Obsolete::ParseEntires( map, entires, car.Car_Entrance );
+        for( uint i = 0; i < entires.length(); i++ )
+        {
+            if( map.CheckPlaceForItem( entires[ i ].HexX, entires[ i ].HexY, car.ProtoId ) )
+            {
+                placeFounded = true;
+                break;
+            }
+        }
+
+        if( !placeFounded )
+        {
+            curX = loc.WorldX + int(loc.Radius) * ( Random( 0, 1 ) == 0 ? int(1) : int(-1) );
+            curY = loc.WorldY + int(loc.Radius) * ( Random( 0, 1 ) == 0 ? int(1) : int(-1) );
+        }
+    }
+}
+

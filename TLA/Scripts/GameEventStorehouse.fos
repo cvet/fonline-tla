@@ -1,0 +1,183 @@
+// FOS Server Sort 3
+// Author: rifleman17
+// Хранилище отобранных у игроков и других нпц предметов на глобальной карте
+
+//#include "Tla"
+
+#pragma property Location PrivateServer uint StorehouseContId
+
+#define LOC_DELTA              ( int(3 * __GlobalMapZoneLength) ) // Радиус установки локации
+#define LOC_SEARCH             ( 6 * __GlobalMapZoneLength )      // Радиус поиска локации
+#define ENTIRE_GUARD           ( 177 )
+#define ENTIRE_DIR             ( 178 )
+#define MAX_CONTAINER_ITEMS    ( 200 )
+
+const uint16[][] GlobalCoords =
+{
+    { 668, 1121 },
+    { 375, 709 },
+    { 274, 367 },
+    { 685, 218 },
+    { 1224, 632 },
+    { 1073, 1181 },
+    { 1019, 119 }
+};
+
+// GameEvent
+void CreateStoreHouse()
+{
+    // Выбираем случайные координаты
+    uint idx = Random( 0, GlobalCoords.length() - 1 );
+    // Ищем склад
+    Location[] locations = GetLocations( GlobalCoords[ idx ][ 0 ], GlobalCoords[ idx ][ 1 ], LOC_SEARCH );
+    if( locations.length() > 0 )
+    {
+        for( uint i = 0, l = locations.length(); i < l; i++ )
+        {
+            Location loc = locations[ i ];
+            if( valid( loc ) && loc.StorehouseContId > 0 )
+                return;                         // в данном регионе уже есть склад
+        }
+    }
+	uint16 locX = GlobalCoords[ idx ][ 0 ] + Random( -1 * LOC_DELTA, LOC_DELTA );
+	uint16 locY = GlobalCoords[ idx ][ 1 ] + Random( -1 * LOC_DELTA, LOC_DELTA );
+	
+	
+	if(locX < __GlobalMapZoneLength || locY < __GlobalMapZoneLength || locX >= __GlobalMapZoneLength * (__GlobalMapHeight -3) || locY >= __GlobalMapZoneLength * (__GlobalMapHeight -3) )
+	{
+		Log("Triing create location: x=" + locX + "; y=" + locY);
+		return;
+	}
+	
+    // Не найдена локация в данной области
+    Location loc  = CreateLocation( Content::Location::desert_12,
+                                 locX,
+                                 locY,
+                                 null );
+    uint  pid = 0;
+    uint8 dir = 0;
+	if( valid( loc ) )
+        {
+            loc.AutoGarbage = false;
+            loc.Hidden = true;
+            Map map = loc.GetMapByIndex( 0 );
+            if( valid( map ) )
+            {
+                map.SetScript ( _MapInit );
+                Item[] items = {};
+                Obsolete::GetItems( map, 128, items );
+                if( items.length() > 0 )
+                {
+                    loc.StorehouseContId = items[ 0 ].Id;
+                    loc.Hidden = true;
+                    loc.AutoGarbage = false;
+                    Entire::Entire[] entires = {};
+                    uint16 hexX = 0, hexY = 0;
+                    Entire::GetNearEntire( map, ENTIRE_DIR, hexX, hexY );
+                    if( Obsolete::ParseEntires( map, entires, ENTIRE_GUARD ) > 0 )
+                    {
+                        for( uint i = 0, l = entires.length(); i < l; i++ )
+                        {
+                            dir = GetDirection( entires[ i ].HexX, entires[ i ].HexY, hexX, hexY );
+                            pid = Random( 0, 1 ) == 0 ? Content::Critter::JackalSniper : Content::Critter::JackalTerminator;
+                            int[] props =
+                            {
+                                CritterProperty::TeamId, Teams::Bandit, CritterProperty::NpcRole, 17,
+                                CritterProperty::BagId, ( pid == Content::Critter::JackalSniper ? Bags::Sniper1 : Bags::Term1 ),
+                                CritterProperty::ReplicationTime, -1
+                            };
+                            Critter npc = map.AddNpc( pid, entires[ i ].HexX, entires[ i ].HexY, dir, TlaExtended::GetCritPropsDict(props));
+							npc.SetScript( EncounterNpc::_NpcInit );
+                        }
+                    }
+                }
+            }
+        }
+}
+
+void _MapInit( Map map, bool firstTime )
+{
+    __EventMapCritterIn.SubscribeToMap( map, _MapInCritter );
+}
+
+void _MapInCritter( Map map, Critter cr )
+{
+    if( cr.IsPlayer() )
+    {
+        Critter[] npc = {};
+        if( Obsolete::GetCritters( map,  0, FIND_LIFE | FIND_ONLY_NPC, npc  ) > 0 )
+        {
+            for( uint i = 0, l = npc.length(); i < l; i++ )
+            {
+                Critter hostile = npc[ i ];
+                if( valid( hostile ) && hostile.NpcRole == 17 )
+                    EnemyStack::AddEnemyToStack( hostile,  cr.Id  );
+            }
+        }
+    }
+}
+
+void SaveLoot2Storehouse( uint16 WorldX, uint16 WorldY, Item[] items )
+{
+    // Ищем локацию
+    Location[] locations = GetLocations( WorldX, WorldY, LOC_SEARCH );
+    Location storeHouse;
+    if( locations.length() > 0 )
+    {
+        for( uint i = 0, l = locations.length(); i < l; i++ )
+        {
+            Location loc = locations[ i ];
+            if( not valid( loc ) )
+                continue;
+
+            if( loc.StorehouseContId > 0 )
+            {
+                storeHouse = loc;
+                break;
+            }
+        }
+    }
+    if( valid( storeHouse ) && storeHouse.Hidden && storeHouse.StorehouseContId > 0 )
+    {
+        Item container = GetItem( storeHouse.StorehouseContId );
+        if( valid( container ) )
+        {
+            MoveItems( items, container, 0 );
+            if( CountContainerItems( container ) > MAX_CONTAINER_ITEMS )
+            {
+                storeHouse.Hidden = false;
+                SavedDeferredCall( DAY_TICKS( 4 ), DeferredDeleteLocation, storeHouse.Id );
+            }
+            return;
+        }
+    }
+}
+
+uint CountContainerItems( Item container )
+{
+    Item item;
+    Item[] items = {};
+    uint  count = 0;
+    Obsolete::GetItems( container, 0, items );
+    for( uint i = 0, l = items.length(); i < l; i++ )
+    {
+        item = items[ i ];
+        if( valid( item ) )
+        {
+            if( item.Type == ItemType::Weapon ||
+                item.Type == ItemType::Armor ||
+                item.Type == ItemType::Drug )
+                count += item.Count;
+            else
+                count += 1;
+        }
+    }
+    return count;
+}
+
+void DeferredDeleteLocation( uint value )
+{
+    Location loc = GetLocation( value );
+    if( valid( loc ) )
+        DeleteLocation( loc.Id );
+}

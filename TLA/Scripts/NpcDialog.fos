@@ -1,0 +1,290 @@
+// FOS Server
+
+// Скрипт для реализации диалогов между несколькими НПЦ
+//
+/*
+
+   1) Криттер произносит фразу, одновременно создает план ожидания на 5..10 секунд.
+   По завершении плана он либо произносит следующую фразу, либо отправляет сообщение с помощью SendMessage тем, кто его видит, с value сообщения = номеру этой фразы
+
+   2) Другой криттер при получении сообщения может произнести следующую фразу, по тем же правилам, что указано в п. 1.
+
+
+   Атрибуты каждой фразы:
+   Номер произносимой фразы криттера - строка из файла FOTEXT.MSG
+   Номер следующей фразы - фраза, которую нпц произнесет по истечению плана ожидания, либо номер сообщения, которое он отправит по завершению
+   Тип следующего действия - либо сказать следующую фразу, либо отослать сообщение
+
+   Диалог начинается, когда криттер произносит первую реплику.
+   Весь диалог можно описать набором реплик, каждая реплика описывается тремя параметрами
+
+
+   Пример:
+
+   number   next    type
+
+   100      101     1 - сказать следующую фразу
+   101      102     2 - отправить сообщение
+   102      103     2
+   103      0       0 - ничего не делать
+
+   есть два нпц: нпц1 и нпц2, которые знают описание этого диалога. Допустим, нпц1 инициирует диалог
+
+   нпц1 говорит фразу №100, добавляет Misc plan, по его окончанию проверяет тип ожидания - видит что нужно говорить следующую фразу под номером 101
+   нпц1 говорит фразу №101, ждет, проверяет тип - видит, что нужно отправить сообщение, он отправляет сообщение 102
+   нпц2 получает сообщение №102, говорит фразу 102 и добавляет план ожидания также, дальше отправляет сообщение 103
+   нпц1 говорит фразу #103 и диалог заканчивается
+ */
+
+//#include "Tla"
+
+#pragma property Critter PrivateServer uint LastNpcDialog
+#pragma property Critter PrivateServer uint NpcDialogStringNum
+
+#define T_SaySelf       ( 1 )                     // Следующую фразу НПЦ говорит сам
+#define T_SendMsg       ( 2 )                     // Следующую фразу должен сказать кто-то другой, НПЦ отправляет сообщение
+#define T_Repeat        ( 0 )                     // Последняя фраза диалога
+#define T_NoAction      ( -1 )                    // Последняя фраза диалога
+
+#define StrFirst        ( 0 )                     // Первая фраза диалога
+#define NoNextStr       ( 0 )                     // Последняя фраза диалога
+#define WAIT_TIME       ( 10 * __TimeMultiplier ) // Время ожидания по умолчанию для следующей реплики
+
+#define DialogNum       ( 0 )                     // Условный номер диалога
+#define TextMsgReplica  ( 1 )                     // Файл, в котором лежит реплика
+#define SayType         ( 2 )                     // Тип фразы (говорить, кричать итд)
+#define Phrase          ( 3 )                     // Произносимая фраза - у первой реплики SayPhrase = 0
+#define NextPhrase      ( 4 )                     // Номер следующей фразы
+#define PhraseType      ( 5 )                     // Тип действия, производимого после завершения плана ожидания
+#define TableColumns    ( 6 )
+
+// #define DL              # (s) ( Log( "" + s ) )
+#define DL              # ( s )
+
+const int[] DialogData =
+{
+// DialogNum, TextMsgReplica,      SayType,           Phrase,     NextPhrase,  PhraseType
+// Диалог№ 1 тестовый
+    1,         TEXTMSG_TEXT, SAY_NORM,          StrFirst,   101,         T_SaySelf,
+    1,         TEXTMSG_TEXT, SAY_NORM,          101,        102,         T_SaySelf,
+    1,         TEXTMSG_TEXT, SAY_NORM,          102,        103,         T_SendMsg,
+    1,         TEXTMSG_TEXT, SAY_NORM,          103,        104,         T_SaySelf,
+    1,         TEXTMSG_TEXT, SAY_NORM,          104,        NoNextStr,   T_NoAction,
+// диалог №2. HubLab. Хономер и охранник
+    2,         TEXTMSG_TEXT, SAY_NORM,          StrFirst,   8000,         T_SendMsg,
+    2,         TEXTMSG_TEXT, SAY_NORM,          8000,       8001,         T_SendMsg,
+    2,         TEXTMSG_TEXT, SAY_NORM,          8001,       8002,         T_SendMsg,
+    2,         TEXTMSG_TEXT, SAY_NORM,          8002,       8003,         T_SendMsg,
+    2,         TEXTMSG_TEXT, SAY_NORM,          8003,       NoNextStr,    T_NoAction,
+// диалог №3. HubLab. Лаборанты
+    3,         TEXTMSG_TEXT, SAY_NORM,          StrFirst,   8010,         T_SaySelf,
+    3,         TEXTMSG_TEXT, SAY_NORM,          8010,       8011,         T_SendMsg,
+    3,         TEXTMSG_TEXT, SAY_NORM,          8011,       8012,         T_SendMsg,
+    3,         TEXTMSG_TEXT, SAY_NORM,          8012,       8013,         T_SendMsg,
+    3,         TEXTMSG_TEXT, SAY_NORM,          8013,       8014,         T_SendMsg,
+    3,         TEXTMSG_TEXT, SAY_NORM,          8014,       8015,         T_SendMsg,
+    3,         TEXTMSG_TEXT, SAY_NORM,          8015,       8016,         T_SendMsg,
+    3,         TEXTMSG_TEXT, SAY_NORM,          8016,       8017,         T_SaySelf,
+    3,         TEXTMSG_TEXT, SAY_NORM,          8017,       8018,         T_SendMsg,
+    3,         TEXTMSG_TEXT, SAY_NORM,          8018,       8019,         T_SendMsg,
+    3,         TEXTMSG_TEXT, SAY_NORM,          8019,       8020,         T_SendMsg,
+    3,         TEXTMSG_TEXT, SAY_NORM,          8020,       8021,         T_SendMsg,
+    3,         TEXTMSG_TEXT, SAY_NORM,          8021,       8022,         T_SendMsg,
+    3,         TEXTMSG_TEXT, SAY_NORM,          8022,       8023,         T_SendMsg,
+    3,         TEXTMSG_TEXT, SAY_NORM,          8023,       8024,         T_SendMsg,
+    3,         TEXTMSG_TEXT, SAY_NORM,          8024,       8025,         T_SendMsg,
+    3,         TEXTMSG_TEXT, SAY_NORM,          8025,       8026,         T_SendMsg,
+    3,         TEXTMSG_TEXT, SAY_NORM,          8026,       8027,         T_SendMsg,
+    3,         TEXTMSG_TEXT, SAY_NORM,          8027,       8028,         T_SendMsg,
+    3,         TEXTMSG_TEXT, SAY_NORM,          8028,       NoNextStr,    T_NoAction,
+// диалог №4. HubLab. Реплики Хономера
+    4,         TEXTMSG_TEXT, SAY_NORM,          StrFirst,   8029,         T_SaySelf,
+    4,         TEXTMSG_TEXT, SAY_NORM,          8029,       StrFirst,     T_SaySelf,
+// диалог №5. VcCommon. Диалог двух посетителей бара
+    5,         TEXTMSG_TEXT, SAY_NORM,          StrFirst,   8032,         T_SaySelf,
+    5,         TEXTMSG_TEXT, SAY_NORM,          8032,       8033,         T_SendMsg,
+    5,         TEXTMSG_TEXT, SAY_NORM,          8033,       8034,         T_SendMsg,
+    5,         TEXTMSG_TEXT, SAY_NORM,          8034,       8035,         T_SendMsg,
+    5,         TEXTMSG_TEXT, SAY_NORM,          8035,       8036,         T_SendMsg,
+    5,         TEXTMSG_TEXT, SAY_NORM,          8036,       8037,         T_SendMsg,
+    5,         TEXTMSG_TEXT, SAY_NORM,          8037,       StrFirst,    T_NoAction,
+};
+
+#define D_Dialog        # (phrase)     ( DialogData[ phrase * TableColumns ] )
+#define D_SayType       # (phrase)    ( DialogData[ phrase * TableColumns + SayType ] )
+#define D_TextMsg       # (phrase)    ( DialogData[ phrase * TableColumns + TextMsgReplica ] )
+#define D_SayPhrase     # (phrase)  ( DialogData[ phrase * TableColumns + Phrase ] )
+#define D_NextPhrase    # (phrase) ( DialogData[ phrase * TableColumns + NextPhrase ] )
+#define D_PhraseType    # (phrase) ( DialogData[ phrase * TableColumns + PhraseType ] )
+
+#define MSG_DIALOG      ( 4022 )
+#define MSG_DIALOG_END( 4023 )
+
+void BeginDialog( Critter cr, int dialog )
+{
+    SayPhrase( cr, dialog, StrFirst );
+}
+
+// Получает индекс нужной фразы в таблице
+int GetPhrase( int dialog, int phrase )
+{
+    uint[] phrases = {};     // Фраз с одинаковым назначением может быть несколько
+    for( uint i = 0, l = DialogData.length(); i < l; i += TableColumns )
+        if( DialogData[ i ] == dialog && DialogData[ i + Phrase ] == phrase )
+            phrases.insertLast( i / TableColumns );
+    if( phrases.length() == 0 )
+        return -1;
+    return phrases[ Random( 0, phrases.length() - 1 ) ];
+}
+
+// Произнесение фразы криттером
+// cr - говорящий криттер
+// dialog - порядковый номер диалога в таблице
+// num - номер строки
+void SayPhrase( Critter cr, int dialog, int num )
+{
+    DL( "SayPhrase called" );
+    int r = GetPhrase( dialog, num );
+    DL( "r=" + r );
+    cr.SayMsg( D_SayType( r ), D_TextMsg( r ), num );
+    cr.NpcDialogStringNum = r;   // Номер строки сохраняется в переменные криттера
+    uint wait = WAIT_TIME;
+    if( cr.NpcDialogTimeWait > 0 )
+        wait = CLAMP( uint( cr.NpcDialogTimeWait ) * __TimeMultiplier, 1, WAIT_TIME );
+    NpcPlanes::AddMiscPlane( cr, 0, __FullSecond + wait, NpcDialog::plane_NextPhrase );
+}
+
+bool DialogEnded( Critter cr )
+{
+    return D_PhraseType( cr.NpcDialogStringNum ) == T_NoAction;
+}
+
+void plane_NextPhrase( Critter cr )
+{
+    DL( "plane_NextPhrase called. CrittedId:" + cr.Id + " type" + D_PhraseType( cr.NpcDialogStringNum ) );
+    if( D_PhraseType( cr.NpcDialogStringNum ) == T_NoAction )
+    {
+        SendMessage::SendMessage( cr,  MSG_DIALOG_END, D_Dialog( cr.NpcDialogStringNum  ), MESSAGE_TO_ALL_ON_MAP );
+        return;
+    }
+    if( D_PhraseType( cr.NpcDialogStringNum ) == T_SaySelf )
+        SayPhrase( cr, D_Dialog( cr.NpcDialogStringNum ), D_NextPhrase( cr.NpcDialogStringNum ) );
+    else if( D_PhraseType( cr.NpcDialogStringNum ) == T_SendMsg )
+        SendMessage::SendMessage( cr,  MSG_DIALOG, D_Dialog( cr.NpcDialogStringNum  ), MESSAGE_TO_WHO_SEES_ME );
+}
+
+void _NpcMessage( Critter cr, Critter fromCr, int message, int value )
+{
+    DL( "message rec" );
+    if( message == MSG_DIALOG && fromCr.Id != cr.Id )
+    {
+        DL( "message rcvd. Cr" + cr.Id + " from " + fromCr.Id + " row " + fromCr.NpcDialogStringNum + " next" + D_NextPhrase( fromCr.NpcDialogStringNum ) );
+        SayPhrase( cr, value, D_NextPhrase( fromCr.NpcDialogStringNum ) );
+    }
+}
+
+// Триггер, запускающий диалог между ДВУМЯ НПЦ, в котором они ПООЧЕРЕДИ говорят фразы
+// строки берутся из FOTEXT.MSG, должны идти по порядку
+// нпц должны быть без планов и живы.
+// диалог возможен не чаще чем раз в 5 реальных минут, за это отвечает локальная переменная LVAR_last_NpcDialog для нпц, участников диалога
+// npcRole - роль НПЦ, которые будут участвовать в диалоге
+// firstStr - первая строка диалога
+// lastStr - последняя строка диалога
+// waitSeconds - паузы между диалогами
+// radius - радиус поиска вокруг триггера для поиска участников диалога
+#define TIME_WAIT       ( REAL_MINUTE( 5 ) )
+void t_NpcDialog( Critter player, const Item trigger, bool entered, uint8 dir )
+{
+    auto params = trigger.SceneryParams.clone();
+    int  npcRole = params[ 0 ];
+    int  firstStr = params[ 1 ];
+    int  lastStr = params[ 2 ];
+    int  waitSeconds = params[ 3 ];
+    int  radius = params[ 4 ];
+
+    if( radius == 0 )
+        radius = 20;
+    Critter[] critters = {};
+    Map map = player.GetMap();
+    if( valid( map ) && entered && player.IsPlayer() )
+    {
+        if( Obsolete::GetCrittersHex ( map,  trigger.HexX, trigger.HexY, radius, FIND_LIFE | FIND_ONLY_NPC, critters  ) > 1 )
+        {
+            Critter npc1;
+            Critter npc2;
+            for( uint i = 0, l = critters.length(); i < l; i++ )
+            {
+                Critter cr = critters[ i ];
+                if( valid( cr ) && cr.NpcRole == uint(npcRole) && NpcPlanes::IsNoPlanes( cr ) )
+                {
+                    if( valid( npc1 ) )
+                        npc2 = cr;
+                    else
+                        npc1 = cr;
+                }
+                if( valid( npc1 ) && valid( npc2 ) )
+                    break;
+            }
+            if( valid( npc1 ) && valid( npc2 ) )
+            {
+                if( npc1.LastNpcDialog + TIME_WAIT < __FullSecond && npc2.LastNpcDialog + TIME_WAIT < __FullSecond )
+                {
+                    npc1.LastNpcDialog = __FullSecond;
+                    npc2.LastNpcDialog = __FullSecond;
+                    // if(Random(1,2)==1)
+                    //	return;
+                    uint[] values = { firstStr, lastStr, waitSeconds, npc1.Id, npc2.Id };
+                    DeferredCall( waitSeconds * 1000, NpcTimerDialog, values );
+                }
+            }
+            if( valid( npc1 ) && !valid( npc2 ) )
+            {
+                if( npc1.LastNpcDialog + TIME_WAIT < __FullSecond )
+                {
+                    npc1.LastNpcDialog = __FullSecond;
+                    uint[] values = { firstStr, lastStr, waitSeconds, npc1.Id, 0 };
+                    DeferredCall( waitSeconds * 1000, NpcTimerDialog, values );
+                }
+            }
+        }
+    }
+}
+
+void NpcTimerDialog( uint[] values )
+{
+    if( valid( values ) && values.length() == 5 )
+    {
+        uint     firstStr = values[ 0 ];
+        uint     lastStr = values[ 1 ];
+        uint     waitSec = values[ 2 ];
+        Critter npc1 = GetCritter( values[ 3 ] );
+        Critter npc2;
+        if( values[ 4 ] > 0 )
+            npc2 = GetCritter( values[ 4 ] );
+        if( valid( npc1 ) && npc1.IsLife() && NpcPlanes::IsNoPlanes( npc1 ) && npc1.GetTalkedPlayers().length() == 0 &&
+            valid( npc2 ) && npc2.IsLife() && NpcPlanes::IsNoPlanes( npc2 ) && npc2.GetTalkedPlayers().length() == 0 )
+        {
+            npc1.SayMsg( SAY_NORM_ON_HEAD, TEXTMSG_TEXT, firstStr );
+            firstStr++;
+            if( firstStr > lastStr )
+                return;
+            values[ 0 ] = firstStr;
+            values[ 3 ] = npc2.Id;
+            values[ 4 ] = npc1.Id;
+            DeferredCall( waitSec * 1000, NpcTimerDialog, values );
+            return;
+        }
+        if( valid( npc1 ) && !valid( npc2 ) && NpcPlanes::IsNoPlanes( npc1 ) && npc1.GetTalkedPlayers().length() == 0 )
+        {
+            npc1.SayMsg( SAY_NORM_ON_HEAD, TEXTMSG_TEXT, firstStr );
+            firstStr++;
+            if( firstStr > lastStr )
+                return;
+            values[ 0 ] = firstStr;
+            values[ 3 ] = npc1.Id;
+            values[ 4 ] = 0;
+            DeferredCall( waitSec * 1000, NpcTimerDialog, values );
+            return;
+        }
+    }
+}

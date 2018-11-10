@@ -1,0 +1,399 @@
+// FOS Server
+// Author: heX
+// Охранники на входе во внутренний город.
+// обыскивают, и запрещают проносить наркотики, алкоголь, взрывчатку
+// и заходить в ПА/АПА броне.  ;-)
+// ver 0.4
+
+/*
+   ToDo:
+   сделать закрытие-открытие ворот
+ */
+
+uint[] player_ok = {};     // Массив с id игроков которых обыскали и им можно проходить
+uint[] player_warned = {}; // Массив с id игроков которых предупредили - дважды предупреждать не будут
+// uint[] player_bad = {}; //Массив с id игроков которые прошли без обыска
+
+GuardLib::CGuardsManager Grd;
+
+void _GateGuardInit( Critter guard, bool firstTime )
+{
+    __EventCritterMessage.SubscribeToCritter( guard, Guard_OnMessage );
+    __EventCritterShow.SubscribeToCritter( guard, Guard_on_add_critter );
+    __EventCritterHide.SubscribeToCritter( guard, Guard_on_remove_critter );
+    __EventCritterHideItemOnMap.SubscribeToCritter( guard, Guard_on_pick_item );
+}
+
+void Guard_on_add_critter( Critter npc, Critter player )
+{
+    if( not player.IsPlayer() )
+        return;
+    // Log("Add OK.");
+    int i = UtilsForArray::FindInArray( player_ok, player.Id );
+    if( i > 0 )
+        player_ok.removeAt( i );
+    i = UtilsForArray::FindInArray( player_warned, player.Id );
+    if( i > 0 )
+        player_warned.removeAt( i );
+}
+
+// Вызывается, когда из поля зрения NPC исчезает криттер.
+void Guard_on_remove_critter( Critter npc, Critter player )
+{
+    if( not player.IsPlayer() )
+        return;
+    int i = UtilsForArray::FindInArray( player_ok, player.Id );
+    if( i > 0 )
+        player_ok.removeAt( i );
+    i = UtilsForArray::FindInArray( player_warned, player.Id );
+    if( i > 0 )
+        player_warned.removeAt( i );
+}
+
+// тестирование предмета на разрешонность
+bool ItemTest( hash protoId )
+{
+    if(
+        UtilsForArray::Present( protoId, PidsGroups::Pids_Drugs ) ||
+        UtilsForArray::Present( protoId, PidsGroups::Pids_DrugsAlcohol ) ||
+        UtilsForArray::Present( protoId, PidsGroups::Pids_MiscExplosions ) ||
+        UtilsForArray::Present( protoId, PidsGroups::Pids_MiscActiveExplosions )
+        )
+        return false;
+    else
+        return true;
+}
+
+// алгоритм обыска
+// возращает коды недопуска
+// 0 - все хорошо
+// 1 - плохой предмет
+// 2 - алкоголь
+// 3 - наркотики
+// 4 - взрывчатка
+// 5 - нету пропуска
+int Searching( Critter npc, Critter player )
+{
+    int  result = 5;
+    hash pid = 0;
+    Item[] items = player.GetItems();
+    for( int i = 0, l = items.length(); i < l; i++ )
+    {
+        pid = items[ i ].ProtoId;
+        if( not ItemTest( pid ) )
+            return 1;
+        if( pid == Content::Item::day_pass )
+            result = 0;
+        if( pid == Content::Item::fake_citizenship )
+            result = 0;
+    }
+    return result;
+}
+
+// Сообщения от тригеров
+void Guard_OnMessage( Critter guard, Critter player, int num, int val )
+{
+// Log("OnMessage ok");
+    if( not player.IsPlayer() )
+        return;
+    if( not NpcPlanes::IsNoPlanes( guard ) )
+        return;
+    if( guard.Cond != CritterCondition::Alive )
+        return;
+    if( player.CurrentHp < 0 )
+        return;
+    if( VcGuardsman::GetRank( player ) > 0 )
+        return;                       // Гвардейцам разрешено проходить без пропуска
+
+    if( num == GuardLib::MessagePlayerOnWarningHex )
+    {
+        // Предупреждаем игрока
+        if( UtilsForArray::Present( player.Id, player_warned ) )
+            return;             // значит мы его уже предупредили - дважды повторять не будем
+        player_warned.insertLast( player.Id );
+        Item itm = _CritGetItemArmor( player );
+        if( valid( itm ) )
+            if( UtilsForArray::Present( itm.ProtoId, PidsGroups::Pids_ArmorHeavy ) )
+            {
+                guard.SayMsg( SAY_NORM_ON_HEAD, TEXTMSG_DLG, DLGSTR( Content::Dialog::vc_gate_guard, 5 ) );
+                return;
+            }
+        guard.SayMsg( SAY_NORM_ON_HEAD, TEXTMSG_DLG, DLGSTR( Content::Dialog::vc_gate_guard, 1 ) );
+        return;
+    }
+
+    if( num == GuardLib::MessagePlayerOnSearchHex )
+        if( GetCrittersDistantion( guard, player ) == 1 )
+        {
+            if( UtilsForArray::Present( player.Id, player_ok ) )
+                return;                 // мы его уже обыскивали - больше покачто небудем.
+            guard.SetDir( GetDirection( guard.HexX, guard.HexY, player.HexX, player.HexY ) );
+            if( VcGuard::GuardItemTest( _CritGetItemHand( player ) ) )
+            {
+                // оружие в руках
+                guard.SayMsg( SAY_NORM_ON_HEAD, TEXTMSG_DLG, DLGSTR( Content::Dialog::vc_gate_guard, 6 ) );
+                return;
+            }
+            Item itm = _CritGetItemArmor( player );
+            if( valid( itm ) )
+                if( UtilsForArray::Present( itm.ProtoId, PidsGroups::Pids_ArmorHeavy ) )
+                {
+                    // плохая броня
+                    guard.SayMsg( SAY_NORM_ON_HEAD, TEXTMSG_DLG, DLGSTR( Content::Dialog::vc_gate_guard, 5 ) );
+                    return;
+                }
+            _CritAnimateUse( guard );
+            int searchResult = 0;
+            if( ( searchResult = Searching( guard, player ) ) == 0 )
+            {
+                // все окей
+                // guard.Say(SAY_NORM_ON_HEAD, "Даже отобрать нечего, топай дальше");
+                guard.SayMsg( SAY_NORM_ON_HEAD, TEXTMSG_DLG, DLGSTR( Content::Dialog::vc_gate_guard, 2 ) );
+                player_ok.insertLast( player.Id );
+            }
+            else
+            {
+                if( searchResult == 5 )              // нету пропуска
+                    guard.SayMsg( SAY_NORM_ON_HEAD, TEXTMSG_DLG, DLGSTR( Content::Dialog::vc_gate_guard, 7 ) );
+                else
+                {
+                    // плохие предметы
+                    // guard.Say(SAY_NORM_ON_HEAD, "О! да у тебя тут Алкоголь и Наркотики. Не уходи от нас братец!");
+                    guard.SayMsg( SAY_NORM_ON_HEAD, TEXTMSG_DLG, DLGSTR( Content::Dialog::vc_gate_guard, 3 ) );
+                    player_ok.removeAt( uint( UtilsForArray::FindInArray( player_ok, player.Id ) ) );
+                }
+            }
+            return;
+        }
+        else
+        {
+            return;
+        }
+
+    if( num == GuardLib::MessagePlayerOnAtackHex )
+        if( not UtilsForArray::Present( player.Id, player_ok ) )
+        {
+            // игрок ушел в город и его надо вернуть назад
+            // ALERT!
+            guard.SayMsg( SAY_SHOUT_ON_HEAD, TEXTMSG_DLG, DLGSTR( Content::Dialog::vc_gate_guard, 4 ) );
+            // guard.Say(SAY_SHOUT_ON_HEAD,"Стой! Стрелять буду!");
+
+            // игрок 'просит' чтобы его пристрелили
+            SendMessage::SendMessage( player,  GuardLib::MessagePleaseKillMeIAmIdiot, 0, MESSAGE_TO_WHO_SEES_ME  );
+
+            // Alert(player, GuardLib::MaxAlert, GuardLib::AlertTypeEnterOnDeny);
+        }
+        else
+        {
+            // игрок ушел в город
+
+        }
+
+    if( num == GuardLib::MessagePlayerOnPreEnter )
+    {
+        // это не честный обыск, но зато надежный.
+        if( Searching( guard, player ) != 0 )
+        {
+            uint idx = uint( UtilsForArray::FindInArray( player_ok, player.Id ) );
+            if( idx >= 0 )
+                player_ok.removeAt( idx );
+            idx = uint( UtilsForArray::FindInArray( player_ok, player.Id ) );
+            if( idx >= 0 )
+                player_warned.removeAt( idx );
+            guard.SayMsg( SAY_NORM_ON_HEAD, TEXTMSG_DLG, DLGSTR( Content::Dialog::vc_gate_guard, 1 ) );
+        }
+    }
+
+}
+
+// зона в которой солдаты предупреждают о необходимости обыскивания
+void t_incoming( Critter player, const Item trigger, bool entered, uint8 dir )
+{
+    if( not entered )
+        return;
+
+    // Проверяем игрок ли это
+    if( not player.IsPlayer() )
+        return;
+
+    // он вышел или вошел?
+    if( dir == 1 || dir == 2 || dir == 3 )
+    {
+        // вышел из города дальше зоны предупреждения
+        // удаляем из листов
+        // grd.DelObserving(player);//!!!
+        // player_ok.removeAt(uint(UtilsForArray::FindInArray(player_ok, player.Id)));
+        return;
+    }
+
+    // Посылаем сообщение о том, что наступили на этот хекс.
+    SendMessage::SendMessage( player,  GuardLib::MessagePlayerOnWarningHex, 0, MESSAGE_TO_WHO_SEES_ME  );
+}
+
+// обыскивают
+// rename t_income -> t_searching
+void t_income( Critter player, const Item trigger, bool entered, uint8 dir )
+{
+    if( not entered )
+        return;
+    // Проверяем игрок ли это
+    if( not player.IsPlayer() )
+        return;
+
+    // Посылаем сообщение о том, что наступили на этот хекс.
+    SendMessage::SendMessage( player,  GuardLib::MessagePlayerOnSearchHex, 0, MESSAGE_TO_WHO_SEES_ME  );
+}
+
+// игрок проходит первые ворота города
+void t_pre_enter( Critter player, const Item trigger, bool entered, uint8 dir )
+{
+    if( not entered )
+        return;
+
+    // Проверяем игрок ли это
+    if( not player.IsPlayer() )
+        return;
+
+    if( dir == 1 || dir == 2 || dir == 3 )
+        return;
+
+    // Посылаем сообщение о том, что наступили на этот хекс.
+    SendMessage::SendMessage( player,  GuardLib::MessagePlayerOnPreEnter, 0, MESSAGE_TO_WHO_SEES_ME  );
+}
+
+// игрок вошел в город
+void t_enter( Critter player, const Item trigger, bool entered, uint8 dir )
+{
+    if( not entered )
+        return;
+
+    // Проверяем игрок ли это
+    if( not player.IsPlayer() )
+        return;
+
+    if( dir == 1 || dir == 2 || dir == 3 )
+    {
+        // вышел из города
+        // удаляем из листов
+        // убираем из листа наблюдения - больше он охрану не интересует
+        // grd.DelObserving(player);//!!!
+        return;
+    }
+
+    // Посылаем сообщение о том, что наступили на этот хекс.
+    SendMessage::SendMessage( player,  GuardLib::MessagePlayerOnAtackHex, 0, MESSAGE_TO_WHO_SEES_ME  );
+}
+
+void Guard_on_pick_item( Critter guard, Item hideItem, bool removed, Critter picker )
+{
+    if( not valid( picker ) )
+        return;
+    if( removed )
+        return;
+    if( not picker.IsPlayer() )
+        return;
+    if( not NpcPlanes::IsNoPlanes( guard ) )
+        return;
+    if( guard.Cond != CritterCondition::Alive )
+        return;
+    // Log("pickup detect");
+
+    if( not ItemTest( hideItem.ProtoId ) )
+    {
+        int i = 0;
+        if( UtilsForArray::FindInArray( player_ok, picker.Id, i ) )
+        {
+            player_ok.removeAt( i );
+            guard.SayMsg( SAY_NORM_ON_HEAD, TEXTMSG_DLG, DLGSTR( Content::Dialog::vc_gate_guard, 1 ) );
+        }
+    }
+}
+
+uint r_searching( Critter player, Critter guard, int val )
+{
+    if( Searching( guard, player ) == 0 )
+    {
+        // окей
+        if( not UtilsForArray::Present( player.Id, player_ok ) )
+            player_ok.insertLast( player.Id );
+        return 9;
+    }
+    // не пускаем
+    return 10;
+}
+
+// constructor [ heX ]
+
+// Инициализация нпц. происходит при вводе нпц в игру
+void _GuardInit( Critter npc, bool firstTime )
+{
+    // вешаем обработчики событий
+    __EventCritterShow.SubscribeToCritter( npc, _GuardOnAddCritter );
+    __EventCritterHide.SubscribeToCritter( npc, _GuardOnRemoveCritter );
+    // __EventCritterIdle.SubscribeToCritter( npc, _GuardIdle );
+    __EventNpcPlaneEnd.SubscribeToCritter( npc, _GuardEndPlane );
+    __EventCritterMessage.SubscribeToCritter( npc, _GuardOnMessage );
+    __EventCritterSomeCritterMoveItem.SubscribeToCritter( npc, _GuardOnMoveItem );
+    __EventCritterSomeCritterUseItem.SubscribeToCritter( npc, _GuardOnUseItem );
+    __EventCritterSomeCritterStealing.SubscribeToCritter( npc, _GuardStealing );
+    __EventCritterSomeCritterAttack.SubscribeToCritter( npc, _GuardOnSmthAttack );
+    __EventCritterSomeCritterDropItem.SubscribeToCritter( npc, _GuardOnDropItem ); // r17
+
+    // Создаем событие наблюдения
+    if( not firstTime && npc.GetTimeEvents( Tla::CteObserving, null, null, null ) == 0 )
+        npc.AddTimeEvent( cte_Observing, OBSERV_PERIOD, Tla::CteObserving );
+}
+
+uint cte_Observing( Critter npc, int identifier, uint& stage )
+{
+    return Grd.EventObserving( npc );
+}
+
+void _GuardOnAddCritter( Critter crit, Critter showCrit )
+{
+    Grd.EventOnAddCritter( crit, showCrit );
+}
+
+void _GuardOnRemoveCritter( Critter crit, Critter hideCrit )
+{
+    Grd.EventOnRemoveCritter( crit, hideCrit );
+}
+
+bool _GuardEndPlane( Critter npc, int planeId, int reason, Critter someCr, Item someItem )
+{
+	NpcPlanes::NpcPlane plane = NpcPlanes::GetCritterPlane(npc, planeId);
+
+    Grd.EventEndPlane( npc );
+    return true;
+}
+
+void _GuardOnMoveItem( Critter crit, Critter fromCrit, const Item item, uint8 fromSlot )
+{
+    Grd.EventOnMoveItem( crit, fromCrit, GetItem( item.Id ), fromSlot );
+}
+
+void _GuardOnMessage( Critter crit, Critter fromCrit, int message, int value )
+{
+    Grd.EventOnMessage( crit, fromCrit, message, value );
+}
+
+void _GuardOnUseItem( Critter crit, Critter fromCrit, Item item, Critter onCritter, Item onItem, const Item onScenery, uint param  )
+{
+    Grd.EventOnUseItem( crit, fromCrit, item, onCritter, onItem, null );
+}
+
+void _GuardOnDropItem( Critter crit, Critter fromCrit, Item item ) // r17
+{
+    Grd.EventOnDropItem( crit, fromCrit, item );
+}
+
+void _GuardOnSmthAttack( Critter crit, Critter fromCrit, Critter target , Item weapon, uint8 weaponMode, const Item ammo)
+{
+    Grd.EventOnSmthAttack( crit, fromCrit, target );
+}
+
+void _GuardStealing( Critter crit, Critter thief, Critter fromCrit, Item item, uint count )
+{
+    Grd.EventStealing( crit, fromCrit, thief, false, item, count );
+}
+

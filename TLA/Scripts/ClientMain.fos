@@ -1,0 +1,1687 @@
+// FOS Client Sort 2
+
+void ModuleInit()
+{
+    __EventStart.Subscribe( start );
+    __EventFinish.Subscribe( finish );
+    __EventLoop.Subscribe( loop );
+    __EventGetActiveScreens.Subscribe( get_active_screens );
+    __EventScreenChange.Subscribe( screen_change );
+    __EventRenderIface.Subscribe( render_iface );
+    // __EventRenderMap.Subscribe( render_map );
+    __EventCritterIn.Subscribe( critter_in );
+    // __EventCritterOut.Subscribe( critter_out );
+    __EventItemMapIn.Subscribe( item_map_in );
+    __EventItemMapChanged.Subscribe( item_map_changed );
+    __EventItemMapOut.Subscribe( item_map_out );
+    __EventItemInvAllIn.Subscribe( item_inv_all_in );
+    __EventItemInvIn.Subscribe( item_inv_in );
+    __EventItemInvChanged.Subscribe( item_inv_changed );
+    __EventItemInvOut.Subscribe( item_inv_out );
+    __EventContainerChanged.Subscribe( container_changed );
+    __EventMapMessage.Subscribe( map_message );
+    __EventInMessage.Subscribe( in_message );
+    __EventOutMessage.Subscribe( out_message );
+    __EventCombatResult.Subscribe( combat_result );
+    __EventCritterAction.Subscribe( critter_action );
+    __EventAnimation2dProcess.Subscribe( animation2d_process );
+    // __EventItemsCollection.Subscribe( items_collection );
+}
+// //////////////////////////////////////////////////////////////////////////////////////////////////
+// Call on client loaded or new client_main.fos script received.
+bool start()
+{
+    Config::InitializeGame();
+
+    if( __ScreenWidth < 800 || __ScreenWidth > 1280 || __ScreenHeight < 600 || __ScreenHeight > 1024 )
+    {
+        // Recomendation message
+        Message( GetMsgStr( TEXTMSG_GAME, MsgStr::StrInvalidResolution ) );
+    }
+
+    LoadFont( Fonts::CourierNewSmall, "CourierNewSmall" );
+	LoadFont( Fonts::Big, "*Big" );
+	LoadFont( Fonts::BigNum, "*BigNumbers" );
+	LoadFont( Fonts::Default, "*Default" );
+	LoadFont( FONT_FALLOUT, "*Fallout" );
+	LoadFont( Fonts::Fat, "*Fat" );
+	LoadFont( Fonts::Num, "*Numbers" );
+	LoadFont( Fonts::OldFo, "*OldDefault" );
+	LoadFont( Fonts::SandNum, "*SandNumbers" );
+	LoadFont( Fonts::Thin, "*Thin" );
+	LoadFont( Fonts::Special, "*Special" );
+    // SetDefaultFont(Fonts::CourierNewSmall, COLOR_TEXT);
+
+    Gui::EngineCallback_Start();
+   // Gui::AddDragAndDropHandler( ItemsDragAndDropHandler );
+
+    //NameColorizing::InitNameColorizing();
+    //IgnoreList::InitIgnoreList();
+    // ClientScreenTest::InitTestScreen();
+    Radio::InitRadioScreen();
+    ChosenTabs::InitChosenTabs();
+
+    return true;
+}
+
+// //////////////////////////////////////////////////////////////////////////////////////////////////
+// Call on client finish.
+void finish()
+{
+    //
+}
+
+// //////////////////////////////////////////////////////////////////////////////////////////////////
+// Main loop function. Next call every cycle.
+void loop()//(uint& wait)
+{
+    Gui::EngineCallback_Loop();
+}
+
+// //////////////////////////////////////////////////////////////////////////////////////////////////
+// Say to engine what screens is active.
+void get_active_screens( int[] result )
+{
+    Gui::EngineCallback_GetActiveScreens( result );
+}
+
+// //////////////////////////////////////////////////////////////////////////////////////////////////
+// Show/hide screen behaviour.
+void screen_change( bool show, int screen, dictionary@ params )
+{
+    if( show )
+        Gui::EngineCallback_ShowScreen( screen, params );
+    else
+        Gui::EngineCallback_HideScreen( screen );
+}
+
+// //////////////////////////////////////////////////////////////////////////////////////////////////
+// Render interface function. You can use Draw* functions only there.
+// Layer specification:
+//    1
+// Game map
+//    2, 3
+// PopUp menu, Cursor
+//    4
+//
+// Extra layers:
+// Global map
+//    100 (over map), 101 (over all)
+void render_iface( )
+{
+	uint layer = 2; //814 возможно тут что-то не так со слоями см. https://xp-dev.com/sc/change/76003/813
+    if( layer == 2 )
+    {
+        ChosenTabs::DrawChosenTabs();
+        Gui::EngineCallback_Draw();
+
+        // Help info
+        if( __HelpInfo )
+        {
+            // About
+            string aboutText =
+                "FOnline " + ( __Singleplayer ? "Singleplayer" : "" ) + "\n" +
+                "by Gamers for Gamers\n" +
+                "version " + CustomCall( "Version" ) + "\n" +
+                "\n" +
+                "Traffic, bytes:\n" +
+                "Send: " + CustomCall( "BytesSend" ) + "\n" +
+                "Receive: " + CustomCall( "BytesReceive" ) + "\n" +
+                "Sum: " + ( CustomCall( "BytesSend" ).toInt() + CustomCall( "BytesReceive" ).toInt() ) + "\n" +
+                "\n" +
+                "FPS: " + __FPS + " (" + ( !__VSync ? "" + abs( __FixedFPS ) : "VSync" ) + ( !__VSync && __FixedFPS < 0 ? ", sleep" : "" ) + ")\n" +
+                "Ping: " + __Ping + "\n" +
+                "\n" +
+                "Sound: " + __SoundVolume + "\n" +
+                "Music: " + __MusicVolume + "\n";
+            if( __DebugInfo )
+            {
+                aboutText += "\n" +
+                             "Focused object: " + ( Gui::GetFocusedObject() !is null ? Gui::GetFocusedObject().Name : "None" ) + "\n" +
+                             "Pressed object: " + ( Gui::GetPressedObject() !is null ? Gui::GetPressedObject().Name : "None" ) + "\n" +
+                             "Hovered object: " + ( Gui::GetHoveredObject() !is null ? Gui::GetHoveredObject().Name : "None" );
+            }
+            DrawText( aboutText, 30, 30, __ScreenWidth, __ScreenHeight, COLOR_RGB( 187, 187, 187 ), Fonts::Big, 0 );
+
+            // Help
+            DrawText( MSG_GAME( MsgStr::StrGameHelp ), 0, 0, __ScreenWidth, __ScreenHeight, COLOR_WHITE, Fonts::Default, FT_CENTERX | FT_CENTERY );
+        }
+
+        // Zoom text
+        if( __MapZooming && __SpritesZoomMin != __SpritesZoomMax )
+        {
+            string zoomText = MSG_GAME( MsgStr::StrZoom );
+            zoomText = ReplaceText( zoomText, "%d", "" + int(1.0 / __SpritesZoom * 100.0) );
+            zoomText = ReplaceText( zoomText, "%%", "%" );
+            DrawText( zoomText, 0, 0, __ScreenWidth, __ScreenHeight, COLOR_SAND, Fonts::Big, FT_CENTERX | FT_CENTERY );
+        }
+    }
+    else if( layer == 4 )
+    {
+        Gui::EngineCallback_DrawCursor();
+    }
+    /*
+       else if( layer == 100 && __GmapActive )
+       {
+        // Here you can draw on global map
+
+        // bool  __GmapActive - активна ли глобальная карта и все ли следующие нижеприведенные переменные корректны;
+        // bool  __GmapWait   - включен режим ожидания ответа о подтверждении энкаунтера;
+        // float __GmapZoom   - текущий масштаб, не забывайте учитывать его при рисовании на карте;
+        // int   __GmapOffsetX/Y   - смещение карты от нулевой координаты (верхний-левый угол);
+        // int   __GmapGroupCurX/Y - координаты группы игрока;
+        // int   __GmapGroupToX/Y  - координаты точки назначения;
+        // float __GmapGroupSpeed  - текущая скорость передвижения.
+        // Для примера, расчет текущего пикселя группы:
+        // x = __GmapGroupX / __GmapZoom + __GmapOffsetX, y = __GmapGroupY / __GmapZoom + __GmapOffsetY.
+       }
+     */
+}
+
+// //////////////////////////////////////////////////////////////////////////////////////////////////
+// Render map function. You can use DrawMap* functions only there. This drawing before 1 iface layer.
+void render_map()
+{
+    //
+}
+
+// //////////////////////////////////////////////////////////////////////////////////////////////////
+// Called on something critter in/out game.
+void critter_in( Critter cr )
+{
+    // Default colors
+    cr.NameColor = COLOR_CRITTER_NAME;
+    cr.ContourColor = ( cr.IsPlayer() ? COLOR_CONTOUR_YELLOW : COLOR_CONTOUR_RED );
+
+    // Try colorize from file
+    //if( NameColorizing::TryColorizeCritter( cr ) )
+    //    return;
+
+    // Karma voting
+    cr.NameColor = COLOR_LIGHT( COLOR_CRITTER_NAME, cr.PlayerKarma / 10 );
+}
+
+void critter_out( Critter cr )
+{
+    //
+}
+
+// //////////////////////////////////////////////////////////////////////////////////////////////////
+// Called on something item in/changed/out map.
+void item_map_in( Item item )
+{
+    Gui::EngineCallback_ItemChanged( true );
+}
+
+void item_map_changed( Item itemNow, Item itemBefore )
+{
+    Gui::EngineCallback_ItemChanged( true );
+}
+
+void item_map_out( Item item )
+{
+    Gui::EngineCallback_ItemChanged( true );
+}
+
+// //////////////////////////////////////////////////////////////////////////////////////////////////
+// Called on something critter in/out chosen inventory.
+void item_inv_all_in()
+{
+    Gui::EngineCallback_ItemChanged( false );
+}
+
+void item_inv_in( Item item )
+{
+    Gui::EngineCallback_ItemChanged( false );
+}
+
+void item_inv_changed( Item itemNow, Item itemBefore )
+{
+    Gui::EngineCallback_ItemChanged( false );
+}
+
+void item_inv_out( Item item )
+{
+    Gui::EngineCallback_ItemChanged( false );
+}
+
+void container_changed()
+{
+    Gui::EngineCallback_ItemChanged( false );
+}
+
+// //////////////////////////////////////////////////////////////////////////////////////////////////
+// Call on receive message on map.
+// By default delay == [TextDelay + message length * 100] ms
+bool map_message( string& message, uint16& hexX, uint16& hexY, uint& color, uint& delay )
+{
+    // Detect radio
+    if( color == 0xFFFFFFFE )
+        message = ".." + message + "..";
+    return true;
+}
+
+// //////////////////////////////////////////////////////////////////////////////////////////////////
+// Call on receive message.
+// By default delay == [TextDelay + message length * 100] ms
+bool in_message( string message, int& sayType, uint& critterId, uint& delay )
+{
+    Critter@ cr = GetCritter( critterId );
+    if( valid( cr ) && IgnoreList::PlayerIgnored( cr ) )
+        return false;
+    return true;
+}
+
+// //////////////////////////////////////////////////////////////////////////////////////////////////
+// Call on send message.
+bool out_message( string& message, int& sayType )
+{
+    string cmdPrefix = "~";
+    if( message[ 0 ] == cmdPrefix ) // Command
+    {
+        message[ 0 ] = "";
+
+        if( message == "names" )
+        {
+            //NameColorizing::InitNameColorizing();
+            Message( "Names colorizer refreshed." );
+            return false;
+        }
+
+        if( message == "ignorelist" )
+        {
+            IgnoreList::InitIgnoreList();
+            Message( "Ignore list refreshed." );
+            return false;
+        }
+
+        if( message == "globalmap" )
+        {
+            ServerRpc.Rpc_CritterToGlobal( 0 );
+            return false;
+        }
+
+        if( message.length() > 7 && message.substr( 0, 7 ) == "ignore " )
+        {
+            IgnoreList::IgnorePlayer( cmdPrefix + message );
+            IgnoreList::InitIgnoreList();
+            return false;
+        }
+
+        string separator = "#";
+        string result = CustomCall( "Command" + separator + message, separator );
+        if( result == "UNKNOWN" )
+        {
+            Message( "Unknown command." );
+        }
+        else if( result.length() > 0 )
+        {
+            string[]  msg = result.split( separator );
+            for( uint i = 0; i < msg.length(); i++ )
+                Message( ReplaceText( result, "<", "<" + cmdPrefix ) );
+        }
+
+        return false;
+    }
+
+    if( sayType == SAY_NORM )
+    {
+        if( message.length() > 2 && ( message[ 0 ] == "/" || message[ 0 ] == "." ) )
+        {
+            string ch = message[ 1 ];
+            if(     ch == "к" || ch == "К" || ch == "s" || ch == "S" )
+                sayType = SAY_SHOUT;
+            else if( ch == "э" || ch == "Э" || ch == "e" || ch == "E" )
+                sayType = SAY_EMOTE;
+            else if( ch == "ш" || ch == "Ш" || ch == "w" || ch == "W" )
+                sayType = SAY_WHISP;
+            else if( ch == "с" || ch == "С" || ch == "$" )
+                sayType = SAY_SOCIAL;
+            else if( ch == "р" || ch == "Р" || ch == "r" || ch == "R" )
+                sayType = SAY_RADIO;
+
+            if( sayType != SAY_NORM )
+            {
+                message[ 0 ] = "";
+                message[ 0 ] = "";
+                while( message[ 0 ] == " " )
+                    message[ 0 ] = "";
+            }
+        }
+        else if(         // RegExp: [*]([^*].*[^*])[*]
+            message.length() >= 4 && message[ 0 ] == "*" && message[ 1 ] != "*" &&
+            message[ message.length() - 2 ] != "*" && message[ message.length() - 1 ] == "*" )
+        {
+            sayType = SAY_EMOTE;
+            message = message.substr( 1, message.length() - 2 );
+        }
+    }
+
+    bool result = false;
+    for( uint i = 0, j = message.length(); i < j; i++ )
+    {
+        if( message[ i ] != " " )
+        {
+            result = true;
+            break;
+        }
+    }
+
+    return result;
+}
+
+// //////////////////////////////////////////////////////////////////////////////////////////////////
+// To-hit chance.
+int to_hit( const Critter& chosen, const Critter& target, const Item weapon, uint8 weaponMode )
+{
+    int use         = _WeaponModeUse( weaponMode );
+    int hitLocation = _WeaponModeAim( weaponMode );
+    if( use > 2 )
+        return 0;
+
+    if( target.IsDead() )
+        return 0;
+    if( !chosen.IsLife() )
+        return 0;
+
+    const Item@ realWeapon = _CritGetItemHand( chosen );
+    const Item@ ammo = null;
+
+    if( valid( realWeapon ) && _WeaponRound( weapon, use ) > 0 )
+    {
+        if( realWeapon.AmmoCount == 0 )
+            return 0;
+        @ammo = GetProtoItem( realWeapon.AmmoPid );
+    }
+
+    CritterProperty skill = _WeaponSkill( weapon, use );
+    int             wpnMaxDist = _WeaponMaxDist( weapon, use );
+    if( skill == CritterProperty::SkillThrowing )
+        wpnMaxDist = MIN( wpnMaxDist, 3 * MIN( int(10), chosen.Strength + 2 * chosen.PerkHeaveHo ) );
+
+    int dist = GetCrittersDistantion( chosen, target );
+    if( dist > wpnMaxDist )
+        return 0;
+
+    int toHit = int( chosen.GetAsInt( skill ) );
+    int weaponPerk = weapon.Weapon_Perk;
+    int blockers = 0;
+
+    if( skill != CritterProperty::SkillUnarmed && skill != CritterProperty::SkillMeleeWeapons )
+    {
+        // Ranged attack modifiers
+        int distmod1 = 2; // Used for initial weapon bonus
+        int distmod2 = 0; // Minimal distance
+        if( weaponPerk == ItemPerks::LongRange )
+            distmod1 = 4;
+        else if( weaponPerk == ItemPerks::ScopeRange )
+        {
+            distmod1 = 5;
+            distmod2 = 8;
+        }
+
+        int perception = chosen.Perception;
+        int acc = dist;
+
+        if( dist < distmod2 )
+            acc += distmod2;
+        else
+        {
+            if( chosen.IsPlayer() )
+                acc -= ( perception - 2 ) * distmod1;               // we want to keep it, because fo2238 might use it to display NPCs chance (via possessing)
+            else
+                acc -= perception * distmod1;
+        }
+
+        if( -2 * perception > acc )
+            acc = -2 * perception;
+
+        acc -= 2 * chosen.PerkSharpshooter;
+
+        if( acc >= 0 )
+        {
+            if( chosen.IsDamagedEye )
+                acc *= -12;
+            else
+                acc *= -4;
+        }
+        else
+        {
+            acc *= -4;
+        }
+
+        toHit += acc;
+
+        blockers = GetCrittersPath( chosen.HexX, chosen.HexY, target.HexX, target.HexY, 0.0f, dist, FIND_LIFE ).length();
+        if( !target.IsKnockout() )
+            blockers--;
+        toHit -= 10 * blockers;
+    } // End range modifiers
+
+    if( !( weapon.Weapon_IsUnarmed ) && chosen.IsTraitOneHander && valid( realWeapon ) )
+        toHit += ( weapon.Weapon_IsTwoHanded ? -40 : 20 );
+
+    int handlingStrength = chosen.Strength;
+    int reqStrength = weapon.Weapon_MinStrength;
+    if( chosen.PerkWeaponHandling != 0 )
+        handlingStrength += 3;
+    if( handlingStrength < reqStrength )
+        toHit -= ( reqStrength - handlingStrength ) * 20;
+    if( weaponPerk == ItemPerks::Accurate )
+        toHit += 20;
+
+    int acmod = target.ArmorClass;
+    if( valid( ammo ) )
+        acmod += ammo.Ammo_AcMod;
+    if( acmod > 0 )
+        toHit -= acmod;
+    // TODO: tohit += 15 if target is multihex
+    // TODO: light penalty
+
+    if( chosen.IsDamagedEye )
+        toHit -= 25;
+    if( chosen.PerkVampireAccuracy != 0 && IS_NIGHT( Globals.Hour ) )
+        toHit += 13;
+    if( target.IsKnockout() )
+        toHit += 40;
+    toHit += target.Multihex * 15;
+
+    int hitMod = GetHitAim( hitLocation );
+    if( skill == CritterProperty::SkillMeleeWeapons || skill == CritterProperty::SkillUnarmed )
+        hitMod /= 2;
+    toHit -= hitMod;
+    toHit = CLAMP( toHit, 5, 95 );
+
+    return toHit;
+}
+
+uint GetHitAim( int hitLocation )
+{
+    switch( hitLocation )
+    {
+    case HitLocations::LocationNone:
+        break;
+    case HitLocations::LocationUncalled:
+        break;
+    case HitLocations::LocationTorso:
+        return __HitAimTorso;
+    case HitLocations::LocationEyes:
+        return __HitAimEyes;
+    case HitLocations::LocationHead:
+        return __HitAimHead;
+    case HitLocations::LocationLeftArm:
+    case HitLocations::LocationRightArm:
+        return __HitAimArms;
+    case HitLocations::LocationGroin:
+        return __HitAimGroin;
+    case HitLocations::LocationRightLeg:
+    case HitLocations::LocationLeftLeg:
+        return __HitAimLegs;
+    default:
+        break;
+    }
+    return 0;
+}
+
+// //////////////////////////////////////////////////////////////////////////////////////////////////
+// Override aim location set by player through targetting screen or simple click on target.
+void hit_aim( uint8& aim )
+{}
+
+// //////////////////////////////////////////////////////////////////////////////////////////////////
+// Combat results.
+void combat_result( uint[] data )
+{
+    uint datalen = data.length();
+    if( datalen == 0 )
+        return;
+    if( data[ 0 ] != datalen )
+        return;
+
+    uint current = 1;
+
+    while( current < datalen )
+    {
+        int      damage  = -1;
+        uint     effect =  0;
+        uint     loc    =  0;
+        int      message = -1;
+
+        uint     mode = data[ current++ ];
+        uint     who  = data[ current++ ];
+        uint     who2;
+        Critter@ originalTarget;
+
+        Critter@ cr         = GetCritter( who );
+        Critter@ chosen     = GetChosen();
+        Critter@ trueTarget = null;
+
+        bool     self = ( who == GetChosen().Id );
+
+        string   name = "error0";
+        if( valid( cr ) )
+        {
+            if( !self )
+                name = cr.Name;
+            else
+                name = GetMsgStr( TEXTMSG_COMBAT, chosen.Gender == Gender::Male ? 506 : 556 );
+        }
+
+        uint offset;
+        if( self )
+        {
+            if( cr.Gender == Gender::Male )
+                offset = 506;
+            else
+                offset = 556;
+        }
+        else
+        {
+            if( cr.Gender == Gender::Male )
+                offset = 606;
+            else
+                offset = 706;
+        }
+
+        string result;
+
+        // reading and preparing the data:
+        switch( mode )
+        {
+        case MessageSpecifications::CritMiss:
+            effect = data[ current++ ];
+            result = GetMsgStr( TEXTMSG_COMBAT, offset + 8 );
+            result = ReplaceText( result, "%s", name );
+            break;
+        case MessageSpecifications::CritMissDamage:
+            effect = data[ current++ ];
+            damage = data[ current++ ];
+            result = GetMsgStr( TEXTMSG_COMBAT, offset + ( damage > 1 ? 28 : 27 ) );
+            result = ReplaceText( result, "%s", name );
+            if( damage > 1 )
+                result = ReplaceText( result, "%d", damage );
+            break;
+        case MessageSpecifications::Hit:
+        case MessageSpecifications::HitDead:
+            damage = data[ current++ ];
+            result = GetMsgStr( TEXTMSG_COMBAT, offset + ( damage > 1 ? 7 : ( damage != 0 ? 17 : 21 ) ) );
+            result = ReplaceText( result, "%s", name );
+            if( damage > 1 )
+                result = ReplaceText( result, "%d", damage );
+            break;
+        case MessageSpecifications::AimedHit:
+        case MessageSpecifications::AimedHitDead:
+            loc    = data[ current++ ];
+            damage = data[ current++ ];
+            result = GetMsgStr( TEXTMSG_COMBAT, offset + ( damage > 1 ? 6 : ( damage != 0 ? 16 : 20 ) ) );
+            result = ReplaceText( result, "%s", name );
+            result = ReplaceText( result, "%s", GetMsgStr( TEXTMSG_COMBAT, 1000 + cr.CrTypeAlias * 10 + loc - 1 ) );
+            if( damage > 1 )
+                result = ReplaceText( result, "%d", damage );
+            break;
+        case MessageSpecifications::CritHit:
+            damage  = data[ current++ ];
+            effect  = data[ current++ ];
+            message = data[ current++ ];
+            result = GetMsgStr( TEXTMSG_COMBAT, offset + ( damage > 1 ? 14 : ( damage != 0 ? 18 : 22 ) ) );
+            result = ReplaceText( result, "%s", name );
+            if( damage > 1 )
+                result = ReplaceText( result, "%d", damage );
+            break;
+        case MessageSpecifications::CritAimedHit:
+            loc     = data[ current++ ];
+            damage  = data[ current++ ];
+            effect  = data[ current++ ];
+            message = data[ current++ ];
+            result = GetMsgStr( TEXTMSG_COMBAT, offset + ( damage > 1 ? 5 : ( damage != 0 ? 15 : 19 ) ) );
+            result = ReplaceText( result, "%s", name );
+            result = ReplaceText( result, "%s", GetMsgStr( TEXTMSG_COMBAT, 1000 + cr.CrTypeAlias * 10 + loc - 1 ) );
+            if( damage > 1 )
+                result = ReplaceText( result, "%d", damage );
+            break;
+        case MessageSpecifications::CritHitDead:
+            damage  = data[ current++ ];
+            message = data[ current++ ];
+            result = GetMsgStr( TEXTMSG_COMBAT, offset + ( damage > 1 ? 14 : ( damage != 0 ? 18 : 22 ) ) );
+            result = ReplaceText( result, "%s", name );
+            if( damage > 1 )
+                result = ReplaceText( result, "%d", damage );
+            break;
+        case MessageSpecifications::CritAimedHitDead:
+            loc     = data[ current++ ];
+            damage  = data[ current++ ];
+            message = data[ current++ ];
+            result = GetMsgStr( TEXTMSG_COMBAT, offset + ( damage > 1 ? 5 : ( damage != 0 ? 15 : 19 ) ) );
+            result = ReplaceText( result, "%s", name );
+            result = ReplaceText( result, "%s", GetMsgStr( TEXTMSG_COMBAT, 1000 + cr.CrTypeAlias * 10 + loc - 1 ) );
+            if( damage > 1 )
+                result = ReplaceText( result, "%d", damage );
+            break;
+        case MessageSpecifications::Oops:
+            who2 = data[ current++ ];           // who2 was hit instead of who
+            // +2 "... was hit instead of you!"
+            // +3 "... was hit instead of ...!"
+            @trueTarget = GetCritter( who2 );
+            if( self )
+            {
+                // It was original target
+                result = GetMsgStr( TEXTMSG_COMBAT, cr.Gender == Gender::Male ? 608 : 708 );
+                string nameTrue = "error1";
+                if( valid( trueTarget ) )
+                    nameTrue = trueTarget.Name;
+                result = ReplaceText( result, "%s", nameTrue );
+            }
+            else
+            {
+                // It was not original target
+                result = GetMsgStr( TEXTMSG_COMBAT, offset + 3 );
+                if( who2 == GetChosen().Id )
+                {
+                    result = ReplaceText( result, "%s", GetMsgStr( TEXTMSG_COMBAT, chosen.Gender == Gender::Male ? 506 : 556 ) );
+                }
+                else
+                {
+                    string nameTrue = "error1";
+                    if( valid( trueTarget ) )
+                        nameTrue = trueTarget.Name;
+                    result = ReplaceText( result, "%s", nameTrue );
+                }
+                result = ReplaceText( result, "%s", name );
+            }
+            break;
+        case MessageSpecifications::Miss:
+            result = GetMsgStr( TEXTMSG_COMBAT, offset + 9 );
+            result = ReplaceText( result, "%s", name );
+            break;
+        case MessageSpecifications::HitRandomly:
+            result  = GetMsgStr( TEXTMSG_COMBAT, offset + 9 );
+            result  = ReplaceText( result, "%s", name );
+            result += GetMsgStr( TEXTMSG_COMBAT, 108 ) + GetMsgStr( TEXTMSG_COMBAT, offset - 306 + 20 );
+        default:
+            break;
+        }
+
+        bool isVerbose = ( __CombatMessagesType == 0 );
+        string[] ext = {};
+
+        if( message != -1 && isVerbose )       // Must be critical hit
+        {
+            result += GetMsgStr( TEXTMSG_COMBAT, message );
+        }
+        else if( effect != 0 )
+        {
+            offset -= 306;
+            if( mode > MessageSpecifications::CritMissDamage )           // Hit flags
+            {
+                if( FLAG( effect, HF_KNOCKOUT ) )
+                    ext.insertLast( GetMsgStr( TEXTMSG_COMBAT, offset + 0 ) );
+                if( FLAG( effect, HF_KNOCKDOWN ) )
+                    ext.insertLast( GetMsgStr( TEXTMSG_COMBAT, offset + 1 ) );
+                if( FLAG( effect, HF_CRIPPLED_LEFT_LEG ) )
+                    ext.insertLast( GetMsgStr( TEXTMSG_COMBAT, offset + 2 ) );
+                if( FLAG( effect, HF_CRIPPLED_RIGHT_LEG ) )
+                    ext.insertLast( GetMsgStr( TEXTMSG_COMBAT, offset + 3 ) );
+                if( FLAG( effect, HF_CRIPPLED_LEFT_ARM ) )
+                    ext.insertLast( GetMsgStr( TEXTMSG_COMBAT, offset + 4 ) );
+                if( FLAG( effect, HF_CRIPPLED_RIGHT_ARM ) )
+                    ext.insertLast( GetMsgStr( TEXTMSG_COMBAT, offset + 5 ) );
+                if( FLAG( effect, HF_BLINDED ) )
+                    ext.insertLast( GetMsgStr( TEXTMSG_COMBAT, offset + 6 ) );
+                // if(FLAG(effect, HF_DEATH))              ext.insertLast(GetMsgStr(TEXTMSG_COMBAT, offset     )); // This is handled elsewhere
+                // if(FLAG(effect, HF_ON_FIRE))            ext.insertLast(GetMsgStr(TEXTMSG_COMBAT, offset + 10)); // Not used
+                if( FLAG( effect, HF_BYPASS_ARMOR ) )
+                    ext.insertLast( GetMsgStr( TEXTMSG_COMBAT, offset + 11 ) );
+                if( FLAG( effect, HF_DROPPED_WEAPON ) )
+                    ext.insertLast( GetMsgStr( TEXTMSG_COMBAT, offset + 14 ) );
+                if( FLAG( effect, HF_LOST_NEXT_TURN ) )
+                    ext.insertLast( GetMsgStr( TEXTMSG_COMBAT, offset + 15 ) );
+                if( FLAG( effect, HF_RANDOM ) )
+                    ext.insertLast( GetMsgStr( TEXTMSG_COMBAT, offset + 21 ) );
+            }
+            else
+            {
+                if( FLAG( effect, MF_KNOCKED_DOWN ) )
+                    ext.insertLast( GetMsgStr( TEXTMSG_COMBAT, offset +  1 ) );
+                // if(FLAG(effect, MF_ON_FIRE))              ext.insertLast(GetMsgStr(TEXTMSG_COMBAT, offset + 10)); // Not used
+                if( FLAG( effect, MF_WEAPON_EXPLODED ) )
+                    ext.insertLast( GetMsgStr( TEXTMSG_COMBAT, offset + 12 ) );
+                if( FLAG( effect, MF_WEAPON_DESTROYED ) )
+                    ext.insertLast( GetMsgStr( TEXTMSG_COMBAT, offset + 13 ) );
+                if( FLAG( effect, MF_WEAPON_DROPPED ) )
+                    ext.insertLast( GetMsgStr( TEXTMSG_COMBAT, offset + 14 ) );
+                if( FLAG( effect, MF_LOST_NEXT_TURN ) )
+                    ext.insertLast( GetMsgStr( TEXTMSG_COMBAT, offset + 15 ) );
+                if( FLAG( effect, MF_HIT_SELF ) )
+                    ext.insertLast( GetMsgStr( TEXTMSG_COMBAT, offset + 16 ) );
+                if( FLAG( effect, MF_LOST_REST_OF_AMMO ) )
+                    ext.insertLast( GetMsgStr( TEXTMSG_COMBAT, offset + 17 ) );
+                if( FLAG( effect, MF_FIRED_DUD_SHOT ) )
+                    ext.insertLast( GetMsgStr( TEXTMSG_COMBAT, offset + 18 ) );
+                if( FLAG( effect, MF_HURT_SELF ) )
+                    ext.insertLast( GetMsgStr( TEXTMSG_COMBAT, offset + 19 ) );
+                // if(FLAG(effect, MF_HIT_RANDOMLY))         ext.insertLast(GetMsgStr(TEXTMSG_COMBAT, offset + 20)); // This is handled elsewhere
+                if( FLAG( effect, MF_CRIPPLED_RANDOM_LIMB ) )
+                    ext.insertLast( GetMsgStr( TEXTMSG_COMBAT, offset + 21 ) );
+                if( FLAG( effect, MF_WAS_KILLED ) )
+                    ext.insertLast( GetMsgStr( TEXTMSG_COMBAT, offset +  7 ) );
+            }
+            offset += 306;
+        }
+
+        if( 8 <= mode && mode <= 11 && ( !isVerbose || message == -1 ) )
+            ext.insertLast( GetMsgStr( TEXTMSG_COMBAT, offset + 7 - 306 ) );
+
+        for( uint m = 0, n = ext.length(); m < n; m++ )
+        {
+            if( m == n - 1 )
+                result += GetMsgStr( TEXTMSG_COMBAT, 108 );
+            else
+                result += ", ";
+
+            result += ext[ m ];
+        }
+
+        result += ".";
+
+        Message( result, FOMB_COMBAT_RESULT );
+
+        if( 8 <= mode && mode <= 11 && isVerbose && message != -1 )
+            Message( name + " " + GetMsgStr( TEXTMSG_COMBAT, offset + 7 - 306 ) + ".", FOMB_COMBAT_RESULT );
+
+        // On head indication
+        if( __DamageHitDelay > 0 && damage > 0 )
+            MapMessage( "-" + damage, cr.HexX, cr.HexY, __DamageHitDelay, 0xFFC80000, true, Random( -5, 5 ), -20 );
+    }
+}
+
+// //////////////////////////////////////////////////////////////////////////////////////////////////
+// Generic description. Descriptions type look in _client_defines.fos, Generic descriptions types.
+// int& offsX, int& offsY - offsets of text, by default is zero.
+string generic_description( int descType, int& offsX, int& offsY )
+{
+    Critter@ chosen = GetChosen();
+    if( not valid( chosen ) )
+        return "";
+    string result;
+
+    if( descType == GenericDescriptionsTypes::InventoryMain )
+    {
+        result += chosen.Name        + "\n";
+        result += "---------------------\n";
+        result += GetMsgStr( TEXTMSG_GAME, STR_INV_SHORT_SPECIAL( CritterProperty::Strength ) )   + "\n";
+        result += GetMsgStr( TEXTMSG_GAME, STR_INV_SHORT_SPECIAL( CritterProperty::Perception ) ) + "\n";
+        result += GetMsgStr( TEXTMSG_GAME, STR_INV_SHORT_SPECIAL( CritterProperty::Endurance ) )  + "\n";
+        result += GetMsgStr( TEXTMSG_GAME, STR_INV_SHORT_SPECIAL( CritterProperty::Charisma ) )   + "\n";
+        result += GetMsgStr( TEXTMSG_GAME, STR_INV_SHORT_SPECIAL( CritterProperty::Intellect ) )  + "\n";
+        result += GetMsgStr( TEXTMSG_GAME, STR_INV_SHORT_SPECIAL( CritterProperty::Agility ) )    + "\n";
+        result += GetMsgStr( TEXTMSG_GAME, STR_INV_SHORT_SPECIAL( CritterProperty::Luck ) )       + "\n";
+        result += "---------------------\n";
+
+        Item@ weaponMain = chosen.GetItemBySlot( SLOT_HAND1 );
+        if( valid( weaponMain ) )
+        {
+            int use = _WeaponModeUse( weaponMain.Mode );
+            if( use > 2 )
+                use = 0;
+
+            result += GetMsgStr( TEXTMSG_ITEM, STR_ITEM_NAME( weaponMain ) ) + "\n";
+
+            if( weaponMain.Type == ItemType::Weapon )
+            {
+                result += GetMsgStr( TEXTMSG_GAME, MsgStr::StrInvDmg ) + " ";
+                result += _WeaponDmgMin( weaponMain, use ) + "-";
+                int wpnMaxDmg = _WeaponDmgMax( weaponMain, use );
+                if( _WeaponIsHtHAttack( weaponMain, use ) )
+                    wpnMaxDmg += chosen.MeleeDamage;
+                result += wpnMaxDmg;
+
+                if( _WeaponMaxDist( weaponMain, use ) > 1 )
+                {
+                    result += " " + GetMsgStr( TEXTMSG_GAME, MsgStr::StrInvDist ) + " ";
+                    int wpnMaxDist = _WeaponMaxDist( weaponMain, use );
+                    if( _WeaponSkill( weaponMain, use ) == CritterProperty::SkillThrowing )
+                        wpnMaxDist = MIN( wpnMaxDist, 3 * MIN( int(10), chosen.Strength + 2 * chosen.PerkHeaveHo ) );
+                    result += wpnMaxDist;
+                }
+                result += "\n";
+
+                if( weaponMain.Weapon_MaxAmmoCount > 0 )
+                {
+                    result += GetMsgStr( TEXTMSG_GAME, MsgStr::StrInvAmmo ) + " ";
+                    result += weaponMain.AmmoCount            + "/";
+                    result += weaponMain.Weapon_MaxAmmoCount  + " ";
+                    result += GetMsgStr( TEXTMSG_GAME, STR_CALIBER( weaponMain.Weapon_Caliber ) );
+                }
+                result += "\n";
+            }
+            else
+            {
+                result += "\n\n";
+            }
+        }
+        else
+        {
+            // Unarmed
+            const Item@ unarmed = chosen.GetItemBySlot( SLOT_HAND1 );
+            result += GetMsgStr( TEXTMSG_GAME, MsgStr::StrInvNoItem )     + "\n";
+            result += GetMsgStr( TEXTMSG_GAME, MsgStr::StrInvUnarmedDmg ) + " ";
+            result += _WeaponDmgMin( unarmed, _WeaponModeUse( unarmed.Mode ) ) + "-";
+            result += ( _WeaponDmgMax( unarmed, _WeaponModeUse( unarmed.Mode ) ) + chosen.MeleeDamage );
+            result += "\n\n";
+        }
+        result += "---------------------\n";
+
+        Item@ weaponExt = chosen.GetItemBySlot( SLOT_HAND2 );
+        if( valid( weaponExt ) )
+        {
+            int use = _WeaponModeUse( weaponExt.Mode );
+            if( use > 2 )
+                use = 0;
+
+            result += GetMsgStr( TEXTMSG_ITEM, STR_ITEM_NAME( weaponExt ) ) + "\n";
+
+            if( weaponExt.Type == ItemType::Weapon )
+            {
+                result += GetMsgStr( TEXTMSG_GAME, MsgStr::StrInvDmg ) + " ";
+                result += _WeaponDmgMin( weaponExt, use )  + "-";
+                int wpnMaxDmg = _WeaponDmgMax( weaponExt, use );
+                if( _WeaponIsHtHAttack( weaponExt, use ) )
+                    wpnMaxDmg += chosen.MeleeDamage;
+                result += wpnMaxDmg;
+                if( _WeaponMaxDist( weaponExt, use ) > 1 )
+                {
+                    result += " " + GetMsgStr( TEXTMSG_GAME, MsgStr::StrInvDist ) + " ";
+                    int wpnMaxDist = _WeaponMaxDist( weaponExt, use );
+                    if( _WeaponSkill( weaponExt, use ) == CritterProperty::SkillThrowing )
+                        wpnMaxDist = MIN( wpnMaxDist, 3 * MIN( int(10), chosen.Strength + 2 * chosen.PerkHeaveHo ) );
+                    result += wpnMaxDist;
+                }
+                result += "\n";
+
+                if( weaponExt.Weapon_MaxAmmoCount > 0 )
+                {
+                    result += GetMsgStr( TEXTMSG_GAME, MsgStr::StrInvAmmo ) + " ";
+                    result += weaponExt.AmmoCount             + "/";
+                    result += weaponExt.Weapon_MaxAmmoCount   + " ";
+                    result += GetMsgStr( TEXTMSG_GAME, STR_CALIBER( weaponExt.Weapon_Caliber ) );
+                }
+                result += "\n";
+            }
+            else
+            {
+                result += "\n\n";
+            }
+        }
+        else
+        {
+            // Unarmed
+            const Item@ unarmed = chosen.GetItemBySlot( SLOT_HAND2 );
+            result += GetMsgStr( TEXTMSG_GAME, MsgStr::StrInvNoItem )     + "\n";
+            result += GetMsgStr( TEXTMSG_GAME, MsgStr::StrInvUnarmedDmg ) + " ";
+            result += _WeaponDmgMin( unarmed, _WeaponModeUse( unarmed.Mode ) ) + "-";
+            result += ( _WeaponDmgMax( unarmed, _WeaponModeUse( unarmed.Mode ) ) + chosen.MeleeDamage );
+            result += "\n\n";
+        }
+
+        result += GetMsgStr( TEXTMSG_GAME, MsgStr::StrInvTotalWeight ) + " ";
+        result += ( chosen.ItemsWeight / 1000 ) + "/";
+        result += ( chosen.CarryWeight / 1000 ) + ".";
+    }
+    else if( descType == GenericDescriptionsTypes::InventorySpecial )
+    {
+        offsX = 23;
+        result += "\n\n";
+        result += chosen.Strength   + "\n";
+        result += chosen.Perception + "\n";
+        result += chosen.Endurance  + "\n";
+        result += chosen.Charisma   + "\n";
+        result += chosen.Intellect  + "\n";
+        result += chosen.Agility    + "\n";
+        result += chosen.Luck;
+    }
+    else if( descType == GenericDescriptionsTypes::InventoryStats )
+    {
+        offsX = 39;
+        result += "\n\n";
+        result += GetMsgStr( TEXTMSG_GAME, MsgStr::StrInvHp ) + " ";
+        result += chosen.CurrentHp + "/" + chosen.MaxLife + "\n";
+        result += GetMsgStr( TEXTMSG_GAME, MsgStr::StrInvAc ) + " ";
+        result += chosen.ArmorClass + "\n";
+        result += GetMsgStr( TEXTMSG_GAME, MsgStr::StrInvNormal ) + "\n";
+        result += GetMsgStr( TEXTMSG_GAME, MsgStr::StrInvLaser )  + "\n";
+        result += GetMsgStr( TEXTMSG_GAME, MsgStr::StrInvFire )   + "\n";
+        result += GetMsgStr( TEXTMSG_GAME, MsgStr::StrInvPlasma ) + "\n";
+        result += GetMsgStr( TEXTMSG_GAME, MsgStr::StrInvExplode );
+    }
+    else if( descType == GenericDescriptionsTypes::InventoryResist )
+    {
+        offsX = 103;
+        result += "\n\n\n\n";
+        int[] threshold = array<int> ( chosen.DamageThreshold );
+        int[] resistance = array<int> ( chosen.DamageResistance );
+        result += threshold[ DamageTypes::Normal ]  + "/" + resistance[ DamageTypes::Normal ]  + "%\n";
+        result += threshold[ DamageTypes::Laser ]   + "/" + resistance[ DamageTypes::Laser ]   + "%\n";
+        result += threshold[ DamageTypes::Fire ]    + "/" + resistance[ DamageTypes::Fire ]    + "%\n";
+        result += threshold[ DamageTypes::Plasma ]  + "/" + resistance[ DamageTypes::Plasma ]  + "%\n";
+        result += threshold[ DamageTypes::Explode ] + "/" + resistance[ DamageTypes::Explode ] + "%";
+    }
+
+    return result;
+}
+
+// //////////////////////////////////////////////////////////////////////////////////////////////////
+// Item description. Look types look in _client_defines.fos, Item look types.
+string item_description( Item item, int lookType )
+{
+    // Default error text
+    if( not IsMsgStr( TEXTMSG_ITEM, STR_ITEM_NAME( item ) + ( lookType != ItemLookTypes::OnlyName ? 1 : 0 ) ) )
+        return GetMsgStr( TEXTMSG_GAME, MsgStr::StrItemLookNothing );
+
+    string result;
+
+    // Car on world map
+    if( lookType == ItemLookTypes::WmCar )
+    {
+        string fuel = GetMsgStr( TEXTMSG_GAME, MsgStr::StrInvCarFuel );
+        fuel = ReplaceText( fuel, "VALUE",     item.Charge / 100 );
+        fuel = ReplaceText( fuel, "MAX_VALUE", item.Car_TankVolume / 100 );
+        string deterioration = GetMsgStr( TEXTMSG_GAME, MsgStr::StrInvCarDeterioration );
+        deterioration = ReplaceText( deterioration, "VALUE", item.Deterioration * 100 / item.Car_MaxDeterioration );
+        result = fuel + "\n" + deterioration;
+    }
+    // Short info
+    else if( lookType == ItemLookTypes::OnlyName )
+    {
+        result += ReplaceText( GetMsgStr( TEXTMSG_GAME, MsgStr::StrItemLook ), "NAME", GetMsgStr( TEXTMSG_ITEM, STR_ITEM_NAME( item ) ) );
+    }
+    // Full info
+    else
+    {
+        if( lookType == ItemLookTypes::Inventory )
+            result += GetMsgStr( TEXTMSG_ITEM, STR_ITEM_NAME( item ) ) + "\n";
+
+        if( item.ProtoId == Content::Item::holodisk && item.HolodiskNum != 0 )
+            result += GetMsgStr( TEXTMSG_HOLO, STR_HOLO_INFO_NAME( item.HolodiskNum ) );
+        else
+            result += GetMsgStr( TEXTMSG_ITEM, STR_ITEM_INFO( item ) );
+
+        if( lookType != ItemLookTypes::Map )
+        {
+            // Weight
+            result += "\n" + ReplaceText( GetMsgStr( TEXTMSG_GAME, MsgStr::StrItemWeightGramm ), "VALUE", item.Weight * item.Count );
+
+            // Ammo load
+            if( item.Type == ItemType::Weapon && item.Weapon_MaxAmmoCount > 0 )
+            {
+                result += "\n";
+                string str = GetMsgStr( TEXTMSG_GAME, MsgStr::StrInvHasShots );
+                str = ReplaceText( str, "VALUE",     item.AmmoCount );
+                str = ReplaceText( str, "MAX_VALUE", item.Weapon_MaxAmmoCount );
+                str = ReplaceText( str, "AMMO",      GetMsgStr( TEXTMSG_GAME, STR_CALIBER( item.Weapon_Caliber ) ) );
+                result += str;
+            }
+
+            // Deterioration
+            if( item.Deteriorable )
+            {
+                uint8  brokenCount = item.BrokenCount;
+                uint16 deterioration = item.Deterioration;
+
+                // Broken level, procent
+                result += "\n";
+                if( item.BrokenNotresc )
+                    result += GetMsgStr( TEXTMSG_GAME, MsgStr::StrDeteriorationNoResc );
+                else if( item.BrokenLowBroken )
+                    result += GetMsgStr( TEXTMSG_GAME, MsgStr::StrDeteriorationBrokenLow );
+                else if( item.BrokenNormBroken )
+                    result += GetMsgStr( TEXTMSG_GAME, MsgStr::StrDeteriorationBrokenNorm );
+                else if( item.BrokenHighBroken )
+                    result += GetMsgStr( TEXTMSG_GAME, MsgStr::StrDeteriorationBrokenHigh );
+                else
+                    result += ReplaceText( GetMsgStr( TEXTMSG_GAME, MsgStr::StrDeteriorationProcent ), "VALUE", deterioration * 100 / Tla::MaxDeterioration );
+
+                // Service
+                if( item.BrokenService )
+                    result += "\n" + GetMsgStr( TEXTMSG_GAME, MsgStr::StrDeteriorationService );
+
+                // Service ext
+                if( item.BrokenServiceExt )
+                    result += "\n" + GetMsgStr( TEXTMSG_GAME, MsgStr::StrDeteriorationServiceExt );
+
+                // Broken count
+                Critter@ chosen = GetChosen();
+                if( valid( chosen ) && chosen.PerkMrFixit != 0 )
+                    result += "\n" + ReplaceText( GetMsgStr( TEXTMSG_GAME, MsgStr::StrDeteriorationBrokenCount ), "VALUE", brokenCount );
+            }
+
+            // Key id
+            if( item.Type == ItemType::Key )
+                result += "\n" + ReplaceText( GetMsgStr( TEXTMSG_GAME, MsgStr::StrInvKeyNumber ), "KEY_ID", item.LockerId );
+        }
+    }
+
+    // Format tags
+    if( item.Lexems != "" )
+        return FormatTags( result, item.Lexems );
+    return result;
+}
+
+// //////////////////////////////////////////////////////////////////////////////////////////////////
+// Critter description. Look types look in _client_defines.fos, Critter look types.
+string critter_description( Critter& cr, int lookType )
+{
+    string result;
+    int    gender = cr.Gender;
+
+    // Player
+    if( cr.IsPlayer() )
+    {
+        // Only name
+        if( lookType == CritterLookTypes::OnlyName )
+        {
+            result = cr.Name;             // No change
+        }
+        // Short info
+        else if( lookType == CritterLookTypes::LookShort )
+        {
+            result += GetMsgStr( TEXTMSG_GAME, STR_CRIT_LOOK1( gender ) );
+            result += cr.Name;
+            result += ".";
+        }
+        // Full info
+        else
+        {
+            result += GetMsgStr( TEXTMSG_GAME, STR_CRIT_LOOK1( gender ) );
+
+            // Age
+            uint ageStr = GetMsgStrNumUpper( TEXTMSG_GAME, STR_CRIT_LOOK_AGE( gender, cr.Age ) );
+            if( ageStr != 0 )
+                result += GetMsgStr( TEXTMSG_GAME, ageStr );
+            else
+                result += cr.Name;
+            result += ".";
+        }
+    }
+    // Npc
+    else
+    {
+        hash dlgId = cr.DialogId;
+        hash npcPid = cr.ProtoId;
+        bool defaultText = false;
+
+        if( lookType == CritterLookTypes::OnlyName )
+        {
+            result = GetMsgStr( TEXTMSG_DLG, STR_NPC_NAME( dlgId, npcPid ) );
+        }
+        // Short info
+        else if( lookType == CritterLookTypes::LookShort )
+        {
+            if( cr.IsLife() && IsMsgStr( TEXTMSG_DLG, STR_NPC_INFO_LIFE( dlgId, npcPid ) ) )
+                result += GetMsgStr( TEXTMSG_DLG, STR_NPC_INFO_LIFE( dlgId, npcPid ) );
+            else if( cr.IsKnockout() && IsMsgStr( TEXTMSG_DLG, STR_NPC_INFO_KO( dlgId, npcPid ) ) )
+                result += GetMsgStr( TEXTMSG_DLG, STR_NPC_INFO_KO(  dlgId, npcPid ) );
+            else if( cr.IsDead() && IsMsgStr( TEXTMSG_DLG, STR_NPC_INFO_DEAD( dlgId, npcPid ) ) )
+                result += GetMsgStr( TEXTMSG_DLG, STR_NPC_INFO_DEAD( dlgId, npcPid ) );
+            else
+                defaultText = true;
+        }
+        // Full info
+        else
+        {
+            if( cr.IsLife() && IsMsgStr( TEXTMSG_DLG, STR_NPC_FULL_INFO_LIFE( dlgId, npcPid ) ) )
+                result += GetMsgStr( TEXTMSG_DLG, STR_NPC_FULL_INFO_LIFE( dlgId, npcPid ) );
+            else if( cr.IsKnockout() && IsMsgStr( TEXTMSG_DLG, STR_NPC_FULL_INFO_KO( dlgId, npcPid ) ) )
+                result += GetMsgStr( TEXTMSG_DLG, STR_NPC_FULL_INFO_KO(  dlgId, npcPid ) );
+            else if( cr.IsDead() && IsMsgStr( TEXTMSG_DLG, STR_NPC_FULL_INFO_DEAD( dlgId, npcPid ) ) )
+                result += GetMsgStr( TEXTMSG_DLG, STR_NPC_FULL_INFO_DEAD( dlgId, npcPid ) );
+            else
+                defaultText = true;
+        }
+
+        if( defaultText )
+        {
+            // Check standart text
+            if( IsMsgStr( TEXTMSG_DLG, STR_NPC_NAME( dlgId, npcPid ) ) )
+            {
+                if( cr.IsLife() )
+                    result += ReplaceText( GetMsgStr( TEXTMSG_GAME, MsgStr::StrCritLookLife ), "NAME", GetMsgStr( TEXTMSG_DLG, STR_NPC_NAME( dlgId, npcPid ) ) );
+                else if( cr.IsKnockout() )
+                    result += ReplaceText( GetMsgStr( TEXTMSG_GAME, MsgStr::StrCritLookKo ), "NAME", GetMsgStr( TEXTMSG_DLG, STR_NPC_NAME( dlgId, npcPid ) ) );
+                else if( cr.IsDead() )
+                    result += ReplaceText( GetMsgStr( TEXTMSG_GAME, MsgStr::StrCritLookDead ), "NAME", GetMsgStr( TEXTMSG_DLG, STR_NPC_NAME( dlgId, npcPid ) ) );
+            }
+            // Set default text
+            else
+            {
+                result += GetMsgStr( TEXTMSG_GAME, MsgStr::StrCritLookNothing );
+            }
+        }
+    }
+
+    // Additional description
+    if( lookType == CritterLookTypes::LookFull )
+    {
+        if( result.length() > 0 && result[ result.length() - 1 ] != "." )
+            result += ".";
+        result += " ";
+
+        Critter@ chosen = GetChosen();
+        if( valid( chosen ) && chosen.PerkAwareness != 0 )   // Awareness
+        {
+            result += GetMsgStr( TEXTMSG_GAME, STR_CRIT_LOOK_HP( gender ) );
+            result = ReplaceText( result, "CUR", cr.CurrentHp );
+            result = ReplaceText( result, "MAX", cr.MaxLife );
+
+            Item@ item = cr.GetItemBySlot( SLOT_HAND1 );
+            if( _CritIsInjured( cr ) )
+            {
+                if( valid( item ) )
+                    result += ", ";
+                else
+                    result += GetMsgStr( TEXTMSG_GAME, MsgStr::StrAnd );
+
+                result += GetMsgStr( TEXTMSG_GAME, STR_CRIT_LOOK_LIMBS( gender, false ) );
+            }
+
+            if( valid( item ) )
+            {
+                if( item.Type == ItemType::Weapon )
+                {
+                    if( item.Weapon_MaxAmmoCount == 0 )
+                    {
+                        result += GetMsgStr( TEXTMSG_GAME, MsgStr::StrCritLookWeap );
+                        result = ReplaceText( result, "WEAPON", GetMsgStr( TEXTMSG_ITEM, STR_ITEM_NAME( item ) ) );
+                    }
+                    else
+                    {
+                        result += GetMsgStr( TEXTMSG_GAME, MsgStr::StrCritLookWeapAmmo );
+                        result = ReplaceText( result, "WEAPON", GetMsgStr( TEXTMSG_ITEM, STR_ITEM_NAME( item ) ) );
+                        result = ReplaceText( result, "CUR", item.AmmoCount );
+                        result = ReplaceText( result, "MAX", item.Weapon_MaxAmmoCount );
+                        result = ReplaceText( result, "AMMO", GetMsgStr( TEXTMSG_GAME, STR_CALIBER( item.Weapon_Caliber ) ) );
+                    }
+                }
+                else
+                {
+                    result += GetMsgStr( TEXTMSG_GAME, MsgStr::StrCritLookMisc );
+                    result = ReplaceText( result, "MISC", GetMsgStr( TEXTMSG_ITEM, STR_ITEM_NAME( item ) ) );
+                }
+            }
+        }
+        else         // Simple
+        {
+            result += GetMsgStr( TEXTMSG_GAME, STR_CRIT_LOOK_WHO( gender ) );
+
+            int hp_proc = cr.CurrentHp * 100 / cr.MaxLife;
+            if( cr.IsDead() )
+                result += GetMsgStr( TEXTMSG_GAME, STR_CRIT_LOOK_STATE( 0 ) );
+            else if( hp_proc < 34 )
+                result += GetMsgStr( TEXTMSG_GAME, STR_CRIT_LOOK_STATE( 1 ) );
+            else if( hp_proc < 67 )
+                result += GetMsgStr( TEXTMSG_GAME, STR_CRIT_LOOK_STATE( 2 ) );
+            else if( hp_proc < 100 )
+                result += GetMsgStr( TEXTMSG_GAME, STR_CRIT_LOOK_STATE( 3 ) );
+            else
+                result += GetMsgStr( TEXTMSG_GAME, STR_CRIT_LOOK_STATE( 4 ) );
+
+            if( _CritIsInjured( cr ) )
+            {
+                if( hp_proc < 90 )
+                    result += GetMsgStr( TEXTMSG_GAME, MsgStr::StrAnd );
+                result += GetMsgStr( TEXTMSG_GAME, STR_CRIT_LOOK_LIMBS( gender, hp_proc >= 90 ) );
+            }
+        }
+        result += ".";
+    }
+
+    // Format tags
+    if( cr.Lexems != "" )
+        return FormatTags( result, cr.Lexems );
+    return result;
+}
+
+// //////////////////////////////////////////////////////////////////////////////////////////////////
+// Call to determine cost of single item.
+// To allow function set __CustomItemCost to true.
+// Don't forgot specify this function in client script.
+uint item_cost( Item item, Critter& chosen, Critter& npc, bool sell )
+{
+    return sell ? 1 : 2;
+}
+
+// //////////////////////////////////////////////////////////////////////////////////////////////////
+// Call to determine available timeouts.
+void get_available_timeouts( CritterProperty[]& timeouts )
+{
+    for( uint i = 0; i < CritterPropertyTimeouts.length(); i++ )
+        timeouts.insertLast( CritterPropertyTimeouts[ i ] );
+}
+
+// //////////////////////////////////////////////////////////////////////////////////////////////////
+// Call on some critter action.
+void critter_action( bool localCall, Critter cr, int action, int actionExt,const Item item )
+{
+    // Not process locally called actions
+    if( cr.IsChosen() && not localCall )
+    {
+        switch( action )
+        {
+        case ACTION_MOVE_ITEM:
+        case ACTION_MOVE_ITEM_SWAP:
+        case ACTION_USE_ITEM:
+        case ACTION_DROP_ITEM:
+        case ACTION_USE_WEAPON:
+        case ACTION_RELOAD_WEAPON:
+        case ACTION_USE_SKILL:
+        case ACTION_PICK_ITEM:
+        case ACTION_PICK_CRITTER:
+        case ACTION_OPERATE_CONTAINER:
+            return;             // Skip processing
+        default:
+            break;              // Processing
+        }
+    }
+
+    const Item@ proto = ( valid( item ) ? item : cr.GetItemBySlot( SLOT_HAND1 ) );
+    if( ( action >= ACTION_MOVE_ITEM && action <= ACTION_OPERATE_CONTAINER ) || action == ACTION_STANDUP )
+        cr.Wait( __Breaktime );
+
+    switch( action )
+    {
+    case ACTION_MOVE:
+        // Not implemented
+        // cr.Wait(move time);
+        break;
+    case ACTION_RUN:
+        // Not implemented
+        // cr.Wait(run time);
+        break;
+    case ACTION_MOVE_ITEM:
+        if( cr.IsLife() )
+        {
+            uint8 fromSlot = actionExt;
+            uint8 toSlot = item.CritSlot;
+
+            cr.ClearAnim();
+
+            if( toSlot == SLOT_HAND1 )
+                cr.Animate( 0, Anim2Actions::ShowWeapon, item );
+            else if( fromSlot == SLOT_HAND1 )
+                cr.Animate( 0, Anim2Actions::HideWeapon, item );
+            else
+                cr.Animate( 0, Anim2Actions::SwitchItems );
+        }
+        break;
+    case ACTION_MOVE_ITEM_SWAP:
+        break;
+    case ACTION_USE_ITEM:
+        if( cr.IsLife() && valid( proto ) )
+        {
+            cr.ClearAnim();
+
+            if( proto.Type == ItemType::Weapon && cr.IsAnimAviable( proto.Weapon_Anim1, proto.Weapon_Anim2_0 ) )
+                cr.Animate( proto.Weapon_Anim1, proto.Weapon_Anim2_0, item );
+            else
+                cr.Animate( 0, Anim2Actions::Use, item );
+        }
+        break;
+    case ACTION_DROP_ITEM:
+        if( cr.IsLife() )
+        {
+            cr.ClearAnim();
+            cr.Animate( 0, Anim2Actions::Pickup );
+        }
+        break;
+    case ACTION_USE_WEAPON:
+        if( cr.IsLife() && valid( proto ) )
+        {
+            int  use   = ( actionExt & 0xF );
+            int  aim   = ( ( actionExt >> 4 ) & 0xF );
+            bool fail = ( ( ( actionExt >> 8 ) & 1 ) != 0 );
+
+            cr.ClearAnim();
+
+            cr.Animate( 0, Anim2Actions::PrepareWeapon );
+
+            //PlaySound( 'W', SOUND_WEAPON_USE, _WeaponSoundId( proto, use ), use != 1 ? '1' : '2' );
+            cr.Animate( 0, _WeaponAnim2( proto, use ), item );
+
+            if( fail )
+                cr.Animate( 0, Anim2Actions::DamageFront, item );
+            else
+                cr.Animate( 0, Anim2Actions::TurnoffWeapon );
+        }
+        break;
+    case ACTION_RELOAD_WEAPON:
+        if( cr.IsLife() && valid( proto ) )
+        {
+            cr.ClearAnim();
+            //PlaySound( 'W', SOUND_WEAPON_RELOAD, proto.Weapon_SoundId_0, '1' );
+            cr.Animate( item.Weapon_Anim1, Anim2Actions::Reload, item );
+        }
+        break;
+    case ACTION_USE_SKILL:
+        if( cr.IsLife() && actionExt != CritterProperty::SkillSneak )
+        {
+            cr.ClearAnim();
+            cr.Animate( 0, Anim2Actions::Use );
+        }
+        break;
+    case ACTION_PICK_ITEM:
+        if( cr.IsLife() && valid( proto ) )
+        {
+            cr.ClearAnim();
+            cr.Animate( 0, proto.GroundLevel ? Anim2Actions::Pickup : Anim2Actions::Use );
+        }
+        break;
+    case ACTION_PICK_CRITTER:
+        if( cr.IsLife() )
+        {
+            cr.ClearAnim();
+
+            switch( actionExt )           // 0 - loot, 1 - steal, 2 - push
+            {
+            case 0:
+                cr.Animate( 0, Anim2Actions::Loot );
+                break;
+            case 1:
+                cr.Animate( 0, Anim2Actions::Steal );
+                break;
+            case 2:
+                cr.Animate( 0, Anim2Actions::Push );
+                break;
+            default:
+                break;
+            }
+        }
+        break;
+    case ACTION_OPERATE_CONTAINER:
+        if( cr.IsLife() )
+        {
+            cr.ClearAnim();
+            int transferType  = actionExt / 10;
+            int directionType = actionExt % 10;
+
+            if( transferType == TransferTypes::HexContDown || transferType == TransferTypes::CritLoot )
+                cr.Animate( 0, Anim2Actions::Pickup );
+            else
+                cr.Animate( 0, Anim2Actions::Use );
+        }
+        break;
+    case ACTION_DODGE:
+        if( not cr.IsAnimPlaying() && cr.IsLife() )
+        {
+            cr.Animate( 0, actionExt == 0 ? Anim2Actions::DodgeFront : Anim2Actions::DodgeBack );
+        }
+        break;
+    case ACTION_DAMAGE:
+        if( not cr.IsAnimPlaying() )
+        {
+            if( cr.IsLife() )
+                cr.Animate( 0, actionExt == 0 ? Anim2Actions::DamageFront : Anim2Actions::DamageBack );
+            else if( cr.IsKnockout() )
+                cr.Animate( 0, actionExt == 0 ? Anim2Actions::DamageProneFront : Anim2Actions::DamageProneBack );
+        }
+        else
+        {
+            // Todo:
+            // Anim2Actions::Walk_DAMAGE_FRONT
+            // Anim2Actions::Walk_DAMAGE_BACK
+            // Anim2Actions::Limp_DAMAGE_FRONT
+            // Anim2Actions::Limp_DAMAGE_BACK
+            // Anim2Actions::Run_DAMAGE_FRONT
+            // Anim2Actions::Run_DAMAGE_BACK
+        }
+        break;
+    case ACTION_DAMAGE_FORCE:
+        if( cr.IsLife() )
+        {
+            cr.ClearAnim();
+            cr.Animate( 0, actionExt == 0 ? Anim2Actions::DamageFront : Anim2Actions::DamageBack );
+        }
+        else if( cr.IsKnockout() )
+        {
+            cr.ClearAnim();
+            cr.Animate( 0, actionExt == 0 ? Anim2Actions::DamageProneFront : Anim2Actions::DamageProneBack );
+        }
+        break;
+    case ACTION_KNOCKOUT:
+        if( not cr.IsKnockout() )
+        {
+            cr.ClearAnim();
+            cr.Animate( 0, actionExt );
+        }
+        break;
+    case ACTION_STANDUP:
+        if( cr.IsKnockout() )
+        {
+            cr.ClearAnim();
+            cr.Animate( 0, actionExt );
+        }
+        break;
+    case ACTION_FIDGET:
+        if( cr.IsLife() && not cr.IsAnimPlaying() )
+        {
+            cr.Animate( 0, Anim2Actions::Fidget );
+        }
+        break;
+    case ACTION_DEAD:
+        if( not cr.IsDead() )
+        {
+            cr.ClearAnim();
+            cr.Animate( 0, actionExt );
+        }
+        break;
+    case ACTION_CONNECT:
+        break;
+    case ACTION_DISCONNECT:
+        break;
+    case ACTION_RESPAWN:
+        break;
+    case ACTION_REFRESH:
+        break;
+    default:
+        break;
+    }
+}
+
+// //////////////////////////////////////////////////////////////////////////////////////////////////
+// Call before 2d animation playing.
+void animation2d_process( bool animateStay, Critter cr, uint anim1, uint anim2, Item item )
+{
+    if( !animateStay )
+        Animation::PlayAnimSound( cr.ModelName, cr.Gender, anim1, anim2 );
+}
+
+// //////////////////////////////////////////////////////////////////////////////////////////////////
+// Called on some items collection generating.
+// To force function call use RefreshItemsCollection(int collection)
+// Collection constants see in Items collections _client_defines.fos
+// If you want disable showing than just null pointer in collection
+void items_collection( int collection, Item@[]& items )
+{
+    // Example
+    // Disable showing of all weapons in USE mode:
+    /*if(collection == ITEMS_USE)
+       {
+            for(uint i = 0, j = items.length(); i < j; i++)
+                    if(items[i].Type == ItemType::Weapon)
+                            @items[i] = null;
+       }*/
+}
+
+// //////////////////////////////////////////////////////////////////////////////////////////////////
+// Call on message added to message box.
+// Parameters messageText and messageType can be changed for engine handler.
+void message_box( string messageText, int messageType, bool scriptCall )
+{
+    Gui::MessageBox@[] messageBoxes = Gui::CollectMessageBoxes(  );
+    for( uint i = 0; i < messageBoxes.length(); i++ )
+        messageBoxes[ i ].AddMessage( messageText, messageType );
+}
+
+// //////////////////////////////////////////////////////////////////////////////////////////////////
+// Called to check interface hit.
+bool check_interface_hit( int x, int y )
+{
+    return Gui::CheckHit( x, y );
+}
+
+// //////////////////////////////////////////////////////////////////////////////////////////////////
+// Called to check current container item under mouse.
+bool get_cont_item( uint& itemId, bool& isEnemy )
+{
+    Gui::Screen@ screen = Gui::GetActiveScreen();
+    if( screen is null ||  screen.Index != CLIENT_SCREEN_INVENTORY ) //screen.IsHardcoded ||
+        return false;
+
+    if( __Cursor == CursorType::Default )
+    {
+        Gui::Object@ hitObj = screen.FindMouseHit();
+        if( hitObj !is null && hitObj.Grid !is null )
+        {
+            Gui::ItemView@ itemView = cast< Gui::ItemView >( hitObj.Grid );
+            if( itemView !is null )
+            {
+                Item@ item = itemView.GetItem( hitObj.CellIndex );
+                if( item !is null )
+                {
+                    itemId = item.Id;
+                    isEnemy = ( itemView.UserDataExt == ITEMS_BARTER_OPPONENT ||
+                                itemView.UserDataExt == ITEMS_BARTER_OPPONENT_OFFER ||
+                                itemView.UserDataExt == ITEMS_PICKUP_FROM );
+                }
+            }
+        }
+    }
+
+    return true;
+}
+
+// //////////////////////////////////////////////////////////////////////////////////////////////////
+// Items and drop handler.
+bool ItemsDragAndDropHandler( Gui::Object obj, Gui::Object target )
+{
+    if( obj.Grid is null )
+        return false;
+
+    // Destination
+    Gui::ItemView@ targetItemView;
+    Item@        targetItem;
+    if( target !is null )
+    {
+        if( target.Grid !is null )
+        {
+            @targetItemView = cast< Gui::ItemView >( target.Grid );
+            if( targetItemView is null )
+                return false;
+            @targetItem = targetItemView.GetItem( target.CellIndex );
+        }
+        else
+        {
+            @targetItemView = cast< Gui::ItemView >( target );
+            if( targetItemView is null )
+                return false;
+        }
+    }
+
+    // Source
+    Gui::ItemView@ objItemView = cast< Gui::ItemView >( obj.Grid );
+    if( objItemView is null )
+        return false;
+    Item@ objItem = objItemView.GetItem( obj.CellIndex );
+    if( objItem is null )
+        return false;
+
+    // Drop item
+    if( targetItemView is null )
+    {
+        if( objItem.Stackable && objItem.Count > 1 )
+            CustomCall( "SplitDrop " + objItem.Id );
+        else
+            ChosenActions::SetChosenActions( array< uint > = { TlaExtended::ChosenMoveItem, objItem.Id, objItem.Count, SLOT_GROUND, 0, 0, 0 } );
+        return true;
+    }
+
+    // Barter
+    if( ( objItemView.UserDataExt == ITEMS_BARTER && targetItemView.UserDataExt == ITEMS_BARTER_OFFER ) ||
+        ( objItemView.UserDataExt == ITEMS_BARTER_OPPONENT && targetItemView.UserDataExt == ITEMS_BARTER_OPPONENT_OFFER ) ||
+        ( objItemView.UserDataExt == ITEMS_BARTER_OFFER && targetItemView.UserDataExt == ITEMS_BARTER ) ||
+        ( objItemView.UserDataExt == ITEMS_BARTER_OPPONENT_OFFER && targetItemView.UserDataExt == ITEMS_BARTER_OPPONENT ) )
+    {
+        if( objItem.Stackable && objItem.Count > 1 )
+            CustomCall( "SplitItem " + objItem.Id + " " + objItemView.UserDataExt );
+        else
+            CustomCall( "BarterMoveItem " + objItem.Id + " " + objItemView.UserDataExt + " " + objItem.Count );
+        return true;
+    }
+
+    // Loot
+    if( ( objItemView.UserDataExt == ITEMS_PICKUP && targetItemView.UserDataExt == ITEMS_PICKUP_FROM ) ||
+        ( objItemView.UserDataExt == ITEMS_PICKUP_FROM && targetItemView.UserDataExt == ITEMS_PICKUP ) )
+    {
+        if( objItem.Stackable && objItem.Count > 1 )
+        {
+            CustomCall( "SplitItem " + objItem.Id + " " + objItemView.UserDataExt );
+        }
+        else
+        {
+            uint[] actions = {};
+            ChosenActions::GetChosenActions( actions );
+            uint[] useItemAction = { TlaExtended::ChosenMoveItemCont, objItem.Id, objItemView.UserDataExt, objItem.Count, 0, 0, 0 };
+            for( uint i = 0; i < useItemAction.length(); i++ )
+                actions.insertLast( useItemAction[ i ] );
+            ChosenActions::SetChosenActions( actions );
+        }
+        return true;
+    }
+
+    // Load ammo
+    if( ( objItemView.UserDataExt == ITEMS_INVENTORY || objItemView.UserDataExt == ITEMS_CHOSEN_ALL ) &&
+        targetItem !is null && objItem.Type == ItemType::Ammo && targetItem.Type == ItemType::Weapon )
+    {
+        if( objItem.Ammo_Caliber == targetItem.Weapon_Caliber &&
+            ( targetItem.AmmoCount < targetItem.Weapon_MaxAmmoCount || targetItem.AmmoPid != objItem.ProtoId ) )
+        {
+            uint[] actions = {};
+            ChosenActions::GetChosenActions( actions );
+            uint[] useItemAction = { TlaExtended::ChosenUseItem, targetItem.Id, 0, TARGET_SELF_ITEM, objItem.Id, USE_RELOAD, 0 };
+            for( uint i = 0; i < useItemAction.length(); i++ )
+                actions.insertLast( useItemAction[ i ] );
+            ChosenActions::SetChosenActions( actions );
+            return true;
+        }
+    }
+
+    // Transfer between slots
+    int objSlot = objItemView.UserData + obj.CellIndex;
+    int targetSlot = targetItemView.UserData + ( target !is null && targetItemView.UserData != SLOT_INV ? target.CellIndex : 0 );
+    if( objSlot != targetSlot )
+    {
+        uint[] actions = {};
+        ChosenActions::GetChosenActions( actions );
+        uint[] useItemAction = { TlaExtended::ChosenMoveItem, objItem.Id, objItem.Count, targetSlot, 0, 0, 0 };
+        for( uint i = 0; i < useItemAction.length(); i++ )
+            actions.insertLast( useItemAction[ i ] );
+        ChosenActions::SetChosenActions( actions );
+        return true;
+    }
+
+    return true;
+}
+
+// //////////////////////////////////////////////////////////////////////////////////////////////////
+// Event on create lmenu node collection.
+// In nodes located collected nodes by engine.
+void lmenu_collect_nodes( Critter@ cr, Item@ item, int[]& nodes )
+{
+    //
+}
+
+// //////////////////////////////////////////////////////////////////////////////////////////////////
+// Event on lmenu node selection.
+bool lmenu_node_select( int nodeType, Critter@ cr, Item@ item )
+{
+    // Pass to engine handler
+    return false;
+}

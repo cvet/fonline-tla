@@ -1,0 +1,138 @@
+// FOS Server Sort 2
+// Author: rifleman17
+
+
+#pragma property Item PrivateServer uint SmokeGrenadeOwnerId
+
+#define MAX_STEP               ( 5 )
+#define SMOKE_TOHIT_PENALTY    # (attacker) ( attacker.IsPlayer() ? 80 : 40 )
+#define GAS_TOHIT_PENALTY      # (attacker) ( attacker.IsPlayer() ? 50 : 25 )
+#define RND                    # ( v1, v2 )( Random( v1, v2 ) == 1 )
+
+uint GetSmokePenalty( const Map map, const Critter attacker, const Critter target )
+{
+    if( valid( map ) )
+    {
+        if( valid( attacker ) && valid( map.GetItem( attacker.HexX, attacker.HexY, Content::Item::smoke ) ) )
+            return SMOKE_TOHIT_PENALTY( attacker );
+        if( valid( target ) && valid( map.GetItem( target.HexX, target.HexY, Content::Item::smoke ) ) )
+            return SMOKE_TOHIT_PENALTY( attacker );
+        if( valid( attacker ) && valid( map.GetItem( attacker.HexX, attacker.HexY, Content::Item::mustard_gas ) ) )
+            return GAS_TOHIT_PENALTY( attacker );
+        if( valid( target ) && valid( map.GetItem( target.HexX, target.HexY, Content::Item::mustard_gas ) ) )
+            return GAS_TOHIT_PENALTY( attacker );
+    }
+    return 0;
+}
+
+void SmokeBlast( Map map, uint16 hexX, uint16 hexY, hash smokePid, uint ownerId )
+{
+    uint[] values = { map.Id, hexX, hexY, 0, smokePid, ownerId };
+    DeferredCall( 0, DoSmokeBlast, values );
+}
+
+void DoSmokeBlast( uint[] values )
+{
+    Map   map = GetMap( values[ 0 ] );
+    uint16 hexX = values[ 1 ];
+    uint16 hexY = values[ 2 ];
+    uint8  step = values[ 3 ];
+    hash   pid = values[ 4 ];
+    uint   ownerId = values[ 5 ];
+    uint   penaltyLowSkill = 0;
+    if( ownerId > 0 )
+    {
+        Critter cr = GetCritter( ownerId );
+        if( valid( cr ) )
+            penaltyLowSkill = 4 - uint( CLAMP( cr.SkillThrowing, 0, 100 ) / 25 );
+    }
+    if( step > ( MAX_STEP - penaltyLowSkill ) )
+        return;
+
+    uint[] smokeIds = {};
+    map.PlaySound( "gas.wav", hexX, hexY, 25 );
+    AddSmoke( map, hexX, hexY, ( step == 0 || ( step < 2 && RND( 1, 2 ) ) ), pid, ownerId, smokeIds );
+
+    for( uint curStep = 1; curStep < step; curStep++ )
+    {
+        hexX = values[ 1 ];
+        hexY = values[ 2 ];
+        map.MoveHexByDir( hexX, hexY, 4, curStep );
+        for( uint i = 0; i < 6; i++ )
+        {
+            for( uint j = 0; j < curStep; j++ )
+            {
+                map.MoveHexByDir( hexX, hexY, i, 1 );
+                AddSmoke( map, hexX, hexY, ( curStep + 2 > step ) || ( ( curStep + 3 > step ) && RND( 1, 2 ) ) || RND( 1, 3 ), pid, ownerId, smokeIds );
+            }
+        }
+    }
+    if( smokeIds.length() > 0 )
+        SavedDeferredCall( GAME_SECOND_TO_TICK( REAL_SECOND( Random( 4, 6 ) ) * ( 12 - step ) * ( 5 - penaltyLowSkill ) / 5 ), DeleteSmokes, smokeIds );
+    values[ 3 ]++;
+
+    DeferredCall( 1000, DoSmokeBlast, values );
+}
+
+void DeleteSmokes( uint[] values )
+{
+    for( uint i = 0, l = values.length(); i < l; i++ )
+    {
+        if( values[ i ] == 0 )
+            continue;
+        Item item = GetItem( values[ i ] );
+        if( valid( item ) )
+            DeleteItem( item );
+    }
+}
+
+void _SmokeInit( Item item, bool firstTime )
+{
+    if( !firstTime )
+        DeleteItem( item );
+    else
+    {
+        item.IsNoBlock = true;
+        item.IsShootThru = true;
+        if( item.ProtoId == Content::Item::mustard_gas )
+        {
+            __EventItemWalk.SubscribeToItem( item, _MustardGasWalk );
+        }
+        // __EventItemFinish.SubscribeToItem( item, _SmokeFinish );
+    }
+}
+
+void _MustardGasWalk( Item mine, Critter cr, bool entered, uint8 dir )
+{
+    if( entered )
+    {
+        if( cr.IsPlayer() && !cr.IsNoPvp )
+        {
+            Poison::AffectPoison( cr, Random( 3, 5 ) );
+        }
+        else
+        {
+            if( !cr.IsInvulnerable )
+                Combat::InjureCritter( cr, Random( 1, 2 ), DamageTypes::Normal, 0, mine.SmokeGrenadeOwnerId );
+        }
+    }
+}
+
+void AddSmoke( Map map, uint16 hexX, uint16 hexY, bool place, int16 pid, int ownerId, uint[] ids )
+{
+    if( valid( map ) && place && ( map.IsHexPassed( hexX, hexY ) || valid( map.GetCritter( hexX, hexY ) ) ) )
+    {
+        Item item = map.AddItem( hexX, hexY, pid, 1 );
+        if( valid( item ) )
+        {
+            item.SmokeGrenadeOwnerId = ownerId;
+            ids.insertLast( item.Id );
+            item.SetScript ( _SmokeInit );
+        }
+    }
+}
+
+void SmokeBlast( Critter cr, int pid, int, int )
+{
+    SmokeBlast( cr.GetMap(), cr.HexX, cr.HexY, pid, cr.Id );
+}

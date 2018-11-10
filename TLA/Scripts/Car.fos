@@ -1,0 +1,179 @@
+// FOS Server
+
+#define STR_CAR_INFO    ( 2100 )
+
+#pragma property Item PrivateServer    bool   CarIsBioEngine
+#pragma property Item PrivateServer    bool   CarIsNoLockpick
+
+uint GetCarCost( hash protoCar ) // Export
+{
+    uint        count = WorldItemCount( protoCar );
+    const Item car = GetProtoItem( protoCar );
+    if( valid( car ) )
+        return car.Cost + car.Cost * count;
+    return 0;
+}
+
+bool UseItemOnCar( Critter cr, Item car, Item item ) // Export
+{
+    hash pid = item.ProtoId;
+    bool isEnergo = ( pid == Content::Item::small_energy_cell || pid == Content::Item::micro_fusion_cell );
+    bool isBio = ( pid == Content::Item::beer || pid == Content::Item::booze || pid == Content::Item::gamma_gulp_beer || pid == Content::Item::rot_gut || pid == Content::Item::roentgen_rum );
+
+    if( not isEnergo && not isBio )
+        return false;
+
+    if( isBio && not car.CarIsBioEngine )
+    {
+        cr.SayMsg( SAY_NETMSG, TEXTMSG_GAME, MsgStr::StrCarFuelNotSupported );
+        return true;
+    }
+
+    int octane = 100;
+    if( pid == Content::Item::beer || pid == Content::Item::gamma_gulp_beer )
+        octane = 30;
+    else if( pid == Content::Item::small_energy_cell )
+        octane = 100;
+    else if( pid == Content::Item::micro_fusion_cell )
+        octane = 150;
+    else
+        octane = 70;    // Bio energy
+
+    int need = int(car.Car_TankVolume) - car.Charge;
+    int count = item.Count * octane;
+    if( count > need )
+        count = need;
+
+    if( count <= 0 )
+    {
+        cr.SayMsg( SAY_NETMSG, TEXTMSG_GAME, MsgStr::StrCarFuelTankFull );
+    }
+    else
+    {
+        int newCount = item.Count - count / octane;
+        if( newCount <= 0 )
+            DeleteItem( item );
+        else
+            item.Count = newCount;
+        car.Charge += count;
+        cr.SayMsg( SAY_NETMSG, TEXTMSG_GAME, MsgStr::StrCarFuelTankFill );
+    }
+
+    return true;
+}
+
+bool UseSkillOnCar( Critter cr, Item car, CritterProperty skill ) // Export
+{
+    if( skill == SKILL_PICK_ON_GROUND )
+    {
+        if( not Lockers::IsKeyAviable( cr, car.LockerId ) )
+        {
+            cr.SayMsg( SAY_NETMSG, TEXTMSG_GAME, MsgStr::StrItemLockerNeedKey );
+        }
+        else if( valid( cr.GetMap() ) )     // Critter on local map
+        {
+            if( IS_TIMEOUT( cr.TimeoutTransfer ) )
+                cr.SayMsg( SAY_NETMSG, TEXTMSG_GAME, MsgStr::StrTimeoutTransferWait );
+            else if( IS_TIMEOUT( cr.TimeoutBattle ) )
+                cr.SayMsg( SAY_NETMSG, TEXTMSG_GAME, MsgStr::StrTimeoutBattleWait );
+            else
+                DriveToGlobal( cr, car, true );
+        }
+    }
+    else if( skill == CritterProperty::SkillScience )
+    {
+        cr.SayMsg( SAY_NETMSG, TEXTMSG_TEXT, STR_CAR_INFO, "$number" + car.LockerId +
+                   "$fuel" + ( car.Charge / 100 ) + "$fuel_tank" + ( car.Car_TankVolume / 100 ) +
+                   "$wear" + ( car.Deterioration * 100 / car.Car_MaxDeterioration ) );
+    }
+    else if( skill == CritterProperty::SkillRepair )
+    {
+        if( car.Deterioration == 0 )
+            cr.SayMsg( SAY_NETMSG, TEXTMSG_GAME, MsgStr::StrCarRepairNoNeed );
+        else if( cr.IsPlayer() && IS_TIMEOUT( cr.TimeoutSkRepair ) )
+            cr.SayMsg( SAY_NETMSG, TEXTMSG_GAME, MsgStr::StrSkillWeariness );
+        else
+        {
+            int fix = car.Deterioration - ( cr.SkillRepair > 0 ? cr.SkillRepair : 1 ) * 100;
+            if( fix < 0 )
+                fix = 0;
+            car.Deterioration = fix;
+            cr.SayMsg( SAY_NETMSG, TEXTMSG_GAME, MsgStr::StrCarRepairSuccess );
+            cr.TimeoutSkRepair = REPAIR_TIMEOUT( cr );
+            cr.Experience += 10;
+            cr.PlaySound( "CARREPAR.ACM", true );
+        }
+    }
+    else if( skill == CritterProperty::SkillLockpick )
+    {
+        if( IS_TIMEOUT( cr.TimeoutSkLockpick ) )
+        {
+            cr.SayMsg( SAY_NETMSG, TEXTMSG_GAME, MsgStr::StrSkillWeariness );
+            return true;
+        }
+
+        if( car.CarIsNoLockpick )
+        {
+            cr.SayMsg( SAY_NETMSG, TEXTMSG_GAME, MsgStr::StrSkillLockpickFail );
+            return true;
+        }
+
+        int  base = cr.SkillLockpick - 200;
+        hash activePid = cr.GetItemBySlot( SLOT_HAND1 ).ProtoId;
+        if( activePid == Content::Item::lockpicks )
+        {
+            base += 25;
+            if( Random( 0, 30 ) == 0 )
+                cr.DeleteItem( Content::Item::lockpicks, 1 );
+        }
+        else if( activePid == Content::Item::exp_lockpick_set )
+        {
+            base += 50;
+            if( Random( 0, 30 ) == 0 )
+                cr.DeleteItem( Content::Item::exp_lockpick_set, 1 );
+        }
+
+        int minChance = cr.Luck / 2;
+        base = CLAMP( base, minChance, 95 );
+        if( base >= Random( 1, 100 ) && car.LockerId != 1 )
+        {
+            DriveToGlobal( cr, car, true );
+            cr.Experience += 200;
+            Scores::AddScore( cr, EScores::Cracker, 1 );
+
+            Item key = Obsolete::GetSlotItem( cr, Content::Item::key, SLOT_HAND1 );
+            if( not valid( key ) )
+                key = Obsolete::GetSlotItem( cr, Content::Item::key, SLOT_HAND2 );
+            if( valid( key ) )
+                key.LockerId = car.LockerId;
+        }
+        else
+        {
+            cr.SayMsg( SAY_NETMSG, TEXTMSG_GAME, MsgStr::StrSkillLockpickFail );
+        }
+
+        cr.TimeoutSkLockpick = LOCKPICK_TIMEOUT( cr );
+    }
+    else
+    {
+        cr.SayMsg( SAY_NETMSG, TEXTMSG_GAME, MsgStr::StrUseNothing );
+    }
+    return true;
+}
+
+void DriveToGlobal( Critter cr, Item car, bool requestGroup )
+{
+    // Place car and bags to inventory
+    /*for( uint i = 0; i < 3; i++ )
+    {
+        Item bag = car.GetChild( i );
+        if( valid( bag ) )
+        {
+            bag.IsHidden = true;
+            MoveItem( bag, 0, cr );
+        }
+    }*/
+    car.IsHidden = true;
+    MoveItem( car, 0, cr );
+    cr.TransitToGlobal();
+}

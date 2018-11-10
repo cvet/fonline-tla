@@ -1,0 +1,180 @@
+// FOS Server Sort 2
+// Author: rifleman17
+
+#pragma property Critter PrivateServer dict< uint, uint8 > GuardedItemSkill
+
+#pragma property Item PrivateServer uint DoorAutoCloseTime
+#pragma property Item PrivateServer uint DoorAutoDialogTime
+
+// Дверь, которая зпкроется через 2 игровые минуты илии через некоторое число реальных секунд , указанное в DoorAutoCloseTime
+void _DoorAutoCloseInit( Item door, bool firstTime )
+{
+    if( firstTime )
+        door.DoorAutoCloseTime = door.Val3;
+    __EventCritterUseSkill.SubscribeToOnItem( door, e_UseAutoCloseDoor );
+}
+
+bool e_UseAutoCloseDoor( Critter cr, CritterProperty skill, Critter onCritter, Item door, const Item onScenery )
+{
+    SavedDeferredCall( ( door.DoorAutoCloseTime == 0 ? 2 : door.DoorAutoCloseTime ) * 1000, AutoCloseDoor, door.Id );
+    return false;
+}
+
+void AutoCloseDoor( uint value )
+{
+    Item door = GetItem( value );
+    if( not valid( door ) )
+        return;
+    if( !door.Opened )
+        return;
+    uint16 x = 0;
+    uint16 y = 0;
+    Map   map = door.GetMapPosition( x, y );
+    if( not valid( map ) )
+        return;
+
+    Critter cr = map.GetCritter( x, y );
+    if( valid( cr ) )
+    {
+        if( cr.IsLife() )
+        {
+            SavedDeferredCall( 3000, AutoCloseDoor, value );
+            return;
+        }
+        else
+        {
+            // Попытка сдвинуть труп. Если не получится, дверь поверх трупа закроется
+            Obsolete::CritterTransitToMapCoords( cr, map.Id, x - 1, y, cr.Dir );
+        }
+    }
+
+    if( !Lockers::SwitchLocker( door, false ) )
+        SavedDeferredCall( 3000, AutoCloseDoor, value );
+}
+
+// Дверь, которая не открывается стандартными способами
+void _ClosedDoorInit( Item door, bool firstTime )
+{
+    __EventCritterUseSkill.SubscribeToOnItem( door, _UseDoor );
+}
+
+bool _UseDoor( Critter critter, CritterProperty skill, Critter onCritter, Item onItem, const Item onScenery )
+{
+    return false;
+}
+
+// Дверь, при использовании которой открывается диалог
+void _DialogDoorInit( Item door, bool firstTime )
+{
+    if( firstTime )
+        door.DoorAutoDialogTime = door.Val3;
+    __EventCritterUseSkill.SubscribeToOnItem( door, _UseDialogDoor );
+}
+
+bool _UseDialogDoor( Critter cr, CritterProperty skill, Critter onCritter, Item door, const Item onScenery )
+{
+    RunDialog( cr, door.DoorAutoDialogTime, door.HexX, door.HexY, false );
+    return true;
+}
+
+// Голодиск с номером, присвоенном в Val0
+void _HoloInit( Item item, bool firstTime )
+{
+    if( item.ProtoId != Content::Item::holodisk )
+        return;
+    item.HolodiskNum = item.Val0;
+    item.SetScript( null );
+}
+
+// Настройка автоматического удаления предмета через икс часов
+void SetDeleteItem( Item item, uint delHours )
+{
+    SavedDeferredCall( GAME_HOUR_TO_TICK( delHours ), DeferredDeleteItem, item.Id );
+}
+
+void DeferredDeleteItem( uint value )
+{
+    Item item = GetItem( value );
+    if( valid( item ) )
+        DeleteItem( item );
+}
+
+// Охраняемая дверь или другой предмет
+// в Val0 - пишется время автоматического закрытия двери, в реальных минутах, если больше 0, дверь будет автоматически закрываться
+// обратите внимание, игрок может застрять за дверью, если пройдет внутрь, а она захлопнется
+// в Val1 прописывается номер роли НПЦ которые будут говорить, должно быть отличным от ноля
+// если скрипт только на одно использование - в Val2 - нужно указать любое значение, это может использоваться для охраняемых предметов, например оружия
+#define STR_DONTOUCH    ( 540 )
+
+
+void _GuardedItemInit( Item item, bool firstTime )
+{
+    __EventCritterUseSkill.SubscribeToOnItem( item, _GuardedItemSkill );
+}
+
+bool _GuardedItemSkill( Critter cr, CritterProperty skill, Critter onCritter, Item item, const Item onScenery )
+{
+    Map map = cr.GetMap();
+    if( !valid( map ) )
+        return false;
+    int  role = item.Val1;
+    bool reset = ( item.Val2 > 0 ? true : false );
+    if( cr.IsPlayer() )
+    {
+        uint guards = map.GetNpcCount( role, FIND_LIFE | FIND_ONLY_NPC );
+        if( guards == 0 )
+        {
+            if( reset )
+            {
+				__EventCritterUseSkill.UnsubscribeFromOnItem( item, _GuardedItemSkill );
+                item.SetScript( null );
+            }
+            if( item.Type == ItemType::Door || item.Type == ItemType::Container )
+            {
+                if( item.Val0 > 0 )
+                    SavedDeferredCall( ( item.Val0 == 0 ? 2 : item.Val0 ) * 1000, AutoCloseDoor, item.Id );
+            }
+            return false;
+        }
+        Critter guard = map.GetNpc( role, FIND_LIFE | FIND_ONLY_NPC, Random( 0, guards - 1 ) );
+        if( valid( guard ) )
+        {
+            auto guardedItemSkill = guard.GuardedItemSkill.clone();
+            guardedItemSkill.setIfNotExist( cr.Id, 0 );
+            if( guardedItemSkill[ cr.Id ] < 2 )
+            {
+                NpcPlanes::NpcPlane[] planes = {};
+                if( NpcPlanes::GetPlanes( guard, AI_PLANE_ATTACK, planes ) > 0 )
+                {
+                    for( uint i = 0, l = planes.length(); i < l; i++ )
+                    {
+                        if( planes[ i ].Attack_TargId == cr.Id )
+                        {
+                            if( reset )
+                            {
+                                __EventCritterUseSkill.UnsubscribeFromOnItem( item, _GuardedItemSkill );
+                                item.SetScript( null );
+                            }
+                            return false;
+                        }
+                    }
+                }
+                guardedItemSkill[ cr.Id ] = guardedItemSkill[ cr.Id ] + 1;
+                guard.GuardedItemSkill = guardedItemSkill;
+                guard.SayMsg( SAY_SHOUT, TEXTMSG_TEXT, STR_DONTOUCH, "$pname" + Obsolete::GetPlayerName( cr.Id ) );
+            }
+            else
+            {
+                guardedItemSkill[ cr.Id ] = 0;
+                guard.GuardedItemSkill = guardedItemSkill;
+                NpcPlanes::AddAttackPlane( guard, 0, cr );
+            }
+        }
+        return true;
+    }
+    else
+    {
+        // Нпц такие двери открыть тоже не смогут
+        return true;
+    }
+}

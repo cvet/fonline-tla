@@ -1,0 +1,300 @@
+// FOS Server Sort 2
+
+//#include "PatternCommon"
+//#include "TeamsTable"
+
+/*
+   Боевой Медик
+
+   Вооружен энергетическим оружием. Предпочтительно - плазменный пистолет.
+   При необходимости лечит себя и своих напарников суперстимпаками. Если у напарника перелом - использует скилл доктора. Если закончились стимпаки - использует навык санитара по таймауту.
+
+   Периодически стреляет в игроков из инъектора специальными патронами. Инъектор снимает положительные эффекты наркотиков и отравляет цель.
+
+   Приоритет действий:
+
+   1 медицинская помощь себе
+   2 медицинская помощь своим
+   3 использование инъектора на персонажах под психо
+   4 атака на расстоянии 20 гексов, если меньше - отступление
+
+   - при смерти - из инвентаря удаляются лишние стимпаки (остается 0..2)
+   - при респауне - получает исходное число стимпаков, см. таблицу.
+   ----------------------------------------------------------------------------------
+   Общие особенности медиков
+        PERK_BONUS_RATE_OF_FIRE
+        TRAIT_FAST_SHOT
+        PERK_LIVING_ANATOMY
+    PERK_BONUS_RANGED_DAMAGE
+   ---------------------------------------------------------------------------------------
+    Параметры для ур  1            2            3            4            5
+   -   Легкое/Энерго     90..120      100..130     120..150     140..250     200..300
+   -   Доктор/Санитар    70..100      100..150     130..180     170..220     200..300
+   -   Крит дополнит.    10%          20%          30%          40%          50%
+   -   Число стимпаков   20           30           40           50           80
+   -   АР                10           12           14           16           20
+   -   HP                120          140          160          180          200
+   -   Резисты           20..50       30..50       40..50       40..55       40..65
+   ---------------------------------------------------------------------------------------
+ */
+const int[] medicStats_ =
+{
+//  WeapMin, WeapMax, HealMin, HealMax, Crit,   NumStim,    AP,   HP,    ResMin,  ResMax
+    90,      120,     70,      100,     10,     20,         10,   120,   20,      50,
+    100,     130,     100,     150,     20,     30,         12,   140,   30,      50,
+    120,     150,     130,     180,     30,     40,         14,   160,   40,      50,
+    140,     250,     170,     220,     40,     50,         16,   180,   40,      55,
+    200,     300,     200,     300,     50,     80,         20,   200,   50,      65
+};
+#define M_COUNT                            ( 5 )
+#define M_POS                              # (pos) ( ( ( pos < M_COUNT ) ? pos : 0 ) * 10 )
+#define M_WEAP                             # (pos) ( Random( medicStats_[ M_POS( pos ) ],   medicStats_[ M_POS( pos ) + 1 ] ) )
+#define M_HEAL                             # (pos) ( Random( medicStats_[ M_POS( pos ) + 2 ], medicStats_[ M_POS( pos ) + 3 ] ) )
+#define M_CRIT                             # (pos) ( medicStats_[ M_POS( pos ) + 4 ] )
+#define M_STIM                             # (pos) ( medicStats_[ M_POS( pos ) + 5 ] )
+#define M_AP                               # (pos) ( medicStats_[ M_POS( pos ) + 6 ] )
+#define M_HP                               # (pos) ( medicStats_[ M_POS( pos ) + 7 ] )
+#define M_RES                              # (pos) ( Random( medicStats_[ M_POS( pos ) + 8 ],  medicStats_[ M_POS( pos ) + 9 ] ) )
+
+#define ID_PLANE_HEAL_TEAMMATE             ( 124 )
+#define AI_PLANE_HEAL_TEAMMATE_PRIORITY    ( 80 )
+#define AI_PLANE_HEAL_SELF_PRIORITY        ( 81 )
+#define AI_PLANE_WAIT_FOR_HEAL_PRIORITY    ( 82 )
+
+#define NEED_HEAL                          # (cr) ( ( 100 * cr.CurrentHp < cr.MaxLife * 50 ) ) // здоровье ниже 50%
+
+void _CritterInit( Critter cr, bool firstTime )
+{
+    pattern.SetEvents( cr );
+}
+
+class MedicPattern : PatternCommon::CommonPattern
+{
+    void _Dead( Critter cr, Critter killer )
+    {
+        PatternCommon::CommonPattern::_Dead( cr, killer );
+        // У медика полно стимпаков, игрокам не нужна подобная халява
+        if( cr.CountItem( Content::Item::super_stimpak ) > 0 )
+        {
+            _SubItem( Obsolete::GetSlotItem( cr, Content::Item::super_stimpak, -1 ), cr.CountItem( Content::Item::super_stimpak ) );
+        }
+        if( cr.CountItem( Content::Item::stimpak ) > 0 )
+        {
+            _SubItem( Obsolete::GetSlotItem( cr, Content::Item::stimpak, -1 ), cr.CountItem( Content::Item::stimpak ) );
+        }
+    }
+
+    void _Message( Critter medic, Critter fromCr, int message, int value )
+    {
+        // DL("message recieved/ value="+value);
+
+        if( TEAM_PARITY( fromCr.TeamId, medic.TeamId ) == TeamsTable::Anyway )
+        {
+            return;
+        }
+
+        if( !valid( medic.GetMap() ) || !valid( fromCr.GetMap() ) )
+            return;
+
+        switch( message )
+        {
+        case PatternCommon::MsgHealme:
+            DL( "healing needed" );
+            MoveForHealTeamMate( medic, fromCr );
+            break;
+        default:
+            break;
+        }
+    }
+
+    bool _PlaneEnd( Critter medic, int planeId, int reason, Critter someCr, Item someItem )
+{
+	NpcPlanes::NpcPlane plane = NpcPlanes::GetCritterPlane(medic, planeId);
+
+        DL( "medic plane end" );
+
+        if( plane.Identifier == ID_PLANE_HEAL_TEAMMATE && reason == REASON_SUCCESS )
+        {
+            Critter teammate = GetCritter( plane.IdentifierExt );
+            if( valid( teammate ) )
+            {
+                uint dist = GetCrittersDistantion( medic, teammate );
+                if( dist < 2 )             // Расстояние до напарника 1 или 0 гексов - можно лечить.
+                {
+                    HealTeammate( medic, teammate );
+                }
+                else
+                {
+                    // Иначе еще одна итерация приближения.
+                    NpcPlanes::AddMiscPlane( teammate, AI_PLANE_WAIT_FOR_HEAL_PRIORITY, __FullSecond + 60, null );
+                    MoveForHealTeamMate( medic, teammate );
+                }
+            }
+        }
+
+        return true;         // основной обработчик
+    }
+
+    bool _Attacked( Critter cr, Critter attacker )
+    {
+        _TryUseStim( cr );
+        SendMessage::SendMessage( cr,  PatternCommon::MsgHealme, 0, MESSAGE_TO_ALL_ON_MAP  );
+        return false;
+    }
+
+    void SetEvents( Critter cr )
+    {
+        cr.IsNoHome = true;
+        __EventCritterMessage.SubscribeToCritter( cr, _MedicMessage );
+        __EventNpcPlaneEnd.SubscribeToCritter( cr, _MedicPlaneEnd );
+        __EventCritterAttacked.SubscribeToCritter( cr, _MedicAttacked );
+        __EventNpcPlaneBegin.SubscribeToCritter( cr, _MedicPlaneBegin );
+        __EventCritterDead.SubscribeToCritter( cr, _MedicDead );
+    }
+
+    // лечение напарников
+    bool CheckTeamMateNeedHeal( Critter medic, Critter teammate )
+    {
+        if( teammate.IsDead() )
+            return false;
+
+        // DL("Планов с таким ид, и доп ид.: "+ medic.GetPlanes(ID_PLANE_HEAL_TEAMMATE, teammate.Id, null));
+
+        if( NpcPlanes::GetPlanes( medic, ID_PLANE_HEAL_TEAMMATE, teammate.Id, null ) > 0 )
+            return false;
+
+        return NEED_HEAL( teammate );
+    }
+
+    void MoveForHealTeamMate( Critter medic, Critter teammate )
+    {
+        // DL("begin move");
+        if( teammate.IsDead() )
+            return;
+        if( !CheckTeamMateNeedHeal( medic, teammate ) )
+            return;
+        // DL("coming!");
+        // В IdentifierEx сохраняется Id напарника, которого нужно вылечить
+        NpcPlanes::AddWalkPlane( medic, AI_PLANE_HEAL_TEAMMATE_PRIORITY, ID_PLANE_HEAL_TEAMMATE, teammate.Id, teammate.HexX, teammate.HexY, Merc::GetDir( medic, teammate ), ( NpcPlanes::IsCurPlane( medic, AI_PLANE_ATTACK ) ? false : true ), 1 );
+    }
+
+    void HealTeammate( Critter medic, Critter teammate )
+    {
+        uint stims = medic.CountItem( Content::Item::super_stimpak );
+
+        bool needHeal = NEED_HEAL( teammate );
+        bool needDoctor = teammate.IsInjured;
+        bool useStim = ( stims > 0 ? true : false );
+        bool canDoctor = !IS_TIMEOUT( medic.TimeoutSkDoctor );
+        bool canHeal = ( useStim ? true : !IS_TIMEOUT( medic.TimeoutSkFirstAid ) );
+
+        if( needDoctor && canDoctor )
+        {
+            // не получилось. Использование навыков пока не производится
+            // medic.EventUseSkill(SK_DOCTOR, teammate, null, null);
+            // DL("Принудительно лечим доктором");
+            // return;
+        }
+
+        if( canHeal && needHeal )
+        {
+            if( stims > 0 )
+            {
+                Item stim = Obsolete::GetSlotItem( medic, Content::Item::super_stimpak, -1 );
+                if( valid( stim ) )
+                {
+                    DL( "Принудительно лечим стимпаками" );
+                    // medic.EventUseItem(stim, teammate, null, null);GetDir(Critter  cr0, Critter  cr1)
+                    medic.SetDir( Merc::GetDir( medic, teammate ) );
+                    _CritAnimateUse( medic );
+                    Drugs::UseDrugOn( medic, teammate, stim );
+                    _SubItem( stim, 1 );
+                    return;
+                }
+            }
+        }
+    }
+    // end class
+}
+
+#ifndef _NoBaseInstance
+MedicPattern pattern; // Для наследников нужно определить _NoBaseInstance
+#endif
+
+void _MedicDead( Critter cr, Critter killer )
+{
+    pattern._Dead( cr, killer );
+}
+
+bool _MedicPlaneBegin( Critter cr, int planeId, int reason, Critter someCr, Item someItem )
+{
+	NpcPlanes::NpcPlane plane = NpcPlanes::GetCritterPlane(cr, planeId);
+
+    return pattern._PlaneBegin( cr, planeId, reason, someCr, someItem );
+}
+
+void _MedicMessage( Critter medic, Critter fromCr, int message, int value )
+{
+    pattern._Message( medic, fromCr, message, value );
+}
+
+bool _MedicAttacked( Critter cr, Critter attacker )
+{
+    return pattern._Attacked( cr, attacker );
+}
+
+bool _MedicPlaneEnd( Critter medic, int planeId, int reason, Critter someCr, Item someItem )
+{
+	NpcPlanes::NpcPlane plane = NpcPlanes::GetCritterPlane(medic, planeId);
+
+    return pattern._PlaneEnd( medic, planeId, reason, someCr, someItem );
+}
+
+void SetMedicStats( Critter cr, uint8 lvl )
+{
+    lvl = CLAMP( lvl, 0, M_COUNT - 1 );
+    if( lvl < 1 )
+        return;
+    cr.MaxLifeBase = M_HP( lvl );
+    cr.CurrentHp = cr.MaxLife;
+    cr.Level = 24;
+    cr.ActionPointsBase = M_AP( lvl );
+    cr.CriticalChanceBase = M_CRIT( lvl );
+
+
+    cr.NormalResistanceBase = M_RES( lvl );
+    cr.LaserResistanceBase = M_RES( lvl );
+    cr.FireResistanceBase = M_RES( lvl );
+    cr.PlasmaResistanceBase = M_RES( lvl );
+    cr.ElectricityResistanceBase = M_RES( lvl );
+    cr.ExplodeResistanceBase = M_RES( lvl );
+    cr.PoisonResistanceBase = M_RES( lvl );
+    cr.RadiationResistanceBase = M_RES( lvl );
+
+    cr.SkillFirstAid = M_HEAL( lvl );
+    cr.SkillDoctor = M_HEAL( lvl );
+    cr.SkillSmallGuns = M_WEAP( lvl );
+    cr.SkillEnergyWeapons = M_WEAP( lvl );
+    cr.IsTraitFastShot = true;
+    cr.PerkBonusRateOfFire = 1;
+    cr.PerkLivingAnatomy = 1;
+    cr.PerkBonusRangedDamage = 1;
+}
+
+void _MedicInit( Critter cr, bool firstTime )
+{
+    _CritterInit( cr, firstTime );
+}
+
+/* ************************************************* DEBUG ************************************************* */
+void testMedic( Critter cr, int lvl, int team, int bag )
+{
+    int[] props = { CritterProperty::BagId, bag, CritterProperty::TeamId, team };
+    Critter npc = cr.GetMap().AddNpc( Content::Critter::VaultCityPatrolMale, cr.HexX - 3, cr.HexY - 3, 0, TlaExtended::GetCritPropsDict(props));
+        npc.SetScript ( _MedicInit );
+    npc.AddItem( Content::Item::super_stimpak, 20 );
+    SetMedicStats( npc, lvl );
+}
+// ~run PatternMedic test 0 0 0
+// ~run test SetStat 1 7 1000
+// ~run test SetStat 1 72 1000

@@ -1,0 +1,703 @@
+// FOS Server
+// Author: rifleman17
+
+#pragma property Critter PrivateServer uint NcrSmitVsVestinStatus Max = 6
+#pragma property Critter PrivateServer uint NcrSmitStringNum
+#pragma property Critter PrivateServer uint NcrSmitGateStringNum
+#pragma property Critter PrivateServer uint NcrSmitPlayerId
+#pragma property Critter PrivateServer uint NcrSmitIdleCount
+
+#pragma property Global PrivateServer uint8 NcrSmitPosition Max = 12
+#pragma property Global PrivateServer bool  NcrSmitGateGuardAccessGranted
+
+// положение Смита
+#define S_POS_BAZAAR_HOME       ( 0 )               // в исходной точке на Базаре
+#define S_POS_BAZAAR_M2GATES    ( 1 )               // в движении от Базара до ворот во внутренний город
+#define S_POS_BAZAAR_GATES      ( 2 )               // стоит у ворот в город
+#define S_POS_BAZAAR_M2HOME     ( 3 )               // в движении к домашней позиции на Базаре
+
+#define S_POS_DWNTN_HOME        ( 4 )               // в баре Дасти
+#define S_POS_DWNTN_M2POLICE    ( 5 )               // в движении к полицейскому около ранчо вейстина
+#define S_POS_DWNTN_POLICE      ( 6 )               // стоит перед полицейским около ранчо вейстина
+
+#define S_POS_RANCH_M2WESTIN    ( 7 )               // идет по ранчо к Вейстину
+#define S_POS_RANCH_WESTIN      ( 8 )               // стоит перед Вейстином
+#define S_POS_RANCH_M2DWNTN     ( 9 )               // двигается к сетке выхода для перехода в центр города
+
+#define S_POS_DWNTN_M2RADIO     ( 10 )              // двигается к месту выхода на связь
+#define S_POS_DWNTN_RADIO       ( 11 )              // выходит на связь с Бишопом
+#define S_POS_DWTN_M2HOME       ( 12 )              // ывозвращается обратно на домашнюю позицию
+
+#define HEX_NUM_BAZAAR_HOME     ( 44 )
+#define HEX_NUM_BAZAAR_GATES    ( 45 )
+#define HEX_NUM_DWNTN_HOME      ( 46 )
+#define HEX_NUM_DWNTN_POLICE    ( 47 )
+#define HEX_NUM_DWNTN_RADIO     ( 48 )
+#define HEX_NUM_DWNTN2RANCH     ( 49 )
+#define HEX_NUM_RANCH_WESTIN    ( 17 )
+#define HEX_NUM_RANCH_EXIT      ( 18 )
+
+// таблица положений Смита
+/*
+   PosNum       = порядковый номер положения
+   GVarValue    = значение переменной NcrSmitPosition
+   MapPid       = карта на которой стоит СМИТ
+   RHexNum      = номер ближайшего EntireHex
+   ResetPosNum  = следующее состояние, если нужен сброс
+   Moving       = признак, перемещается по карте, находится в движении
+   IsHomePos    = признак, является домашней позицией
+   MoveTo       = номер гекса, к которому идет вейстин
+ */
+const int[] SmitData_ =
+{
+/*PosNum     GVarVaule                     MapPid                    EHexNum                    ResetPosNum   IsHomePos       Moving        MoveTo*/
+/* 0 */ S_POS_BAZAAR_HOME,            Content::Map::ncr_bazaar,           HEX_NUM_BAZAAR_HOME,       0,            1,              0,            0,
+/* 1 */ S_POS_BAZAAR_M2GATES,         Content::Map::ncr_bazaar,           0,                         0,            0,              1,            HEX_NUM_BAZAAR_GATES,
+/* 2 */ S_POS_BAZAAR_GATES,           Content::Map::ncr_bazaar,           HEX_NUM_BAZAAR_GATES,      0,            0,              0,            0,
+/* 3 */ S_POS_BAZAAR_M2HOME,          Content::Map::ncr_bazaar,           0,                         0,            0,              1,            HEX_NUM_BAZAAR_HOME,
+/* 4 */ S_POS_DWNTN_HOME,             Content::Map::ncr_downtown,         HEX_NUM_DWNTN_HOME,        4,            1,              0,            0,
+/* 5 */ S_POS_DWNTN_M2POLICE,         Content::Map::ncr_downtown,         0,                         4,            0,              1,            HEX_NUM_DWNTN_POLICE,
+/* 6 */ S_POS_DWNTN_POLICE,           Content::Map::ncr_downtown,         HEX_NUM_DWNTN_POLICE,      4,            0,              0,            0,
+/* 7 */ S_POS_RANCH_M2WESTIN,         Content::Map::ncr_ranch,            HEX_NUM_RANCH_EXIT,        4,            0,              1,            HEX_NUM_RANCH_WESTIN,
+/* 8 */ S_POS_RANCH_WESTIN,           Content::Map::ncr_ranch,            HEX_NUM_RANCH_WESTIN,      4,            0,              0,            0,
+/* 9 */ S_POS_RANCH_M2DWNTN,          Content::Map::ncr_ranch,            0,                         4,            0,              1,            HEX_NUM_RANCH_EXIT,
+/* 10*/ S_POS_DWNTN_M2RADIO,          Content::Map::ncr_downtown,         0,                         4,            0,              1,            HEX_NUM_DWNTN_RADIO,
+/* 11*/ S_POS_DWNTN_RADIO,            Content::Map::ncr_downtown,         HEX_NUM_DWNTN_RADIO,       4,            0,              0,            0,
+/* 12*/ S_POS_DWTN_M2HOME,            Content::Map::ncr_downtown,         0,                         4,            0,              1,            HEX_NUM_DWNTN_HOME
+};
+
+#define SPOS_COUNT              ( 13 )
+
+// SmitPosition data offsets
+#define S_POS_GVAR              # (posNum)            ( SmitData_[ ( ( ( posNum ) < SPOS_COUNT ? ( posNum ) : 0 ) * 7 + 0 ) ] )
+#define S_POS_MAP_PID           # (posNum)         ( SmitData_[ ( ( ( posNum ) < SPOS_COUNT ? ( posNum ) : 0 ) * 7 + 1 ) ] )
+#define S_POS_HEX               # (posNum)                     ( SmitData_[ ( ( ( posNum ) < SPOS_COUNT ? ( posNum ) : 0 ) * 7 + 2 ) ] )
+#define S_POS_RES_POS           # (posNum)         ( SmitData_[ ( ( ( posNum ) < SPOS_COUNT ? ( posNum ) : 0 ) * 7 + 3 ) ] )
+#define S_POS_IS_HOME           # (posNum)         ( SmitData_[ ( ( ( posNum ) < SPOS_COUNT ? ( posNum ) : 0 ) * 7 + 4 ) ] == 1 )
+#define S_POS_MOVING            # (posNum)          ( SmitData_[ ( ( ( posNum ) < SPOS_COUNT ? ( posNum ) : 0 ) * 7 + 5 ) ] == 1 )
+#define S_POS_HEX_MOVETO        # (posNum)      ( SmitData_[ ( ( ( posNum ) < SPOS_COUNT ? ( posNum ) : 0 ) * 7 + 6 ) ] )
+
+#define NPC_ROLE_SMIT           ( 54 )
+#define MAX_HOME_DISTANCE       ( 3 )               // максимальная дистанция до домашней позиции, после которой уже нужно телепортировать домой смита
+
+////import uint GetNearFullSecond0( uint16 year, uint16 month, uint16 day, uint16 hour, uint16 minute, uint16 second ) from "Time";
+////import bool BeginSpyControl0( Critter catcher, uint catchRadius, uint minSneak, uint checkTime, uint varStatNum, uint varQuest, uint strAlarm ) from "SpyMission";
+/* ************************** Основной скрипт Смита ****************************************** */
+
+void _SmitInit( Critter smit, bool firstTime )
+{
+    smit.NpcRole = NPC_ROLE_SMIT;
+
+    __EventCritterRespawn.SubscribeToCritter( smit, _SmitRespawn );
+    __EventCritterDead.SubscribeToCritter( smit, _SmitDead );
+    __EventNpcPlaneEnd.SubscribeToCritter( smit, _SmitPlaneEnd );
+    __EventCritterIdle.SubscribeToCritter( smit, _SmitIdle );
+    if( firstTime )
+    {
+        SetupRadioComm( smit );
+    }
+    // на всякий случай проверяем, что на своем месте смит
+    SetSmitPos( S_POS_RES_POS( GetSmitPos() ) );
+    _SmitRespawn( smit );
+}
+
+/* ************************** Управление позицией Смита на картах **************************** */
+
+// текущее сохраненное значение
+uint8 GetSmitPos()
+{
+    return Globals.NcrSmitPosition;
+}
+
+void SetSmitPos( int val )
+{
+    Globals.NcrSmitPosition = val;
+}
+
+// проверка, нету других смитов на указанной позиции
+Critter GetFakeSmit( uint pos, Critter realSmit )
+{
+    Map posmap = GetMapByPid( S_POS_MAP_PID( pos ), 0 );
+    if( !valid( posmap ) )
+    {
+        Log( "Map position № " + pos + " not found " );
+        return null;
+    }
+
+    Critter fakeSmit = posmap.GetNpc( NPC_ROLE_SMIT, FIND_ALL | FIND_ONLY_NPC, 0 );
+    if( valid( fakeSmit ) )
+    {
+        if( fakeSmit.DialogId == realSmit.DialogId  &&fakeSmit.Id != realSmit.Id ) // диалог тот же, а Id отличается, значит - другой смит
+        {
+            DL( "real id" + realSmit.Id + "fakeId = " + fakeSmit.Id );
+            return fakeSmit;
+        }
+        else
+        {
+            return null;
+        }
+    }
+    else
+    {
+        return null;
+    }
+}
+
+// проверяем, что смит на нужной карте, рядом с нужным гексом
+bool IsSmitRightPosition( Critter smit, uint pos )
+{
+    Map map = smit.GetMap();
+    if( !valid( map ) )
+        return false;
+
+    if( int(map.ProtoId) != S_POS_MAP_PID( pos ) )
+        return false;
+
+    uint16 hx = smit.HexX;
+    uint16 hy = smit.HexY;
+
+    Entire::GetNearEntire( map, S_POS_HEX( pos ), hx, hy );
+
+    return GetDistantion( hx, hy, smit.HexX, smit.HexY ) <= MAX_HOME_DISTANCE;
+}
+
+// при респавне смита нужно его телепортировать домой, если он очутился не в том месте
+void _SmitRespawn( Critter smit )
+{
+    uint     pos = GetSmitPos();
+
+    Critter cr = GetFakeSmit( pos, smit );
+    if( valid( cr ) )
+    {
+        DL( "Fake smit deleted id = " + cr.Id );
+        DeleteNpc( cr );
+    }
+
+    if( IsSmitRightPosition( smit, pos ) )
+        return;
+
+    TransitToPos( smit, pos );
+}
+
+void _SmitDead( Critter smit, Critter killer )
+{
+
+    // умер, значит что-то пошло не так, делаем резет позиции
+    SetSmitPos( S_POS_RES_POS( GetSmitPos() ) );
+}
+
+void TransitToPos( Critter smit, uint pos )
+{
+    Map map = GetMapByPid( S_POS_MAP_PID( pos ), 0 );
+    if( !valid( map ) )
+    {
+        Log( "Map position № " + pos + " not found " );
+        return;
+    }
+    uint16 hx = smit.HexX;
+    uint16 hy = smit.HexY;
+
+    if( Entire::GetNearEntire( map, S_POS_HEX( pos ), hx, hy ) )
+    {
+        if( !Obsolete::CritterTransitToMapCoords( smit, map.Id, hx, hy, 6 ) )
+            Log( "Smit transit error. Position " + pos );
+    }
+    else
+    {
+        Log( "Smit transit failed. Can't find entire. Position " + pos );
+    }
+
+    SetSmitPos( pos );
+    DL( "Transit to map successful" );
+}
+
+void WalkToPos( Critter smit, uint pos )
+{
+
+    uint16 hx = smit.HexX;
+    uint16 hy = smit.HexY;
+
+    Map    map =  GetMapByPid( S_POS_MAP_PID( pos ), 0 );
+
+    if( !valid( map ) )
+        return;
+
+    if( map.Id != smit.GetMap().Id )
+        return;
+
+    if( !Entire::GetNearEntire( map, S_POS_HEX_MOVETO( pos ) == 0 ? S_POS_HEX( pos ) : S_POS_HEX_MOVETO( pos ), hx, hy ) )
+        return;
+
+
+    if( !NpcPlanes::AddWalkPlane( smit, 0, pos, pos, hx, hy, Random( 0, 5 ), false, 0 ) )
+        return;
+
+
+    SetSmitPos( pos );
+}
+
+void _SmitIdle( Critter smit )
+{
+    DL( "EnterIdle" + S_POS_RES_POS( GetSmitPos() ) );
+    if( !S_POS_IS_HOME( GetSmitPos() ) || !IsSmitRightPosition( smit, GetSmitPos() ) )
+    {
+        // DL("WRONG Pos and no planes... ");
+        uint idleCount = smit.NcrSmitIdleCount;
+        if( idleCount > 10 )
+        {
+            if( S_POS_MAP_PID( S_POS_RES_POS( GetSmitPos() ) ) != int(smit.GetMap().ProtoId) )
+            {
+                TransitToPos( smit, S_POS_RES_POS( GetSmitPos() ) );
+            }
+            else
+            {
+                WalkToPos( smit, S_POS_RES_POS( GetSmitPos() ) );
+            }
+            smit.NcrSmitIdleCount = 0;
+        }
+        else
+        {
+            smit.NcrSmitIdleCount += 1;
+        }
+    }
+}
+
+/* ********************** Завершение выполнения Смитом некоего плана ************************* */
+// CRITTER_EVENT_PLANE_END
+void _SmitPlaneEnd( Critter smit, int planeId, int reason, Critter someCr, Item someItem )
+{
+	NpcPlanes::NpcPlane plane = NpcPlanes::GetCritterPlane(smit, planeId);
+
+    // smit.Say(SAY_NORM_ON_HEAD,"reason="+reason);
+    if( reason == REASON_SUCCESS && plane.Identifier == S_POS_BAZAAR_M2GATES && plane.IdentifierExt == S_POS_BAZAAR_M2GATES )
+    {
+        OnGatesPlaneEnd( smit );
+    }
+    else if( reason == REASON_SUCCESS && plane.Identifier == S_POS_DWNTN_M2RADIO && plane.IdentifierExt == S_POS_DWNTN_M2RADIO )
+    {
+        OnMove2RadioPlaneEnd( smit );
+    }
+    else if( reason == REASON_SUCCESS && plane.Identifier == S_POS_DWNTN_M2POLICE && plane.IdentifierExt == S_POS_DWNTN_M2POLICE )
+    {
+        OnMove2PolicePlaneEnd( smit );
+    }
+    else if( reason == REASON_SUCCESS && plane.Identifier == HEX_NUM_DWNTN2RANCH && plane.IdentifierExt == HEX_NUM_DWNTN2RANCH )
+    {
+        OnExitDwnTnPlaneEnd( smit );
+    }
+    else if( reason == REASON_SUCCESS && plane.Identifier == S_POS_RANCH_WESTIN && plane.IdentifierExt == S_POS_RANCH_WESTIN )
+    {
+        OnWestinMovePlaneEnd( smit );
+    }
+    else if( reason == REASON_SUCCESS && plane.Identifier == S_POS_DWTN_M2HOME && plane.IdentifierExt == S_POS_DWTN_M2HOME )
+    {
+        SetSmitPos( S_POS_DWNTN_HOME );
+    }
+    else if( reason == REASON_HEX_BUSY && plane.IdentifierExt != 0 && plane.Type == AI_PLANE_WALK )
+    {
+        DL( "HEX BUSY..." );
+        uint16 newX = plane.Walk_HexY;
+        uint16 newY = plane.Walk_HexY;
+        Map   map = smit.GetMap();
+        if( valid( map ) )
+        {
+            map.MoveHexByDir( newX, newY, Random( 0, 5 ), 1 );
+
+            if( map.IsHexPassed( newX, newY ) )
+            {
+                plane.Walk_HexY = newX;
+                plane.Walk_HexY = newY;
+
+            }
+        }
+
+    }
+}
+
+/* ********************** Диалог Смита и охранника на воротах города ************************* */
+#define STR_FIRST_GATESGUARD      ( 3400 )                     // первая строка обмена репликами между смитом и охранником
+#define STR_LAST_GATESGUARD       ( 3407 )                     // последняя строка обмена репликами
+#define STR_NO_GUARDS             ( 3408 )                     // строка, если нет охранника на воротах
+#define NPC_ROLE_GATESGUARD       ( 317 )                      // роль охранника на воротах
+#define NPC_ROLE_GATESMAIN        ( 318 )                      // роль охранника на воротах
+
+void OnGatesPlaneEnd( Critter smit )
+{
+    SetSmitPos( S_POS_BAZAAR_GATES );
+    uint8 pos = GetSmitPos();
+
+    DL( "Закончен план перемещения к воротам" );
+
+    if( !valid( GetGatesGuard( smit ) ) )
+    {
+        smit.SayMsg( SAY_NORM_ON_HEAD, TEXTMSG_TEXT, STR_NO_GUARDS );
+        TransitToPos( smit, S_POS_DWNTN_HOME );
+
+    }
+    else
+    {
+        smit.NcrSmitGateStringNum = STR_FIRST_GATESGUARD;
+        NpcPlanes::AddMiscPlane( smit, 0, __FullSecond + 2 * 60, NcrSmit::plane_SayNextPhrase );
+
+    }
+}
+
+void plane_SayNextPhrase( Critter smit )
+{
+    if( smit.NcrSmitGateStringNum > STR_LAST_GATESGUARD )
+    {
+        DL( "value" + Globals.NcrSmitGateGuardAccessGranted );
+        if( not Globals.NcrSmitGateGuardAccessGranted )
+        {
+            SetSmitPos( S_POS_BAZAAR_HOME );
+            return;
+        }
+
+        smit.NcrSmitGateStringNum = 0;
+        TransitToPos( smit, S_POS_DWNTN_HOME );
+    }
+    else
+    {
+        if( smit.NcrSmitGateStringNum % 2 == 1 )
+        {
+            smit.SayMsg( SAY_NORM_ON_HEAD, TEXTMSG_TEXT, smit.NcrSmitGateStringNum );
+        }
+        else
+        {
+            // говорит охранник
+            Critter guard = GetGatesGuard( smit );
+            if( !valid( guard ) || guard.IsDead() )
+            {
+                // исчез, убит?
+                smit.NcrSmitGateStringNum = 0;
+                return;
+            }
+            guard.SayMsg( SAY_NORM_ON_HEAD, TEXTMSG_TEXT, smit.NcrSmitGateStringNum );
+        }
+        smit.NcrSmitGateStringNum += 1;
+        NpcPlanes::AddMiscPlane( smit, 0, __FullSecond + 3 * 60, NcrSmit::plane_SayNextPhrase );
+    }
+}
+
+Critter GetGatesGuard( Critter smit )
+{
+    Map map = smit.GetMap();
+    if( !valid( map ) )
+        return null;
+
+    if( int(map.ProtoId) != S_POS_MAP_PID( S_POS_BAZAAR_GATES ) )
+        return null;
+
+    if( map.GetNpcCount( NPC_ROLE_GATESGUARD, FIND_LIFE | FIND_ONLY_NPC ) > 0 )
+        return map.GetNpc( NPC_ROLE_GATESGUARD, FIND_LIFE | FIND_ONLY_NPC, 0 );
+
+
+    if( map.GetNpcCount( NPC_ROLE_GATESMAIN, FIND_LIFE | FIND_ONLY_NPC ) > 0 )
+        return map.GetNpc( NPC_ROLE_GATESMAIN, FIND_LIFE | FIND_ONLY_NPC, 0 );
+
+    return null;
+}
+
+/* ********************** Смит выходит на связь с Бишопом по рации *************************** */
+#define STR_FIRST_SMIT_RADIO      ( 3420 )                  // первая строка радиопереговоров
+#define STR_LAST_SMIT_RADIO       ( 3451 )                  // последняя строка радиопереговоров
+#define STR_PLAYER_SEEN_ALARM     ( 1 )                     // строка в диалоге смита, которую он произносит, если заметит, что за ним следят во время переговоров
+#define RADIO_CHANNEL_SMIT        ( 17 )                    // номер канала, по которому смит выходит на связь
+
+void SetupRadioComm( Critter smit )
+{
+    SavedDeferredCall( Time::GetNearFullSecond( 0, 0, 0, 1, 0, 0 ) - __FullSecond, BeginRadioComm, smit.Id );
+}
+
+void BeginRadioComm( uint value )
+{
+    Critter smit = GetCritter( value );
+    if( valid( smit ) )
+    {
+        _BeginRadioCom( smit );
+        // следующее событие
+        SetupRadioComm( smit );
+    }
+}
+
+void plane_SayNextRadio( Critter smit )
+{
+    if( smit.NcrSmitStringNum % 3 == 0 )
+    {
+        smit.SayMsg( SAY_NORM_ON_HEAD, TEXTMSG_TEXT, smit.NcrSmitStringNum );
+        smit.NcrSmitStringNum += 1;
+        RadioMessageMsg( RADIO_CHANNEL_SMIT, TEXTMSG_TEXT, smit.NcrSmitStringNum );
+        smit.NcrSmitStringNum += 1;
+
+    }
+    else
+    {
+        RadioMessageMsg( RADIO_CHANNEL_SMIT, TEXTMSG_TEXT, smit.NcrSmitStringNum );
+        smit.NcrSmitStringNum += 1;
+    }
+    if( smit.NcrSmitStringNum > STR_LAST_SMIT_RADIO )
+    {
+        smit.NcrSmitStringNum = 0;
+        smit.SpyCathActive = 0;
+        SetSmitPos( S_POS_DWNTN_HOME );
+        DL( "Smit home pos: x=" + smit.HomeHexX + " y = " + smit.HomeHexY + "mapHome = " + smit.HomeMapId +
+            "mapcur" + smit.GetMap().Id + "CurX = " + smit.HexX + " CurY =" + smit.HexY );
+    }
+    else
+    {
+        NpcPlanes::AddMiscPlane( smit, 0, __FullSecond + 2 * 60, NcrSmit::plane_SayNextRadio );
+    }
+}
+
+void _BeginRadioCom( Critter smit )
+{
+    if( !smit.IsLife() )
+        return;
+
+    if( GetSmitPos() != S_POS_DWNTN_HOME )
+        return;
+
+    WalkToPos( smit, S_POS_DWNTN_M2RADIO );
+}
+
+void OnMove2RadioPlaneEnd( Critter smit )
+{
+    SetSmitPos( S_POS_DWNTN_RADIO );
+    smit.SpyCathActive = 1;
+    if( !SpyMission::BeginSpyControl( smit, 12, 30, 2, uint( CritterProperty::SpyCathActive ), uint( CritterProperty::NcrSantiagaFindSpyStatus ), STR_PLAYER_SEEN_ALARM ) )
+    {
+        DL( "Cannot begin spy control" );
+    }
+    DL( "begin radio event" );
+    smit.NcrSmitStringNum = STR_FIRST_SMIT_RADIO;
+    NpcPlanes::AddMiscPlane( smit, 0, __FullSecond + 2 * 60, NcrSmit::plane_SayNextRadio );
+}
+
+/* ******************* Перемещение Смита к полицейскому перед входом на Ранчо **************** */
+#define WAIT_FORPLAYER_MINUTES    ( 60 )                     // число реальных игровых минут, которое Смит будет ждать игрока перед входом на Ранчо.
+#define STR_NO_GUARD_AT_RANCH     ( 3455 )                   // строка, которую говорит вейстин, если на воротах ранчо нет охранника
+#define STR_FIRST_GRANT           ( 3456 )                   // первая строка в диалоге смит/грант
+#define STR_LAST_GRANT            ( 3459 )                   // последняя
+
+void OnMove2PolicePlaneEnd( Critter smit )
+{
+    SetSmitPos( S_POS_DWNTN_POLICE );
+    // NpcPlanes::AddMiscPlane(smit, 0, __FullSecond+WAIT_FORPLAYER_MINUTES*60, NcrSmit::plane_ComeBackNoPlayer);
+    // он сам через 10 идлов вернется на домашнюю позицию
+}
+
+void plane_ComeBackNoPlayer( Critter smit )
+{
+    // игрок не успел поговорить в отведенное время, Смит возвращается обратно
+    WalkToPos( smit, S_POS_DWTN_M2HOME );
+}
+
+void OnExitDwnTnPlaneEnd( Critter smit )
+{
+    Critter[] critters = {};
+    Obsolete::GetCrittersHex ( smit.GetMap(),  smit.HexX, smit.HexY, 10, FIND_ALL | FIND_ONLY_NPC, critters  );
+
+    for( uint i = 0; i < critters.length(); i++ )
+    {
+        if( critters[ i ].DialogId == Content::Dialog::ncr_grant )
+        {
+            if( critters[ i ].GetTalkedPlayers().length() > 0 )
+            {
+                Critter critter = GetCritter( smit.NcrSmitPlayerId );
+                if( valid( critter ) && critter.NcrSmitVsVestinStatus == 2 )
+                    critter.NcrSmitVsVestinStatus = 3;
+                smit.IsHide = false;
+                Smit2Ranch( smit );
+                return;
+            }
+            else
+            {
+                Critter critter = GetCritter( smit.NcrSmitPlayerId );
+                if( valid( critter ) && critter.NcrSmitVsVestinStatus == 2 )
+                    critter.NcrSmitVsVestinStatus = 6;                                                                     // провал
+                smit.NcrSmitPlayerId = critters[ i ].Id;
+                smit.NcrSmitStringNum = STR_FIRST_GRANT;
+                plane_SayNexPolicePhrase( smit );
+                return;
+            }
+        }
+    }
+
+    smit.SayMsg( SAY_NORM_ON_HEAD, TEXTMSG_TEXT, STR_NO_GUARD_AT_RANCH );
+    Smit2Ranch( smit );
+}
+
+void plane_SayNexPolicePhrase( Critter smit )
+{
+    if( smit.NcrSmitStringNum <= STR_LAST_GRANT )
+    {
+        if( smit.NcrSmitStringNum % 2 == 1 )
+        {
+            smit.SayMsg( SAY_NORM_ON_HEAD, TEXTMSG_TEXT, smit.NcrSmitStringNum );
+            smit.NcrSmitStringNum += 1;
+            NpcPlanes::AddMiscPlane( smit, 0, __FullSecond + 3 * 60, NcrSmit::plane_SayNexPolicePhrase );
+            return;
+        }
+        else
+        {
+            Critter cr = GetCritter( smit.NcrSmitPlayerId );
+            if( valid( cr ) )
+            {
+                if( cr.IsLife() )
+                {
+                    cr.SayMsg( SAY_NORM_ON_HEAD, TEXTMSG_TEXT, smit.NcrSmitStringNum );
+                    smit.NcrSmitStringNum += 1;
+                    NpcPlanes::AddMiscPlane( smit, 0, __FullSecond + 3 * 60, NcrSmit::plane_SayNexPolicePhrase );
+                    return;
+                }
+            }
+        }
+    }
+
+    smit.NcrSmitPlayerId = 0;
+    smit.NcrSmitStringNum = 0;
+    _NpcEraseAllPlanes( smit );
+    WalkToPos( smit, S_POS_DWTN_M2HOME );
+}
+
+void Smit2Ranch( Critter smit )
+{
+    TransitToPos( smit, S_POS_RANCH_M2WESTIN );
+    WalkToPos( smit, S_POS_RANCH_WESTIN );
+}
+
+/* ***************************** И, наконец, убийство Вейстина ******************************* */
+#define STR_FIRST_WESTINSMIT      ( 3460 )                    // первая строка в диалоге смит/грант
+#define STR_LAST_WESTINSMIT       ( 3465 )                    // последняя
+#define STR_NO_WESTININHOME       ( 3466 )                    // вейстина нет на месте или он мертв
+#define WESTIN_FIND_RADIUS        ( 5 )                       // радиус, в котором ищем живых вейстинов вокруг смита
+
+void OnWestinMovePlaneEnd( Critter smit )
+{
+    smit.NcrSmitStringNum = STR_FIRST_WESTINSMIT;
+    if( !valid( GetWestin( smit ) ) )
+    {
+        DL( "Westin=invalid" );
+        smit.SayMsg( SAY_NORM_ON_HEAD, TEXTMSG_TEXT, STR_NO_WESTININHOME );
+        FailWestinKill( smit );
+    }
+    else
+    {
+        NpcPlanes::AddMiscPlane( smit, 0, __FullSecond + 3 * 60, NcrSmit::plane_SayNexWestinPhrase );
+    }
+}
+
+void plane_SayNexWestinPhrase( Critter smit )
+{
+    Critter westin = GetWestin( smit );
+    if( !valid( westin ) )
+    {
+        FailWestinKill( smit );
+    }
+    if( smit.NcrSmitStringNum <= STR_LAST_WESTINSMIT )
+    {
+        if( smit.NcrSmitStringNum % 2 == 1 )
+        {
+            westin.SayMsg( SAY_NORM_ON_HEAD, TEXTMSG_TEXT, smit.NcrSmitStringNum );
+        }
+        else
+        {
+            smit.SayMsg( SAY_NORM_ON_HEAD, TEXTMSG_TEXT, smit.NcrSmitStringNum );
+        }
+        smit.NcrSmitStringNum += 1;
+        NpcPlanes::AddMiscPlane( smit, 0, __FullSecond + 3 * 60, NcrSmit::plane_SayNexWestinPhrase );
+    }
+    else
+    {
+        AttackWestin( smit, westin );
+    }
+}
+
+void FailWestinKill( Critter smit )
+{
+    DL( "westin kill failked" );
+    smit.NcrSmitStringNum = 0;
+    WalkToPos( smit, S_POS_RANCH_M2WESTIN );
+    // SetSmitPos(S_POS_DWNTN_HOME);
+}
+
+void AttackWestin( Critter smit, Critter westin )
+{
+    if( !NpcPlanes::AddAttackPlane( smit, 0, westin ) )
+    {
+        FailWestinKill( smit );
+    }
+}
+
+Critter GetWestin( Critter smit )
+{
+    Critter[] critters = {};
+    Obsolete::GetCrittersHex ( smit.GetMap(),  smit.HexX, smit.HexY, WESTIN_FIND_RADIUS, FIND_ALL | FIND_ONLY_NPC, critters  );
+
+    for( uint i = 0; i < critters.length(); i++ )
+    {
+        if( critters[ i ].DialogId == Content::Dialog::ncr_westin )
+        {
+            if( critters[ i ].IsLife() )
+            {
+                DL( "westin founded" );
+                return critters[ i ];
+            }
+        }
+    }
+    return null;
+}
+
+/* ************************** Функции для использования в диалогах *************************** */
+void r_SmitGoToGates( Critter player, Critter smit )
+{
+    if( !valid( smit ) )
+        return;
+    if( GetSmitPos() != S_POS_BAZAAR_HOME )
+        return;
+
+    WalkToPos( smit, S_POS_BAZAAR_M2GATES );
+}
+
+void r_SmitGoToPolice( Critter player, Critter smit )
+{
+    if( !valid( smit ) )
+        return;
+    if( GetSmitPos() != S_POS_DWNTN_HOME )
+        return;
+
+    WalkToPos( smit, S_POS_DWNTN_M2POLICE );
+
+}
+
+void r_SmitGoToRanch( Critter player, Critter smit )
+{
+    if( !valid( smit ) )
+        return;
+
+    // if(GetSmitPos()!=S_POS_DWNTN_POLICE) return;
+    uint16 x = smit.HexX;
+    uint16 y = smit.HexY;
+    Map    map = smit.GetMap();
+    if( !valid( map ) )
+        return;
+
+    if( !Entire::GetNearEntire( map, HEX_NUM_DWNTN2RANCH, x, y ) )
+        return;
+
+    if( !NpcPlanes::AddWalkPlane( smit, 0, HEX_NUM_DWNTN2RANCH, HEX_NUM_DWNTN2RANCH, x, y, Random( 0, 5 ), false, 1 ) )
+        return;
+
+    smit.IsHide = true;
+    smit.SkillSneak = 300;
+    // запоминаем игрока
+    smit.NcrSmitPlayerId = player.Id;
+}
+
+// */
+// ~checkvar 4215 0 1 0 0
+// ~setvar 4220 0 1 0 1
+// ~additemself 100 1
+// ~settime 20 2246 10 31 06 00
+// ~run test t2m 45 44 0 //  ксмиту домой на базар
+// ~run test t2m 42 46 0 //  ксмиту в бар

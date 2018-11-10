@@ -1,0 +1,581 @@
+// FOS Server
+// Author: Sufir
+
+const hash MsgV13GuardAlarm = 301;
+const hash MsgV13GuardKill = 303;
+#define MSG_V13_GUARD_DCLAW    ( 305 )
+const hash RoleSoldier = 1;
+const hash RoleGuardian = 2;
+
+// Defines
+uint[] player_warned = {};
+uint[] player_ban = {};
+uint[] player_done = {};
+#define QUEST_TIMEOUT    ( 0.5 )        // Переодичность, в игровых сутках, с которой квест "Добыть самку" дается игрокам.
+uint QuestAllowTime = 0;
+
+void _GuardInit( Critter guard, bool firstTime )
+{
+    guard.IsNoSupply = true;
+    __EventCritterIdle.SubscribeToCritter( guard, e_GuardIdle );
+    __EventCritterHide.SubscribeToCritter( guard, e_GuardHide );
+    __EventCritterSomeCritterDropItem.SubscribeToCritter( guard, e_GuardMined );
+}
+
+// Ищем беспредельщиков, предупреждаем и непослушных убиваем.
+void e_GuardIdle( Critter guard )
+{
+
+    // Ищем игроков.
+    Critter[] players = {};
+    Obsolete::GetCritters( guard,  false, FIND_ONLY_PLAYERS | FIND_LIFE_AND_KO, players  );
+    if( players.length() > 0 )
+    {
+        for( uint i = 0; i < players.length(); i++ )
+        {
+            // Если игроки найдены, видны охраннику и у них в руках оружие.
+            if( players[ i ].IsPlayer() && players[ i ].IsSeenBy( guard ) && players[ i ].CurrentHp > 0 )
+            {
+                // Если игрок в списке нарушителей - агрим на него охрану. Если он убрал оружие - убираем из списка.
+                if( UtilsForArray::FindInArray( player_ban, players[ i ].Id ) >= 0 )
+                {
+                    if( V13GuardLib::SearchWeapon( _CritGetItemHand( players[ i ] ) ) )
+                    {
+                        // Отдаём приказ атаковать нарушителя.
+                        SendMessage::SendMessage( guard,  V13ZGuard::MsgV13GuardAlarm, players[ i ].Id, MESSAGE_TO_WHO_SEES_ME  );
+                        guard.SayMsg( SAY_SHOUT_ON_HEAD, TEXTMSG_DLG, DLGSTR( guard.DialogId, 1 ) );
+                        // EnemyStack::AddEnemyToStack( guard,  players[i].Id  );
+                    }
+                    else
+                    {
+                        player_ban.removeAt( uint( UtilsForArray::FindInArray( player_ban, players[ i ].Id ) ) );
+                        guard.SayMsg( SAY_NORM_ON_HEAD, TEXTMSG_DLG, DLGSTR( guard.DialogId, 3 ) );
+                    }
+                }
+                // Проверяем занесён-ли игрок в список предупреждённых и соответственно добавляем туда или убираем...
+                if( UtilsForArray::FindInArray( player_warned, players[ i ].Id ) >= 0 && UtilsForArray::FindInArray( player_ban, players[ i ].Id ) < 0 )
+                {
+                    if( V13GuardLib::SearchWeapon( _CritGetItemHand( players[ i ] ) ) )
+                    {
+                        guard.SayMsg( SAY_SHOUT_ON_HEAD, TEXTMSG_DLG, DLGSTR( guard.DialogId, 2 ) );
+                        player_ban.insertLast( players[ i ].Id );
+                    }
+                    else
+                    {
+                        player_warned.removeAt( uint( UtilsForArray::FindInArray( player_warned, players[ i ].Id ) ) );
+                        guard.SayMsg( SAY_NORM_ON_HEAD, TEXTMSG_DLG, DLGSTR( guard.DialogId, 3 ) );
+                    }
+                }
+                else if( UtilsForArray::FindInArray( player_warned, players[ i ].Id ) < 0 && UtilsForArray::FindInArray( player_ban, players[ i ].Id ) < 0 )
+                {
+                    if( V13GuardLib::SearchWeapon( _CritGetItemHand( players[ i ] ) ) )
+                    {
+                        player_warned.insertLast( players[ i ].Id );
+                        guard.SayMsg( SAY_NORM_ON_HEAD, TEXTMSG_DLG, DLGSTR( guard.DialogId, 2 ) );
+                    }
+                }
+
+            }
+
+        }
+    }
+    return;
+
+}
+
+
+// Если игрок пропал из поля зрения, убираем его из списков предупреждённых.
+void e_GuardHide( Critter npc, Critter player )
+{
+
+    if( not player.IsPlayer() )
+        return;
+    player_ban.removeAt( uint( UtilsForArray::FindInArray( player_ban, player.Id ) ) );
+    player_warned.removeAt( uint( UtilsForArray::FindInArray( player_warned, player.Id ) ) );
+    return;
+
+}
+
+
+// Охранник болезненно реагирует на попытку минирования и отдаёт приказ солдатам на атаку.
+void e_GuardMined( Critter guard, Critter dropper, Item item )
+{
+
+    // if ( NpcPlanes::IsNoPlanes( !guard ) ) return;
+    if( !valid( dropper ) )
+        return;
+    if( !dropper.IsPlayer() )
+        return;
+    if( !dropper.IsLife() )
+        return;
+    // Заминировать нас не так-то просто, нужно быть действительно мастером и удачливым ловкачем.
+    if( V13GuardLib::IsMined( guard, item, dropper, guard.PerceptionBase * 20, PidsGroups::Pids_MiscActiveExplosions ) )
+    {
+        // player_ban.insertLast( dropper.Id );
+        SendMessage::SendMessage( guard,  V13ZGuard::MsgV13GuardKill, dropper.Id, MESSAGE_TO_WHO_SEES_ME  );
+        guard.SayMsg( SAY_SHOUT_ON_HEAD, TEXTMSG_DLG, DLGSTR( guard.DialogId, 1 ) );
+    }
+    return;
+
+}
+
+
+/* =================== Триггеры =================== */
+
+
+// Открываем диалог с игроком.
+void t_Frontier( Critter player, const Item trigger, bool entered, uint8 dir )
+{
+
+    if( !player.IsPlayer() )
+        return;
+    if( !entered )
+        return;
+    if( HaveAccess( player ) )
+        return;
+
+    Critter guard = player.GetMap().GetNpc( V13ZGuard::RoleGuardian, FIND_LIFE | FIND_ONLY_NPC, 0 );
+    if( !valid( guard ) )
+        return;
+
+    if( !guard.IsLife() )
+        return;
+
+    if( player.IsHide || !player.IsSeenBy( guard ) )
+    {
+        // Можно пробраться в скрытности. Чем выше навык и удача, тем шанс больше.
+        if( player.SkillSneak / 3 >= Random( 60, 100 ) - player.Luck )
+        {
+            // Разрешаем игроку пройти в убежище.
+            AllowAccess( player );
+            return;
+        }
+        else
+        {
+            // Открываем диалог с неудачно попытавшимся пробраться.
+            player.Wait( 0 );
+            RunDialog( player, guard, true );
+            return;
+        }
+    }
+    else
+    {
+        // Если игрок не прячется - просто откроем диалог.
+        player.Wait( 0 );
+        RunDialog( player, guard, true );
+        return;
+    }
+
+}
+
+
+// Проход в убежище. Если идём внутрь и нет пропуска - атака.
+void t_Entrance( Critter player, const Item trigger, bool entered, uint8 dir )
+{
+
+    if( !player.IsPlayer() )
+        return;
+    if( !entered )
+        return;
+    if( dir == 2 || dir == 3 )
+        return;
+
+    Critter guard = player.GetMap().GetNpc( V13ZGuard::RoleGuardian, FIND_LIFE | FIND_ONLY_NPC, 0 );
+    if( !valid( guard ) )
+        return;
+
+    // Если гвардян не жив, значит можно всем проходить спокойно.
+    if( !guard.IsLife() )
+        return;
+
+    if( !HaveAccess( player ) )
+    {
+        SendMessage::SendMessage( guard,  V13ZGuard::MsgV13GuardKill, player.Id, MESSAGE_TO_WHO_SEES_ME  );
+        guard.SayMsg( SAY_SHOUT_ON_HEAD, TEXTMSG_DLG, DLGSTR( guard.DialogId, 1 ) );
+    }
+    return;
+
+}
+
+
+// Проход в убежище. Если идём внутрь и нет пропуска - атака.
+/*void t_Exit( Critter player, const Item trigger, bool entered, uint8 dir )
+   {
+
+        if ( !player.IsPlayer() ) return;
+        if ( !entered ) return;
+        if ( dir == 2 || dir == 3 ) {
+                if ( UtilsForArray::FindInArray( player_done, player.Id ) < 0 ){
+                        player_done.insertLast( player.Id );
+                }
+        }
+
+        return;
+
+   }*/
+
+
+/* =================== Диалоги =================== */
+
+
+// Разрешаем игроку пройти в убежище.
+void r_AllowAccess( Critter player, Critter npc )
+{
+
+    AllowAccess( player );
+    return;
+
+}
+
+
+// Разрешаем игроку пройти в убежище.
+uint r_GuardDialog( Critter player, Critter npc )
+{
+
+    // Если есть пропуск и броня - не позволяем пронести только взрывчатку.
+    // В противном случае не позволяем проносить и любое оружие.
+    //
+
+    // Если в руках игрока оружие.
+    /*if ( V13GuardLib::SearchWeapon( _CritGetItemHand(player) ) ){
+            return 1;
+       // Если в инвентаре запрещенные предметы - взрывчатка.
+       } else if ( EquipmentInspection( player, PidsGroups::Pids_MiscExplosions ) || EquipmentInspection( player, PidsGroups::Pids_MiscActiveExplosions ) ){
+            return 2;
+       }  else if ( EquipmentInspection( player, PidsGroups::Pids_MiscExplosions ) || EquipmentInspection( player, PidsGroups::Pids_MiscActiveExplosions ) ){
+            return 2;
+       }*/
+    if( player.IsHide )
+        return 100;
+    else if( V13GuardLib::SearchWeapon( _CritGetItemHand( player ) ) )
+        return 101;
+    return 2;
+
+}
+
+
+// Запуск квеста "Добыть самку".
+void r_StartQuest( Critter player, Critter npc )
+{
+
+    player.AddItem( Content::Item::rope, 1 );
+    Item Collar = player.AddItem( Content::Item::psychic_nullifier, 1 );
+    if( !valid( Collar ) )
+        return;
+    Collar.SetScript( ItemV13Collar::_CollarInit );
+    int[] ChangeStages = { 0, 3, 5 };
+    V13DClawLib::SetGroupQuestStage( player, ChangeStages, 1 );
+    // Устанавливаем таймаут для квеста. Квест не может быть взят другими игроками ранее чем через QUEST_TIMEOUT суток.
+    QuestAllowTime = uint( __FullSecond + ( 60 * 60 * 24 * QUEST_TIMEOUT ) );
+
+}
+
+
+// Завершаем квест.
+void r_QuestDone( Critter player, Critter npc )
+{
+
+    Critter[] group = {};
+    Critter leader = GetCritter( V13DClawLib::GetLeaderId( player ) );
+    group.insertLast( leader );
+    GlobalmapGroupExtended::GetFollowGroup(leader, FIND_ALL, group );
+
+    for( uint i = 0; i < group.length(); i++ )
+    {
+        // Если в группе есть НПС, а он есть, если самка поймана, - пропускаем его.
+        if( group[ i ].IsPlayer() )
+        {
+
+            if( V13DClawLib::GetQuestStage( group[ i ] ) == 2 )
+            {
+                Critter[] mercs = {};
+                if( Merc::GetPlayerMercs( group[ i ], mercs ) > 0 )
+                {
+                    for( uint n = 0; n < group.length(); n++ )
+                    {
+                        if( mercs[ n ].NpcRole == 1001 )
+                        {
+
+                            Merc::CancelMerc( mercs[ n ] );
+                            group[ i ].Experience += 8000;
+                            // ToDo: Сделать, что-бы один из солдат приходил и забирал самку.
+                            /*if ( valid(npc) ){
+                                    SendMessage::SendMessage( guard,  MSG_V13_GUARD_DCLAW, players[i].Id, MESSAGE_TO_WHO_SEES_ME  );
+                               } else {
+                                    Caravan::GetFreeHex(Map map, uint radius, uint16 hx, uint16 hy);
+                                    player.GetMap().GetEntireCoords( 250, uint8 num, uint16 hexX, uint16 hexY );
+
+                               }*/
+                            uint16 x = 0, y = 0;
+                            if( player.GetMap().GetEntireCoords( 250, 0, x, y ) )
+                            {
+                                // GetFreeHex( player.GetMap(), 1, x, y);
+                                NpcPlanes::AddWalkPlane( mercs[ n ], 10, x, y, 0, false, 0 );
+                                NpcPlanes::AddMiscPlane( mercs[ n ], 5, 0, NpcV13DClaw::DclawFinish );
+                            }
+                            else
+                            {}
+                            //
+                            V13DClawLib::SetQuestStage( group[ i ], 4 );
+
+                        }
+                    }
+                }
+            }
+
+        }
+    }
+    return;
+
+}
+
+
+// Проверяем на наличие оружия вруках.
+/*bool d_V13GuardLib::SearchWeapon( Critter player, Critter npc )
+   {
+
+        return V13GuardLib::SearchWeapon( _CritGetItemHand(player) );
+
+   }
+
+
+   // Проверяем на наличие запрещённых предметов в инвентаре.
+   bool d_EquipmentInspection( Critter player, Critter npc )
+   {
+
+        if ( EquipmentInspection( player, PidsGroups::Pids_MiscExplosions ) || EquipmentInspection( player, PidsGroups::Pids_MiscActiveExplosions ) ){
+                return true;
+        }
+        return false;
+
+   }*/
+
+
+// Проверяем наличие, размер и сосав группы для квеста "Добыть самку".
+bool d_GroupCheck( Critter player, Critter npc )
+{
+
+    return GroupCheck( player );
+
+}
+
+
+// Проверяем наличие, размер и сосав группы для квеста "Добыть самку".
+bool d_GroupNotCheck( Critter player, Critter npc )
+{
+
+    if( GroupCheck( player ) )
+    {
+        return false;
+    }
+    else
+    {
+        return true;
+    }
+
+}
+
+
+// Проверка - потерян ли ошейник.
+bool d_CollarLost( Critter player, Critter npc )
+{
+
+    if( V13DClawLib::GetQuestStage( player ) == 3 )
+    {
+        return true;
+    }
+    return false;
+
+}
+
+
+// Проверяем был ли квест уже взят участниками группы. Если более чем половина участников уже брали квест - не даём.
+// Те кто выполнил квест могут участвовать и помогать, но не получат опыта и награды.
+bool d_QuestCheck( Critter player, Critter npc )
+{
+
+    // Проверяем как давно квест брался другими игроками
+    if( QuestAllowTime > __FullSecond )
+        return false;
+    // Находим группу в которой состоит игрок и лидера этой группы.
+    Critter[] group = {};
+    Critter leader = GetCritter( V13DClawLib::GetLeaderId( player ) );
+    group.insertLast( leader );
+    GlobalmapGroupExtended::GetFollowGroup(leader, FIND_ALL, group );
+    uint QuestDone = 0;
+    for( uint i = 0; i < group.length(); i++ )
+    {
+        // Если в группе есть НПС - пропускаем его, он может быть любого уровня.
+        if( !group[ i ].IsNpc() )
+        {
+            // Если игроки уже брали квест.
+            if( V13DClawLib::GetQuestStage( group[ i ] ) != 0 )
+                QuestDone += 1;
+        }
+    }
+    if( QuestDone <= group.length() / 2 )
+    {
+        return true;
+    }
+    return false;
+
+}
+
+
+// Проверяем в броне ли игрок.
+bool d_ArmorCheck( Critter player, Critter npc )
+{
+
+    Item[] PlayerArmor = {};
+    if( Obsolete::GetItems( player, SLOT_ARMOR, PlayerArmor ) <= 0 )
+        return false;
+    if( PlayerArmor.length() == 1 )
+    {
+        if( !valid( PlayerArmor[ 0 ] ) )
+            return false;
+        if( PlayerArmor[ 0 ].ProtoId == Content::Item::advanced_power_armor || PlayerArmor[ 0 ].ProtoId == Content::Item::advanced_power_armor_mk2 )
+        {
+            return true;
+        }
+        else
+        {
+            return false;
+        }
+    }
+    return false;
+
+}
+
+
+// Проверяем выполнен ли квест.
+bool d_QuestDone( Critter player, Critter npc )
+{
+
+    Critter[] group = {};
+    Critter leader = GetCritter( V13DClawLib::GetLeaderId( player ) );
+    group.insertLast( leader );
+    GlobalmapGroupExtended::GetFollowGroup(leader, FIND_ALL, group );
+    for( uint i = 0; i < group.length(); i++ )
+    {
+        // Если в группе есть НПС, а он есть, если самка поймана, - пропускаем его.
+        if( group[ i ].IsPlayer() )
+        {
+            if( V13DClawLib::GetQuestStage( group[ i ] ) == 2 )
+            {
+                Critter[] mercs = {};
+                if( Merc::GetPlayerMercs( group[ i ], mercs ) > 0 )
+                {
+                    for( uint n = 0; n < group.length(); n++ )
+                    {
+                        if( mercs[ n ].NpcRole == 1001 )
+                            return true;
+                    }
+                }
+            }
+        }
+    }
+    return false;
+
+}
+
+
+/* =================== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ =================== */
+
+
+// Проверяем группу. Минимальный размер и колличество игроков.
+bool GroupCheck( Critter player )
+{
+
+    uint minPlayers = 2;
+    int  groupLvl = 0;
+
+    // Находим группу в которой состоит игрок и лидера этой группы.
+    Critter[] group = {};
+    Critter leader = GetCritter( V13DClawLib::GetLeaderId( player ) );
+    group.insertLast( leader );
+    GlobalmapGroupExtended::GetFollowGroup(leader, FIND_ALL, group );
+
+    // Проверяем размер группы в которой состоит игрок берущий квест. Если игроков менее minPlayers возвращаем false.
+    if( group.length() < minPlayers )
+    {
+        return false;
+    }
+
+    // Проверяем уровни группы в которой состоит игрок берущий квест.
+    for( uint i = 0; i < group.length(); i++ )
+    {
+        // Если в группе есть НПС - пропускаем его, он может быть любого уровня.
+        if( !group[ i ].IsNpc() )
+        {
+            groupLvl += group[ i ].Level;
+        }
+
+    }
+
+    // Если суммарный уровень группы менее 40 возвращаем false.
+    if( groupLvl < 20 )
+    {
+        return false;
+    }
+
+    // Если группа прошла все проверки - возвращаем true.
+    return true;
+
+}
+
+
+// Вспомогательная функция. Помещает Id игрока в массив допущенных в убежище.
+void AllowAccess( Critter player )
+{
+
+    if( !HaveAccess( player ) )
+    {
+        player_done.insertLast( player.Id );
+    }
+    return;
+
+}
+
+
+// Вспомогательная функция. Удаляет Id игрока из массива допущенных в убежище.
+void DenyAccess( Critter player )
+{
+
+    if( !HaveAccess( player ) )
+    {
+        player_done.removeAt( uint( GetAccessId( player ) ) );
+    }
+    return;
+
+}
+
+
+// Вспомогательная функция. Возвращает true если игрок допущен и false если отсутсвует в массиве допущенных.
+bool HaveAccess( Critter player )
+{
+
+    if( GetAccessId( player ) >= 0 )
+    {
+        return true;
+    }
+    return false;
+
+}
+
+
+// Вспомогательная функция. Возвращает ключ записи в массиве допущенных игроков.
+int GetAccessId( Critter player )
+{
+
+    if( !valid( player ) )
+        return -1;
+    for( uint i = 0; i < player_done.length(); i++ )
+    {
+        if( player_done[ i ] == player.Id )
+        {
+            return i;
+        }
+    }
+    return -1;
+
+}

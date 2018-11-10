@@ -1,1 +1,1 @@
-cd "%~dp0" & start "" "%~dp0FOnlineSDK\Client\FOnline.exe" %*
+start "" "%~dp0FOnlineSDK\Binaries\Client\Windows\FOnline.exe" %* -WorkDir "%~dp0Client" -AddConfig "..\FOnline.cfg" %*

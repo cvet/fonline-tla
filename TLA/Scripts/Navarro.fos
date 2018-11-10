@@ -1,0 +1,179 @@
+// FOS Server Sort 2
+// Author: rifleman17
+// Navarro sub1 quests
+
+#pragma property Critter Protected uint8 NavHenryEmpTest Group = Quests, Quest = 4507, Max = 7
+#pragma property Critter PrivateServer dict< uint, bool > NavEmpTestedCritter
+
+#pragma property Item    PrivateServer uint NavarroCountUseScaner
+#pragma property Critter PrivateServer uint NavarroTimeOutScan
+#pragma property Critter PrivateServer uint NavarroChipUsedId
+
+// Quest "Soft Job", Henry
+#pragma content Item elec_lockpick_mkii
+#define SCANER_INFO              ( 2 )
+#define STR_SCAN                 ( 5150 )
+#define STR_FULL                 ( 5151 )
+#define STR_EMPTY                ( 5152 )
+
+void _ScanerInit( Item item, bool firstTime )
+{
+    item.Info = SCANER_INFO;
+    item.IsCanUseOnSmth = true;
+    item.Lexems = "$value" + item.NavarroCountUseScaner;
+    __EventCritterUseItem.SubscribeToItem( item, _ScanerUse );
+    if( firstTime )
+    {
+        // Создаем событие удаления предмета через 1 игровой месяц
+        SavedDeferredCall( GAME_MONTH_TO_TICK( 1 ), DeleteScaner, item.Id );
+    }
+}
+
+void DeleteScaner( uint value )
+{
+    Item item = GetItem( value );
+    if( valid( item ) )
+        DeleteItem( item );
+}
+
+bool _ScanerUse( Critter cr, Item item, Critter onCritter, Item onItem, const Item onScenery, uint param )
+{
+    if( valid( onCritter ) && onCritter.IsDead() && onCritter.ModelNameBase == CRTYPE_ROBOT )
+    {
+        Map map = onCritter.GetMap();
+        if( !valid( map ) )
+            return false;
+        Location loc = map.GetLocation();
+        if( !valid( loc ) || ( loc.ProtoId != Content::Location::sierra_army_depot ) )
+            return false;
+        if( onCritter.NavarroTimeOutScan > __FullSecond )
+        {
+            cr.SayMsg( SAY_NETMSG, TEXTMSG_TEXT, STR_EMPTY );
+            return true;
+        }
+        // Каждого робота можно сканировать только раз в два реальных часа
+        onCritter.NavarroTimeOutScan = __FullSecond + __TimeMultiplier * 2 * 60 * 60;
+        uint value = 1;
+        if( cr.SkillScience > 50 )
+            value = Random( 5, 10 );
+        if( cr.SkillScience > 100 )
+            value = Random( 15, 20 );
+        if( cr.SkillScience > 150 )
+            value = Random( 20, 25 );
+        item.NavarroCountUseScaner += value;
+        item.NavarroCountUseScaner = CLAMP( item.NavarroCountUseScaner, 0, 100 );
+        item.Lexems = "$value" + item.NavarroCountUseScaner;
+        if( item.NavarroCountUseScaner > 99 )
+            cr.SayMsg( SAY_NETMSG, TEXTMSG_TEXT, STR_FULL );
+        else
+            cr.SayMsg( SAY_NETMSG, TEXTMSG_TEXT, STR_SCAN, "$value" + item.NavarroCountUseScaner );
+
+        return true;
+    }
+    return false;
+}
+
+bool d_SoftJobComplete( Critter player, Critter npc )
+{
+    Item[] items = {};
+    if( Obsolete::GetItems( player, -1, items ) > 0 )
+    {
+        for( uint i = 0, l = items.length(); i < l; i++ )
+        {
+            if( items[ i ].ProtoId == Content::Item::elec_lockpick_mkii && items[ i ].Info == SCANER_INFO && items[ i ].NavarroCountUseScaner == 100 )
+                return true;
+        }
+    }
+    return false;
+}
+
+void r_AddScaner( Critter player, Critter npc )
+{
+    Item item = player.AddItem( Content::Item::elec_lockpick_mkii, 1 );
+    if( valid( item ) )
+    {
+        item.SetScript ( _ScanerInit );
+    }
+}
+
+// Чип для подчинения робота
+#define STR_CHIP_SET_UP          ( 5153 )
+#define STR_CHIP_SET_FAIL        ( 5154 )
+#define STR_ROBOT_CANT_REPAIR    ( 5155 )
+#define STR_ROBOT_REPAIRED       ( 5156 )
+
+
+void r_AddChip( Critter player, Critter npc )
+{
+    Item item = player.AddItem( Content::Item::navcom_parts, 1 );
+    if( valid( item ) )
+        item.SetScript ( _ChipInit );
+}
+
+void _ChipInit( Item item, bool firstTime )
+{
+    item.Info = 2;
+    item.IsCanUseOnSmth = true;
+    __EventCritterUseItem.SubscribeToItem( item, _ChipUse );
+}
+
+bool _ChipUse( Critter cr, Item item, Critter onCritter, Item onItem, const Item onScenery, uint param )
+{
+    if( valid( onCritter ) && onCritter.IsDead() && onCritter.ModelNameBase == CRTYPE_ROBOT )
+    {
+        Map map = onCritter.GetMap();
+        if( !valid( map ) )
+            return false;
+        Location loc = map.GetLocation();
+        if( !valid( loc ) || ( loc.ProtoId != Content::Location::sierra_army_depot ) )
+            return false;
+        if( cr.SkillScience < 100 )
+        {
+            cr.SayMsg( SAY_NETMSG, TEXTMSG_TEXT, STR_CHIP_SET_FAIL );
+        }
+        else
+        {
+            cr.SayMsg( SAY_NETMSG, TEXTMSG_TEXT, STR_CHIP_SET_UP );
+            DeleteItem( item );
+            __EventCritterSomeCritterUseSkill.SubscribeToCritter( onCritter, _RobotSmthUseSkill );
+            onCritter.NavarroChipUsedId = cr.Id;           // Запоминаем, кто установил чип
+        }
+        return true;
+    }
+    return false;
+}
+
+void _RobotSmthUseSkill( Critter cr, Critter fromCr, CritterProperty skill, Critter onCritter, Item onItem, const Item onScenery )
+{
+    if( skill == CritterProperty::SkillRepair && valid( onCritter ) && onCritter.Id == cr.Id && cr.NavarroChipUsedId == fromCr.Id )
+    {
+        if( fromCr.SkillRepair <= 100 )
+        {
+            fromCr.SayMsg( SAY_NETMSG, TEXTMSG_TEXT, STR_ROBOT_CANT_REPAIR );
+        }
+        else
+        {
+            fromCr.SayMsg( SAY_NETMSG, TEXTMSG_TEXT, STR_ROBOT_REPAIRED );
+            EnemyStack::ClearEnemyStack( cr );
+            CritterState::ToLife( cr );
+            cr.CurrentHp = cr.MaxLife;
+            cr.MercMasterDist = 6;
+            cr.BagId = 144;               // Sentry robot bag
+            Merc::Merc2Player( fromCr, cr, 4 ); // Охранник по умолчанию. Защищает хозяина
+        }
+    }
+}
+
+void CountEmpRocketTests( Critter player, Critter target )
+{
+    if( player.NavHenryEmpTest > 0 && player.NavHenryEmpTest < 7 )
+    {
+        auto navEmpTestedCritter = player.NavEmpTestedCritter.clone();
+        if( !navEmpTestedCritter.get( target.Id, false ) )
+        {
+            player.NavHenryEmpTest += 1;
+            navEmpTestedCritter[ target.Id ] = true;
+            player.NavEmpTestedCritter = navEmpTestedCritter;
+        }
+    }
+}

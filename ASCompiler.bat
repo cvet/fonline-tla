@@ -1,1 +1,1 @@
-cd "%~dp0" & "%~dp0FOnlineSDK\Tools\ASCompiler\ASCompiler.exe" %*
+"%~dp0FOnlineSDK\Binaries\ASCompiler\ASCompiler.exe" %* -WorkDir "%~dp0Server" -AddConfig "..\FOnline.cfg"

@@ -1,0 +1,121 @@
+// FOS Server
+// Author: cvet
+
+
+#pragma property Critter PrivateServer uint TerminalPlayerId
+
+// terminal == null
+
+#define FORCE_DIALOG_PAY_SELF          ( 3 )
+#define FORCE_DIALOG_PAY_OTHER_NEXT    ( 8 )
+
+#define STR_GENERIC_ERROR              ( DLGSTR( Content::Dialog::repl_terminal, 0 ) ) // Критическая ошибка. Пожалуйста обратитесь в службу поддержки.
+#define STR_PLAYER_NOT_FOUND           ( DLGSTR( Content::Dialog::repl_terminal, 1 ) ) // Данный клиент не найден. Возможно вы ошиблись в имени, либо клиент не в зоне доступа.
+#define STR_INVALID_MONEY_COUNT        ( DLGSTR( Content::Dialog::repl_terminal, 2 ) )
+#define STR_ZERO_MONEY_COUNT           ( DLGSTR( Content::Dialog::repl_terminal, 3 ) )
+#define STR_NEGATIVE_MONEY_COUNT       ( DLGSTR( Content::Dialog::repl_terminal, 4 ) )
+#define STR_NOT_ENAUGTH_MONEY          ( DLGSTR( Content::Dialog::repl_terminal, 5 ) )
+#define STR_ZERO_BALANCE               ( DLGSTR( Content::Dialog::repl_terminal, 6 ) )
+#define STR_NEGATIVE_BALANCE           ( DLGSTR( Content::Dialog::repl_terminal, 7 ) )
+#define STR_OPERATION_SUCCESS          ( DLGSTR( Content::Dialog::repl_terminal, 10 ) )
+
+#define SEND_ERROR_RETURN              # ( cr, error )     { cr.SayMsg( SAY_DIALOG, TEXTMSG_DLG, error ); return; }
+#define SEND_ERROR_RETURN0             # ( cr, error )     { cr.SayMsg( SAY_DIALOG, TEXTMSG_DLG, error ); return 0; }
+
+//bool s_Terminal( Critter player, const Item terminal, CritterProperty skill, Item item )
+bool s_Terminal( Critter player, const Item terminal, Item item, int skill )
+{
+    if( player.IsPlayer() && skill == SKILL_PICK_ON_GROUND && not valid( item ) )
+        RunDialog( player, Content::Dialog::repl_terminal, terminal.HexX, terminal.HexY, false );
+    return true;
+}
+
+void r_PaySelf( Critter player, Critter terminal )
+{
+    player.TerminalPlayerId = player.Id;
+}
+
+uint dlg_ChoosePlayer( Critter player, Critter terminal, string playerName )
+{
+    if( not IS_DIALOG_SAY_MODE( playerName ) )
+        return 0;
+
+    const Critter cr = GetPlayer( playerName );
+    if( not valid( cr ) )
+        SEND_ERROR_RETURN0( player, STR_PLAYER_NOT_FOUND );
+
+    player.TerminalPlayerId = cr.Id;
+    if( cr.Id == player.Id )
+        return FORCE_DIALOG_PAY_SELF;
+    return FORCE_DIALOG_PAY_OTHER_NEXT;
+}
+
+void dlg_TransferReal( Critter player, Critter terminal, string moneyCount )
+{
+    if( not IS_DIALOG_SAY_MODE( moneyCount ) )
+        return;
+    TransferMoney( player, moneyCount, true );
+}
+
+void dlg_TransferVirtual( Critter player, Critter terminal, string moneyCount )
+{
+    if( not IS_DIALOG_SAY_MODE( moneyCount ) )
+        return;
+    TransferMoney( player, moneyCount, false );
+}
+
+void dlg_TakeMoney( Critter player, Critter terminal, string moneyCount )
+{
+    if( not IS_DIALOG_SAY_MODE( moneyCount ) )
+        return;
+    if( player.ReplicationMoney == 0 )
+        SEND_ERROR_RETURN( player, STR_ZERO_BALANCE );
+    if( player.ReplicationMoney < 0 )
+        SEND_ERROR_RETURN( player, STR_NEGATIVE_BALANCE );
+    int money = 0;
+    if( not StrToInt( moneyCount, money ) )
+        SEND_ERROR_RETURN( player, STR_INVALID_MONEY_COUNT );
+    if( money == 0 )
+        SEND_ERROR_RETURN( player, STR_ZERO_MONEY_COUNT );
+    if( money < 0 )
+        SEND_ERROR_RETURN( player, STR_NEGATIVE_MONEY_COUNT );
+    if( money > player.ReplicationMoney )
+        SEND_ERROR_RETURN( player, STR_NOT_ENAUGTH_MONEY );
+    player.ReplicationMoney -= money;
+    _CritAddItem( player, Content::Item::bottle_caps, money );
+    player.SayMsg( SAY_DIALOG, TEXTMSG_TEXT, STR_OPERATION_SUCCESS );
+}
+
+void TransferMoney( Critter player, string moneyCount, bool forReal )
+{
+    // Get money to transfer.
+    int money = 0;
+    if( not StrToInt( moneyCount, money ) )
+        SEND_ERROR_RETURN( player, STR_INVALID_MONEY_COUNT );
+    if( money == 0 )
+        SEND_ERROR_RETURN( player, STR_ZERO_MONEY_COUNT );
+    if( money < 0 )
+        SEND_ERROR_RETURN( player, STR_NEGATIVE_MONEY_COUNT );
+
+    // Get stored critter.
+    Critter cr = GetCritter( player.TerminalPlayerId );
+    if( not valid( cr ) )
+        SEND_ERROR_RETURN( player, STR_PLAYER_NOT_FOUND );
+
+    // Transfer money.
+    if( forReal )
+    {
+        if( uint( money ) > _CritCountItem( player, Content::Item::bottle_caps ) )
+            SEND_ERROR_RETURN( player, STR_NOT_ENAUGTH_MONEY );
+        _CritDeleteItem( player, Content::Item::bottle_caps, money );
+    }
+    else
+    {
+        if( money > player.ReplicationMoney )
+            SEND_ERROR_RETURN( player, STR_NOT_ENAUGTH_MONEY );
+        player.ReplicationMoney -= money;
+    }
+
+    cr.ReplicationMoney += money;
+    player.SayMsg( SAY_DIALOG, TEXTMSG_TEXT, STR_OPERATION_SUCCESS );
+}

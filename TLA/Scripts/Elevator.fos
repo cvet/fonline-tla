@@ -1,0 +1,264 @@
+// FOS Server Client Sort 2
+#pragma rpc Client ShowScreenElevator( int elevatorType, int p1, int p2 )
+#pragma property Map PrivateServer dict< uint, uint[] > ElevatorData
+
+#pragma rpc Server Rpc_SelectLevel (int level, int p1, int p2 )
+
+
+#define RESET_DATA_AFTER    ( 60 * 60 )
+
+#ifdef __SERVER
+// лифт, всего существуют 8 типов лифтов. Максимум - 4 этажа
+// для четырехэтажного отдельный триггер
+// 1ый параметр - номер гекса, на который попадет игрок
+// остальные параметры - коды прототипов карт
+void t_Elevator4( Critter player, const Item trigger, bool entered, uint8 dir )
+{
+    if( !entered )
+        return;
+
+    auto params = trigger.SceneryParams;
+    int  entireExit = params[ 0 ];
+    int  map1Pid = params[ 1 ];
+    int  map2Pid = params[ 2 ];
+    int  map3Pid = params[ 3 ];
+    int  map4Pid = params[ 4 ];
+
+    if( IS_TIMEOUT( player.TimeoutTransfer ) )
+        player.SayMsg( SAY_NETMSG, TEXTMSG_GAME, MsgStr::StrTimeoutTransferWait );
+    else if( IS_TIMEOUT( player.TimeoutBattle ) )
+        player.SayMsg( SAY_NETMSG, TEXTMSG_GAME, MsgStr::StrTimeoutBattleWait );
+    else
+    {
+        uint[] pids = { map1Pid, map2Pid, map3Pid, map4Pid };
+        ShowElevator( player, 0, pids, entireExit );
+    }
+}
+
+// лифт, в котором меньше чем 4 этажа
+// 1ый параметр - номер гекса, на который попадет игрок
+// 2о1 параметр - типа лифта (от 1 до 8. см. _defines.fos, секцию // Elevators)
+// 3ий..5ый параметры - коды протоипов карт
+void t_Elevator( Critter player, const Item trigger, bool entered, uint8 dir )
+{
+    if( !entered )
+        return;
+
+    auto params = trigger.SceneryParams;
+    int  entireExit = params[ 0 ];
+    int  elevatorType = params[ 1 ];
+    int  map1Pid = params[ 2 ];
+    int  map2Pid = params[ 3 ];
+    int  map3Pid = params[ 4 ];
+
+    if( IS_TIMEOUT( player.TimeoutTransfer ) )
+        player.SayMsg( SAY_NETMSG, TEXTMSG_GAME, MsgStr::StrTimeoutTransferWait );
+    else if( IS_TIMEOUT( player.TimeoutBattle ) )
+        player.SayMsg( SAY_NETMSG, TEXTMSG_GAME, MsgStr::StrTimeoutBattleWait );
+    else
+    {
+        uint[] pids = { map1Pid };
+        if( map2Pid > 0 )
+            pids.insertLast( map2Pid );
+        if( map3Pid > 0 )
+            pids.insertLast( map3Pid );
+        ShowElevator( player, elevatorType, pids, entireExit );
+    }
+}
+
+// Работает только для карт в одном экземпляре
+void ShowElevator( Critter player, uint8 elevatorType, uint[] mapPids, uint entireNum )
+{
+    player.Wait( 0 );
+
+    Map playerMap = player.GetMap();
+    if( playerMap is null )
+        return;
+
+    uint mPid = playerMap.ProtoId;
+    uint curLevel = 0;     // Этаж, на котором находится игрок
+    switch( elevatorType )
+    {
+    case 0:
+    case 2:
+    case 4:
+    case 8:
+        curLevel = 1;
+        break;
+    case 1:
+        curLevel = 0;
+        break;
+    case 3:
+    case 5:
+    case 6:
+        curLevel = 3;
+        break;
+    case 7:
+        curLevel = 4;
+        break;
+    }
+
+    uint[] data = { entireNum, curLevel };
+    for( uint i = 0; i < mapPids.length(); i++ )
+    {
+        if( mapPids[ i ] == mPid )
+            curLevel += i;
+        data.insertLast( mapPids[ i ] );
+    }
+
+    // cохраняем описание лифта
+    auto elevatorData = playerMap.ElevatorData.clone();
+    elevatorData[ player.Id ] = data;
+    playerMap.ElevatorData = elevatorData;
+
+    // добавляем событие очистки (если игрок так и не воспользовался лифтом)
+    uint[] values = { player.Id, playerMap.Id };
+    SavedDeferredCall( GAME_SECOND_TO_TICK( RESET_DATA_AFTER ), ResetData, values );
+    // player.ShowScreen( ShowScreenModes::Elevator, ELEVATOR_X( elevatorType, curLevel ), "answer_SelectLevel" );
+    player.Rpc.ShowScreenElevator( ELEVATOR_X( elevatorType, curLevel ), 0, 0 );
+}
+
+void ResetData( uint[] values )
+{
+    Map map = GetMap( values[ 1 ] );
+    if( map !is null )
+    {
+        auto elevatorData = map.ElevatorData.clone();
+        elevatorData.remove( values[ 0 ] );
+        map.ElevatorData = elevatorData;
+    }
+}
+
+void answer_SelectLevel( Critter player, uint answerI, string answerS )
+{
+    Map map = player.GetMap();
+    if( map is null )
+        return;
+
+    auto elevatorData = map.ElevatorData.clone();
+    if( !elevatorData.exists( player.Id ) )
+        return;
+
+    uint[] params = elevatorData[ player.Id ];
+    elevatorData.remove( player.Id );
+    if( params.length() == 0 )
+        return;
+
+    uint l = params.length();
+    uint entNum = params[ 0 ];
+    uint firstLevelNum = l <= 1 ? 0 : params[ 1 ];
+    map.ElevatorData = elevatorData;
+    if( answerI < firstLevelNum || answerI > l + firstLevelNum )
+        return;
+
+    Location loc = map.GetLocation();
+    for( uint j = 0; j < loc.GetMapCount(); j++ )
+    {
+        Map newMap = loc.GetMapByIndex( j );                         // GetMapByPid(params[i-firstLevelNum+2], 0);
+        if( newMap !is null && newMap.ProtoId == params[ answerI - firstLevelNum + 2 ] )
+        {
+            Obsolete::CritterTransitToMapEntire( player, newMap.Id, entNum );
+            return;
+        }
+    }
+}
+
+void Rpc_SelectLevel (Critter  cr, int level, int p1, int p2)
+ 
+{
+    Map map = cr.GetMap();
+    if( map is null )
+        return;
+
+    auto elevatorData = map.ElevatorData.clone();
+    if( !elevatorData.exists( cr.Id ) )
+        return;
+
+    uint[] params = elevatorData[ cr.Id ];
+    elevatorData.remove( cr.Id );
+    if( params.length() == 0 )
+        return;
+
+    uint l = params.length();
+    uint entNum = params[ 0 ];
+    int  firstLevelNum = l <= 1 ? 0 : params[ 1 ];
+    map.ElevatorData = elevatorData;
+    if( level < firstLevelNum || level > l + firstLevelNum )
+        return;
+
+    Location loc = map.GetLocation();
+    for( uint i = 0, j = loc.GetMapCount(); i < j; i++ )
+    {
+        Map newMap = loc.GetMapByIndex( i );                         // GetMapByPid(params[i-firstLevelNum+2], 0);
+        if( newMap !is null && newMap.ProtoId == params[ level - firstLevelNum + 2 ] )
+        {
+            Obsolete::CritterTransitToMapEntire( cr, newMap.Id, entNum );
+            return;
+        }
+    }
+}
+#endif
+
+
+#ifdef __CLIENT
+
+
+void ShowScreenElevator( int elevatorType, int p1, int p2)
+{
+    dictionary params = { { "ElevatorType", elevatorType } };
+    ShowScreen( CLIENT_SCREEN_ELEVATOR, params );
+}
+
+// Elevator generation.
+// Data specification:
+// 1
+// 1 start level		// 1
+// 1 levels count		// 2
+// 1 main pic			// 3
+// 2 main pic width, height		// 4, 5
+// 1 additional pic offset		// 6
+// 2 additional pic point		// 7, 8
+// 1 indicator animation offset in INTRFACE.LST	// 9
+// 2 indicator animation point					// 10, 11
+// 1 button down pic offset in INTRFACE.LST		// 12
+// 1 buttons count								// 13
+// 4 rect for every button						// 14+
+bool get_elevator( uint type, uint[] data )
+{
+    const string iface = "art/intrface/Elevator/";
+    const        uint[][] elevators =
+    {
+        //	 Level current, start, count               Main picture size                          Additional picture size                            Indicator animation size                  Buttons count
+        //	         Main picture                               Additional picture                       Indicator animation                                  Button down picture                 Button coordinates
+        // 0) BOS 1234
+        { 0, 1, 4,  GetStrHash( iface + "Bos.png" ),       230, 284, 0,                                      0,  0,  GetStrHash( iface + "ElevatorIndicator.frm" ), 121, 41,  GetStrHash( iface + "ElevatorButton.png" ), 4, 11, 42, 58, 91, 11, 102, 58, 151, 11, 162, 58, 211, 11, 222, 58, 271 },
+        // 1) BOS G1
+        { 0, 0, 2,  GetStrHash( iface + "Bos.png" ),       230, 284, GetStrHash( iface + "Bos2.png" ),       0, 37,  GetStrHash( iface + "ElevatorIndicator.frm" ), 121, 41,  GetStrHash( iface + "ElevatorButton.png" ), 2, 11, 42, 58, 91, 11, 102, 58, 151 },
+        // 2) Master 123
+        { 0, 1, 3,  GetStrHash( iface + "Bos.png" ),       230, 284, 0,                                      0,  0,  GetStrHash( iface + "ElevatorIndicator.frm" ), 121, 41,  GetStrHash( iface + "ElevatorButton.png" ), 3, 11, 42, 58, 91, 11, 102, 58, 151, 11, 162, 58, 211 },
+        // 3) Master 34
+        { 0, 3, 2,  GetStrHash( iface + "Bos.png" ),       230, 284, GetStrHash( iface + "Bos2.png" ),       0, 37,  GetStrHash( iface + "ElevatorIndicator.frm" ), 121, 41,  GetStrHash( iface + "ElevatorButton.png" ), 2, 11, 42, 58, 91, 11, 102, 58, 151 },
+        // 4) Military 123
+        { 0, 1, 3,  GetStrHash( iface + "Militeri1.png" ), 231, 285, 0,                                      0,  0,  GetStrHash( iface + "ElevatorIndicator.frm" ), 121, 41,  GetStrHash( iface + "ElevatorButton.png" ), 3, 11, 42, 58, 91, 11, 102, 58, 151, 11, 162, 58, 211 },
+        // 5) Military 34
+        { 0, 3, 4,  GetStrHash( iface + "Militeri1.png" ), 231, 285, GetStrHash( iface + "Militeri2.png" ),  0, 37,  GetStrHash( iface + "ElevatorIndicator.frm" ), 121, 41,  GetStrHash( iface + "ElevatorButton.png" ), 2, 11, 42, 58, 91, 11, 102, 58, 151 },
+        // 6) Military 346
+        { 0, 3, 3,  GetStrHash( iface + "Militeri1.png" ), 231, 285, GetStrHash( iface + "Militeri3.png" ),  0, 37,  GetStrHash( iface + "ElevatorIndicator.frm" ), 121, 41,  GetStrHash( iface + "ElevatorButton.png" ), 3, 11, 42, 58, 91, 11, 102, 58, 151, 11, 162, 58, 211 },
+        // 7) Military 456
+        { 0, 4, 3,  GetStrHash( iface + "Militeri1.png" ), 231, 285, GetStrHash( iface + "Militeri4.png" ),  0, 37,  GetStrHash( iface + "ElevatorIndicator.frm" ), 121, 41,  GetStrHash( iface + "ElevatorButton.png" ), 3, 11, 42, 58, 91, 11, 102, 58, 151, 11, 162, 58, 211 },
+        // 8) Vault 123
+        { 0, 1, 3,  GetStrHash( iface + "Militeri1.png" ), 230, 284, 0,                                      0, 0,   GetStrHash( iface + "ElevatorIndicator.frm" ), 121, 41,  GetStrHash( iface + "ElevatorButton.png" ), 3, 11, 42, 58, 91, 11, 102, 58, 151, 11, 162, 58, 211 },
+    };
+
+    uint index        = ( type & 0xFFFF );
+    uint currentLevel = ( type >> 16 );
+
+    if( index > 8 )
+        return false;
+    data.resize( elevators[ index ].length() );
+    for( uint i = 0; i < data.length(); i++ )
+        data[ i ] = elevators[ index ][ i ];
+    data[ 0 ] = currentLevel;
+    return true;
+}
+#endif

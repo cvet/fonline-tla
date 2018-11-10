@@ -1,0 +1,134 @@
+// FOS Server Sort 2
+// Author: cvet
+
+#pragma property Map PrivateServer bool WarehouseTurretActive
+
+#define TURRET_PID             ( 480 )
+#define SCIENCE_OFF_TURRETS    ( 110 )
+#define STR_TURRETS_ON         ( 1200 )
+#define STR_TURRETS_OFF        ( 1201 )
+#define STR_COMPUTER_BEEP      ( 1205 )
+#define NPC_ROLE_TURRET        ( 1 )
+
+bool IsTurretActive( Critter turret )
+{
+    if( not turret.IsLife() )
+        return false;
+    Map map = turret.GetMap();
+    if( not valid( map ) )
+        return false;
+    return map.WarehouseTurretActive;
+}
+
+void TurretScanArea( Critter turret )
+{
+    if( not IsTurretActive( turret ) )
+        return;
+    Critter[] players = {};
+    if( Obsolete::GetCritters( turret,  false, FIND_LIFE_AND_KO | FIND_ONLY_PLAYERS, players  ) > 0 )
+    {
+        for( uint i = 0; i < players.length(); i++ )
+        {
+            Critter player = players[ i ];
+            EnemyStack::AddEnemyToStack( turret,  player.Id  );
+            NpcPlanes::AddAttackPlane( turret, 0, player );
+        }
+    }
+}
+
+void TurretsTurnOn( Map map )
+{
+    // Already on
+    if( map.WarehouseTurretActive )
+        return;
+    map.WarehouseTurretActive = true;
+
+    // Scan area for attack
+    Critter[] turrets = {};
+    if( Obsolete::GetCritters( map,  TURRET_PID, FIND_LIFE_AND_KO | FIND_ONLY_NPC, turrets  ) > 0 )
+    {
+        for( uint i = 0; i < turrets.length(); i++ )
+        {
+            TurretScanArea( turrets[ i ] );
+        }
+    }
+}
+
+void TurretsTurnOff( Map map )
+{
+    // Already off
+    if( !map.WarehouseTurretActive )
+        return;
+    map.WarehouseTurretActive = false;
+
+    // If turrets has attack plane, clear it
+    Critter[] turrets = {};
+    if( Obsolete::GetCritters( map,  TURRET_PID, FIND_ALL | FIND_ONLY_NPC, turrets  ) > 0 )
+    {
+        for( uint i = 0; i < turrets.length(); i++ )
+        {
+            NpcPlanes::ErasePlane( turrets[ i ], AI_PLANE_ATTACK, true  );
+            EnemyStack::ClearEnemyStack( turrets[ i ] );
+        }
+    }
+}
+
+// Computer On/Off turrets
+//bool s_Computer( Critter cr, const Item computer, CritterProperty skill, Item item )
+bool s_Computer( Critter cr, const Item computer, Item item, int skill )
+{
+    Map map = cr.GetMap();
+    if( not valid( map ) )
+        return true;
+
+    if( skill != int(CritterProperty::SkillScience )|| cr.SkillScience < SCIENCE_OFF_TURRETS )
+    {
+        map.SetTextMsg( computer.HexX, computer.HexY, COLOR_GRAY, TEXTMSG_TEXT, STR_COMPUTER_BEEP );
+        return true;
+    }
+
+    // Switch state
+    if( !map.WarehouseTurretActive )
+    {
+        TurretsTurnOn( map );
+        map.SetTextMsg( computer.HexX, computer.HexY, COLOR_GRAY, TEXTMSG_TEXT, STR_TURRETS_ON );
+    }
+    else
+    {
+        TurretsTurnOff( map );
+        map.SetTextMsg( computer.HexX, computer.HexY, COLOR_GRAY, TEXTMSG_TEXT, STR_TURRETS_OFF );
+    }
+    return true;
+}
+
+// Turret functions
+void _TurretInit( Critter turret, bool firstTime )
+{
+    __EventCritterIdle.SubscribeToCritter( turret, _TurretIdle );
+    __EventCritterShow.SubscribeToCritter( turret, _TurretShowCritter );
+    __EventNpcPlaneBegin.SubscribeToCritter( turret, _TurretBeginPlane );
+    turret.IsUnlimitedAmmo = true;
+}
+
+void _TurretIdle( Critter turret )
+{
+    TurretScanArea( turret );
+}
+
+void _TurretShowCritter( Critter turret, Critter cr )
+{
+    if( cr.IsPlayer() && IsTurretActive( turret ) )
+    {
+        EnemyStack::AddEnemyToStack( turret,  cr.Id  );
+        NpcPlanes::AddAttackPlane( turret, 0, cr );
+    }
+}
+
+bool _TurretBeginPlane( Critter turret, int planeId, int reason, Critter someCr, Item someItem )
+{
+	NpcPlanes::NpcPlane plane = NpcPlanes::GetCritterPlane(turret, planeId);
+
+    if( plane.Type == AI_PLANE_ATTACK && not IsTurretActive( turret ) )
+        return false;
+    return true;
+}

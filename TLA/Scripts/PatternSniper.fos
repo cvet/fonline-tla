@@ -1,0 +1,434 @@
+// FOS Server Sort 2
+
+//#include "PatternCommon"
+
+#pragma property Critter PrivateServer uint8 PatternSniperCountRunning
+
+/* Снайпер-сникер.
+   ----------------------
+   -  Стреляет всегда в глаза, если цель игрок и не в нокауте.
+   -  После выстрела шкерится на большое расстояние и прячется в сник.
+   -  Если здоровье ниже 50% и есть стимпаки - лечится перед уходом в сник.
+   -  В режиме ожидания сидит в снике.
+   -  Начинает огонь при попадании цели в эффективный радиус стрельбы.
+   ----------------------
+   Особенности, общие для снайперов всех уровней:
+   -  Бесшумный бег
+   -  Снайпер                   PE_SNIPER
+   -                             PE_BETTER_CRITICALS
+   -  Удача 10
+                                                         PE_BONUS_RANGED_DAMAGE
+   -- Обращение с оружием	     PE_WEAPON_HANDLING
+   --                                                    PE_LIVING_ANATOMY
+   ----------------------
+   Параметры для ур 1.
+   -  Легкое оружие 50..75
+   -  Сник          50..75
+   -  Восприятие    7
+   -  Резисты       35..50
+   -  АР            10
+   -  HP            100
+   ----------------------
+ */
+const int[] sniperStats_ =
+{
+// Level SGMin SGMax SnMin SnMax PE ResMin ResMax AP  HPMin
+    1,    120,  190,  150,   180, 7, 25,    30,    10, 170,
+    2,    100,  185,  180,   240, 8, 35,    60,    12, 220,
+    3,    120,  250,  190,   250, 9, 35,    70,    16, 280,
+    4,    200,  300,  250,   300, 10, 35,    120,   20, 400
+};
+#define S_COUNT              ( 4 )
+#define S_POS                # (pos) ( ( ( pos < S_COUNT ) ? pos : 0 ) * 10 )
+#define S_LEVEL              # (pos) ( sniperStats_[ S_POS( pos ) ] )
+#define S_SMALL_GUNS         # (pos) ( Random( sniperStats_[ S_POS( pos ) + 1 ], sniperStats_[ S_POS( pos ) + 2 ] ) )
+#define S_SNEAK              # (pos) ( Random( sniperStats_[ S_POS( pos ) + 3 ], sniperStats_[ S_POS( pos ) + 4 ] ) )
+#define S_PERCEPTION         # (pos) ( sniperStats_[ S_POS( pos ) + 5 ] )
+#define S_RESIST             # (pos) ( Random( sniperStats_[ S_POS( pos ) + 6 ], sniperStats_[ S_POS( pos ) + 7 ] ) )
+#define S_AP                 # (pos) ( sniperStats_[ S_POS( pos ) + 8 ] )
+#define S_HP                 # (pos) ( sniperStats_[ S_POS( pos ) + 9 ] )
+
+#define ENEMY_SRCH_RADIUS    ( 25 )
+#define RUN_AWAY_DISTANCE    ( 35 )
+#define ATTACK_DISTANCE      ( 35 )
+
+#define PLANE_ID_RUNAWAY     ( 76 )
+#define RUNAWAY_PRIORITY     ( AI_PLANE_ATTACK_PRIORITY * 2 )
+
+void _CritterInit( Critter cr, bool firstTime )
+{
+    pattern.SetEvents( cr );
+}
+
+class SniperPattern : PatternCommon::CommonPattern
+{
+    // получение сообщений
+    void _Message( Critter sniper, Critter fromCr, int message, int value )
+    {
+        if( message == PatternCommon::MsgAttackTarget )
+        {
+            if( NpcPlanes::IsCurPlane( sniper, AI_PLANE_ATTACK ) )
+                return;
+            if( sniper.TeamId != fromCr.TeamId )
+                return;
+            if( _MsgReact( sniper, fromCr, message ) )
+                return;
+
+            Critter target = GetCritter( value );
+            if( valid( target ) )
+            {
+                AttackPlayer( sniper, target );
+            }
+            return;
+        }
+        if( message == PatternCommon::MsgPlayerMustDie )
+        {
+            Critter target = GetCritter( value );
+            if( valid( target ) )
+            {
+                AttackPlayer( sniper, target );
+            }
+            return;
+        }
+    }
+
+    // Атака снайпера
+    bool _Attack( Critter cr, Critter target )
+    {
+        if( target.IsNpc() )
+            return false;
+        if( target.IsKnockout() )
+            return false;
+        SendMessage::SendMessage( cr,  PatternCommon::MsgAttackTarget, target.Id, MESSAGE_TO_I_SEE  );
+
+        // В активном слоте - оружие?
+        const Item weapon = cr.GetItemBySlot( SLOT_HAND1 );
+        if( !valid( weapon ) )
+            return false;
+        if( weapon.Type != ItemType::Weapon || _WeaponSkill( weapon, _WeaponModeUse( weapon.Mode ) ) != CritterProperty::SkillSmallGuns )
+            return false;
+
+        Item weap = _CritGetItemHand( cr );
+        if( !valid( weap ) )
+            return false;
+
+        const Item ammo = GetProtoItem( weap.AmmoPid );
+        if( !valid( ammo ) )
+            return false;
+
+        // Скопировано из основного обработчика
+        cr.TimeoutAggressor = __FullSecond + REAL_MINUTE( 1 );
+        Combat::CombatAttack( cr, target, weapon, _WeaponModeMake( 0, HitLocations::LocationEyes ), ammo );
+        _SetOnAfterAttackEvent( cr, target );
+        return true;
+    }
+
+    // Снайпер убегает, если осталось мало АП
+    void _SetOnAfterAttackEvent( Critter sniper, Critter target )
+    {
+        if( !target.IsPlayer() )
+            return;
+        uint[] values = { sniper.Id, target.Id };
+        DeferredCall( GAME_SECOND_TO_TICK( 60 ), OnAfterAttack, values );
+    }
+
+    // Выбор плана отступления
+    void TryRunAway( Critter sniper )
+    {
+        uint16 x = sniper.HexX;
+        uint16 y = sniper.HexY;
+        uint8  dir = sniper.Dir;
+        if( !_GetRunAwayPoint( sniper, x, y, dir ) )
+            return;
+        NpcPlanes::AddWalkPlane( sniper, RUNAWAY_PRIORITY, PLANE_ID_RUNAWAY, 0, x, y, dir, true, 0 );
+    }
+
+    // Простой снайпера
+    void _Idle( Critter sniper )
+    {
+        if( sniper.IsDead() )
+            return;
+
+        if( !sniper.IsHide && sniper.IsLife() )
+            sniper.IsHide = true;
+
+        Critter[] players = {};
+        if( Obsolete::GetCritters( sniper,  false, FIND_LIFE | FIND_ONLY_PLAYERS, players  ) > 0 )
+        {
+            uint[] distances = array<uint>( players.length() );
+            for( uint i = 0; i < players.length(); i++ )
+            {
+                distances[ i ] = GetCrittersDistantion( sniper, players[ i ] );
+                AttackPlayer( sniper, players[ i ] );
+            }
+            uint minInd = 0;
+            if( PatternCommon::_GetFirstMinIndex( distances, minInd ) )
+            {
+                NpcPlanes::EraseAttackPlane( sniper, players[ minInd ] );
+                AttackPlayer( sniper, AI_PLANE_ATTACK_PRIORITY + 10, players[ minInd ] );
+            }
+        }
+
+    }
+
+    // Завершение выполнения плана
+    bool _PlaneEnd( Critter sniper, int planeId, int reason, Critter someCr, Item someItem )
+{
+	NpcPlanes::NpcPlane plane = NpcPlanes::GetCritterPlane(sniper, planeId);
+
+        if( plane.Identifier == PLANE_ID_RUNAWAY )
+        {
+            if( reason == REASON_SUCCESS )
+            {
+                HideSniper( sniper );
+                sniper.PatternSniperCountRunning = 0;             // Счетчик попыток добежать
+            }
+            else
+            {
+                sniper.PatternSniperCountRunning += 1;
+
+                if( sniper.PatternSniperCountRunning < 9 && sniper.PatternSniperCountRunning > 6 )
+                {
+                    TryRunAway( sniper );
+                }
+                if( sniper.PatternSniperCountRunning < 7 )          // Не получилось добежать, пытаемся куданибудь рzдом
+                {
+                    Map map = sniper.GetMap();
+                    if( valid( map ) )
+                    {
+                        if( Caravan::GetFreeHex( map, 4, plane.Walk_HexX, plane.Walk_HexY ) )
+                        {
+                            return false;
+                        }
+
+                    }
+                }
+            }
+        }
+        return true;
+    }
+
+    // Вспомогательная функция - стелс для снайпера
+    void HideSniper( Critter sniper )
+    {
+        sniper.IsHide = true;
+        _NpcEraseAllPlanesAttack( sniper );
+    }
+
+    void SetEvents( Critter cr )
+    {
+        __EventCritterAttack.SubscribeToCritter( cr, _SniperAttack );
+        __EventNpcPlaneEnd.SubscribeToCritter( cr, _SniperPlaneEnd );
+        __EventNpcPlaneBegin.SubscribeToCritter( cr, _SniperPlaneBegin );
+        __EventCritterIdle.SubscribeToCritter( cr, _SniperIdle );
+        __EventCritterMessage.SubscribeToCritter( cr, _SniperMessage );
+        __EventCritterShow.SubscribeToCritter( cr, _SniperShowCritter );
+        __EventCritterAttacked.SubscribeToCritter( cr, _SniperAttacked );
+        __EventCritterDead.SubscribeToCritter( cr, _SniperDead );
+    }
+
+    bool _HaveToRun( Critter sniper, Critter player )
+    {
+
+        // Игрок жив, ранен, осталось мало здоровья или хватает АП на выстрел
+        if( player.IsLife() && !player.IsKnockout() )
+        {
+            const Item weapon = sniper.GetItemBySlot( SLOT_HAND1 );
+            if( valid( weapon ) )
+            {
+                if( weapon.Type == ItemType::Weapon )
+                {
+                    if( player.CurrentHp > 30 &&
+                        sniper.CurrentAp / AP_DIVIDER < int( _WeaponApCost( weapon, _WeaponModeUse( weapon.Mode ) ) ) &&
+                        player.MaxLife > player.CurrentHp )
+                    {
+                        return true;
+                    }
+                    else
+                    {
+                        if( sniper.CurrentHp > 30 &&
+                            sniper.MaxLife > sniper.CurrentHp )
+                        {
+                            return true;                                     // У самого нпц со здоровьем плохо
+                        }
+                        else
+                        {
+                            return false;                                    // Надо добивать
+                        }
+
+                    }
+                }
+            }
+
+        }
+        // Видит ли снайпер игроков
+        if( Obsolete::GetCritters( sniper,  false, FIND_LIFE | FIND_ONLY_PLAYERS, null  ) > 0 )
+            return true;
+        // Всть игроки в радиусе поиска
+        Map map = sniper.GetMap();
+        if( !valid( map ) )
+            return false;
+
+        return Obsolete::GetCrittersHex ( map,  sniper.HexX, sniper.HexY, ENEMY_SRCH_RADIUS, FIND_LIFE | FIND_ONLY_PLAYERS, null  ) > 0;
+    }
+    // end class
+}
+
+#ifndef _NoBaseInstance
+SniperPattern pattern; // Для наследников нужно определить _NoBaseInstance
+#endif
+
+// Установка параметров криттера
+// lvl - уровень крутости от 0 до 4
+void SetSniperStats( Critter cr, uint8 lvl )
+{
+    lvl = CLAMP( lvl, 0, S_COUNT - 1 );
+    if( lvl < 1 )
+        return;
+    if( lvl > 2 )
+        cr.PerkSniper = 1;
+    cr.PerkSharpshooter = 1;
+    if( lvl > 2 )
+        cr.PerkBetterCriticals = 1;
+    cr.PerkBonusRangedDamage = lvl;
+    cr.PerkWeaponHandling = 1;
+    cr.PerkLivingAnatomy = 1;
+    if( lvl > 3 )
+        cr.PerkBonusRateOfFire = 1;
+    cr.PerkSilentRunning = 1;
+
+    cr.LuckBase = 10;
+    cr.PerceptionBase = S_PERCEPTION( lvl );
+    cr.MaxLifeBase = S_HP( lvl );
+    cr.ActionPointsBase = S_AP( lvl );
+    cr.CurrentHp = S_HP( lvl );
+
+    for( uint i = 0; i < CritterPropertyResistsBase.length(); i++ )
+        if( CritterPropertyResistsBase[ i ] != CritterProperty::EmpResistanceBase )
+            cr.SetAsInt( CritterPropertyResistsBase[ i ], S_RESIST( lvl ) );
+
+    cr.SkillSmallGuns = S_SMALL_GUNS( lvl );
+    cr.SkillSneak = S_SNEAK( lvl );
+}
+
+void _SniperInit( Critter cr, bool firstTime )
+{
+    _CritterInit( cr, firstTime );
+}
+
+void _SniperDead( Critter cr, Critter killer )
+{
+    pattern._Dead( cr, killer );
+}
+
+void _SniperShowCritter( Critter cr, Critter showCrit )
+{
+    pattern._ShowCritter( cr, showCrit );
+}
+
+// Cнайпер начал некий план
+bool _SniperPlaneBegin( Critter cr, int planeId, int reason, Critter someCr, Item someItem )
+{
+    return pattern._PlaneBegin( cr, planeId, reason, someCr, someItem );
+}
+
+// Снайпер получил сообщение
+void _SniperMessage( Critter sniper, Critter fromCr, int message, int value )
+{
+    pattern._Message( sniper, fromCr, message, value );
+}
+
+// Снайпер атакован
+bool _SniperAttacked( Critter sniper, Critter attacker )
+{
+    return pattern._Attacked( sniper, attacker );
+}
+
+// Атака снайпера
+bool _SniperAttack( Critter cr, Critter target, Item weapon, uint8 weaponMode, const Item ammo )
+{
+    return pattern._Attack( cr, target );
+}
+
+// Простой снайпера
+void _SniperIdle( Critter sniper )
+{
+    pattern._Idle( sniper );
+}
+
+// Завершение выполнения плана
+bool _SniperPlaneEnd( Critter sniper, int planeId, int reason, Critter someCr, Item someItem )
+{
+    return pattern._PlaneEnd( sniper, planeId, reason, someCr, someItem );
+}
+
+// Через 1 игровую минуту после выстрела Снайпер будет пытаться уйти из зоны видимости
+void OnAfterAttack( uint[] values )
+{
+    Critter sniper = GetCritter( values[ 0 ] );
+    Critter target = GetCritter( values[ 1 ] );
+    if( !valid( sniper ) || !valid( target ) )
+        return;
+
+    bool run = pattern._HaveToRun( sniper, target );
+    if( run )
+        pattern.TryRunAway( sniper );
+}
+
+bool _GetRunAwayPoint( Critter sniper, uint16 x, uint16 y, uint8 dir )
+{
+    // 1. поиск игроков во всех направлениях
+    Map map = sniper.GetMap();
+    if( !valid( map ) )
+        return false;
+
+    uint[] enemies = array<uint>( 6 );
+    for( uint i = 0; i < enemies.length(); i++ )
+    {
+        x = sniper.HexX;
+        y = sniper.HexY;
+        map.MoveHexByDir( x, y, i, RUN_AWAY_DISTANCE );
+        enemies[ i ] = Obsolete::GetCrittersPath( map, sniper.HexX, sniper.HexY, x, y, 30, RUN_AWAY_DISTANCE, FIND_LIFE | FIND_ONLY_PLAYERS, null  );
+    }
+
+    uint min = 0;
+    uint max = 0;
+    if( !PatternCommon::_GetLimits( enemies, min, max ) )
+        return false;
+
+    // Проверяем, что не вылезем за границы карты
+    // копируем направления с минимальным числом врагов в новый массив
+    uint[] safeDirs = {};
+    for( uint d = 0; d < enemies.length() && d < 6; d++ )
+        if( enemies[ d ] == min )
+            safeDirs.insertLast( d );
+
+    uint[] distances = array<uint>( safeDirs.length() );
+    for( uint i = 0; i < safeDirs.length(); i++ )
+    {
+
+        x = sniper.HexX;
+        y = sniper.HexY;
+        map.MoveHexByDir( x, y, safeDirs[ i ], RUN_AWAY_DISTANCE );
+        distances[ i ] = GetDistantion( sniper.HexX, sniper.HexY, x, y );
+    }
+
+    if( !PatternCommon::_GetRandomMaxIndex( distances, max ) )
+        return false;
+
+    x = sniper.HexX;
+    y = sniper.HexY;
+    map.MoveHexByDir( x, y, safeDirs[ max ], RUN_AWAY_DISTANCE );
+    dir = GetDirection( x, y, sniper.HexX, sniper.HexY );
+
+    return Caravan::GetFreeHex( map, 4, x, y );
+}
+
+/* ************************************************* DEBUG ************************************************* */
+void testSniper( Critter cr, int lvl, int team, int bag )
+{
+    int[] props = { CritterProperty::BagId, bag, CritterProperty::TeamId, team };
+    Critter npc = cr.GetMap().AddNpc( Content::Critter::VaultCityPatrolMale, cr.HexX - 5, cr.HexY - 5, 0, TlaExtended::GetCritPropsDict(props));
+    SetSniperStats( npc, lvl );
+    pattern.SetEvents( npc );
+}

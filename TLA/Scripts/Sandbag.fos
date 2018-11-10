@@ -1,0 +1,315 @@
+// FOS Server
+// Author: rifleman17
+
+#pragma content Item sandbag_1            // единичный мешок           флаги: ITEM_SHOOT_THRU
+#pragma content Item sandbag_2            // два мешка на одном гексе  флаги:
+#pragma content Item sandbag_3            // стопка из трех мешков     флаги:
+#pragma content Item sandbag_4            // стопка из четырех мешков  флаги:
+#pragma content Item sandbag_5            // стопка из пяти мешков     флаги:
+
+#define STR_TEAR_SANDBAG          ( 200 ) // Мешок порвался у вас в руках.
+#define STR_CANT_PLACE_SANDBAG    ( 201 ) // В этом месте больше невозможно уложить ни одного мешка.
+#define STR_TEAR_REPAIR           ( 202 ) // Вы рвете мешок и песок рассыпается на землю.
+#define MIN_ENTIRE_DIST           ( 5 )   // Минимальное расстояние до ближайшего ентайр гекса, на котором можно расположить мешок
+
+// Кладет мешок на карту в указанных координатах
+// - проверяется возможность положить мешок
+// - проверяется, что в координатах нет двери или контейнера - на них мешки класть нельзя. Новый мешок в таком случае удаляется
+// - если на данном гексе уже лежит стопка из 5 мешков, еще один добавить нельзя
+bool AddSandBag( Map map, Critter player, uint16 x, uint16 y, Item sandBag )
+{
+
+    Item[] items = {};
+    uint pidCur = sandBag.ProtoId;
+
+    if( pidCur != Content::Item::sandbag_1 )
+        return false;
+    if( CheckIsNearEntire( sandBag ) ) // Удаление мешка если рядом есть спецгекс
+    {
+        DeleteItem( sandBag );
+        player.SayMsg( SAY_NETMSG, TEXTMSG_TEXT, STR_TEAR_SANDBAG );
+        return false;
+    }
+    if( Obsolete::GetItems( map, x, y, items ) > 0 )
+    {
+        for( uint i = 0, l = items.length(); i < l; i++ )
+        {
+            // На нужном нам гексе может быть неизвестное число мешков
+            // Все мешки удаляем
+            // - остальные предметы не трогаем, за исключением контейнеров или дверей
+            // - мешок в дверной проем поставить нельзя, на контейнер положить нельзя
+            //   в этом случае новый мешок просто удаляется и выдается сообщение
+            Item item = items[ i ];
+            if( !valid( item ) )
+                continue;
+            if( item.Id == sandBag.Id )
+                continue;
+
+            if( item.Type == ItemType::Container || item.Type == ItemType::Door )
+            {
+                // Найдена дверь или контейнер в нужных координатах, удаляем мешок, которым игрок пытался заблокировать проход или контейнер
+                DeleteItem( sandBag );
+                player.SayMsg( SAY_NETMSG, TEXTMSG_TEXT, STR_TEAR_SANDBAG );
+                return false;
+            }
+// TODO:       Если будет большое число эксплоитов с огораживанием сеток выхода и дверей, в этом месте можно будет добавить удаление
+            // мешка, если в некоем радиусе есть дверь, стена итд
+
+            hash iPid = item.ProtoId;
+            if( iPid == Content::Item::sandbag_1 )
+            {
+                pidCur = Content::Item::sandbag_2;
+                DeleteItem( item );
+            }
+            else if( iPid == Content::Item::sandbag_2 )
+            {
+                pidCur = Content::Item::sandbag_3;
+                DeleteItem( item );
+            }
+            else if( iPid == Content::Item::sandbag_3 )
+            {
+                pidCur = Content::Item::sandbag_4;
+                DeleteItem( item );
+            }
+            else if( iPid == Content::Item::sandbag_4 )
+            {
+                pidCur = Content::Item::sandbag_5;
+                DeleteItem( item );
+            }
+            else if( iPid == Content::Item::sandbag_5 )
+            {
+                player.SayMsg( SAY_NETMSG, TEXTMSG_TEXT, STR_CANT_PLACE_SANDBAG );
+                player.SayMsg( SAY_NETMSG, TEXTMSG_TEXT, STR_TEAR_SANDBAG );
+                DeleteItem( sandBag );
+                return true;
+            }
+        }
+    }
+    if( pidCur != sandBag.ProtoId )
+    {
+        // Проверка, что на гексе с мешком не стоит игрок
+        // иначе его можно заложить мешками и он будет непростреливаемым
+        if( valid( map.GetCritter( x, y ) ) )
+        {
+            // в этом гексе уже лежит мешок, и на нем стоит человек
+            DeleteItem( sandBag );
+            player.SayMsg( SAY_NETMSG, TEXTMSG_TEXT, STR_TEAR_SANDBAG );
+            return false;
+        }
+        if( !ChangeSandBagProto( sandBag, pidCur ) )
+            return false;
+    }
+    MoveItem( sandBag, 1, map, x, y );
+    return true;
+}
+
+bool ChangeSandBagProto( Item sb, int16 pidNew )
+{
+    if( !sb.ChangeProto( pidNew ) )
+        return false;
+    sb.IsGag = true;
+    return true;
+}
+
+// Попытка забрать верхний мешок из стопки
+bool TakeSandBag( Map map, Critter player, Item takeFrom )
+{
+    hash pid = takeFrom.ProtoId;
+    bool lastSB = false;
+    hash newPid = 0;
+    if( pid == Content::Item::sandbag_1 )
+        lastSB = true;
+    else if( pid == Content::Item::sandbag_2 )
+        newPid = Content::Item::sandbag_1;
+    else if( pid == Content::Item::sandbag_3 )
+        newPid = Content::Item::sandbag_2;
+    else if( pid == Content::Item::sandbag_4 )
+        newPid = Content::Item::sandbag_3;
+    else if( pid == Content::Item::sandbag_5 )
+        newPid = Content::Item::sandbag_4;
+    else
+        return false;
+
+    // Проверка, сможет ли игрок поднять мешок
+    int         freeWeight = player.CarryWeight - player.ItemsWeight;
+    const Item sandBagProto = GetProtoItem( Content::Item::sandbag_1 );
+    if( !valid( sandBagProto ) )
+        return false;
+
+    if( freeWeight < int(sandBagProto.Weight) )
+    {
+        player.SayMsg( SAY_NETMSG, TEXTMSG_GAME, MsgStr::StrOverweight );
+        return false;
+    }
+    // Если это последний мешок в стопке на земле - перемещаем предмет в инвентарь персонажа
+    // Иначе, уменьшаем высоту стопки
+    if( lastSB )
+    {
+        MoveItem( takeFrom, 0, player );
+        return true;
+    }
+    else
+    {
+        if( !ChangeSandBagProto( takeFrom, newPid ) )
+            return false;
+
+        _CritAddItem( player, Content::Item::sandbag_1, 1 );
+        return true;
+    }
+}
+// Признак - этот протитип - относится к мешкам
+bool IsSandBag( uint pid )
+{
+    return ( pid == Content::Item::sandbag_1 || pid == Content::Item::sandbag_2 || pid == Content::Item::sandbag_3 || pid == Content::Item::sandbag_4 || pid == Content::Item::sandbag_5 );
+}
+// При использовании итема на итем. При false вызывается обработчик криттера, потом глобальный on_use_item. При true выход.
+bool _SandBagUseOnMe( Critter cr, Item usedItem, Critter onCritter, Item item, const Item onScenery, uint param )
+{
+    if( !valid( usedItem ) )
+        return false;
+
+    if( !IsSandBag( usedItem.ProtoId ) )
+        return false;
+    uint16 x = 0, y = 0;
+    Map   map = item.GetMapPosition( x, y );
+    if( valid( map ) )
+    {
+        AddSandBag( map, cr, x, y, usedItem );
+    }
+    return true;
+}
+// При использовнии навыка на итеме. При false вызывается обработчик криттера, потом глобальный on_use_skill. При true выход.
+bool _SandBagSkill( Critter cr, CritterProperty skill, Critter onCritter, Item item, const Item onScenery )
+{
+    uint pid = item.ProtoId;
+    if( !IsSandBag( pid ) )
+        return false;
+    if( cr.IsNpc() )
+    {
+        if( pid == Content::Item::sandbag_1 )
+        {
+            DeleteItem( item );
+        }
+        else
+        {
+            pid--;
+            ChangeSandBagProto( item, pid );
+        }
+        return true;
+    }
+    switch( skill )
+    {
+    case SKILL_PICK_ON_GROUND:
+        if( cr.GetMap() != null )
+        {
+            TakeSandBag( cr.GetMap(), cr, item );
+        }
+        return true;
+    case CritterProperty::SkillRepair:
+        // При использовании ремонта на мешок - мешок можно порвать
+        // пока шанс 100%, включается таймаут на ремонт
+        if( cr.IsPlayer() && IS_TIMEOUT( cr.TimeoutSkRepair ) )
+        {
+            cr.SayMsg( SAY_NETMSG, TEXTMSG_GAME, MsgStr::StrSkillWeariness );
+            return true;
+        }
+        cr.TimeoutSkRepair = REPAIR_TIMEOUT( cr );
+        if( pid == Content::Item::sandbag_1 )
+        {
+            DeleteItem( item );
+            cr.AddItem( Content::Item::sandbag_empty, 1 );
+        }
+        else
+        {
+            pid--;
+            cr.AddItem( Content::Item::sandbag_empty, 1 );
+            ChangeSandBagProto( item, pid );
+        }
+        cr.SayMsg( SAY_NETMSG, TEXTMSG_TEXT, STR_TEAR_REPAIR );
+        return true;
+    case SKILL_TAKE_CONT:
+        return false;
+    case SKILL_TAKE_ALL_CONT:
+        return true;
+    default:
+        return false;
+    }
+    return false;
+}
+// При выбросе итема.
+void _SandBagDrop( Critter cr, Item item )
+{
+    if( !IsSandBag( item.ProtoId ) )
+        return;
+    uint16 x = 0, y = 0;
+    Map   map = item.GetMapPosition( x, y );
+    if( valid( map ) )
+    {
+        AddSandBag( map, cr, x, y, item );
+    }
+}
+
+bool CheckIsNearEntire( Item item ) // Проверка, что рядом с предметом нет EntireHex'a
+{
+    if( item.MapId < 1 )
+        return false;
+    Map map = GetMap( item.MapId );
+    if( !valid( map ) )
+        return false;
+	
+	hash[] entireNames = map.GetAllEntires();
+	hash[] ignoredEntires = array<hash> = {HASH( "154" ), HASH( "155" ), HASH( "156" ), HASH( "157" ), HASH( "158" ), HASH( "159" )};
+	uint16 x = 0; 
+	uint16 y = 0;
+	
+	for(int i = 0, l = entireNames.length(); i < l; i++)
+	{
+		hash entireName = entireNames [ i ];
+		if( !ignoredEntires.exists(entireName))
+		{
+			int totalEntires = map.CountEntire(entireName);
+			for(int j = 0; j < totalEntires; j++ )
+			{
+				 if( map.GetEntireCoords( entireName, j, x, y ))
+				 {
+					if(::GetDistantion( item.HexX, item.HexY, x,y ) < MIN_ENTIRE_DIST)
+						return true;
+				 }
+			}
+		}	
+	}
+	
+    return false;
+}
+
+void _SandBagInit( Item sb, bool firstTime )
+{
+    if( CheckIsNearEntire( sb ) )
+    {
+        DeleteItem( sb );
+        return;
+    }
+    sb.IsGag = true;
+    __EventCritterDropItem.SubscribeToItem( sb, _SandBagDrop );
+    __EventCritterUseSkill.SubscribeToOnItem( sb, _SandBagSkill );
+    __EventCritterUseItem.SubscribeToOnItem( sb, _SandBagUseOnMe );
+}
+
+// / DEBUG
+void SandContour( Critter cr, int len, int num, int )
+{
+    Map map = cr.GetMap();
+    if( !valid( map ) )
+        return;
+    num = CLAMP( num - 1, 0, 4 );
+    uint16 x = cr.HexX;
+    uint16 y = cr.HexY;
+    for( int dir = 0; dir < 6; dir++ )
+    {
+        for( int i = 0; i < len; i++ )
+        {
+            map.AddItem( x, y, Content::Item::sandbag_1 + num, 1 );
+            map.MoveHexByDir( x, y, dir, 1 );
+        }
+    }
+}

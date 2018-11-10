@@ -1,0 +1,135 @@
+// FOS Server
+
+// Author: rifleman17
+// Собиратель мусора
+// каждые NEXT_SEARCH_TIME собирает предметы на карте  в радиусе 5*PE от домашней позиции
+// если на карте есть контейнер, расположенный на EntireHex'e с номером ENTIRE_CONTAINER, после того, как соберет все предметы, идет их складывать в этот контейнер
+// Внимание! используется ST_VAR0 для определения времени следующего поиска
+// заняты события: CRITTER_EVENT_IDLE, CRITTER_EVENT_PLANE_END
+
+#pragma property Critter PrivateServer uint CollectorTimeNextSearch
+
+#define NEXT_SEARCH_TIME      ( REAL_MINUTE( 5 ) )
+#define ENTIRE_CONTAINER      ( 87 )
+#define PUT_ITEMS_PRIORITY    ( 178 )
+
+void _CollectorInit( Critter cr, bool firstTime )
+{
+    __EventCritterIdle.SubscribeToCritter( cr, _CollectorIdle );
+    __EventNpcPlaneEnd.SubscribeToCritter( cr, _CollectorPlaneEnd );
+    cr.CollectorTimeNextSearch = __FullSecond + NEXT_SEARCH_TIME;
+}
+
+void _CollectorIdle( Critter cr )
+{
+    if( __FullSecond >= cr.CollectorTimeNextSearch )
+    {
+        SearchForItems( cr );
+        cr.CollectorTimeNextSearch = __FullSecond + NEXT_SEARCH_TIME;       // Следующий поиск
+    }
+    else
+    {
+        MoveItemsToContainer( cr );
+    }
+}
+
+
+void MoveItemsToContainer( Critter cr ) // Складывает все предметы из инвентаря в контейнер
+{
+    Item[] items = {};
+    Item[] containers = {};
+    Map map = cr.GetMap();
+    if( Obsolete::GetItems( cr, SLOT_INV, items ) > 0 && valid( map ) )
+    {
+        uint entires = map.CountEntire( ENTIRE_CONTAINER );
+        if( entires > 0 )
+        {
+            uint16 hx = 0;
+            uint16 hy = 0;
+            if( map.GetEntireCoords( ENTIRE_CONTAINER, Random( 0, entires - 1 ), hx, hy ) )
+            {
+                if( Obsolete::GetItems( map, hx, hy, containers ) > 0 )
+                {
+                    for( uint i = 0, l = containers.length(); i < l; i++ )
+                    {
+                        if( containers[ i ].Type == ItemType::Container )
+                        {
+                            NpcPlanes::AddPickPlane( cr, PUT_ITEMS_PRIORITY, containers[ i ], 0, true );
+                            return;
+                        }
+                    }
+                    containers;
+                }
+
+            }
+        }
+        // если нет спецконтейнера, кладем в ближайший
+        Obsolete::GetItemsByType( map,  ItemType::Container, containers  );
+        uint distMin = map.Width;
+        uint distCur = 0;
+        int  ind = -1;
+        for( int i = 0, l = containers.length(); i < l; i++ )
+        {
+            distCur = map.GetPathLength( cr.HexX, cr.HexY, containers[ i ].HexX, containers[ i ].HexY, 1 );
+            if( distCur > 0 && distMin > distCur )
+            {
+                distMin = distCur;
+                ind = i;
+            }
+        }
+        if( ind >= 0 )
+        {
+            NpcPlanes::AddPickPlane( cr, PUT_ITEMS_PRIORITY, containers[ ind ], 0, true );
+        }
+    }
+
+}
+
+void SearchForItems( Critter cr ) // Поиск предметов, валяющихся на карте
+{
+    Map map = cr.GetMap();        // Карта с криттером, на которой будем искать вещи
+    if( !valid( map ) )
+        return;
+    Item[] items = {};
+    if( Obsolete::GetItems( map, cr.HexX, cr.HexY, cr.Perception * 5, 0, items ) == 0 )
+        return;
+    int   type;
+    Item item;
+    for( uint i = 0, l = items.length(); i < l; i++ )
+    {
+        item = items[ i ];
+        if( valid( item ) )
+        {
+            if( item.IsGag )
+                continue;
+            type = item.Type;
+            if( type >= ItemType::Armor && type <= ItemType::Key && map.GetPathLength( cr, item.HexX, item.HexY, 0 ) > 0 )
+                NpcPlanes::AddPickPlane( cr, 0, item, 0, true );
+        }
+    }
+}
+
+bool _CollectorPlaneEnd( Critter cr, int planeId, int reason, Critter someCr, Item someItem )
+{
+	NpcPlanes::NpcPlane plane = NpcPlanes::GetCritterPlane(cr, planeId);
+
+    if( plane.Type == AI_PLANE_PICK && plane.Priority == PUT_ITEMS_PRIORITY )
+    {
+        Map  map = cr.GetMap();
+        Item cont = map.GetItem( plane.Pick_HexX, plane.Pick_HexY, plane.Pick_Pid );
+        if( valid( cont ) && reason == REASON_SUCCESS && cont.Type == ItemType::Container )
+        {
+            Item[] items = {};
+            if( Obsolete::GetItems( cr, SLOT_INV, items ) > 0 )
+                MoveItems( items, cont, 0 );
+
+        }
+    }
+    return true;
+}
+
+void AddCollector( Critter cr, int, int, int )
+{
+    Critter npc = cr.GetMap().AddNpc( Content::Critter::HeroMale, cr.HexX, cr.HexY, 3, null);
+        npc.SetScript ( _CollectorInit );
+}

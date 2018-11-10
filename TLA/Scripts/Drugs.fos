@@ -1,0 +1,576 @@
+// FOS Server Client
+// Author: cvet
+// Original Fallout2 system
+
+#pragma property Critter Protected dict< CritterProperty, int > DrugEffects
+#pragma property Critter Protected uint8 DoughnutsCounter Max = 20
+
+#define LBS_TO_GRAMM        # (lbs)       ( ( lbs ) * 453 )
+
+#ifdef __SERVER
+
+// Chem Reliant
+// benefit: Faster recovery from chem side effects
+// penalty: Doubles chance for addiction
+// Chem Resistant
+// benefit: 50% less addiction chance
+// penalty: 50% less duration for Chem effects
+# define DRUG_EFFECT_DIV2_WITHDRAWAL    ( 1 )
+# define DRUG_EFFECT_MUL2_ADDICTION     ( 2 )
+# define DRUG_EFFECT_DIV2_ADDICTION     ( 4 )
+# define DRUG_EFFECT_DIV2_DURATION      ( 8 )
+# define RATE_TO_STAGE                  # (rate)          ( ( rate ) & 0xFFFFFF )
+# define RATE_TO_FLAGS                  # (rate)          ( ( rate ) >> 24 )
+# define FORM_RATE                      # ( stage, flags )( ( ( ( flags ) & 0xFF ) << 24 ) | ( ( stage ) & 0xFFFFFF ) )
+
+const int[] DrugsIdentifiers =
+{
+    Content::Item::stimpak, Content::Item::radaway, Content::Item::antidote, Content::Item::rad_x, Content::Item::super_stimpak, Content::Item::jet_antidote, Content::Item::healing_powder, Content::Item::hypo,
+    Content::Item::nuka_cola, Content::Item::beer, Content::Item::booze, Content::Item::gamma_gulp_beer, Content::Item::roentgen_rum, Content::Item::rot_gut, Content::Item::mentats, Content::Item::buffout, Content::Item::psycho, Content::Item::jet,
+    Content::Item::mutated_fruit, Content::Item::iguana_on_a_stick, Content::Item::meat_on_a_stick, Content::Item::cookie, Content::Item::hypo_poison, Content::Item::mutated_toe, Content::Item::kitty_sex_drug_agility,
+    Content::Item::kitty_sex_drug_intelligence, Content::Item::kitty_sex_drug_strength, Content::Item::monument_chunck, Content::Item::box_of_doughnuts
+};
+
+const int[] DrugEffects =
+{
+// Content::Item::stimpak
+    -1,      0,             0,      0,          0,     0,
+    -2,        10,      0,      0,          0,     0,
+    CritterProperty::CurrentHp,        20,      0,      0,          0,     0,
+    -1,         0,      0,      0,          0,     0,
+    -1,         0,      0,      0,          0,     0,
+// Content::Item::radaway
+    Addictions::Radaway,     10,           120,    120,      14160, 10080,
+    CritterProperty::RadiationLevel,       -25,    -50,    -75,          0,     0,
+    CritterProperty::RadiationResistanceBase,         0,      0,      0,        -20,    20,
+    -1,         0,      0,      0,          0,     0,
+    -1,         0,      0,      0,          0,     0,
+// Content::Item::antidote
+    -1,      0,            10,     10,          0,     0,
+    CritterProperty::PoisoningLevel,       -25,    -25,    -25,          0,     0,
+    -1,         0,      0,      0,          0,     0,
+    -1,         0,      0,      0,          0,     0,
+    -1,         0,      0,      0,          0,     0,
+// Content::Item::mentats
+    Addictions::Mentats,     15,          1440,   4320,       4320, 10080,
+    CritterProperty::IntellectBase,         2,     -4,      2,         -3,     3,
+    CritterProperty::PerceptionBase,         2,     -4,      2,          0,     0,
+    CritterProperty::CharismaBase,         1,     -3,      2,          0,     0,
+    CritterProperty::AgilityBase,         0,      0,      0,         -2,     2,
+// Content::Item::mutated_fruit
+    -1,      0,           120,    360,          0,     0,
+    -2,         1,      0,      0,          0,     0,
+    CritterProperty::CurrentHp,         4,      0,      0,          0,     0,
+    CritterProperty::RadiationLevel,         0,      1,      1,          0,     0,
+    -1,         0,      0,      0,          0,     0,
+// Content::Item::iguana_on_a_stick
+    -1,      0,             0,      0,          0,     0,
+    -1,         0,      0,      0,          0,     0,
+    -1,         0,      0,      0,          0,     0,
+    -1,         0,      0,      0,          0,     0,
+    -1,         0,      0,      0,          0,     0,
+// Content::Item::buffout
+    Addictions::Buffout,     25,           360,    720,       1800, 10080,
+    CritterProperty::StrengthBase,         2,     -4,      2,         -2,     2,
+    CritterProperty::AgilityBase,         2,     -4,      2,         -3,     3,
+    CritterProperty::EnduranceBase,         3,     -4,      1,         -2,     2,
+    -1,         0,      0,      0,          0,     0,
+// Content::Item::meat_on_a_stick
+    -1,      0,             0,      0,          0,     0,
+    -1,         0,      0,      0,          0,     0,
+    -1,         0,      0,      0,          0,     0,
+    -1,         0,      0,      0,          0,     0,
+    -1,         0,      0,      0,          0,     0,
+// Content::Item::nuka_cola
+    Addictions::NukaCola,     10,             0,      0,         30, 10080,
+    -1,         0,      0,      0,          0,     0,
+    -1,         0,      0,      0,          0,     0,
+    -1,         0,      0,      0,          0,     0,
+    -1,         0,      0,      0,          0,     0,
+// Content::Item::rad_x
+    -1,      0,          1440,   1440,          0,     0,
+    CritterProperty::RadiationResistanceBase,        50,    -25,    -25,          0,     0,
+    -1,         0,      0,      0,          0,     0,
+    -1,         0,      0,      0,          0,     0,
+    -1,         0,      0,      0,          0,     0,
+// Content::Item::psycho
+    Addictions::Psycho,     20,           240,    240,       9600, 10080,
+    CritterProperty::AgilityBase,         3,     -3,      0,          0,     0,
+    CritterProperty::IntellectBase,        -3,      1,      2,         -2,     2,
+    CritterProperty::NormalResistanceBase,        50,    -25,    -25,          0,     0,
+    -1,         0,      0,      0,          0,     0,
+// Content::Item::beer
+    -1,      0,            30,      0,          0,     0,
+    CritterProperty::PerceptionBase,        -1,      1,      0,          0,     0,
+    -1,         0,      0,      0,          0,     0,
+    -1,         0,      0,      0,          0,     0,
+    -1,         0,      0,      0,          0,     0,
+// Content::Item::booze
+    -1,      0,            30,      0,          0,     0,
+    CritterProperty::PerceptionBase,        -1,      1,      0,          0,     0,
+    -1,         0,      0,      0,          0,     0,
+    -1,         0,      0,      0,          0,     0,
+    -1,         0,      0,      0,          0,     0,
+// Content::Item::super_stimpak
+    -1,      0,            10,     10,          0,     0,
+    CritterProperty::CurrentHp,        75,     -3,     -6,          0,     0,
+    -1,         0,      0,      0,          0,     0,
+    -1,         0,      0,      0,          0,     0,
+    -1,         0,      0,      0,          0,     0,
+// Content::Item::jet
+    Addictions::Jet,     50,    /* 10 */ 240,   1430,       1450,     2,      // Only after Jet Antidote was used
+    CritterProperty::ActionPointsBase,         2,     -4,      2,         -1,     1,
+    CritterProperty::StrengthBase,         1,     -4,      3,         -2,     2,
+    CritterProperty::PerceptionBase,         1,     -4,      3,         -2,     2,
+    -1,         0,      0,      0,          0,     0,
+// Content::Item::jet_antidote
+    -1,      0,             0,      0,          0,     0,
+    -1,         0,      0,      0,          0,     0,
+    -1,         0,      0,      0,          0,     0,
+    -1,         0,      0,      0,          0,     0,
+    -1,         0,      0,      0,          0,     0,
+// Content::Item::healing_powder
+    -1,      0,           360,      0,          0,     0,
+    -2,         8,      0,      0,          0,     0,
+    CritterProperty::CurrentHp,        18,      0,      0,          0,     0,
+    CritterProperty::PerceptionBase,        -1,      1,      0,          0,     0,
+    -1,         0,      0,      0,          0,     0,
+// Content::Item::gamma_gulp_beer
+    -1,      0,            30,      0,          0,     0,
+    CritterProperty::PerceptionBase,        -1,      1,      0,          0,     0,
+    -1,         0,      0,      0,          0,     0,
+    -1,         0,      0,      0,          0,     0,
+    -1,         0,      0,      0,          0,     0,
+// Content::Item::roentgen_rum
+    -1,      0,            30,      0,          0,     0,
+    CritterProperty::PerceptionBase,        -2,      2,      0,          0,     0,
+    -1,         0,      0,      0,          0,     0,
+    -1,         0,      0,      0,          0,     0,
+    -1,         0,      0,      0,          0,     0,
+// Content::Item::hypo_poison
+    -1,      0,             0,      0,          0,     0,
+    -1,         0,      0,      0,          0,     0,
+    -1,         0,      0,      0,          0,     0,
+    -1,         0,      0,      0,          0,     0,
+    -1,         0,      0,      0,          0,     0,
+// Content::Item::cookie
+    -1,      0,            15,      0,          0,     0,
+    CritterProperty::ActionPointsBase,         1,     -1,      0,          0,     0,
+    -1,         0,      0,      0,          0,     0,
+    -1,         0,      0,      0,          0,     0,
+    -1,         0,      0,      0,          0,     0,
+// Content::Item::monument_chunck
+    -1,      0,            60,     60,          0,     0,
+    CritterProperty::StrengthBase,         3,     -6,      3,          0,     0,
+    CritterProperty::AgilityBase,         3,     -6,      3,          0,     0,
+    CritterProperty::NormalResistanceBase,        50,    -50,      0,          0,     0,
+    -1,         0,      0,      0,          0,     0,
+// Content::Item::rot_gut
+    -1,      0,            30,      0,          0,     0,
+    CritterProperty::PerceptionBase,        -2,      2,      0,          0,     0,
+    -1,         0,      0,      0,          0,     0,
+    -1,         0,      0,      0,          0,     0,
+    -1,         0,      0,      0,          0,     0,
+// Content::Item::mutated_toe
+    -1,      0,          1440,   8640,          0,     0,
+    CritterProperty::MaxLifeBase,        -3,      0,      3,          0,     0,
+    CritterProperty::PoisoningLevel,         2,      0,      0,          0,     0,
+    -1,         0,      0,      0,          0,     0,
+    -1,         0,      0,      0,          0,     0,
+// Content::Item::kitty_sex_drug_agility
+    -1,      0,            60,      0,          0,     0,
+    CritterProperty::AgilityBase,         1,     -1,      0,          0,     0,
+    -1,         0,      0,      0,          0,     0,
+    -1,         0,      0,      0,          0,     0,
+    -1,         0,      0,      0,          0,     0,
+// Content::Item::kitty_sex_drug_intelligence
+    -1,      0,            60,      0,          0,     0,
+    CritterProperty::IntellectBase,         1,     -1,      0,          0,     0,
+    -1,         0,      0,      0,          0,     0,
+    -1,         0,      0,      0,          0,     0,
+    -1,         0,      0,      0,          0,     0,
+// Content::Item::kitty_sex_drug_strength
+    -1,      0,            60,      0,          0,     0,
+    CritterProperty::StrengthBase,         1,     -1,      0,          0,     0,
+    -1,         0,      0,      0,          0,     0,
+    -1,         0,      0,      0,          0,     0,
+    -1,         0,      0,      0,          0,     0,
+// Content::Item::hypo
+    -1,      0,             0,      0,          0,     0,
+    -2,        75,      0,      0,          0,     0,
+    CritterProperty::CurrentHp,       100,      0,      0,          0,     0,
+    -1,         0,      0,      0,          0,     0,
+    -1,         0,      0,      0,          0,     0,
+// Content::Item::box_of_doughnuts
+    -1,         0,      0,      0,          0,     0,
+    -2,         1,      0,      0,          0,     0,
+    CritterProperty::CurrentHp,         2,      0,      0,          0,     0,
+    -1,         0,      0,      0,          0,     0,
+    -1,         0,      0,      0,          0,     0,
+};
+
+// Table offsets
+# define TABLE_DRUG_ADDICT    ( 0 )
+# define TABLE_DRUG_PROC      ( 1 )
+# define TABLE_DURATION       # (stage)      ( 2 + ( stage ) )
+# define TABLE_STAT           # (stat)           ( 6 + ( stat ) * 6 )
+# define TABLE_AMOUNT         # ( stat, stage )( 7 + ( stage ) + ( stat ) * 6 )
+
+void UseDrug( Critter cr, Item drug ) // Export
+{
+    SetDrug( cr, drug.ProtoId );
+    _SubItem( drug, 1 );
+}
+
+void UseDrugOn( Critter cr, Critter onCr, Item drug ) // Export
+{
+    if( onCr.IsDead() )
+    {
+        cr.SayMsg( SAY_NETMSG, TEXTMSG_GAME, MsgStr::StrSkillNoressurect );
+        return;
+    }
+
+    bool isStimpak = ( drug.ProtoId == Content::Item::stimpak || drug.ProtoId == Content::Item::super_stimpak );
+    if( isStimpak || onCr.IsKnockout() )
+    {
+        onCr.SayMsg( SAY_NETMSG, TEXTMSG_GAME, MsgStr::StrDrugUseOnSucc );
+        SetDrug( onCr, drug.ProtoId );
+    }
+    else
+    {
+        onCr.SayMsg( SAY_NETMSG, TEXTMSG_GAME, MsgStr::StrDrugUseOnFail );
+    }
+
+    _SubItem( drug, 1 );
+    if( not isStimpak )
+        cr.TimeoutSkFirstAid = FIRST_AID_TIMEOUT( cr );
+}
+
+void SetDrug( Critter cr, hash drugPid )
+{
+    // Special drugs
+    if( drugPid == Content::Item::box_of_doughnuts )
+    {
+        if( cr.DoughnutsCounter < 20 )
+        {
+            cr.DoughnutsCounter += 1;
+            // Вы съели столько пончиков, что почуствовали себя немного сильнее. Переносимый вес увеличен на +1 пункт.
+            cr.SayMsg( SAY_NETMSG, TEXTMSG_TEXT, 70061 );
+            cr.CarryWeightBase += LBS_TO_GRAMM( 1 );
+        }
+    }
+    else if( drugPid == Content::Item::jet_antidote )
+    {
+        uint[] rates = {};
+        uint count = cr.GetTimeEvents( Content::Item::jet, null, null, rates );
+        for( uint i = 0; i < count; i++ )
+            DropDrug( cr, Content::Item::jet, RATE_TO_STAGE( rates[ i ] ) );
+        cr.EraseTimeEvents( Content::Item::jet );
+        if( count > 0 && cr.Addictions[ Addictions::Jet ] )
+        {
+            bool[] addictions = cr.Addictions.clone();
+            addictions[ Addictions::Jet ] = false;
+            cr.Addictions = addictions;
+            cr.SayMsg( SAY_NETMSG, TEXTMSG_GAME, MsgStr::StrDrugAddictionEnd );
+        }
+        else
+        {
+            cr.SayMsg( SAY_NETMSG, TEXTMSG_GAME, MsgStr::StrDrugNothingHappens );
+        }
+        return;
+    }
+
+    // Chem flags
+    uint flags = 0;
+    if( cr.IsTraitChemReliant )
+        flags |= DRUG_EFFECT_DIV2_WITHDRAWAL | DRUG_EFFECT_MUL2_ADDICTION;
+    if( cr.IsTraitChemResistant )
+        flags |= DRUG_EFFECT_DIV2_ADDICTION | DRUG_EFFECT_DIV2_DURATION;
+
+    // Other drugs
+    uint[] indexes = {};
+    uint[] rates = {};
+    uint count = cr.GetTimeEvents( drugPid, indexes, null, rates );
+    int  index = GetDrugTableIndex( drugPid );
+
+    // Check
+    if( DrugEffects[ index + TABLE_DRUG_ADDICT ] >= 0 ) // Addiction perk aviability
+    {
+        uint positive = 0;
+        uint negative = 0;
+        for( uint i = 0; i < count; i++ )
+        {
+            uint stage = RATE_TO_STAGE( rates[ i ] );
+            if( stage <= 1 )
+                positive++;
+            else if( stage == 2 )
+                negative++;
+        }
+
+        if( positive >= 2 - negative / 2 )
+        {
+            int addict = DrugEffects[ index + TABLE_DRUG_ADDICT ];
+            int addictProc = DrugEffects[ index + TABLE_DRUG_PROC ];
+            if( FLAG( flags, DRUG_EFFECT_MUL2_ADDICTION ) )
+                addictProc *= 2;
+            if( FLAG( flags, DRUG_EFFECT_DIV2_ADDICTION ) )
+                addictProc /= 2;
+            if( !cr.Addictions[ addict ] && Random( 1, 100 ) <= addictProc )
+            {
+                bool[] addictions = cr.Addictions.clone();
+                addictions[ addict ] = true;
+                cr.Addictions = addictions;
+            }
+            else
+            {
+                cr.SayMsg( SAY_NETMSG, TEXTMSG_GAME, MsgStr::StrDrugNothingHappens );
+            }
+            return;
+        }
+    }
+
+    // Clear active addictions
+    uint deleted = 0;   // After erase indexes decrement on one position
+    for( uint i = 0; i < count; i++ )
+    {
+        uint stage = RATE_TO_STAGE( rates[ i ] );
+        if( stage >= 3 )
+        {
+            DropDrug( cr, drugPid, stage );
+            cr.EraseTimeEvent( indexes[ i ] - deleted );
+            deleted++;
+        }
+    }
+
+    // Set critter time event
+    cr.AddTimeEvent( cte_Drug, 0, drugPid, FORM_RATE( 0, flags ) );
+}
+
+int GetDrugTableIndex( hash drugPid )
+{
+    hash[] drugPids =
+    {
+        Content::Item::stimpak,
+        Content::Item::radaway,
+        Content::Item::antidote,
+        Content::Item::mentats,
+        Content::Item::mutated_fruit,
+        Content::Item::iguana_on_a_stick,
+        Content::Item::buffout,
+        Content::Item::meat_on_a_stick,
+        Content::Item::nuka_cola,
+        Content::Item::rad_x,
+        Content::Item::psycho,
+        Content::Item::beer,
+        Content::Item::booze,
+        Content::Item::super_stimpak,
+        Content::Item::jet,
+        Content::Item::jet_antidote,
+        Content::Item::healing_powder,
+        Content::Item::gamma_gulp_beer,
+        Content::Item::roentgen_rum,
+        Content::Item::hypo_poison,
+        Content::Item::cookie,
+        Content::Item::monument_chunck,
+        Content::Item::rot_gut,
+        Content::Item::mutated_toe,
+        Content::Item::kitty_sex_drug_agility,
+        Content::Item::kitty_sex_drug_intelligence,
+        Content::Item::kitty_sex_drug_strength,
+        Content::Item::hypo,
+        Content::Item::box_of_doughnuts,
+    };
+    int index = drugPids.find( drugPid );
+    return index != -1 ? index * 30 : 0;
+}
+
+uint ProcessDrug( Critter cr, hash drugPid, uint rate )
+{
+    uint stage = RATE_TO_STAGE( rate );
+    uint flags = RATE_TO_FLAGS( rate );
+
+    if( cr.IsDead() )
+        return REAL_MINUTE( 5 );               // Stop drug processing
+    if( drugPid == Content::Item::jet && stage >= 4 )
+        return REAL_HOUR( 5 );                 // Only after Jet Antidote was used
+
+    int  index = GetDrugTableIndex( drugPid );
+    uint duration = 0;
+
+    if( stage == 0 || // Instant effect
+        stage == 1 || // Withdrawal
+        stage == 2 || // Normalize
+        stage == 3 || // Addiction begin
+        stage == 4 )  // Addiction end
+    {
+        for( uint i = 0; i < 4; i++ )
+        {
+            int propInd = DrugEffects[ index + TABLE_STAT( i ) ];
+            int amount = DrugEffects[ index + TABLE_AMOUNT( i, stage ) ];
+            if( i == 1 && DrugEffects[ index + TABLE_STAT( 0 ) ] == -2 )
+                amount = Random( DrugEffects[ index + TABLE_AMOUNT( 0, stage ) ], amount );                                              // Take first
+            if( propInd == -1 )
+                continue;
+
+            CritterProperty prop = CritterProperty( propInd );
+            int             propVal = cr.GetAsInt( prop );
+            if( prop == CritterProperty::CurrentHp )
+            {
+                cr.CurrentHp = CLAMP( propVal + amount, -9999, cr.MaxLife );
+                if( amount < 0 && cr.CurrentHp < 0 )
+                    CritterState::ToDead( cr, Random( 0, 1  ) == 0 ? Anim2Actions::DeadFront : Anim2Actions::DeadBack, null );
+            }
+            else if( prop == CritterProperty::PoisoningLevel )
+            {
+                Poison::AffectPoison( cr, amount );
+            }
+            else if( prop == CritterProperty::RadiationLevel )
+            {
+                Radiation::AffectRadiation( cr, amount );
+            }
+            else
+            {
+                ChangeDrugEffect( cr, prop, amount );
+            }
+
+            propVal = cr.GetAsInt( prop ) - propVal;
+            if( propVal > 0 )
+                cr.SayMsg( SAY_NETMSG, TEXTMSG_GAME, MsgStr::StrDrugStatGain, "$name @msg game " + STR_PARAM_NAME( prop ) + "@$value" + propVal );
+            else if( propVal < 0 )
+                cr.SayMsg( SAY_NETMSG, TEXTMSG_GAME, MsgStr::StrDrugStatLose, "$name @msg game " + STR_PARAM_NAME( prop ) + "@$value" + ( -propVal ) );
+        }
+
+        int addict = DrugEffects[ index + TABLE_DRUG_ADDICT ];
+        if( stage == 0 )     // To withdrawal
+        {
+            duration = DrugEffects[ index + TABLE_DURATION( stage ) ];
+            if( FLAG( flags, DRUG_EFFECT_DIV2_DURATION ) )
+                duration /= 2;
+            // Try set addiction perk
+            int addictProc = DrugEffects[ index + TABLE_DRUG_PROC ];
+            if( FLAG( flags, DRUG_EFFECT_MUL2_ADDICTION ) )
+                addictProc *= 2;
+            if( FLAG( flags, DRUG_EFFECT_DIV2_ADDICTION ) )
+                addictProc /= 2;
+            if( stage == 0 && addict >= 0 && Random( 1, 100 ) <= addictProc )
+            {
+                bool[] addictions = cr.Addictions.clone();
+                addictions[ addict ] = true;
+                cr.Addictions = addictions;
+            }
+        }
+        else if( stage == 1 )     // To normalize
+        {
+            duration = DrugEffects[ index + TABLE_DURATION( stage ) ];
+            if( FLAG( flags, DRUG_EFFECT_DIV2_DURATION ) )
+                duration /= 2;
+        }
+        else if( stage == 2 && addict >= 0 && cr.Addictions[ addict ] ) // To addiction
+        {
+            // Find already processed addiction
+            uint[] rates = {};
+            uint count = cr.GetTimeEvents( drugPid, null, null, rates );
+            bool isPresent = false;
+            for( uint i = 0; i < count; i++ )
+            {
+                if( RATE_TO_STAGE( rates[ i ] ) >= 3 )
+                {
+                    isPresent = true;
+                    break;
+                }
+            }
+            if( not isPresent )
+                duration = DrugEffects[ index + TABLE_DURATION( stage ) ];
+        }
+        else if( stage == 3 )     // To end of addiction
+        {
+            duration = DrugEffects[ index + TABLE_DURATION( stage ) ];
+            if( FLAG( flags, DRUG_EFFECT_DIV2_WITHDRAWAL ) )
+                duration /= 2;
+        }
+        else if( stage == 4 )     // End of addiction
+        {
+            cr.SayMsg( SAY_NETMSG, TEXTMSG_GAME, MsgStr::StrDrugAddictionEnd );
+            if( addict >= 0 && cr.Addictions[ addict ] )
+            {
+                bool[] addictions = cr.Addictions.clone();
+                addictions[ addict ] = false;
+                cr.Addictions = addictions;
+            }
+        }
+    }
+
+    stage++;
+    rate = FORM_RATE( stage, flags );
+    return duration * 60;
+}
+
+void DropDrug( Critter cr, hash drugPid, uint stage )
+{
+    if( stage == 0 || stage == 3 )
+        return;                           // Instant effect not happens or already normalize or wait Addidional effect
+
+    int index = GetDrugTableIndex( drugPid );
+
+    if( stage == 1 || // Instant effect already
+        stage == 2 || // Withdrawal already
+        stage == 4 )  // Addiction already
+    {
+        for( uint i = 0; i < 4; i++ )
+        {
+            int propInd = DrugEffects[ index + TABLE_STAT( i ) ];
+            int amount = DrugEffects[ index + TABLE_AMOUNT( i, stage + ( stage == 1 ? -1 : 0 ) ) ]; // Turn
+            if( stage == 1 )
+                amount = -amount;
+            if( propInd != -1 )
+            {
+                CritterProperty prop = CritterProperty( propInd );
+                if( prop != CritterProperty::CurrentHp && prop != CritterProperty::PoisoningLevel && prop != CritterProperty::RadiationLevel )
+                    ChangeDrugEffect( cr, prop, amount );
+            }
+        }
+    }
+}
+
+uint cte_Drug( Critter cr, int identifier, uint& rate )
+{
+    return ProcessDrug( cr, identifier, rate );
+}
+
+void SetDrugEffect( Critter cr, CritterProperty prop, int value ) // Export
+{
+    auto drugEffects = cr.DrugEffects.clone();
+    drugEffects[ prop ] = value;
+    cr.DrugEffects = drugEffects;
+}
+
+void ChangeDrugEffect( Critter cr, CritterProperty prop, int value ) // Export
+{
+    auto drugEffects = cr.DrugEffects.clone();
+    drugEffects.setIfNotExist( prop, 0 );
+    drugEffects[ prop ] = drugEffects[ prop ] + value;
+    cr.DrugEffects = drugEffects;
+}
+
+void DropDrugEffects( Critter cr ) // Export
+{
+    // Clear drug effects
+    auto drugEffects = cr.DrugEffects.clone();
+    drugEffects.clear();
+    cr.DrugEffects = drugEffects;
+
+    // Erase all events
+    cr.EraseTimeEvents( DrugsIdentifiers.clone() );
+
+    // Unset addictions perks
+    bool[] addictions = cr.Addictions.clone();
+    for( uint i = 0, j = addictions.length(); i < j; i++ )
+        addictions[ i ] = false;
+    cr.Addictions = addictions;
+}
+#endif
+
+int GetDrugEffect( const Critter cr, const CritterProperty prop ) // Export
+{
+    return cr.DrugEffects.get( prop, 0 );
+}

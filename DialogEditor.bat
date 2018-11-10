@@ -1,1 +1,1 @@
-cd "%~dp0" & start "" "%~dp0FOnlineSDK\Tools\DialogEditor\DialogEditor.exe" %*
+cd "%~dp0" & start "" "%~dp0FOnlineSDK\Binaries\DialogEditor\DialogEditor.exe" %*

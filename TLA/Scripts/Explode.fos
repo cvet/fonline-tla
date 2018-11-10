@@ -1,0 +1,348 @@
+// FOS Server Sort 2
+// Author: cvet, rifleman17
+
+#pragma property Item PrivateServer uint ExplodeInvokeId
+#pragma property Item PrivateServer uint ExplodeSwitcherExplodeId
+#pragma property Item PrivateServer uint ExplodeOwnerId
+#pragma property Item PrivateServer int  ExplodeBonusDamage
+#pragma property Item PrivateServer int  ExplodeBonusRadius
+#pragma property Item PrivateServer uint ExplodeTimeRespawnMine
+
+#define TRAPS_HIDE                      # (traps)              ( ( traps ) / 5 + 10 )
+#define EXPLODE_CLEARANCE_EXPERIENCE    ( 50 )
+
+// Timer
+#define TIMER_MIN_VALUE                 ( 1 )
+#define TIMER_MAX_VALUE                 ( 599 )
+
+// Global on use, export
+bool OnUseExplode( Critter cr, Item explode, Critter targetCr, Item targetItem, const Item targetScen, uint timer ) // Export
+{
+    if( valid( targetCr ) || valid( targetItem ) || valid( targetScen ) )
+        return false;
+    hash pid = explode.ProtoId;
+    if( pid != Content::Item::dynamite && pid != Content::Item::active_dynamite &&
+        pid != Content::Item::plastic_explosives && pid != Content::Item::active_plastic_explosive && pid != Content::Item::toggle_switch && 
+        pid != Content::Item::mine && pid != Content::Item::active_mine )
+        return false;
+
+    bool isExpert = cr.PerkDemolitionExpert != 0;
+    int  trapsSkill = cr.SkillTraps;
+    if( trapsSkill < 0 )
+        trapsSkill = 0;
+
+    if( timer < TIMER_MIN_VALUE )
+        timer = TIMER_MIN_VALUE;
+    if( timer > TIMER_MAX_VALUE )
+        timer = TIMER_MAX_VALUE;
+    timer *= 60;   // Convert to game seconds
+
+    // Activate dynamite explosion
+    if( pid == Content::Item::dynamite )
+    {
+        Item activateExpl = cr.AddItem( Content::Item::active_dynamite, 1 );
+        if( not valid( activateExpl ) )
+            return false;
+
+        if( not isExpert )
+            timer = timer * Random( 80, 120 ) / 100;
+
+        activateExpl.ExplodeInvokeId = SavedDeferredCall( GAME_SECOND_TO_TICK( timer ), DeferredExplode, activateExpl.Id );
+        activateExpl.IsTrap = true;
+        activateExpl.ExplodeOwnerId = cr.Id;
+        activateExpl.TrapValue = TRAPS_HIDE( cr.SkillTraps );
+        activateExpl.ExplodeBonusDamage = trapsSkill;
+        activateExpl.ExplodeBonusRadius = isExpert ? 1 : 0;
+        if( cr.TimeoutRemoveFromGame < REAL_MINUTE( 5 ) + timer )
+            cr.TimeoutRemoveFromGame = __FullSecond + REAL_MINUTE( 5 ) + timer;
+    }
+    // Activate plastic explosion
+    else if( pid == Content::Item::plastic_explosives )
+    {
+        Item expl = cr.AddItem( Content::Item::active_plastic_explosive, 1 );
+        if( not valid( expl ) )
+            return false;
+        Item explSwitch = cr.AddItem( Content::Item::toggle_switch, 1 );
+        if( not valid( explSwitch ) )
+            return false;
+
+        expl.IsTrap = true;
+        explSwitch.ExplodeSwitcherExplodeId = expl.Id;
+        expl.ExplodeOwnerId = cr.Id;
+        expl.TrapValue = TRAPS_HIDE( cr.SkillTraps );
+        expl.ExplodeBonusDamage = trapsSkill;
+        expl.ExplodeBonusRadius = isExpert ? 1 : 0;
+
+        expl.Info += 2;
+        explSwitch.Info += 2;
+        expl.Lexems = "$frequency" + expl.Id;
+        explSwitch.Lexems = "$frequency" + expl.Id;
+    }
+    // Explode plastic explosion
+    else if( pid == Content::Item::toggle_switch )
+    {
+        Item expl = GetItem( explode.ExplodeSwitcherExplodeId );
+        if( valid( expl ) )
+        {
+            uint16   hexX = 0, hexY = 0;
+            Map     map = expl.GetMapPosition( hexX, hexY );
+            Critter crExpl = ( expl.Accessory == ItemOwnership::CritterInventory ? ::GetCritter( expl.CritId ) : null );
+            Explode( map, hexX, hexY, crExpl, Content::Item::active_plastic_explosive, expl.ExplodeOwnerId, expl.ExplodeBonusDamage, expl.ExplodeBonusRadius );
+            DeleteItem( expl );
+        }
+    }
+    // Activate mine
+    else if( pid == Content::Item::mine )
+    {
+        Item mine = cr.AddItem( Content::Item::active_mine, 1 );
+        if( not valid( mine ) )
+            return false;
+
+        mine.IsTrap = true;
+        mine.ExplodeOwnerId = cr.Id;
+        mine.TrapValue = TRAPS_HIDE( cr.SkillTraps );
+        mine.ExplodeBonusDamage = trapsSkill;
+        mine.ExplodeBonusRadius = isExpert ? 1 : 0;
+        mine.SetScript ( _ExplodeInit );
+    }
+    // Deactivate dynamite explosion, plastic explosion or mine
+    else if( pid == Content::Item::active_dynamite || pid == Content::Item::active_plastic_explosive || pid == Content::Item::active_mine )
+    {
+        if( pid == Content::Item::active_dynamite )
+            CancelDeferredCall( explode.ExplodeInvokeId );
+
+        int chance = cr.SkillTraps - ( explode.TrapValue - 10 ) * ( cr.Id == explode.ExplodeOwnerId ? 5 : 10 );
+        chance = CLAMP( chance, 5, 90 ) + cr.Luck;
+
+        // Success
+        if( chance > Random( 1, 100 ) )
+        {
+            if( pid == Content::Item::active_dynamite )
+                cr.AddItem( Content::Item::dynamite, 1 );
+            else if( pid == Content::Item::active_mine )
+                cr.AddItem( Content::Item::mine, 1 );
+            else if( pid == Content::Item::active_plastic_explosive )
+                cr.AddItem( Content::Item::plastic_explosives, 1 );
+            cr.Experience += EXPLODE_CLEARANCE_EXPERIENCE;
+        }
+        // Fail
+        else
+        {
+            Map map = cr.GetMap();
+            Explode( map, cr.HexX, cr.HexY, cr, pid, explode.ExplodeOwnerId, explode.ExplodeBonusDamage, explode.ExplodeBonusRadius );
+        }
+    }
+
+    _SubItem( explode, 1 );
+    return true;
+}
+
+// Explosions initialisation
+void _ExplodeInit( Item item, bool firstTime )
+{
+    if( item.ProtoId == Content::Item::active_mine )
+    {
+        item.IsTrap = true;
+        __EventItemWalk.SubscribeToItem( item, _MineWalk );
+    }
+}
+
+// Item walk event
+void _MineWalk( Item mine, Critter cr, bool entered, uint8 dir )
+{
+    if( entered && cr.LocomotionType != Tla::LocomotionFly && ( cr.PerkLightStep == 0 || Random( 0, 1 ) == 0 ) )
+        DeferredCall( 0, DeferredExplode, mine.Id );
+}
+
+// Time event
+void DeferredExplode( uint value )
+{
+    Item item = GetItem( value );
+    if( not valid( item ) )
+        return;
+
+    hash   explodePid = item.ProtoId;
+    uint   ownerId = item.ExplodeOwnerId;
+    int    bonusDamage = item.ExplodeBonusDamage;
+    int    bonusRadius = item.ExplodeBonusRadius;
+    uint16 hexX = 0;
+    uint16 hexY = 0;
+    Map   map = item.GetMapPosition( hexX, hexY );
+    DeleteItem( item );
+
+    if( valid( map ) )
+        Explode( map, hexX, hexY, null, explodePid, ownerId, bonusDamage, bonusRadius );
+    else if( item.Accessory == ItemOwnership::CritterInventory ) // Global map
+    {
+        Critter cr = ::GetCritter( item.CritId );
+        if( valid( cr ) )
+            Explode( null, 0, 0, cr, explodePid, ownerId, bonusDamage, bonusRadius );
+    }
+}
+
+void Explode( Map map, uint16 hexX, uint16 hexY, Critter cr, hash explodePid, uint ownerId, int bonusDamage, int bonusRadius ) // Export
+{
+    hash effectPid;
+    uint effectRadius;
+    uint damage;
+    uint damageType;
+    uint damageRadius;
+
+    if( explodePid == Content::Item::active_dynamite )
+    {
+        effectPid = Content::Item::explode_rocket;
+        effectRadius = 1;
+        damage = Random( 30, 50 );
+        damageType = DamageTypes::Explode;
+        damageRadius = 3;
+    }
+    else if( explodePid == Content::Item::active_plastic_explosive )
+    {
+        effectPid = Content::Item::explode_rocket;
+        effectRadius = 2;
+        damage = Random( 40, 80 );
+        damageType = DamageTypes::Explode;
+        damageRadius = 3;
+
+    }
+    else if( explodePid == Content::Item::active_mine )
+    {
+        effectPid = Content::Item::explode_rocket;
+        effectRadius = 1;
+        damage = Random( 40, 80 );
+        damageType = DamageTypes::Explode;
+        damageRadius = 3;
+    }
+    else
+    {
+        Log( "Invalid explode pid." );
+        return;
+    }
+
+    damage += bonusDamage;
+    if( damage <= 0 )
+        damage = 1;
+    damageRadius += bonusRadius;
+    if( damageRadius <= 0 )
+        damageRadius = 1;
+
+    if( valid( map ) )
+        ExplodeEx( map, hexX, hexY, effectPid, effectRadius, damage, damageType, damageRadius, ownerId );
+    else if( valid( cr ) )
+        Combat::InjureCritter( cr, damage, damageType, cr.Dir, ownerId );
+}
+
+void ExplodeEx( Map map, uint16 hexX, uint16 hexY, hash effectPid, uint effectRadius, uint damage, uint damageType, uint damageRadius, uint ownerId ) // Export
+{
+    map.RunEffect( effectPid, hexX, hexY, effectRadius );
+    map.PlaySound( Random( 0, 1 ) == 0 ? "WHN1XXX1.ACM" : "WHN1XXX2.ACM" );
+    Effects::QuakeScreen( map );
+
+    Critter[] critters = {};
+    if( Obsolete::GetCrittersHex ( map,  hexX, hexY, damageRadius, FIND_LIFE_AND_KO, critters  ) == 0 )
+        return;
+    for( uint i = 0, j = critters.length(); i < j; i++ )
+    {
+        Critter cr = critters[ i ];
+        uint     dist = ::GetDistantion( hexX, hexY, cr.HexX, cr.HexY );
+        int      dir = ( dist == 0 ? ( cr.Dir + 3 ) % 6 : GetDirection( hexX, hexY, cr.HexX, cr.HexY ) );
+        Combat::InjureCritter( cr, damage, damageType, dir, ownerId );
+        if( ownerId != 0 )
+            EnemyStack::AddEnemyToStack( cr,  ownerId  );
+    }
+}
+
+/*
+        Самовостанавливающаяся мина, которую можно положить через маппер
+        восстанавливается через некоторое время в тех же координатах
+        после того, как взорвется
+        время восстановления, в игровых минутах, указывается в ExplodeTimeRespawnMine
+        поскольку ExplodeTimeRespawnMine - используется только для динамита пока
+        !работает только для предмета Активированная мина
+        все параметры:
+        ExplodeTimeRespawnMine - время респавна мины после активации, в игровых минутах
+        ExplodeOwnerId - Id сапера, поставившего мину
+        TrapValue- сложность мины
+        ExplodeBonusDamage - дополнительный урон
+        ExplodeBonusRadius - дополнительный радиус(базовый радиус = 3)
+ */
+void _TimerMineInit( Item mine, bool firstTime )
+{
+    if( mine.ProtoId == Content::Item::active_mine )
+    {
+        __EventItemWalk.SubscribeToItem( mine, _TimerMineWalk );
+        __EventCritterUseSkill.SubscribeToOnItem( mine, _OnSkillTimerMine );
+        mine.ExplodeBonusRadius = CLAMP( mine.ExplodeBonusRadius, 1, 5 );
+        mine.IsTrap = true;
+    }
+}
+
+void _TimerMineWalk( Item mine, Critter cr, bool entered, uint8 dir )
+{
+    // Cкопировано из _MineWalk
+    if( entered && cr.LocomotionType != Tla::LocomotionFly && ( cr.PerkLightStep == 0 || Random( 0, 1 ) == 0 ) )
+    {
+        DeferredCall( 0, DeferredExplode, mine.Id );
+
+        // Respawn
+        if( mine.ExplodeTimeRespawnMine > 0 )
+        {
+            uint[] values = { mine.MapId, mine.HexX, mine.HexY, mine.ProtoId, mine.ExplodeTimeRespawnMine, mine.ExplodeOwnerId, mine.TrapValue, mine.ExplodeBonusDamage, mine.ExplodeBonusRadius }; // 9 элементов массива
+            SavedDeferredCall( GAME_MINUTE_TO_TICK( mine.ExplodeTimeRespawnMine ), RespawnTimerMine, values );
+        }
+    }
+}
+
+void RespawnTimerMine( uint[] values )
+{
+    Map map = GetMap( values[ 0 ] );
+    if( valid( map ) )
+    {
+        Item mine = map.AddItem( values[ 1 ], values[ 2 ], values[ 3 ], 1 );
+        if( valid( mine ) )
+        {
+            mine.ExplodeTimeRespawnMine = values[ 4 ];
+            mine.ExplodeOwnerId = values[ 5 ];
+            mine.TrapValue = ( values[ 6 ] == 0 ? Random( 30, 50 ) : values[ 6 ] );
+            mine.ExplodeBonusDamage = values[ 7 ];
+            mine.ExplodeBonusRadius = CLAMP( values[ 8 ], 1, 5 );
+            mine.SetScript ( _TimerMineInit );
+        }
+    }
+}
+
+bool _OnSkillTimerMine( Critter cr, CritterProperty skill, Critter, Item mine, const Item )
+{
+    hash pid = mine.ProtoId;
+    if( pid != Content::Item::active_mine )
+        return true;
+
+    bool isExpert = cr.PerkDemolitionExpert != 0;
+    int  trapsSkill = cr.SkillTraps;
+    if( trapsSkill < 0 )
+        trapsSkill = 0;
+
+    int chance = cr.SkillTraps - ( mine.TrapValue - 10 ) * ( cr.Id == mine.ExplodeOwnerId ? 5 : 10 );
+    chance = CLAMP( chance, 5, 90 ) + cr.Luck;
+
+    // Success
+    if( chance > Random( 1, 100 ) )
+    {
+        cr.Experience += EXPLODE_CLEARANCE_EXPERIENCE;
+    }
+    // Fail
+    else
+    {
+        Map map = cr.GetMap();
+        Explode( map, cr.HexX, cr.HexY, cr, pid, mine.ExplodeOwnerId, mine.ExplodeBonusDamage, mine.ExplodeBonusRadius );
+    }
+
+    if( mine.ExplodeTimeRespawnMine > 0 )
+    {
+        uint[] values = { mine.MapId, mine.HexX, mine.HexY, mine.ProtoId, mine.ExplodeTimeRespawnMine, mine.ExplodeOwnerId, mine.TrapValue, mine.ExplodeBonusDamage, mine.ExplodeBonusRadius }; // 9 элементов массива
+        SavedDeferredCall( GAME_MINUTE_TO_TICK( mine.ExplodeTimeRespawnMine + Random( 120, 240 ) ), RespawnTimerMine, values );
+    }
+
+    _SubItem( mine, 1 );
+    return false;
+}

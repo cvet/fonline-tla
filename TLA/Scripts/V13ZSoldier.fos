@@ -1,0 +1,132 @@
+// FOS Server
+// Author: Sufir
+
+// Defines
+uint   CurGuardian     = 5002372;
+int    GuardDlg        = 1909;
+uint16 GuardX          = 69,
+       GuardY          = 72,
+       GuardDir        = 3;
+
+void _SoldierInit( Critter soldier, bool firstTime )
+{
+    soldier.IsNoSupply = true;
+    __EventCritterMessage.SubscribeToCritter( soldier, _SoldierGetMessage );
+    __EventCritterSomeCritterDropItem.SubscribeToCritter( soldier, _SoldierMined );
+    __EventCritterSomeCritterDead.SubscribeToCritter( soldier, _GuardianDead );
+    __EventCritterAttacked.SubscribeToCritter( soldier, _FriendlyFire );
+    __EventCritterAttack.SubscribeToCritter( soldier, _FriendlyFire2 );
+    __EventNpcPlaneBegin.SubscribeToCritter( soldier, _FriendlyFirePlane );
+}
+
+void _SoldierGetMessage( Critter soldier, Critter fromCr, int message, int value )
+{
+    if( !soldier.IsLife() )
+        return;
+    if( soldier.Id == fromCr.Id )
+        return;
+    if( !fromCr.IsSeenBy( soldier ) )
+        return;
+    Critter player = GetCritter( value );
+    if( !valid( player ) )
+        return;
+    if( !player.IsPlayer() )
+        return;
+    if( message == V13ZGuard::MsgV13GuardAlarm )
+    {
+        NpcPlanes::AddAttackPlane( soldier, 0, player.Id, int(float(player.CharismaBase) * 1.5) );
+        // EnemyStack::AddEnemyToStack( soldier,  player.Id  );
+    }
+    else if( message == V13ZGuard::MsgV13GuardKill )
+    {
+        NpcPlanes::AddAttackPlane( soldier, 0, player.Id );
+    }
+}
+
+// Если солдат обнаружил закладывающего взрывчатку игрока - атакуем его.
+void _SoldierMined( Critter soldier, Critter dropper, Item item )
+{
+    if( !NpcPlanes::IsNoPlanes( soldier ) )
+        return;
+    if( !valid( dropper ) )
+        return;
+    if( !dropper.IsPlayer() )
+        return;
+    if( !dropper.IsLife() )
+        return;
+
+    // Заминировать нас не так-то просто, нужно быть действительно мастером и удачливым ловкачем.
+    if( V13GuardLib::IsMined( soldier, item, dropper, soldier.PerceptionBase * 20, PidsGroups::Pids_MiscActiveExplosions ) )
+        NpcPlanes::AddAttackPlane( soldier, 0, dropper.Id );
+}
+
+
+// Если сержант на КПП убит, один из солдат займёт его место, если хоть один из солдат жив.
+void _GuardianDead( Critter soldier, Critter guardian, Critter killer )
+{
+    if( !soldier.IsLife() )
+        return;
+
+    if( guardian.Id == CurGuardian )
+    {
+        soldier.NpcRole = V13ZGuard::RoleGuardian;
+        guardian.NpcRole = V13ZGuard::RoleSoldier;
+        CurGuardian = soldier.Id;
+        guardian.HomeMapId = soldier.HomeMapId;
+        guardian.HomeHexX = soldier.HomeHexX;
+        guardian.HomeHexY = soldier.HomeHexY;
+        guardian.HomeDir = soldier.HomeDir;
+        soldier.HomeMapId = soldier.GetMap().Id;
+        soldier.HomeHexX = GuardX;
+        soldier.HomeHexY = GuardY;
+        soldier.HomeDir = GuardDir;
+        guardian.DialogId = soldier.DialogId;
+        soldier.DialogId = GuardDlg;
+        guardian.SetScript ( _SoldierInit );
+        soldier.SetScript ( V13ZGuard::_GuardInit );
+    }
+    else
+    {
+        if( valid( killer ) )
+            NpcPlanes::AddAttackPlane( soldier, 0, killer.Id );
+    }
+}
+
+// Если NPC атакован одним из "своих" - не атакуем его.
+bool _FriendlyFirePlane( Critter guardian, int planeId, int reason, Critter some, Item someItem )
+{
+	NpcPlanes::NpcPlane plane = NpcPlanes::GetCritterPlane(guardian, planeId);
+
+    if( plane.Type == AI_PLANE_ATTACK )
+    {
+        Critter target = ::GetCritter( plane.Attack_TargId );
+        if( valid( target ) && target.NpcRole == V13ZGuard::RoleGuardian || target.NpcRole == V13ZGuard::RoleSoldier )
+            return false;
+    }
+    return true;
+}
+bool _FriendlyFire2( Critter critter, Critter target, Item weapon, uint8 weaponMode, const Item ammo )
+{
+	return _FriendlyFire(critter, target);
+}
+
+// Если NPC атакован одним из "своих" - не атакуем его.
+bool _FriendlyFire( Critter guardian, Critter attacker )
+{
+    if( guardian.IsNpc() && attacker.IsNpc() )
+    {
+        if( guardian.NpcRole == V13ZGuard::RoleGuardian || guardian.NpcRole == V13ZGuard::RoleSoldier )
+        {
+            guardian.Wait( 5000 );
+            attacker.Wait( 5000 );
+            if( EnemyStack::CheckEnemyInStack( guardian, attacker.Id  ) )
+                EnemyStack::EraseEnemyFromStack( guardian, attacker.Id  );
+            if( EnemyStack::CheckEnemyInStack( attacker, guardian.Id  ) )
+                EnemyStack::EraseEnemyFromStack( attacker, guardian.Id  );
+            NpcPlanes::EraseAttackPlane( attacker, guardian.Id );
+            NpcPlanes::EraseAttackPlane( guardian, attacker.Id );
+            return true;
+        }
+    }
+    return false;
+}

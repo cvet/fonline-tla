@@ -1,0 +1,92 @@
+// FOS Server
+
+// Author: rifleman17
+// Электронный замок на контейнеры, двери
+// Свойства предмета
+
+#pragma property Critter PrivateServer uint LastElectronicLocked
+
+#pragma property Item PrivateServer uint   ELockCloseAtSeconds // Время автоматического закрытия контейнера или двери
+#pragma property Item PrivateServer string ELockCode
+
+#define STR_HEADER    ( 403 )                                  // Система авторизации. Введите код доступа.
+#define STR_OPEN      ( 410 )                                  // Доступ подтвержден. Замок открыт.
+#define STR_ERROR     ( 411 )                                  // Ошибка. Неправильный код доступа.
+
+const string[] CodeChars = { "Q", "S", "Y", "W", "F", "Z", "1", "2", "3", "4", "5", "6", "7", "8", "9", "R", "U", "L", "N" };
+
+void GenerateCode( Item item )
+{
+    string code = "";
+    for( uint i = 0; i < 5; i++ )
+        code += CodeChars[ Random( 0, ( CodeChars.length() - 1 ) ) ];
+    item.ELockCode = code;
+}
+
+string GetCode( Item item )
+{
+    return item.ELockCode;
+}
+
+void ClearCode( Item item )
+{
+    item.ELockCode = "";
+}
+
+void _LockedInit( Item item, bool firstTime )
+{
+    __EventCritterUseSkill.SubscribeToOnItem( item, _LockedSkill );
+    GenerateCode( item );
+}
+
+bool _LockedSkill( Critter player, CritterProperty skill, Critter, Item item, const Item )
+{
+    if( skill == SKILL_PICK_ON_GROUND && item.ELockCode.length() > 0 )
+    {
+        if( ( item.Type == ItemType::Container || item.Type == ItemType::Door ) &&
+            item.Opened )
+            return true;
+
+        string code = "";
+        uint   codeLength = item.ELockCode.length();
+        for( uint i = 0; i < codeLength; i++ )
+            code += "?";
+
+        player.LastElectronicLocked = item.Id;
+		/*
+        //player.ShowScreen( ShowScreenModes::Say, 0, "answer_LockedSkill" );
+        player.SayMsg( TlaExtended::SaySayTitle, TEXTMSG_TEXT, STR_HEADER );
+        player.Say( TlaExtended::SaySayText, code );
+		*/
+		
+		SayExtended::ShowScreenEx( player, STR_HEADER);
+        player.Wait( 1000 );
+		
+        return false;
+    }
+    return true;
+}
+
+void answer_LockedSkill( Critter player, uint answerI, string answerS )
+{
+    if( player.LastElectronicLocked == 0 )
+        return;
+
+    Item item = GetItem( player.LastElectronicLocked );
+    if( !valid( item ) || item.ELockCode.length() == 0 ||
+        ( item.Type != ItemType::Container && item.Type != ItemType::Door ) )
+        return;
+
+    if( GetCode( item ) == answerS )
+    {
+        player.SayMsg( SAY_NETMSG, TEXTMSG_TEXT, STR_OPEN );
+        Lockers::SwitchLocker( item, true );
+        Lockers::ShowContainer( player, null, item, TransferTypes::HexContUp );
+        if( item.ELockCloseAtSeconds > 0 )
+            SavedDeferredCall( item.ELockCloseAtSeconds * 1000, Item::AutoCloseDoor, item.Id );
+    }
+    else
+    {
+        player.SayMsg( SAY_NETMSG, TEXTMSG_TEXT, STR_ERROR );
+    }
+}

@@ -1,0 +1,167 @@
+// FOS Server Sort 2
+// Town supply
+// Author: cvet
+
+#pragma property Critter PrivateServer uint TownSupplyVictimId
+#pragma property Critter PrivateServer uint TownSupplyHostileId
+
+#define ENTER_ENTIRE           ( 0 )
+#define EXIT_ENTIRE            ( 0 )
+#define ROLE_GUARD             ( 29 )
+#define PLANE_GOTO_EXIT        ( 29 )
+#define SUPPLY_GAME_MINUTES    ( Random( 5, 60 ) )
+
+void CallTownSupply( Critter victim, Critter hostile ) // Export
+{
+    if( IsValidForSupply( victim, hostile ) )
+    {
+        uint[] values = { victim.Id, hostile.Id, 0 };
+        SavedDeferredCall( GAME_MINUTE_TO_TICK( SUPPLY_GAME_MINUTES ), CallTownSupplyNext, values );
+    }
+}
+
+void CallTownSupplyNext( uint[] values )
+{
+    uint     victimId = values[ 0 ];
+    Critter hostile = ::GetCritter( values[ 1 ] );
+    uint     rate = ++values[ 2 ];
+
+    if( valid( hostile ) && hostile.MapId != 0 && not hostile.IsDead() )
+    {
+        uint count = hostile.Level / 10 + 1;
+        if( count > 10 )
+            count = 10;
+        CallSupply( victimId, hostile, count );
+        return;
+    }
+
+    if( rate >= 10 )
+        return;
+
+    SavedDeferredCall( GAME_MINUTE_TO_TICK( SUPPLY_GAME_MINUTES ), CallTownSupplyNext, values );
+}
+
+bool IsValidForSupply( Critter victim, Critter hostile )
+{
+    // Only for humanoids npc in cities
+    if( hostile.IsPlayer() && hostile.GetAccess() < ACCESS_MODER && victim.IsNpc() && !victim.IsNoSupply )
+    {
+        uint bt = victim.BodyType;
+        if( bt >= BodyTypes::Men && bt <= BodyTypes::Ghoul )
+        {
+            Map map = hostile.GetMap();
+            if( valid( map ) )
+            {
+                hash locPid = map.GetLocation().ProtoId;
+                if( LOCATION_IS_CITY( locPid ) )
+                    return true;
+            }
+        }
+    }
+    return false;
+}
+
+void CallSupply( uint victimId, Critter target, int supplyCount )
+{
+    Map map = target.GetMap();
+    if( not valid( map ) )
+        return;
+    uint16 hx = target.HexX, hy = target.HexY;
+    if( not Entire::GetNearEntire( map, ENTER_ENTIRE, hx, hy ) )
+        return;
+
+    int rnd = Random( 0, 9 );
+    int[] props =
+    {
+        CritterProperty::BagId, Bags::AllBountyHunters1 + rnd, CritterProperty::TeamId, Teams::Guard,
+        CritterProperty::KillExperience, 0, CritterProperty::PerkTerminator, 1, CritterProperty::IsNoSteal, 1,
+        CritterProperty::IsNoLoot, 1, CritterProperty::IsNoSupply, 1,
+        CritterProperty::TownSupplyVictimId, victimId, CritterProperty::TownSupplyHostileId, target.Id
+    };
+    Critter bountyHunter = map.AddNpc( Content::Critter::BountyHunter_1 + rnd, hx, hy, Random( 0, 5 ), TlaExtended::GetCritPropsDict(props));
+        bountyHunter.SetScript ( _GuardInit );
+    if( not valid( bountyHunter ) )
+        return;
+
+    NpcPlanes::AddAttackPlane( bountyHunter, 0, target, true );
+
+    if( supplyCount > 1 )
+        CallSupply( victimId, target, supplyCount - 1 );
+}
+
+void _GuardInit( Critter bountyHunter, bool firstTime )
+{
+    bountyHunter.NpcRole = ROLE_GUARD;
+    __EventCritterIdle.SubscribeToCritter( bountyHunter, _GuardIdle );
+    __EventCritterDead.SubscribeToCritter( bountyHunter, _GuardDead );
+    __EventCritterSomeCritterDead.SubscribeToCritter( bountyHunter, _GuardSmthDead );
+    // __EventCritterSomeCritterAttack.SubscribeToCritter( bountyHunter, _GuardSmthAttack );
+    __EventNpcPlaneEnd.SubscribeToCritter( bountyHunter, _GuardPlaneEnd );
+    bountyHunter.BonusLook = 100;
+    bountyHunter.PerkSniper = 1;
+    bountyHunter.PerkSlayer = 1;
+    bountyHunter.PerkTerminator = 1;
+    bountyHunter.PerkBetterCriticals = 1;
+}
+
+void _GuardIdle( Critter bountyHunter )
+{
+    uint16 hx = bountyHunter.HexX, hy = bountyHunter.HexY;
+    if( not Entire::GetNearEntire( bountyHunter.GetMap(), EXIT_ENTIRE, hx, hy ) )
+        DeleteNpc( bountyHunter );
+    else
+    {
+        bountyHunter.CurrentAp = bountyHunter.ActionPoints * AP_DIVIDER;
+        NpcPlanes::NpcPlane plane = NpcPlanes::CreatePlane();
+        plane.Type = AI_PLANE_WALK;
+        plane.Priority = AI_PLANE_WALK_PRIORITY;
+        plane.Identifier = PLANE_GOTO_EXIT;
+        plane.Walk_HexX = hx;
+        plane.Walk_HexY = hy;
+        plane.Walk_Dir = 6;
+        plane.Run = true;
+        plane.Walk_Cut = 2;
+        if( not NpcPlanes::AddPlane( bountyHunter, plane) )
+            DeleteNpc( bountyHunter );
+    }
+}
+
+void _GuardDead( Critter bountyHunter, Critter killer )
+{
+    // if(valid(killer) && IsValidForSupply(bountyHunter,killer)) CallSupply(killer,1);
+    DeleteNpc( bountyHunter );
+}
+
+void _GuardSmthDead( Critter bountyHunter, Critter fromCrit, Critter killer )
+{
+    // Add to stack player who kills another guards
+    if( valid( killer ) && killer.IsPlayer() && fromCrit.NpcRole == ROLE_GUARD )
+    {
+        EnemyStack::AddEnemyToStack( bountyHunter,  killer.Id  );
+        return;
+    }
+
+    // Erase id from victim enemy stack
+    uint victimId = bountyHunter.TownSupplyVictimId;
+    uint hostileId = bountyHunter.TownSupplyHostileId;
+    if( victimId != 0 && hostileId == fromCrit.Id )
+    {
+        Critter victim = ::GetCritter( victimId );
+        if( valid( victim ) )
+            EnemyStack::EraseEnemyFromStack( victim, hostileId  );
+    }
+}
+
+void _GuardSmthAttack( Critter bountyHunter, Critter fromCrit, Critter target )
+{
+    // bountyHunter.AddEnemyToStack
+}
+
+bool _GuardPlaneEnd( Critter bountyHunter, int planeId, int reason, Critter someCr, Item someItem )
+{
+	NpcPlanes::NpcPlane plane = NpcPlanes::GetCritterPlane(bountyHunter, planeId);
+
+    if( plane.Identifier == PLANE_GOTO_EXIT )
+        DeleteNpc( bountyHunter );
+    return true;
+}

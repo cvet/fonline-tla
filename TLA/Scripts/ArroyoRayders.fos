@@ -1,0 +1,85 @@
+// FOS Server
+// Name:   arroyo_rayders
+// Author: Sufir
+
+
+#pragma property Critter PrivateServer uint ArroyoRaydersAttackedId
+
+// Defines
+#define ARROYO_RAIDERS_MSG    ( 301 )
+
+void _RaiderInit( Critter raider, bool firstTime )
+{
+    raider.ReplicationTime = -1;
+	
+    __EventCritterShow.SubscribeToCritter( raider, _RaiderSaw );
+    __EventCritterIdle.SubscribeToCritter( raider, _RaiderIdle );
+    __EventCritterDead.SubscribeToCritter( raider, _RaiderDead );
+    __EventCritterHide.SubscribeToCritter( raider, _RaiderHide );
+    __EventCritterMessage.SubscribeToCritter( raider, _RaiderAlarm );
+	
+    raider.ArroyoRaydersAttackedId = 0;   // Id атакуемого игрока.
+
+    // Записываем группу рейдеров. Эти данные используются при выходе с карты, для определения все-ли рейдеры убиты...
+    if( firstTime )
+        Globals.ArroyoRaidersCount = Globals.ArroyoRaidersCount + 1;
+}
+
+void _RaiderSaw( Critter raider, Critter player )
+{
+    // Проверяем свободен ли криттер
+    if( raider.ArroyoRaydersAttackedId != 0 )
+        return;
+
+    if( not NpcPlanes::IsNoPlanes( raider ) )
+        NpcPlanes::EraseAttackPlane( raider, player );
+
+    if( player.IsPlayer() )
+    {
+        raider.ArroyoRaydersAttackedId = player.Id;
+        SendMessage::SendMessage( raider,  ARROYO_RAIDERS_MSG, raider.ArroyoRaydersAttackedId, MESSAGE_TO_WHO_SEES_ME  );
+        if( NpcPlanes::AddAttackPlane( raider, 0, player ) )
+        {
+            if( Random( 0, 8 ) == 0 )
+                raider.SayMsg( SAY_SHOUT_ON_HEAD, TEXTMSG_DLG, DLGSTR( raider.DialogId, 0 ) );
+            else if( Random( 0, 6 ) == 1 )
+                raider.SayMsg( SAY_SHOUT_ON_HEAD, TEXTMSG_DLG, DLGSTR( raider.DialogId, 0 ) );
+        }
+    }
+}
+
+void _RaiderHide( Critter raider, Critter player )
+{
+    // Если игрок пропал из поля зрения, убираем план атаки
+    if( player.IsPlayer() && raider.ArroyoRaydersAttackedId != 0 )
+    {
+        if( Random( 0, 10 ) == 0 )
+            raider.SayMsg( SAY_SHOUT_ON_HEAD, TEXTMSG_DLG, DLGSTR( raider.DialogId, 1 ) );
+        NpcPlanes::EraseAttackPlane( raider, player );
+        if( NpcPlanes::IsNoPlanes( raider ) )
+            raider.ArroyoRaydersAttackedId = 0;
+    }
+}
+
+void _RaiderIdle( Critter raider )
+{
+    // Ищем игроков и атакуем
+    Critter[] players = {};
+    Obsolete::GetCritters( raider,  false, FIND_ONLY_PLAYERS | FIND_LIFE_AND_KO, players  );
+    if( players.length() > 0 )
+        NpcPlanes::AddAttackPlane( raider, 0, players[ 0 ] );
+}
+
+void _RaiderDead( Critter raider, Critter player )
+{
+    Globals.ArroyoRaidersCount = Globals.ArroyoRaidersCount - 1;
+}
+
+void _RaiderAlarm( Critter raider, Critter fromCrit, int message, int value )
+{
+    if( raider.Id != fromCrit.Id && NpcPlanes::IsNoPlanes( raider ) )
+    {
+        EnemyStack::AddEnemyToStack( raider,  value  );
+        NpcPlanes::AddAttackPlane( raider, 0, GetCritter( value ) );
+    }
+}

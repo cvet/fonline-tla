@@ -1,0 +1,142 @@
+// FOS Server
+// Author: rifleman17
+// Майкл хочет пройти внутрь города, игроки ему помогают
+// после того, как диалогом вызывается соотвествующая функция, майrл отправляется к воротам, происходит небольшая сценка с охраной и он проходит внутрь
+// движение нужно начинать не сразу, а через некоторое время
+// Для квеста "Пропуск"
+
+#pragma property Critter PrivateServer uint NcrMichealMessageNum
+#pragma property Map PrivateServer uint NcrMichaelCritterId
+
+#define HEX_EXIT_GRID                  ( 17 )                         // гекс перехода базар/центр города
+#define NPC_ROLE_PRIVATE               ( 317 )                        // рядовой на воротах (юг)
+#define NPC_ROLE_MAIN                  ( 318 )                        // командир охраны на воротах (север)
+#define MSG_NUM_INCOMING_MIKE          ( 317 )                        // номер сообщения - Майк приблежается.
+#define MSG_NUM_INCOMING_MIKE_GUARD    ( 318 )                        // номер сообщения - Майк приблежается.
+#define HEX_NEW_MIKE_HOME              ( 171 )                        // номер гекса новой домашней позиции майка
+
+#define MSG_NUM_START_MOVE             ( 2910 )                       // {2910}{}{Посмотрим, что изменилось в Республике...}
+#define MSG_NUM_SEE_MIKE               ( 2911 )                       // {2911}{}{Бог ты мой, это же Майкл! Майкл, какими судьбами?}
+#define MSG_NUM_SHOUT                  ( 2912 )                       // {2912}{}{Отставить базар! Ему разрешено пройти.}
+
+// вызов из диалога - начало движения
+void r_PrepareComing( Critter player, Critter npc, int val )
+{
+    // движение начинаем через 3 игровые минуты
+    NpcPlanes::AddMiscPlane( npc, 2, __FullSecond + 3 * 60, NcrMichael::plane_StartMichaelMove );
+
+    npc.NcrMichealMessageNum = MSG_NUM_INCOMING_MIKE;
+    __EventNpcPlaneEnd.SubscribeToCritter( npc, _MichaelPlaneEnd );
+}
+
+// начало движения
+void plane_StartMichaelMove( Critter npc )
+{
+    // сообщаем миру о начале движения
+    npc.SayMsg( SAY_NORM_ON_HEAD, TEXTMSG_TEXT, MSG_NUM_START_MOVE ); // "Посмотрим, что изменилось в Республике...");
+    // координаты гекса, до которого должен дойти майкл
+    uint16 hx = npc.HexX;
+    uint16 hy = npc.HexY;
+    // не найден гекс, идти некуда
+    if( !Entire::GetNearEntire( npc.GetMap(), HEX_EXIT_GRID, hx, hy ) )
+        return;
+    // при установке новой домащней позиции, Майкл туда проследует, когда закончит все текущие планы
+    npc.HomeHexX = hx;
+    npc.HomeHexY = hy;
+    npc.HomeDir = Random( 0, 5 );
+}
+
+// завершение выполнения некоего плана
+bool _MichaelPlaneEnd( Critter npc, int planeId, int reason, Critter someCr, Item someItem )
+{
+	NpcPlanes::NpcPlane plane = NpcPlanes::GetCritterPlane(npc, planeId);
+
+    // npc.Say(SAY_NORM_ON_HEAD, "Plane end. ID: " + plane.Identifier + " reason: " + reason);
+    // завершен план следования к экзит гриду
+    if( npc.NcrMichealMessageNum == MSG_NUM_INCOMING_MIKE && npc.MapId == npc.HomeMapId && npc.HexX == npc.HomeHexX && npc.HexY == npc.HomeHexY )
+    {
+        npc.NcrMichealMessageNum = 0;
+        // майкл отправляет сообщение "Я пришел" для охранников на входе города
+        SendMessage::SendMessage( npc,  MSG_NUM_INCOMING_MIKE, 0, MESSAGE_TO_WHO_SEES_ME  );
+        // телепорт майкла в центр города. Будет торчать в баре Дасти
+        Map map = GetMapByPid( Content::Map::ncr_downtown, 0 );
+        Map map_bazaar = npc.GetMap();
+        if( not valid( map ) )
+        {
+            Log( "Michael teleport map not found error" );
+            return true;
+        }
+
+        // транзит
+        if( !Obsolete::CritterTransitToMapEntire( npc, map.Id, HEX_NEW_MIKE_HOME ) )
+            return true;
+
+        npc.HomeMapId = map.Id;
+        npc.HomeHexX = npc.HexX;
+        npc.HomeHexY = npc.HexY;
+        npc.HomeDir = npc.Dir;
+
+        // если будет очищена карта центра города, прощаемся с Майком, он свою роль уже выполнил
+        // а вот если будет очищена карта Базара, а Майкл уже телепортирован в центр города, копию в центре городу нужно удалить, иначе будет существовать два майкла
+        map_bazaar.NcrMichaelCritterId = npc.Id;
+        __EventMapFinish.SubscribeToMap( map_bazaar, _eOnFinishMap );
+    }
+
+    return true;
+}
+
+// для рядового охранника, слева у входа стоит
+void _PrivateGuardInit( Critter npc, bool firstTime )
+{
+    if( firstTime )
+    {
+        npc.NpcRole  = NPC_ROLE_PRIVATE;
+        __EventCritterMessage.SubscribeToCritter( npc, _NpcOnMessage );
+    }
+}
+
+// для главного охранника (справа у входа в город)
+void _MainGuardInit( Critter npc, bool firstTime )
+{
+    if( firstTime )
+    {
+        npc.NpcRole  = NPC_ROLE_MAIN;
+        __EventCritterMessage.SubscribeToCritter( npc, _NpcOnMessage );
+    }
+}
+
+// обработка сообщения от майкла "я пришел"
+void _NpcOnMessage( Critter npcB, Critter npcA, int num, int val )
+{
+    // сначала говорит рядовой
+    if( num == MSG_NUM_INCOMING_MIKE && npcB.NpcRole == NPC_ROLE_PRIVATE )
+    {
+        npcB.SayMsg( SAY_NORM_ON_HEAD, TEXTMSG_TEXT, MSG_NUM_SEE_MIKE );    // Say(SAY_NORM_ON_HEAD,"Бог ты мой, это же Майкл! Майкл, какими судьбами?");
+
+        SendMessage::SendMessage( npcB,  MSG_NUM_INCOMING_MIKE_GUARD, 0, MESSAGE_TO_WHO_SEES_ME  );
+    }
+    // ему отвечает сержант
+    if( num == MSG_NUM_INCOMING_MIKE_GUARD && npcB.NpcRole  == NPC_ROLE_MAIN )
+    {
+        // отвечает не мгновенно, иначе непонятно. кто первым прокомментировал появление Майкла
+        NpcPlanes::AddMiscPlane( npcB, 2, __FullSecond + 60, NcrMichael::plane_MainGuardAnswer );
+    }
+}
+// ответ Сержанта у ворот
+void plane_MainGuardAnswer( Critter npc )
+{
+    npc.SayMsg( SAY_SHOUT_ON_HEAD, TEXTMSG_TEXT, MSG_NUM_SHOUT ); // npc.Say(SAY_SHOUT_ON_HEAD,"Отставить базар! Ему разрешено пройти.");
+
+}
+// при очистке карты базара, если Майкл уже там нужно удалить его копию
+// иначе будет существовать два Майкла одновременно
+void _eOnFinishMap( Map map )
+{
+    Map map_downtown = GetMapByPid( Content::Map::ncr_downtown, 0 );
+    if( !valid( map_downtown ) )
+        return;
+    Critter npc = map_downtown.GetCritter( map.NcrMichaelCritterId );
+    if( !valid( npc ) )
+        return;
+    DeleteNpc( npc );
+}

@@ -1,0 +1,1103 @@
+// FOS Client Mapper
+
+string[] animsList = { "harobe", "hfcmbt", "hfjmps", "hflthr", "hfmaxx", "hfmetl", "hmbjmp", "hmbmet", "hmcmbt", "hmjmps", "hmlthr", "hmmaxx", "hmmetl", "mamtn2", "nablue", "naghul", "naglow", "napowr", "narobe", "nmval0", "nfbrlp", "nfmaxx", "nfmetl", "nfpeas", "nftrmp", "nfvred", "nmbpea", "nmbrlp", "nmbsnp", "nmgrch", "nmlosr", "nmlthr", "nmmaxx", "nmval1", "nmpeas", "malieu", "nabrwn", "nmdocc", "hfprim", "hmwarr", "nfprim", "nmwarr", "nmvalt", "macybr", "hanpwr", "nmnice", "nfnice", "nfvalt", "mabran", "nmbonc", "nmbrsr", "navgul", "mafire", "nmasia", "nflynn", "nawhit", "nmcopp", "nmmyrn", "nmlabb", "nmfatt", "nmrgng", "nmgang", "nfasia", "nmmexi", "nmboxx", "nmoldd", "nfchld", "hmljmp", "hmllth", "hmlmax", "hmlmet", "hmlwar", "hfcabl", "hmcmbl" };
+
+void ModuleInit()
+{
+    __EventCritterAnimation.Subscribe( critter_animation );
+    __EventCritterAnimationSubstitute.Subscribe( critter_animation_substitute );
+    __EventCritterAnimationFallout.Subscribe( critter_animation_fallout );
+	// Ручная инициализация хешей, которые не видит клиент
+	hash hashA;
+	for(int i = 0, l = animsList.length(); i < l; i++)
+	{
+		hashA = GetStrHash("art/critters/" + animsList[i]);
+	}
+}
+
+void critter_animation( hash modelName, uint anim1, uint anim2, uint& pass, uint& flags, int& ox, int& oy, string& animation )
+{
+
+	
+	if(  modelName  == CRTYPE_TACTICS_RHUMANOID)
+	{
+		animation = ProcessTactics(GetHashStr(modelName), anim1, anim2, pass, flags, ox, oy);
+	}
+
+    animation = "";//ProcessTactics("Rhumanoid", anim1, anim2, pass, flags, ox, oy);
+}
+
+
+string ProcessTactics( string crTypeName, uint anim1, uint anim2, uint& pass, uint& flags, int& ox, int& oy )
+{
+    // Todo: Implement overlays
+
+    //string@ crTypeName = GetCritterTypeName( crType );//теперь это ModelName
+    string  animName;
+
+    // Some specific types
+    bool    isTurret = false;
+    bool    isVehicle = false;
+    bool    isMutantFreak = false;
+    bool    isBrain = false;
+
+    string firstLetter = crTypeName[ 0 ];
+    if( firstLetter == "C" ) // Characters
+    {
+        animName = "sprites/characters/";
+        isMutantFreak = ( crTypeName == "CMutantFreak" );
+        isBrain = ( crTypeName == "CBrain" );
+    }
+    else if( firstLetter == "A" )     // Animals
+    {
+        animName = "sprites/critters/";
+    }
+    else if( firstLetter == "R" )     // Robots
+    {
+        animName = "sprites/robots/";
+    }
+    else if( firstLetter == "T" )     // Turrets
+    {
+        animName = "sprites/robots/RobotTurrets/";
+        isTurret = true;
+    }
+    else if( firstLetter == "V" )     // Vehicles
+    {
+        if( crTypeName == "VTankTurret" )
+            crTypeName = "VTank Turret";
+        animName = "sprites/vehicles/";
+        isVehicle = true;
+    }
+    else
+    {
+        return "";
+    }
+    animName += crTypeName.substr( 1, crTypeName.length() - 1 );
+    animName += "$";
+
+    // Color offsets
+    // 0 - other
+    // 1 - skin
+    // 2 - hair
+    // 3 - armor
+    // Format: [index,R,G,B]
+    const string[] colorOffsets =
+    {
+        //   R   G   B      Index
+        "0,0,0",               // 0  None
+        "30,-30,-30",          // 1  Red
+        "-30,30,-30",          // 2  Green
+        "-30,-30,30",          // 3  Blue
+        "-30,30,30",           // 4  Turquoise
+        "30,-30,30",           // 5  Purple
+        "30,30,-30",           // 6  Yellow
+        "30,30,30",            // 7  Light
+        "60,60,60",            // 8  White
+        "-30,-30,-30",         // 9  Dark
+        "-60,-60,-60",         // 10 Black
+        "0,0,0",               // 11 ...
+        "0,0,0",               // 12 ...
+        "0,0,0",               // 13 ...
+        "0,0,0",               // 14 ...
+        "0,0,0"                // 15 ...
+    };
+    uint  skinColor  = ( anim1 >> 20 ) & 0xF;
+    uint  hairColor  = ( anim1 >> 24 ) & 0xF;
+    uint  armorColor = ( anim1 >> 28 ) & 0xF;
+    if( skinColor  != 0 )
+        animName += "[1," + colorOffsets[ skinColor ]  + "]";
+    if( hairColor  != 0 )
+        animName += "[2," + colorOffsets[ hairColor ]  + "]";
+    if( armorColor != 0 )
+        animName += "[3," + colorOffsets[ armorColor ] + "]";
+
+    // Check flags
+    bool isDead   = ( anim2 >= Anim2Actions::DeadBegin && anim2 <= Anim2Actions::DeadEnd );
+    bool isCrouch = ( !isDead && ( anim1 & ANIM1_CROUCH ) != 0 );
+    bool isProne  = ( !isDead && !isCrouch && ( anim1 & ANIM1_PRONE ) != 0 );
+
+    // Keep only weapon
+    anim1 &= ANIM1_WEAPON_MASK;
+
+    // Turret
+    if( isTurret )
+    {
+        // Todo:
+        animName += "StandArmed.spr";
+        return animName;
+    }
+
+    // Vehicle
+    if( isVehicle )
+    {
+        // Todo:
+        animName += "Idle.spr";
+        return animName;
+    }
+
+    // Mutant Freak
+    if( isMutantFreak )
+    {
+        if( isDead )
+            animName += "Death.spr";
+        else if( anim2 >= Anim2Actions::PunchRight && anim2 <= Anim2Actions::KickCombo )
+            animName += "Attack.spr";
+        else
+            animName += "Breathe.spr";
+        return animName;
+    }
+
+    // Generic critter
+    if( !isDead )
+    {
+        // Some critters not have Breathe, use Default instead
+        if( pass == 10 )
+        {
+            animName += "Default.spr";
+            return animName;
+        }
+
+        // Position
+        if( isCrouch )
+            animName += "Crouch";
+        else if( isProne )
+            animName += "Prone";
+        else
+            animName += "Stand";
+
+        switch( anim2 )
+        {
+        // Todo: Climb, Climbdown, Climbup
+        case Anim2Actions::Walk:
+            animName += "Walk";
+            break;
+        case Anim2Actions::Limp:
+            animName += "Walk";
+            break;
+        case Anim2Actions::SneakWalk:
+            animName += "Walk";
+            break;
+        case Anim2Actions::Run:
+            animName += "Run";
+            break;
+        case Anim2Actions::PanicRun:
+            animName += "Run";
+            break;
+        case Anim2Actions::SneakRun:
+            animName += "Run";
+            break;
+        case Anim2Actions::DodgeFront:
+            animName += "DodgeOne";
+            break;
+        case Anim2Actions::DodgeBack:
+            animName += "DodgeTwo";
+            break;
+        case Anim2Actions::DamageFront:
+            animName += "Recoil";
+            break;
+        case Anim2Actions::DamageBack:
+            animName += "Recoil";
+            break;
+        case Anim2Actions::KnockFront:
+            animName += "Fallback";
+            break;
+        case Anim2Actions::KnockBack:
+            animName += "Fallforward";
+            break;
+        case Anim2Actions::StandupFront:
+            animName += "Getupback";
+            break;
+        case Anim2Actions::StandupBack:
+            animName += "Getupforward";
+            break;
+        case Anim2Actions::IdleProneFront:
+            animName += "Fallenback";
+            break;
+        case Anim2Actions::IdleProneBack:
+            animName += "Fallenforward";
+            break;
+        case Anim2Actions::Pickup:
+            animName += "Pickup";
+            break;
+        case Anim2Actions::Loot:
+            animName += "Pickup";
+            break;
+        case Anim2Actions::Push:
+            animName += "Attack";
+            break;
+        case Anim2Actions::PunchRight:
+            animName += "Attack";
+            break;
+        case Anim2Actions::KickHi:
+            animName += "Attack";
+            break;
+        case Anim2Actions::Thrust1h:
+            animName += "Attack";
+            break;
+        case Anim2Actions::Swing1h:
+            animName += "Attack";
+            break;
+        case Anim2Actions::Single:
+            animName += "Attack";
+            break;
+        case Anim2Actions::Burst:
+            animName += "Attack";
+            break;
+        case Anim2Actions::Sweep:
+            animName += "Attack";
+            break;
+        case Anim2Actions::Flame:
+            animName += "Attack";
+            break;
+        case Anim2Actions::Throw:
+            animName += "Attack";
+            break;
+        case Anim2Actions::Fidget:
+            animName += "Fidget";
+            break;
+        case Anim2Actions::Stand:
+            animName += "Stand";
+            break;
+        case Anim2Actions::Crouch:
+            animName += "Crouch";
+            break;
+        case Anim2Actions::Prone:
+            animName += "Prone";
+            break;
+
+        case Anim2Actions::Idle:
+            animName += "Breathe";
+            if( anim1 == WeaponsAnims::Unarmed )
+                pass = 10;                                    // Allow another call, see upper
+            break;
+
+        case Anim2Actions::ShowWeapon:
+        case Anim2Actions::HideWeapon:
+        case Anim2Actions::Use:
+        case Anim2Actions::SwitchItems:
+        case Anim2Actions::Steal:
+            if( pass == 0 )
+            {
+                animName += "Magic";
+                pass++;                 // Allow another call, see below
+            }
+            else
+            {
+                animName += "Magichigh";
+            }
+            break;
+
+        default:
+            return "";
+        }
+
+        switch( anim1 )
+        {
+        case WeaponsAnims::Unarmed:
+            animName += "";
+            break;
+        case WeaponsAnims::Knife:
+            animName += "Knife";
+            break;
+        case WeaponsAnims::Club:
+            animName += "Club";
+            break;
+        case WeaponsAnims::Hammer:
+            animName += "Club";
+            break;                                                        // N/A
+        case WeaponsAnims::Spear:
+            animName += "Spear";
+            break;
+        case WeaponsAnims::Pistol:
+            animName += "Pistol";
+            break;
+        case WeaponsAnims::Smg:
+            animName += "SMG";
+            break;
+        case WeaponsAnims::Shootgun:
+            animName += "Rifle";
+            break;                                                        // N/A
+        case WeaponsAnims::HeavyRifle:
+            animName += "Heavy";
+            break;
+        case WeaponsAnims::Minigun:
+            animName += "Minigun";
+            break;
+        case WeaponsAnims::RocketLauncher:
+            animName += "Rocket";
+            break;
+        case WeaponsAnims::Flamer:
+            animName += "Heavy";
+            break;                                                        // N/A
+        case WeaponsAnims::Rifle:
+            animName += "Rifle";
+            break;
+        case WeaponsAnims::Sword:
+            animName += "Knife";
+            break;                                                        // N/A
+        case WeaponsAnims::LongSword:
+            animName += "Knife";
+            break;                                                        // N/A
+        case WeaponsAnims::Axe:
+            animName += "Club";
+            break;                                                        // N/A
+        case WeaponsAnims::Bow:
+            animName += "Spear";
+            break;                                                        // N/A
+        default:
+            break;
+        }
+
+        // Attack
+        switch( anim2 )
+        {
+        case Anim2Actions::PunchRight:
+        case Anim2Actions::PunchLeft:
+        case Anim2Actions::PunchCombo:
+            if( isBrain )
+                animName += "HeadButt";
+            else
+                animName += "UnarmedOne";
+            break;
+        case Anim2Actions::KickHi:
+        case Anim2Actions::KickLo:
+        case Anim2Actions::KickCombo:
+            if( isBrain )
+                animName += "Whip";
+            else
+                animName += "UnarmedTwo";
+            break;
+
+        case Anim2Actions::Single:
+            animName += "Single";
+            break;                                                       // RocketSingleOverlay
+        case Anim2Actions::Burst:
+            animName += "Burst";
+            break;
+        case Anim2Actions::Sweep:
+            animName += "Burst";
+            break;
+        case Anim2Actions::Flame:
+            animName += "Single";
+            break;
+        case Anim2Actions::Throw:
+            animName += "Throw";
+            break;
+
+        case Anim2Actions::Thrust1h:
+        case Anim2Actions::Thrust2h:
+        case Anim2Actions::Swing1h:
+        case Anim2Actions::Swing2h:
+            if( anim1 == WeaponsAnims::Knife || anim1 == WeaponsAnims::Sword || anim1 == WeaponsAnims::LongSword )
+                animName += "Slash";
+            else if( anim1 == WeaponsAnims::Club || anim1 == WeaponsAnims::Hammer || anim1 == WeaponsAnims::Axe )
+                animName += "Swing";
+            else             // Spear
+                animName += "Thrust";
+            break;
+
+        default:
+            break;
+        }
+    }
+    else
+    {
+        animName += "";
+        switch( anim2 )
+        {
+        case Anim2Actions::DeadProneFront:
+            animName += "StandFallenback";
+            break;
+        case Anim2Actions::DeadProneBack:
+            animName += "StandFallenforward";
+            break;
+        case Anim2Actions::DeadFront:
+            animName += "Death";
+            break;
+        case Anim2Actions::DeadBack:
+            animName += "Death";
+            break;
+        case Anim2Actions::DeadBloodySingle:
+            animName += "DeathBighole";
+            break;
+        case Anim2Actions::DeadBloodyBurst:
+            animName += "DeathRiddled";
+            break;
+        case Anim2Actions::DeadBurst:
+            animName += "DeathRiddled";
+            break;
+        case Anim2Actions::DeadPulse:
+            animName += "DeathMelt";
+            break;
+        case Anim2Actions::DeadPulseDust:
+            animName += "DeathElectrify";
+            break;                                                                      // ElectrifyOverlay
+        case Anim2Actions::DeadLaser:
+            animName += "DeathCutinhalf";
+            break;
+        case Anim2Actions::DeadFused:
+            animName += "DeathMelt";
+            break;                                                                      // MeltOverlay
+        case Anim2Actions::DeadExplode:
+            animName += "DeathExplode";
+            break;
+        case Anim2Actions::DeadBurn:
+            animName += "DeathFire";
+            break;                                                                      // FireOverlay
+        case Anim2Actions::DeadBurnRun:
+            animName += "DeathFire";
+            break;                                                                      // FireOverlay
+        default:
+            return "";
+        }
+    }
+
+    animName += ".spr";
+    return animName;
+}
+
+
+
+
+// //////////////////////////////////////////////////////////////////////////////////////////////////
+// Call on animation substitute seeking.
+bool critter_animation_substitute( hash modelNameBase, uint anim1Base, uint anim2Base, hash& modelName, uint& anim1, uint& anim2 )
+{
+    // Check model alias
+
+	//Log("critter_animation_substitute modelName" = GetHashStr(modelName) +">  ;modelNameBase" = GetHashStr(modelNameBase)+" anim1Base = " + anim1Base + " anim2Base " + anim2Base + "modelNameBase:" + GetHashStr(modelName) + " hash: " + GetHashStr(modelName) + " anim1 = " + anim1 + " anim2 =" +anim2);
+    hash modelNameAlias = CritterAnims::GetCritterAlias( modelNameBase );
+    if( modelName == modelNameBase && modelName != modelNameAlias )
+    {
+        switch( anim2 )
+        {
+        case Anim2Actions::DeadPulse:
+        case Anim2Actions::DeadPulseDust:
+        case Anim2Actions::DeadBurn:
+        case Anim2Actions::DeadBurnRun:
+            modelName = modelNameAlias;
+            return true;
+        default:
+            break;
+        }
+    }
+    modelName = modelNameBase;
+
+    // Check Unarmed specific substitute
+    if( ( anim1 & ANIM1_WEAPON_MASK ) == WeaponsAnims::Unarmed )
+    {
+        bool swapped = true;
+        switch( anim2 )
+        {
+        case Anim2Actions::Limp:
+            anim2 = Anim2Actions::Walk;
+            break;
+        case Anim2Actions::Run:
+            anim2 = Anim2Actions::Walk;
+            break;
+        case Anim2Actions::PanicRun:
+            anim2 = Anim2Actions::Run;
+            break;
+        case Anim2Actions::SneakWalk:
+            anim2 = Anim2Actions::Walk;
+            break;
+        case Anim2Actions::SneakRun:
+            anim2 = Anim2Actions::SneakWalk;
+            break;
+        case Anim2Actions::Pickup:
+            anim2 = Anim2Actions::Use;
+            break;
+        case Anim2Actions::SwitchItems:
+            anim2 = Anim2Actions::Use;
+            break;
+        default:
+            swapped = false;
+            break;
+        }
+        if( swapped )
+            return true;
+    }
+
+    // Check anim2 substitute
+    bool swapped = true;
+    switch( anim2 )
+    {
+    case Anim2Actions::IdleStunned:
+        anim2 = Anim2Actions::Idle;
+        break;
+    case Anim2Actions::IdleCombat:
+        anim2 = Anim2Actions::Idle;
+        break;
+    case Anim2Actions::Climbing:
+        anim2 = Anim2Actions::Use;
+        break;
+    case Anim2Actions::PunchLeft:
+        anim2 = Anim2Actions::PunchRight;
+        break;
+    case Anim2Actions::PunchCombo:
+        anim2 = Anim2Actions::PunchLeft;
+        break;
+    case Anim2Actions::KickHi:
+        anim2 = Anim2Actions::PunchRight;
+        break;
+    case Anim2Actions::KickLo:
+        anim2 = Anim2Actions::KickHi;
+        break;
+    case Anim2Actions::KickCombo:
+        anim2 = Anim2Actions::KickHi;
+        break;
+    case Anim2Actions::Swing1h:
+        anim2 = Anim2Actions::Thrust1h;
+        break;
+    case Anim2Actions::Thrust2h:
+        anim2 = Anim2Actions::Thrust1h;
+        break;
+    case Anim2Actions::Swing2h:
+        anim2 = Anim2Actions::Swing1h;
+        break;
+    case Anim2Actions::Sweep:
+        anim2 = Anim2Actions::Burst;
+        break;
+    case Anim2Actions::Burst:
+        anim2 = Anim2Actions::Single;
+        break;
+    case Anim2Actions::Butt:
+        anim2 = Anim2Actions::PunchRight;
+        break;
+    case Anim2Actions::Flame:
+        anim2 = Anim2Actions::Single;
+        break;
+    case Anim2Actions::NoRecoil:
+        anim2 = Anim2Actions::Use;
+        break;
+    case Anim2Actions::Throw:
+        anim2 = Anim2Actions::PunchRight;
+        break;
+    case Anim2Actions::Reload:
+        anim2 = Anim2Actions::Use;
+        break;
+    case Anim2Actions::Repair:
+        anim2 = Anim2Actions::Reload;
+        break;
+    case Anim2Actions::DodgeBack:
+        anim2 = Anim2Actions::DodgeFront;
+        break;
+    case Anim2Actions::DamageBack:
+        anim2 = Anim2Actions::DamageFront;
+        break;
+    case Anim2Actions::DamageMulBack:
+        anim2 = Anim2Actions::DamageMulFront;
+        break;
+    case Anim2Actions::WalkDamageBack:
+        anim2 = Anim2Actions::WalkDamageFront;
+        break;
+    case Anim2Actions::LimpDamageBack:
+        anim2 = Anim2Actions::LimpDamageFront;
+        break;
+    case Anim2Actions::RunDamageBack:
+        anim2 = Anim2Actions::RunDamageFront;
+        break;
+    case Anim2Actions::Loot:
+        anim2 = Anim2Actions::Pickup;
+        break;
+    case Anim2Actions::Steal:
+        anim2 = Anim2Actions::Use;
+        break;
+    case Anim2Actions::Push:
+        anim2 = Anim2Actions::PunchRight;
+        break;
+    case Anim2Actions::ShowWeapon:
+        anim2 = Anim2Actions::Use;
+        break;
+    case Anim2Actions::HideWeapon:
+        anim2 = Anim2Actions::Use;
+        break;
+
+    case Anim2Actions::KnockBack:
+        anim2 = Anim2Actions::KnockFront;
+        break;
+    case Anim2Actions::LaydownBack:
+        anim2 = Anim2Actions::LaydownFront;
+        break;
+    case Anim2Actions::IdleProneBack:
+        anim2 = Anim2Actions::IdleProneFront;
+        break;
+    case Anim2Actions::StandupBack:
+        anim2 = Anim2Actions::StandupFront;
+        break;
+    case Anim2Actions::DeadProneBack:
+        anim2 = Anim2Actions::DeadProneFront;
+        break;
+    case Anim2Actions::DamageProneBack:
+        anim2 = Anim2Actions::DamageProneFront;
+        break;
+    case Anim2Actions::DamageMulProneBack:
+        anim2 = Anim2Actions::DamageMulProneFront;
+        break;
+    case Anim2Actions::TwitchProneBack:
+        anim2 = Anim2Actions::TwitchProneFront;
+        break;
+
+    case Anim2Actions::DeadFront:
+        anim2 = Anim2Actions::KnockFront;
+        break;
+    case Anim2Actions::DeadBack:
+        anim2 = Anim2Actions::KnockBack;
+        break;
+    case Anim2Actions::DeadBloodySingle:
+    case Anim2Actions::DeadBloodyBurst:
+    case Anim2Actions::DeadBurst:
+    case Anim2Actions::DeadPulse:
+    case Anim2Actions::DeadPulseDust:
+    case Anim2Actions::DeadLaser:
+    case Anim2Actions::DeadFused:
+    case Anim2Actions::DeadExplode:
+    case Anim2Actions::DeadBurn:
+    case Anim2Actions::DeadBurnRun:
+        anim2 = Anim2Actions::DeadFront;
+        break;
+
+    default:
+        swapped = false;
+        break;
+    }
+    if( swapped )
+        return true;
+
+    // Restore anim2
+    anim2 = anim2Base;
+
+    // Find anim1 substitute
+    uint flags = anim1 & ANIM1_FLAGS_MASK; // Store flags
+    anim1 &= ANIM1_WEAPON_MASK;            // Keep only weapon
+    switch( anim1 )
+    {
+    case WeaponsAnims::Knife:
+        anim1 = WeaponsAnims::Unarmed;
+        break;
+    case WeaponsAnims::Club:
+        anim1 = WeaponsAnims::Knife;
+        break;
+    case WeaponsAnims::Hammer:
+        anim1 = WeaponsAnims::Club;
+        break;
+    case WeaponsAnims::Spear:
+        anim1 = WeaponsAnims::Knife;
+        break;
+    case WeaponsAnims::Pistol:
+        anim1 = WeaponsAnims::Unarmed;
+        break;
+    case WeaponsAnims::Smg:
+        anim1 = WeaponsAnims::Pistol;
+        break;
+    case WeaponsAnims::Shootgun:
+        anim1 = WeaponsAnims::Smg;
+        break;
+    case WeaponsAnims::Rifle:
+        anim1 = WeaponsAnims::Shootgun;
+        break;
+    case WeaponsAnims::Minigun:
+        anim1 = WeaponsAnims::Rifle;
+        break;
+    case WeaponsAnims::RocketLauncher:
+        anim1 = WeaponsAnims::Minigun;
+        break;
+    case WeaponsAnims::Flamer:
+        anim1 = WeaponsAnims::RocketLauncher;
+        break;
+    case WeaponsAnims::HeavyRifle:
+        anim1 = WeaponsAnims::Rifle;
+        break;
+    case WeaponsAnims::Sword:
+        anim1 = WeaponsAnims::Knife;
+        break;
+    case WeaponsAnims::LongSword:
+        anim1 = WeaponsAnims::Knife;
+        break;
+    case WeaponsAnims::Axe:
+        anim1 = WeaponsAnims::Hammer;
+        break;
+    case WeaponsAnims::Bow:
+        anim1 = WeaponsAnims::Knife;
+        break;
+    default:
+        return false;
+    }
+    anim1 |= flags;     // Merge weapon and flags
+
+    return true;
+}
+
+// Convert from common to fallout specific
+bool critter_animation_fallout( hash modelName, uint& anim1, uint& anim2, uint& anim1ex, uint& anim2ex, uint& flags )
+{
+Log("anim fallout model: " + GetHashStr(modelName) + "anim1 " + anim1 + " anim 2" + anim2 + " anim1ex " + anim1ex + " anim2ex " +anim2ex);
+    // Still only weapon
+    anim1 &= ANIM1_WEAPON_MASK;
+
+    // Weapon
+    switch( anim1 )
+    {
+    case WeaponsAnims::Unarmed:
+        anim1 = FalloutAnims1::Unarmed;
+        break;
+    case WeaponsAnims::Knife:
+        anim1 = FalloutAnims1::Knife;
+        break;
+    case WeaponsAnims::Club:
+        anim1 = FalloutAnims1::Club;
+        break;
+    case WeaponsAnims::Hammer:
+        anim1 = FalloutAnims1::Hammer;
+        break;
+    case WeaponsAnims::Spear:
+        anim1 = FalloutAnims1::Spear;
+        break;
+    case WeaponsAnims::Pistol:
+        anim1 = FalloutAnims1::Pistol;
+        break;
+    case WeaponsAnims::Smg:
+        anim1 = FalloutAnims1::Uzi;
+        break;
+    case WeaponsAnims::Shootgun:
+        anim1 = FalloutAnims1::Shootgun;
+        break;
+    case WeaponsAnims::HeavyRifle:
+        anim1 = FalloutAnims1::Rifle;
+        break;
+    case WeaponsAnims::Minigun:
+        anim1 = FalloutAnims1::Minigun;
+        break;
+    case WeaponsAnims::RocketLauncher:
+        anim1 = FalloutAnims1::RocketLauncher;
+        break;
+    case WeaponsAnims::Flamer:
+        anim1 = FalloutAnims1::Rifle;
+        break;
+    case WeaponsAnims::Rifle:
+        anim1 = FalloutAnims1::Rifle;
+        break;
+    case WeaponsAnims::Sword:
+        anim1 = FalloutAnims1::Knife;
+        break;
+    case WeaponsAnims::LongSword:
+        anim1 = FalloutAnims1::Knife;
+        break;
+    case WeaponsAnims::Axe:
+        anim1 = FalloutAnims1::Club;
+        break;
+    case WeaponsAnims::Bow:
+        anim1 = FalloutAnims1::Unarmed;
+        break;
+    default:
+        anim1 = FalloutAnims1::Unarmed;
+        break;
+    }
+
+    // Action
+    switch( anim2 )
+    {
+    case Anim2Actions::Idle:
+        anim2 = FalloutAnims2::Stay;
+        flags |= ANIM_FLAG_FIRST_FRAME;
+        break;
+    case Anim2Actions::IdleStunned:
+        anim2 = FalloutAnims2::Stay;
+        flags |= ANIM_FLAG_FIRST_FRAME;
+        break;
+    case Anim2Actions::Walk:
+        anim2 = FalloutAnims2::Walk;
+        break;
+    case Anim2Actions::Limp:
+        anim2 = FalloutAnims2::Walk;
+        break;
+    case Anim2Actions::Run:
+        anim2 = FalloutAnims2::Run;
+        anim1 = FalloutAnims1::Unarmed;
+        break;
+    case Anim2Actions::PanicRun:
+        anim2 = FalloutAnims2::Run;
+        anim1 = FalloutAnims1::Unarmed;
+        break;
+    case Anim2Actions::ShowWeapon:
+        anim2 = FalloutAnims2::Show;
+        break;
+    case Anim2Actions::HideWeapon:
+        anim2 = FalloutAnims2::Hide;
+        break;
+    case Anim2Actions::PrepareWeapon:
+        anim2 = FalloutAnims2::PrepareWeapon;
+        break;
+    case Anim2Actions::TurnoffWeapon:
+        anim2 = FalloutAnims2::TurnoffWeapon;
+        break;
+    case Anim2Actions::Fidget:
+        anim2 = FalloutAnims2::Stay;
+        break;
+//	case Anim2Actions::Climbing:           anim2 = ;                                                     break;
+    case Anim2Actions::Pickup:
+        anim2 = FalloutAnims2::Pickup;
+        anim1 = FalloutAnims1::Unarmed;
+        break;
+    case Anim2Actions::Use:
+        anim2 = FalloutAnims2::Use;
+        anim1 = FalloutAnims1::Unarmed;
+        break;
+    case Anim2Actions::SwitchItems:
+        anim2 = FalloutAnims2::Use;
+        anim1 = FalloutAnims1::Unarmed;
+        break;
+    case Anim2Actions::Loot:
+        anim2 = FalloutAnims2::Pickup;
+        anim1 = FalloutAnims1::Unarmed;
+        break;
+    case Anim2Actions::Steal:
+        anim2 = FalloutAnims2::Use;
+        anim1 = FalloutAnims1::Unarmed;
+        break;
+    case Anim2Actions::Push:
+        anim2 = FalloutAnims2::Punch;
+        anim1 = FalloutAnims1::Unarmed;
+        break;
+    case Anim2Actions::IdleCombat:
+        anim2 = FalloutAnims2::Stay;
+        flags |= ANIM_FLAG_FIRST_FRAME;
+        break;
+    case Anim2Actions::PunchRight:
+        anim2 = FalloutAnims2::Punch;
+        anim1 = FalloutAnims1::Unarmed;
+        break;
+    case Anim2Actions::KickHi:
+        anim2 = FalloutAnims2::Kick;
+        anim1 = FalloutAnims1::Unarmed;
+        break;
+    case Anim2Actions::Thrust1h:
+        anim2 = FalloutAnims2::Thrust;
+        break;
+    case Anim2Actions::Thrust2h:
+        anim2 = FalloutAnims2::Thrust;
+        break;
+    case Anim2Actions::Swing1h:
+        anim2 = FalloutAnims2::Swing;
+        break;
+    case Anim2Actions::Swing2h:
+        anim2 = FalloutAnims2::Swing;
+        break;
+    case Anim2Actions::Single:
+        anim2 = FalloutAnims2::Shoot;
+        break;
+    case Anim2Actions::Burst:
+        anim2 = FalloutAnims2::Burst;
+        break;
+    case Anim2Actions::Sweep:
+        anim2 = FalloutAnims2::Burst;
+        break;
+    case Anim2Actions::Flame:
+        anim2 = FalloutAnims2::Flame;
+        break;
+    case Anim2Actions::Butt:
+        anim2 = FalloutAnims2::Punch;
+        anim1 = FalloutAnims1::Unarmed;
+        break;
+    case Anim2Actions::Throw:
+        anim2 = ( anim1 == FalloutAnims1::Unarmed ? FalloutAnims2::ThrowEmpty : FalloutAnims2::ThrowWeapon );
+        break;
+    case Anim2Actions::DodgeFront:
+        anim2 = ( anim1 == FalloutAnims1::Unarmed ? FalloutAnims2::DodgeEmpty : FalloutAnims2::DodgeWeapon );
+        break;
+    case Anim2Actions::DodgeBack:
+        anim2 = ( anim1 == FalloutAnims1::Unarmed ? FalloutAnims2::DodgeEmpty : FalloutAnims2::DodgeWeapon );
+        break;
+    case Anim2Actions::DamageFront:
+        anim2 = FalloutAnims2::DamageFront;
+        break;
+    case Anim2Actions::DamageBack:
+        anim2 = FalloutAnims2::DamageBack;
+        break;
+    case Anim2Actions::DamageMulFront:
+        anim2 = FalloutAnims2::DamageFront;
+        break;
+    case Anim2Actions::DamageMulBack:
+        anim2 = FalloutAnims2::DamageBack;
+        break;
+    case Anim2Actions::KnockFront:
+        anim2 = FalloutAnims2::KnockFront;
+        anim1 = FalloutAnims1::Dead;
+        break;
+    case Anim2Actions::KnockBack:
+        anim2 = FalloutAnims2::KnockBack;
+        anim1 = FalloutAnims1::Dead;
+        break;
+    case Anim2Actions::StandupFront:
+        anim2 = FalloutAnims2::StandupFront;
+        anim1 = FalloutAnims1::Knockout;
+        break;
+    case Anim2Actions::StandupBack:
+        anim2 = FalloutAnims2::StandupBack;
+        anim1 = FalloutAnims1::Knockout;
+        break;
+    case Anim2Actions::DeadProneFront:
+        anim2 = FalloutAnims2::DeadFront2;
+        anim1 = FalloutAnims1::Dead;
+        break;
+    case Anim2Actions::DeadProneBack:
+        anim2 = FalloutAnims2::DeadBack2;
+        anim1 = FalloutAnims1::Dead;
+        break;
+    case Anim2Actions::DeadBloodySingle:
+        anim2 = FalloutAnims2::DeadBloodySingle;
+        anim1 = FalloutAnims1::Dead;
+        break;
+    case Anim2Actions::DeadBloodyBurst:
+        anim2 = FalloutAnims2::DeadBloodyBurst;
+        anim1 = FalloutAnims1::Dead;
+        break;
+    case Anim2Actions::DeadBurst:
+        anim2 = FalloutAnims2::DeadBurst;
+        anim1 = FalloutAnims1::Dead;
+        break;
+    case Anim2Actions::DeadPulse:
+        anim2 = FalloutAnims2::DeadPulse;
+        anim1 = FalloutAnims1::Dead;
+        break;
+    case Anim2Actions::DeadPulseDust:
+        anim2 = FalloutAnims2::DeadPulseDust;
+        anim1 = FalloutAnims1::Dead;
+        break;
+    case Anim2Actions::DeadLaser:
+        anim2 = FalloutAnims2::DeadLaser;
+        anim1 = FalloutAnims1::Dead;
+        break;
+    case Anim2Actions::DeadFused:
+        anim2 = FalloutAnims2::DeadFused;
+        anim1 = FalloutAnims1::Dead;
+        break;
+    case Anim2Actions::DeadExplode:
+        anim2 = FalloutAnims2::DeadExplode;
+        anim1 = FalloutAnims1::Dead;
+        break;
+
+    case Anim2Actions::IdleProneFront:
+        anim2 = FalloutAnims2::KnockFront;
+        anim1 = FalloutAnims1::Dead;
+        flags |= ANIM_FLAG_LAST_FRAME;
+        break;
+    case Anim2Actions::IdleProneBack:
+        anim2 = FalloutAnims2::KnockBack;
+        anim1 = FalloutAnims1::Dead;
+        flags |= ANIM_FLAG_LAST_FRAME;
+        break;
+
+    case Anim2Actions::DeadBurn:
+        anim2 = FalloutAnims2::DeadBurn;
+        anim1 = FalloutAnims1::Dead;
+        break;                                                                                                          // FalloutAnims2::DeadBurn2
+    case Anim2Actions::DeadBurnRun:
+        anim2   = FalloutAnims2::DeadBurnRun;
+        anim1   = FalloutAnims1::Dead;
+        anim2ex = FalloutAnims2::DeadBurn;
+        anim1ex = FalloutAnims1::Dead;
+        break;
+
+    case Anim2Actions::DeadFront:
+        anim1 = FalloutAnims1::Dead;
+        anim1ex = FalloutAnims1::Dead;
+        anim2 = FalloutAnims2::KnockFront;
+        anim2ex = FalloutAnims2::DeadFront2;
+        break;
+    case Anim2Actions::DeadBack:
+        anim1 = FalloutAnims1::Dead;
+        anim1ex = FalloutAnims1::Dead;
+        anim2 = FalloutAnims2::KnockBack;
+        anim2ex = FalloutAnims2::DeadBack2;
+        break;
+    case Anim2Actions::NoRecoil:
+    case Anim2Actions::Reload:
+    case Anim2Actions::Repair:
+        anim1ex = anim1;
+        anim2 = FalloutAnims2::PrepareWeapon;
+        anim2ex = FalloutAnims2::TurnoffWeapon;
+        break;
+
+    // Anim2Actions::BeginCombat
+    // Anim2Actions::EndCombat
+    // Anim2Actions::PunchLeft
+    // Anim2Actions::PunchCombo
+    // Anim2Actions::KickLo
+    // Anim2Actions::KickCombo
+    // Anim2Actions::WalkDamageFront
+    // Anim2Actions::WalkDamageBack
+    // Anim2Actions::LimpDamageFront
+    // Anim2Actions::LimpDamageBack
+    // Anim2Actions::RunDamageFront
+    // Anim2Actions::RunDamageBack
+    // Anim2Actions::LaydownFront
+    // Anim2Actions::LaydownBack
+    // Anim2Actions::DamageProneFront
+    // Anim2Actions::DamageProneBack
+    // Anim2Actions::DamageMulProneFront
+    // Anim2Actions::DamageMulProneBack
+    // Anim2Actions::TwitchProneFront
+    // Anim2Actions::TwitchProneBack
+    default:
+        return false;
+    }
+    return true;
+}
+
+#ifdef __CLIENT
+void PlayAnimSound( hash modelName, int gender, uint anim1, uint anim2 )
+{
+    if( anim2 == Anim2Actions::Walk || anim2 == Anim2Actions::Limp || anim2 == Anim2Actions::Run ||
+        anim2 == Anim2Actions::PanicRun || anim2 == Anim2Actions::SneakWalk || anim2 == Anim2Actions::SneakRun )
+        return;
+
+    bool   isFemale = gender == Gender::Female;
+    string modelNameSound = CritterAnims::GetCritterSound( modelName );
+    if( modelNameSound == "" )
+        return;
+
+    // Keep only weapon
+    anim1 &= ANIM1_WEAPON_MASK;
+
+    // Convert indicies to fallout specific
+    uint fAnim1 = anim1, fAnim2 = anim2, fAnim1ex = 0, fAnim2ex = 0, fFlags = 0;
+    if( !critter_animation_fallout( modelName, fAnim1, fAnim2, fAnim1ex, fAnim2ex, fFlags ) || fFlags != 0 )
+        return;
+
+    // Make name
+    const string abc = "_abcdefghijklmnopqrstuvwxyz0123456789";
+    string       sound = modelNameSound;
+    sound += " ";
+    sound[ sound.length() - 1 ] = abc[ fAnim1 ];
+    sound += " ";
+    sound[ sound.length() - 1 ] = abc[ fAnim2 ];
+    sound += ".acm";
+
+    // Convert "ha" to "hm" / "hf"
+    if( sound[ 0 ] == "h" && sound[ 1 ] == "a" )
+        sound[ 1 ] = ( isFemale ? "f" : "m" );
+
+    // Try play
+    if( PlaySound( sound ) )
+        return;
+
+    // Find substitutes for humans
+    if( sound[ 0 ] == "h" )
+    {
+        // Try find by mask (hmxxxxab)
+        for( uint i = 2, j = modelNameSound.length(); i < j; i++ )
+            sound[ i ] = "x";
+        if( PlaySound( sound ) )
+            return;
+
+        // Convert "hf" to "hm"
+        if( sound[ 1 ] == "f" )
+        {
+            sound[ 1 ] = "m";
+            if( PlaySound( sound ) )
+                return;
+        }
+    }
+}
+#endif

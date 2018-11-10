@@ -1,0 +1,1335 @@
+// FOS Server Sort 3
+
+//#include "Tla"
+
+// Author: rifleman17
+// Групповые поединки на локациях. //wip
+// Проходят в 4 этапа, участвует несколько команд/групп.
+// Ведется учет убийств членами команд.
+// Подразумевается, что изначально команды закрыты друг от друга. Доступ к сражению команды получают только на стадии 3.
+// TODO: Сделать расписание этапов по эвентам
+// * ВНИМАНИЕ: при использовании BattleInfo необходимо включить battle_info.fos в соответствующий скрипт #include'ом, и объявить экземпляр
+// BattleInfo bInfo;
+
+#define STAGE_NONE               ( 0 ) // Поединок не начинался
+#define STAGE_PREPARE            ( 1 ) // Идет прием заявок на участие. Известно время начала. На картах появляются наниматели
+#define STAGE_BEGIN              ( 2 ) // Начало поединка, персонажи помещаются на исходные позиции.
+#define STAGE_FIGHT              ( 3 ) // Открытие дверей во внутренний двор. Начало сражение.
+#define STAGE_FINISH             ( 4 ) // Открытие дверей во внешний мир, бой закончен
+
+#define _PlayerName              # (cr) ( cr.IsPlayer() ? Obsolete::GetPlayerName( cr.Id ) : "@msg DLG " + STR_NPC_NAME( cr.DialogId, cr.ProtoId ) + "@" )
+
+#define ANSWER_CONFIRM_INVITE    ( 0 )
+#define ANSWER_REJECT_INVITE     ( 1 )
+#define ANSWER_DELAY_INVITE      ( 2 )
+
+#define STR_PLAYER_JOINED        ( 7125 ) // Команда |lex teamColorlex team|lex baseColor К сражению присоединяется |lex teamColorlex name.
+#define STR_KILL                 ( 7126 ) // Участник Испытания |lex team1Colorlex dead|lex baseColor убит участником по имени |lex team2Colorlex killer.
+
+////import void ShowDialogBox0(Critter player, int dialogID) from "SayExtended";
+
+interface IBattleTeamInviteCallback {
+    void OnInvite( Critter cr, bool transit, BattleTeam team );
+    void OnTransit( Critter cr );
+}
+interface IBattleInfoStageChangedHandler {
+    void OnStageChanged( uint8 stage );
+}
+interface IBattleInfoCallBack {
+    void OnCritterDead( Critter dead, Critter killer );
+}
+
+class BattleTeam
+{
+    uint8 Index;                   // Условный индекс команды, начинается с 0
+    uint  StartEntire;             // Спецгекс, на котором появляются игроки команды во время этапа STAGE_BEGIN
+    uint  StartMapIndex;           // Индекс карты среди карт локаций, на котором размещается команда
+    uint[] Requests = {};              // Id персонажей, подавших заявку на участие в поединке в составе данной команды
+    uint[] Players = {};               // Id персонажей, подтвердивших свое участие в поединке
+    uint TeamKills;                // Счетчик убийств, произведенных персонажами в составе группы
+    uint LastPeekedRequestId;      // Код персонажа для последней заявки в команде, по которой было отправлено приглашение, получен ответ.
+    bool LastRequestAccepted;
+    int  BattlePoints;             // Игровые очки, исходя из количества очков команды формируется призовой фонд
+    bool Winner;
+    uint Color;
+
+    BattleTeam()
+    {
+        Color = COLOR_LGRAY;
+    }
+
+    IBattleTeamInviteCallback CallBackInvite;
+
+    void SetInviteCallback( IBattleTeamInviteCallback callback )
+    {
+        CallBackInvite = callback;
+    }
+
+    bool HasRequest( uint crId )
+    {
+        return ( LastPeekedRequestId == crId || UtilsForArray::FindInArray( Requests, crId ) >= 0 );
+    }
+
+    bool HasPlayer( uint crId )
+    {
+        return ( UtilsForArray::FindInArray( Players, crId ) >= 0 );
+    }
+
+    uint CountAlive()             // Подсчет персонажей команды, оставшихся вживых
+    {
+        uint     alive = 0;
+        Critter player;
+        for( uint i = 0, l = Players.length(); i < l; i++ )
+        {
+            player = GetCritter( Players[ i ] );
+            if( valid( player ) && player.IsLife() )
+                alive++;
+        }
+        return alive;
+    }
+
+    // Достает Id персонажа, подавшего заявку по порядку
+    // Одновременно удаляет его из массива
+    int PeekRequest()
+    {
+        DL( "Peek request" );
+        int crId = 0;
+        while( crId == 0 )
+        {
+            if( Requests.length() == 0 )
+            {
+                crId = -1;
+                break;
+            }
+            crId = Requests[ 0 ];
+            Requests.removeFirst();
+            if( !valid( GetCritter( crId ) ) )
+                crId = 0;
+        }
+        LastPeekedRequestId = crId;
+        DL( "founded crId = " + crId );
+        return crId;
+    }
+
+    bool SendTeamInvite()
+    {
+        LastRequestAccepted = false;
+        int crId = PeekRequest();
+        if( crId > -1 )
+        {
+            Critter cr = GetCritter( crId );
+            if( valid( cr ) )
+            {
+                if( cr.IsPlayer() )
+                {
+                    uint[] data = { Index, cr.Id };
+                    DeferredCall( SECOND_TICKS( 10 ), CheckInvite, data );
+					SayExtended::ShowDialogBox(cr, TlaExtended::DialogboxPurgatoryInvite);
+					/*
+                    //cr.ShowScreen( CLIENT_SCREEN_DIALOGBOX, 2, "answer_BattleInvite" );
+                    cr.Say( TlaExtended::SayDialogboxText, "Внимание. Начинается поединок. Вы готовы принять участие?" );
+                    cr.Say( SAY_DIALOGBOX_BUTTON( ANSWER_CONFIRM_INVITE ), "Да" );
+                    cr.Say( SAY_DIALOGBOX_BUTTON( ANSWER_REJECT_INVITE ), "Нет, отказываюсь" );
+					*/
+                }
+                else
+                {
+                    LastRequestAccepted = true;
+                    bInfo.TeamInviteConfirmed();
+                }
+                return true;
+            }
+        }
+        return false;
+    }
+
+    void ConfirmInvite()
+    {
+        LastRequestAccepted = true;
+        bInfo.TeamInviteConfirmed();
+    }
+
+    void RequestToPlayer( Location loc )
+    {
+        DL( "Request confirmed" );
+        if( !valid( loc ) )
+            return;
+        Map map = GetMap( StartMapIndex );      // loc.GetMapByIndex(StartMapIndex);
+        bool transit = true;
+        if( valid( map ) )
+        {
+            Critter cr = GetCritter( LastPeekedRequestId );
+            if( valid( cr ) )
+            {
+                if( !HasPlayer( LastPeekedRequestId ) )
+                    Players.insertLast( LastPeekedRequestId );
+                if( valid( CallBackInvite ) )
+                    CallBackInvite.OnInvite( cr, transit, this );
+                if( transit )
+                {
+                    DL( "Transit critter 2 map"  + cr.Id );
+                    Obsolete::CritterTransitToMapEntire( cr, map.Id, StartEntire );
+                    if( valid( CallBackInvite ) )
+                        CallBackInvite.OnTransit( cr );
+                }
+            }
+        }
+    }
+
+}
+
+class BattleInfo
+{
+    uint  LocId;                  // Id локации, на которой идет поединок
+    uint8 Stage;                  // Текущая стадия события
+    uint8 MaxPlayers;
+    BattleTeam[] Teams = {};
+
+    IBattleInfoStageChangedHandler StageChangedHandler;
+    IBattleInfoCallBack            Callback;
+
+    void SetStageHandler( IBattleInfoStageChangedHandler handler )
+    {
+        StageChangedHandler = handler;
+    }
+
+    void SetCallBack( IBattleInfoCallBack callback )
+    {
+        Callback = callback;
+    }
+
+    void AddTeam( uint entire, uint mapId, uint color, IBattleTeamInviteCallback callback )
+    {
+        BattleTeam t = BattleTeam();
+        t.StartMapIndex = mapId;
+        t.StartEntire = entire;
+        t.Index = Teams.length();
+        t.SetInviteCallback( callback );
+        t.Color = color;
+        Teams.insertLast( t );
+    }
+
+    bool HasRequest( uint crId )
+    {
+        for( uint i = 0, l = Teams.length(); i < l; i++ )
+        {
+            if( Teams[ i ].HasRequest( crId ) )
+                return true;
+        }
+        return false;
+    }
+
+    void AddRequest( uint8 team, uint crId )  // Индексация с нуля
+    {
+        if( !HasRequest( crId ) && Teams.length() > 0 && ( team + 1 <= Teams.length() ) )
+        {
+            DL( "Adding Request. Team#" + team + "; crId = " + crId );
+            if( !Teams[ team ].HasRequest( crId ) )
+                Teams[ team ].Requests.insertLast( crId );
+            DL( "1->" + ( Teams[ team ].HasRequest( crId ) ? "has request" + crId : "no request" + crId ) );
+            crId = 1;
+            DL( "2->" + ( Teams[ team ].HasRequest( crId ) ? "has request" + crId : "no request" + crId ) );
+        }
+    }
+
+    BattleTeam GetCritterTeam( uint crId )
+    {
+        DL( "get cr team: " + crId );
+        for( uint i = 0, l = Teams.length(); i < l; i++ )
+        {
+            if( Stage < STAGE_FIGHT && Teams[ i ].HasRequest( crId ) )
+                return Teams[ i ];
+            if( Teams[ i ].HasPlayer( crId ) )
+                return Teams[ i ];
+        }
+        DL( "team invalid" );
+        return null;
+    }
+
+    // false - рассылка провалилась
+    // true - найдены по одному персонажу в каждой команде
+    bool SendTeamsInvite()
+    {
+        // Порядок рассылки приглашений
+        // 1. В списках заявок на участие в каждой команде начинается поиск ПЕРВОГО существующего игрока
+        // 2. Если это игрок - ему отправляется приглашение, участие НПЦ сразу подтверждается
+        // 3. При каждом ответе игрока, если это согласие, проверяется, все ли команды получили по одному участнику. Если нет, ждем дальше.
+        // 4. Если каждая команда получила своего участника, отправляются следующие приглашения по той же схеме.
+        // TODO: После отправки каждого приглашения запускать эвенты-проверки, чтобы убедиться что ожидание не ушло в бесконечность.
+        int crId;
+        for( uint i = 0, l = Teams.length(); i < l; i++ )
+        {
+            if( !Teams[ i ].SendTeamInvite() )
+                return false;                 // В одной из команд некому отправлять приглашение
+        }
+        return true;
+    }
+
+    void TeamInviteConfirmed()
+    {
+        // Подтверждение заявки одной из команд
+        for( uint i = 0, l = Teams.length(); i < l; i++ )
+        {
+            if( !Teams[ i ].LastRequestAccepted )         // Найдена команда, не подтвердившая последний запрос
+                return;
+            if( Teams[ i ].LastPeekedRequestId < 0 )      // В одной из команд кончились персонажи, подавшие заявку
+                return;
+        }
+        // Перенос согласившихся игроков на поле боя
+        for( uint i = 0, l = Teams.length(); i < l; i++ )
+        {
+            Teams[ i ].RequestToPlayer( GetLocation( LocId ) );
+            Teams[ i ].LastRequestAccepted = false;
+        }
+        // Следующая итерация 2ой, 3ий, четвертый участник в каждой команде и т.д.
+        SendTeamsInvite();
+    }
+
+    void Notify()     // Сообщение о смене этапа поединка
+    {
+        if( valid( StageChangedHandler ) )
+            StageChangedHandler.OnStageChanged( Stage );
+    }
+
+    void PrepareBattle()
+    {
+        Stage = STAGE_PREPARE;
+        Notify();
+        for( uint i = 0, l = Teams.length(); i < l; i++ )
+        {
+            Teams[ i ].Winner = false;
+            Teams[ i ].Requests.clear();
+            Teams[ i ].Players.clear();
+            Teams[ i ].TeamKills = 0;
+            Teams[ i ].LastPeekedRequestId = 0;
+            Teams[ i ].LastRequestAccepted = false;
+            Teams[ i ].BattlePoints = 0;
+        }
+    }
+
+    void BeginBattle()
+    {
+        Stage = STAGE_BEGIN;
+        Location loc = GetLocation( LocId );
+        if( valid( loc ) )
+        {
+            Map[] maps = loc.GetMaps();
+            if( maps!=null && maps.length() > 0 )
+            {
+                for( uint i = 0, l = maps.length(); i < l; i++ )
+                {
+                    __EventMapCritterIn.SubscribeToMap( maps[ i ], _BattleMapCritterIn );
+                }
+            }
+        }
+        SendTeamsInvite();
+        Notify();
+    }
+
+    void Fight()
+    {
+        Stage = STAGE_FIGHT;
+        Notify();
+        Location loc = GetLocation( LocId );
+        if( valid( loc ) )
+        {
+            Map[] maps = loc.GetMaps();
+            if( maps.length() > 0 )
+            {
+                for( uint i = 0, l = maps.length(); i < l; i++ )
+                {
+                    __EventMapCritterDead.SubscribeToMap( maps[ i ], _BattleMapCritterDead );
+                }
+            }
+        }
+        // Для НПЦ добавляем всех игроков из других команд во врагов
+        Critter cr;
+        for( uint i = 0, l = Teams.length(); i < l; i++ )
+        {
+            for( uint j = 0, k = Teams[ i ].Players.length(); j < k; j++ )
+            {
+                cr = GetCritter( Teams[ i ].Players[ j ] );
+                if( valid( cr ) && cr.IsNpc() )
+                {
+                    for( uint m = 0, n = Teams.length(); m < n; m++ )
+                    {
+                        if( i != m )
+                        {
+                            for( uint x = 0, z = Teams[ m ].Players.length(); x < z; x++ )
+                            {
+                                EnemyStack::AddEnemyToStack( cr,  Teams[ m ].Players[ x ]  );
+                                NpcPlanes::AddAttackPlane( cr, 0, Teams[ m ].Players[ x ] );
+                            }
+                        }
+                        NpcPlanes::AddWalkPlane( cr, Teams[ m ].StartEntire, 5, true );
+                    }
+                    cr.AddTimeEvent( cte_BattleNpcSearchForTarget, REAL_MINUTE( 5 ), 0 );
+                }
+            }
+        }
+    }
+
+    void CheckWinner()
+    {
+        // победитель известен, если число
+        uint activeTeams = 0;
+        for( uint i = 0, l = Teams.length(); i < l; i++ )
+        {
+            if( Teams[ i ].CountAlive() > 0 )
+                activeTeams++;
+        }
+        if( activeTeams == 1 )
+        {
+            for( uint i = 0, l = Teams.length(); i < l; i++ )
+            {
+                if( Teams[ i ].CountAlive() > 0 )
+                {
+                    Teams[ i ].Winner = true;
+                    Teams[ i ].BattlePoints += Teams[ i ].CountAlive();                 // Бонус к очкам за живых членов команды
+                }
+            }
+        }
+        if( activeTeams < 2 )       // может быть ни одного победителя, если все мертвы
+        {
+            Finish();
+        }
+
+    }
+
+    void Finish()
+    {
+        Critter cr;
+        Stage = STAGE_FINISH;
+        Notify();
+        Location loc = GetLocation( LocId );
+        if( valid( loc ) )
+        {
+            Map[] maps = loc.GetMaps();
+            if( maps.length() > 0 )
+            {
+                for( uint i = 0, l = maps.length(); i < l; i++ )
+                {
+                    //maps[ i ].SetEvent( MAP_EVENT_CRITTER_DEAD, "" );
+					__EventMapCritterDead.UnsubscribeFromMap( maps[ i ], _BattleMapCritterDead );
+                }
+            }
+        }
+        for( uint i = 0, l = Teams.length(); i < l; i++ )
+        {
+            for( uint j = 0, k = Teams[ i ].Players.length(); j < k; j++ )
+            {
+                cr = GetCritter( Teams[ i ].Players[ j ] );
+                if( valid( cr ) && cr.IsNpc() )
+                {
+                    // НПЦ возвращаются на домашние позиции, иначе карта не будет удалена да и вообще возможны проблемы
+                    cr.AddTimeEvent( cte_RemoveNpc, REAL_MINUTE( Random( 1, 2 ) ), 0 );
+                }
+            }
+        }
+    }
+
+    BattleTeam GetWinnerTeam()
+    {
+        for( uint i = 0, l = Teams.length(); i < l; i++ )
+        {
+            if( Teams[ i ].Winner )
+                return Teams[ i ];
+        }
+        return null;
+    }
+}
+
+// Вспомогательные функции
+
+// Оповещения
+// Приглашение на участие
+void answer_BattleInvite( Critter player, uint answerI, string answerS )
+{
+    DL( "Answer called. Answ " + answerI );
+    BattleTeam bt = bInfo.GetCritterTeam( player.Id );
+    if( valid( bt ) && bt.LastPeekedRequestId == player.Id )
+    {
+        DL( "team valid" );
+        if( answerI == ANSWER_CONFIRM_INVITE )
+        {
+            DL( "Invite confirmed" );
+            bt.ConfirmInvite();
+            return;
+        }
+        bt.SendTeamInvite();
+    }
+}
+
+// Если по каким то причинам последняя заявка не получила ответа, или игрок слишком долго думает
+void CheckInvite( uint[] values )
+{
+    BattleTeam bt = bInfo.Teams[ values[ 0 ] ];
+    uint        crId = values[ 1 ];
+    if( crId == bt.LastPeekedRequestId )
+        bt.SendTeamInvite();
+}
+
+// Диалоги
+// Проверка стадии
+bool d_IsStage( Critter player, Critter npc, int stage )
+{
+    return bInfo.Stage == uint8( stage );
+}
+
+// Может ли персонаж подать заявку
+bool d_CanRequestBattle( Critter player, Critter npc )
+{
+    return d_IsStage( player, npc, STAGE_PREPARE );
+}
+
+// Игрок в составе любой из команд
+bool d_PlayerRequested( Critter player, Critter npc )
+{
+    return bInfo.HasRequest( player.Id );
+}
+
+// Игрок не в составе
+bool d_PlayerNotRequested( Critter player, Critter npc )
+{
+    return !bInfo.HasRequest( player.Id );
+}
+
+bool d_IsEnemy( Critter player, Critter npc )
+{
+    BattleTeam tPlayer = bInfo.GetCritterTeam( player.Id );
+    BattleTeam tNpc = bInfo.GetCritterTeam( npc.Id );
+
+    return ( bInfo.Stage >= STAGE_BEGIN && bInfo.Stage <= STAGE_FIGHT && valid( tPlayer ) && valid( tNpc ) && tPlayer.StartMapIndex == tNpc.StartMapIndex && tPlayer.Index != tNpc.Index );
+}
+
+bool d_IsFriend( Critter player, Critter npc )
+{
+    BattleTeam tPlayer = bInfo.GetCritterTeam( player.Id );
+    BattleTeam tNpc = bInfo.GetCritterTeam( npc.Id );
+
+    return ( bInfo.Stage >= STAGE_BEGIN && bInfo.Stage <= STAGE_FIGHT && valid( tPlayer ) && valid( tNpc ) && tPlayer.StartMapIndex == tNpc.StartMapIndex && tPlayer.Index == tNpc.Index );
+}
+
+
+// Запись заявки на участие
+// team - индекс команды в поединке, начиная с 0
+void r_SaveRequest( Critter player, Critter npc, int team )
+{
+    bInfo.AddRequest( uint8( team ), player.Id );
+}
+
+// генерация лексем: Количество поданных заявок, за команду и всего
+// число заявок в команде пишется в виде lex team1
+// общее число заявок lex total
+void dlg_TeamCount( Critter player, Critter npc, string lexems )
+{
+    if( !IS_DIALOG_GENERATED( lexems ) )
+        return;
+    lexems = "";
+    uint total = 0;
+    for( uint i = 0, l = bInfo.Teams.length(); i < l; i++ )
+    {
+        lexems = lexems + "$team" + i + bInfo.Teams[ i ].Requests.length();
+        total += bInfo.Teams[ i ].Requests.length();
+    }
+    lexems = lexems + "$total" + total;
+}
+
+uint cte_RemoveNpc( Critter cr, int identifier, uint& rate )
+{
+    if( cr.IsNpc() )
+    {
+        if( cr.HomeMapId != 0 && GetMap( cr.HomeMapId ) !is null )
+        {
+            Obsolete::CritterTransitToMapCoords( cr, cr.HomeMapId, cr.HomeHexX, cr.HomeHexY, cr.HomeDir );
+            return 0;
+        }
+        // домашняя позиция не найдена или карта уже удалена
+        DeleteNpc( cr );
+    }
+    return 0;
+}
+
+uint cte_BattleNpcSearchForTarget( Critter cr, int identifier, uint& rate )
+{
+    if( cr.IsLife() && NpcPlanes::IsNoPlanes( cr ) && valid( bInfo ) )
+    {
+        BattleTeam team = bInfo.GetCritterTeam( cr.Id );
+        if( valid( team ) )
+        {
+            for( uint i = 0, n = bInfo.Teams.length(); i < n; i++ )
+            {
+                if( team.Index != i )
+                {
+                    for( uint x = 0, z = bInfo.Teams[ i ].Players.length(); x < z; x++ )
+                    {
+
+                        EnemyStack::AddEnemyToStack( cr,  bInfo.Teams[ i ].Players[ x ]  );
+                        NpcPlanes::AddAttackPlane( cr, 0, bInfo.Teams[ i ].Players[ x ] );
+                    }
+                }
+                NpcPlanes::AddWalkPlane( cr, bInfo.Teams[ i ].StartEntire, 5, true );
+            }
+        }
+    }
+    return REAL_MINUTE( 1 );
+}
+
+// Предметы
+// Дверь/контейнер, открываемые только в определенную стадию
+// Value1 - указывается минимальный номер этапа, начиная с которого контейнер/дверь будут открыты
+// Value2 - если это значение больше 0, контейнер доступен только для участников сражения
+// Value3 - ели значение больше 0, контейнер доступен только победителям
+#define STR_STAGE_ERROR     ( 7001 )    // Невозможно использовать. Возможно, нужно дождаться следующего этапа сражения.
+#define STR_PLAYER_ERROR    ( 7002 )    // Невозможно использовать. Доступ только для участников сражения.
+#define STR_WINNER_ERROR    ( 7003 )    // Невозможно использовать. Доступ только для победителей.
+void _BattleDoorInit( Item item, bool firstTime )
+{
+    __EventCritterUseSkill.SubscribeToOnItem( item, _UseBattleDoor );
+}
+
+bool _UseBattleDoor( Critter cr, CritterProperty skill, Critter onCritter, Item item, const Item onScenery )
+{
+    if( int(bInfo.Stage) < item.Val1 )
+    {
+        cr.SayMsg( SAY_NETMSG, TEXTMSG_TEXT, STR_STAGE_ERROR );
+        return true;
+    }
+    BattleTeam bt = bInfo.GetCritterTeam( cr.Id );
+    if( item.Val2 > 0 )
+    {
+        if( !valid( bt ) )
+        {
+            cr.SayMsg( SAY_NETMSG, TEXTMSG_TEXT, STR_PLAYER_ERROR );
+            return true;
+        }
+    }
+    if( item.Val3 > 0 )
+    {
+        if( !bt.Winner )
+        {
+            cr.SayMsg( SAY_NETMSG, TEXTMSG_TEXT, STR_WINNER_ERROR );
+            return true;
+        }
+    }
+    return false;
+}
+
+// Карты
+void _BattleMapCritterDead( Map map, Critter cr, Critter killer )
+{
+    // Убитый должен быть членом одной из команд, чтобы убийство пошло в зачет
+    BattleTeam btDead = bInfo.GetCritterTeam( cr.Id );
+    if( valid( bInfo.Callback ) )
+        bInfo.Callback.OnCritterDead( cr, killer );
+    if( !valid( btDead ) )
+        return;
+    if( valid( killer ) )
+    {
+        BattleTeam btKiller = bInfo.GetCritterTeam( killer.Id );
+        if( valid( btKiller ) )
+        {
+            btKiller.BattlePoints += GetPoints( cr, killer );
+            PlayerDeadMessage( cr, killer, map );
+            btKiller.TeamKills++;
+        }
+    }
+    bInfo.CheckWinner();
+}
+
+void _BattleMapCritterIn( Map map, Critter cr )
+{
+    DL( "critter in" );
+    BattleTeam team = bInfo.GetCritterTeam( cr.Id );
+    DL( "stage: " + bInfo.Stage );
+    if( valid( team ) && bInfo.Stage == STAGE_BEGIN )
+    {
+        DL( "get critters" );
+        Critter[] critters = {};
+        Obsolete::GetCritters( map,  0, FIND_ALL | FIND_ONLY_PLAYERS, critters  );
+        for( uint i = 0, l = critters.length(); i < l; i++ )
+        {
+            DL( "messagin" );
+            PlayerJoinedMessage( cr, critters[ i ] );
+        }
+
+    }
+}
+
+// Сообщения
+void PlayerJoinedMessage( Critter cr, Critter crTo )
+{
+    DL( "joined msg" );
+    if( !valid( crTo ) )
+        return;
+    DL( "Check team" );
+    BattleTeam team = bInfo.GetCritterTeam( cr.Id );
+    if( !valid( team ) )
+        return;
+    string lexems = "$baseColor" + COLOR_TEXT;
+    lexems += "$team" + ( team.Index + 1 ) + "$teamColor" + team.Color;
+    lexems += "$name" + _PlayerName( cr );
+    DL( lexems );
+    crTo.SayMsg( SAY_NETMSG, TEXTMSG_TEXT, STR_PLAYER_JOINED, lexems );
+}
+
+void PlayerDeadMessage( Critter crDead, Critter crKiller, Map map )
+{
+    if( !valid( map ) || !valid( crKiller ) )
+        return;
+    BattleTeam teamDead = bInfo.GetCritterTeam( crDead.Id );
+    BattleTeam teamKill = bInfo.GetCritterTeam( crKiller.Id );
+    if( valid( teamDead ) && valid( teamKill ) )
+    {
+        string lexems = "$baseColor" + COLOR_TEXT;
+        lexems += "$team1Color" + teamDead.Color + "$dead" + _PlayerName( crDead );
+        lexems += "$team2Color" + teamKill.Color + "$killer" + _PlayerName( crKiller );
+        Critter[] critters = {};
+        Obsolete::GetCritters( map,  0, FIND_ALL | FIND_ONLY_PLAYERS, critters  );
+        for( uint i = 0, l = critters.length(); i < l; i++ )
+        {
+            Critter cr = critters[ i ];
+            if( valid( cr ) )
+                cr.SayMsg( SAY_NETMSG, TEXTMSG_TEXT, STR_KILL, lexems );
+        }
+        DL( lexems );
+    }
+}
+
+string GetTeamPlayers( BattleTeam team )
+{
+    string teamText = "";
+    if( valid( team ) )
+    {
+        Critter cr;
+        uint     l = bInfo.Stage >= STAGE_BEGIN ? team.Players.length() : team.Requests.length();
+        if( l == 0 )
+        {
+            teamText += "@msg TEXT 7127@";
+        }
+        else
+        {
+            for( uint i = 0; i < l; i++ )
+            {
+                cr = GetCritter( bInfo.Stage >= STAGE_BEGIN ? team.Players[ i ] : team.Requests[ i ] );
+                if( valid( cr ) )
+                {
+                    teamText += _PlayerName( cr ) + " (" + cr.Level + ")";
+                    if( cr.IsDead() )
+                        teamText += "[Dead]";
+                    teamText += "\n";
+                }
+                else
+                {
+                    teamText += Obsolete::GetPlayerName( team.Players[ i ] ) + "[Offline]\n";
+                    // оффлайн персонаж
+                }
+            }
+        }
+    }
+    DL( teamText );
+    return teamText;
+}
+
+int GetPoints( Critter cr, Critter killer )
+{
+    if( !valid( cr ) || !valid( killer ) )
+        return 0;
+    BattleTeam teamCr = bInfo.GetCritterTeam( cr.Id );
+    BattleTeam teamKiller = bInfo.GetCritterTeam( killer.Id );
+    if( !valid( teamCr ) || !valid( teamKiller ) )
+        return -1;
+    int points = 1;
+    if( killer.IsPlayer() )
+        points++;
+    if( cr.IsPlayer() )
+        points++;
+    if( killer.Level <= cr.Level )
+        points += 3;
+    if( cr.Level > 10 )
+        points += 2;
+    if( cr.Level > 20 )
+        points += 3;
+    if( cr.Level > 30 )
+        points += 5;
+    if( killer.Luck > 4 )
+        points++;
+    // Максимум за одного убитого 17 очков
+    // Максимум за бой, если команда убила всех противников
+    // 17*3*6 = 306
+    // Чем меньше участников, чем ниже их уровень, тем ниже шансы получить что-то полезное
+    return ( teamCr.Index == teamKiller.Index ? ( -1 ) * points : points );
+}
+
+void test( Critter crp, int id, int, int )
+{
+    Critter crDead = GetCritter( id );
+    string   lexems = "$baseColor" + COLOR_TEXT;
+    lexems += "$team1Color" + COLOR_RED + "$dead" + _PlayerName( crDead );
+    lexems += "$team2Color" + COLOR_BLUE + "$killer" + _PlayerName( crp );
+    Critter[] critters = {};
+    Obsolete::GetCritters( crp.GetMap(),  0, FIND_ALL | FIND_ONLY_PLAYERS, critters  );
+    for( uint i = 0, l = critters.length(); i < l; i++ )
+    {
+        Critter cr = critters[ i ];
+        if( valid( cr ) )
+            cr.SayMsg( SAY_NETMSG, TEXTMSG_TEXT, STR_KILL, lexems );
+    }
+    DL( lexems );
+}
+
+#pragma property Location PrivateServer uint LastLootTransfer
+
+#define TIME_NEXT_RADIO_STAGE1    ( REAL_MINUTE( 5 ) )
+#define STR_RADIO_STAGE1          ( 7120 )             // Внимание! Открыт набор участников для Испытания в Чистилище. Для того, чтобы подать заявку найдите Экзекутора на входе любого города Пустоши.
+#define STR_KILL                  ( 7121 )             // Мощный электрически разряд из пипбоя отправляет вас на небеса. Правда, вам показалось, что удар был нанесен в шею, откуда-то сзади.
+#define STR_ITEMS                 ( 7122 )
+#define SPAWN_ENTIRE              # (locPid)               ( ( locPid == Content::Location::replication_hell ) ? 242 : 0 )
+#define ENTIRE_NOPVP_FIRST        ( 100 )              // Первый спецгекс нопвп зоны
+#define ENTIRE_NOPVP_LAST         ( 103 )              // Первый спецгекс нопвп зоны
+#define CTE_NOPVP_OFF             ( 42 )               // Идентификатор события "очистить нопвп режим"
+#define TIME_CHECK                ( REAL_MINUTE( 1 ) ) // Время проверки, не вышел ли игрок с нопвп зоны
+#define PURGATORY_WORLD_X         ( 800 )
+#define PURGATORY_WORLD_Y         ( 500 )
+#define ENTIRE_TEAM_1             ( 33 )
+#define ENTIRE_TEAM_2             ( 34 )
+#define ENTIRE_TEAM_3             ( 35 )
+#define ENTIRE_TEAM_4             ( 36 )
+
+#define _RndCont                  # (containers) ( containers[ Random( 0, containers.length() - 1 ) ] )
+
+////import uint   GetEventOccurenceTime0( uint idx ) from "GameEvent";
+////import string DateTimeToString0( uint gameTime ) from "Time";
+
+BattleInfo bInfo;
+
+uint        TeamContainerId; // код контейнера для игроков в составе команды
+
+// Обработчики смены состояний и инвайта
+
+class PurgatoryStageChangedHandler : IBattleInfoStageChangedHandler, IBattleInfoCallBack
+{
+    void OnStageChanged( uint8 stage )
+    {
+        if( bInfo.Stage == STAGE_FIGHT )
+        {
+            RadioMessageMsg( 0, TEXTMSG_TEXT, 7132 );
+            Location loc = GetLocationByPid( Content::Location::hub_purgatory, 0 );
+            if( valid( loc ) )
+            {
+                Map map = loc.GetMapByIndex( 0 );
+                if( valid( map ) )
+                {
+                    __EventMapLoop1.SubscribeToMap( map, _PurgatoryLoop );
+                    map.LoopTime1 =  25000 ;                    // Раз в 25 секунд
+                    Critter[] players = {};
+                    Obsolete::GetCritters( map,  0, FIND_ALL | FIND_ONLY_PLAYERS, players  );
+                    for( uint i = 0, l = players.length(); i < l; i++ )
+                    {
+                        players[ i ].SayMsg( SAY_NETMSG, TEXTMSG_TEXT, 7132 );
+                    }
+                }
+            }
+            return;
+        }
+        if( bInfo.Stage == STAGE_FINISH )
+        {
+            // Завершение испытания
+            Location loc = GetLocationByPid( Content::Location::hub_purgatory, 0 );
+            if( valid( loc ) )
+            {
+                loc.Hidden = true;
+                loc.AutoGarbage = true;
+                SavedDeferredCall( MINUTE_TICKS( 20 ), DeletePurgatory, loc.Id );
+            }
+            BattleTeam winners = bInfo.GetWinnerTeam();
+            if( valid( winners ) )
+            {
+                Critter[] players = {};
+                Map mapInfo = loc.GetMapByIndex( 0 );
+                Obsolete::GetCritters( mapInfo,  0, FIND_ALL | FIND_ONLY_PLAYERS, players  );
+                for( uint i = 0, l = players.length(); i < l; i++ )
+                {
+                    Critter player = players[ i ];
+                    if( valid( player ) )
+                        player.SayMsg( SAY_NETMSG, TEXTMSG_TEXT, 7131, "$team" + ( winners.Index + 1 ) );
+                }
+                int  points = winners.BattlePoints;
+                int  alive = winners.CountAlive();
+                Map map = loc.GetMapByIndex( 1 );
+                Item[] containers = {};
+                Item[] prizeContainers = {};
+                if( Obsolete::GetItemsByType( map,  ItemType::Container, containers  ) > 0 )
+                {
+                    for( uint i = 0, l = containers.length(); i < l; i++ )
+                    {
+                        if( containers[ i ].Val0 != 0 )
+                            prizeContainers.insertLast( containers[ i ] );
+                    }
+                    if( prizeContainers.length() > 0 && points > 0 )
+                    {
+                        // Раздача призов
+                        // Сначала обязательные призы
+                        for( int i = 0; i < alive; i++ )
+                        {
+                            _RndCont( prizeContainers ).AddItem( Content::Item::bottle_caps, points * 50, 0 );
+                            _RndCont( prizeContainers ).AddItem( Content::Item::metal_armor_mk_ii, 1, 0 );
+                            _RndCont( prizeContainers ).AddItem( Content::Item::_223_pistol, 1, 0 );
+                            _RndCont( prizeContainers ).AddItem( Content::Item::_223_fmj, points * 2, 0 );
+                            _RndCont( prizeContainers ).AddItem( Content::Item::stimpak, 5, 0 );
+                        }
+                        uint rnd = Random( 1, 3 );
+                        // ПА
+                        if( points > 200 && rnd == 1 )
+                        {
+                            _RndCont( prizeContainers ).AddItem( Content::Item::powered_armor, 1, 0 );
+                            points -= 50;
+                        }
+                        if( points > 200 )
+                        {
+                            _RndCont( prizeContainers ).AddItem( Content::Item::cats_paw_issue_5, 2, 0 );
+                        }
+                        if( points > 200 )
+                        {
+                            if( rnd == 1 )
+                            {
+                                _RndCont( prizeContainers ).AddItem( Content::Item::m72_gauss_rifle, Random( 1, 2 ), 0 );
+                                _RndCont( prizeContainers ).AddItem( Content::Item::_2mm_ec_ammo, Random( 333, 444 ), 0 );
+                            }
+                            if( rnd == 2 )
+                            {
+                                _RndCont( prizeContainers ).AddItem( Content::Item::vindicator_minigun, Random( 1, 2 ), 0 );
+                                _RndCont( prizeContainers ).AddItem( Content::Item::_4_7mm_caseless, Random( 4000, 6000 ), 0 );
+                            }
+                            if( rnd == 3 )
+                            {
+                                _RndCont( prizeContainers ).AddItem( Content::Item::yk42b_pulse_rifle, Random( 1, 2 ), 0 );
+                                _RndCont( prizeContainers ).AddItem( Content::Item::turbo_plasma_rifle, Random( 1, 2 ), 0 );
+                                _RndCont( prizeContainers ).AddItem( Content::Item::micro_fusion_cell, Random( 200, 300 ), 0 );
+                            }
+                            points -= 50;
+                        }
+                        if( points > 150 )
+                        {
+                            for( int i = 0; i < alive; i++ )
+                            {
+                                _RndCont( prizeContainers ).AddItem( Content::Item::combat_armor, 1, 0 );
+                                _RndCont( prizeContainers ).AddItem( Content::Item::fn_fal_hpfa, 1, 0 );
+                                _RndCont( prizeContainers ).AddItem( Content::Item::avenger_minigun, 1, 0 );
+                                _RndCont( prizeContainers ).AddItem( Content::Item::_5mm_jhp, 500, 0 );
+                            }
+                            points -= 50;
+                        }
+                        if( points > 100 )
+                        {
+                            _RndCont( prizeContainers ).AddItem( Content::Item::super_stimpak, 4 * alive, 0 );
+                            _RndCont( prizeContainers ).AddItem( Content::Item::psycho, 5 * alive, 0 );
+                            _RndCont( prizeContainers ).AddItem( Content::Item::hypo, 2 * alive, 0 );
+                            points -= 50;
+                        }
+                        if( points > 50 )
+                        {
+                            _RndCont( prizeContainers ).AddItem( Content::Item::super_stimpak, 5 * alive, 0 );
+                            _RndCont( prizeContainers ).AddItem( Content::Item::buffout, 2 * alive, 0 );
+                            _RndCont( prizeContainers ).AddItem( Content::Item::jet, 2 * alive, 0 );
+                            _RndCont( prizeContainers ).AddItem( Content::Item::big_book_of_science, 2, 0 );
+                            _RndCont( prizeContainers ).AddItem( Content::Item::first_aid_book, 2, 0 );
+                            _RndCont( prizeContainers ).AddItem( Content::Item::scout_handbook, 2, 0 );
+                            _RndCont( prizeContainers ).AddItem( Content::Item::guns_and_bullets, 2, 0 );
+                        }
+                    }
+                }
+
+            }
+
+        }
+    }
+
+    void OnCritterDead( Critter dead, Critter killer )
+    {
+        BattleTeam btDead = bInfo.GetCritterTeam( dead.Id );
+        BattleTeam btKiller = bInfo.GetCritterTeam( killer.Id );
+        if( valid( btKiller ) && valid( btDead ) && killer.IsPlayer() )
+        {
+            if( btKiller.Index == btDead.Index )
+            {
+                killer.ReplicationMoney -= 1000;
+                killer.SayMsg( SAY_NETMSG, TEXTMSG_TEXT, 7129 );
+            }
+            else
+            {
+                uint xp = killer.Level * 100;
+                killer.ReplicationMoney += 300;
+                killer.Experience += xp;
+                killer.SayMsg( SAY_NETMSG, TEXTMSG_TEXT, 7130, "$xp" + xp );
+            }
+        }
+    }
+}
+
+bool NeedReplicateCritterToBattle( Critter cr )
+{
+    DL( "replication called" );
+    if( valid( bInfo ) && cr.NextReplicationMap != 0 && cr.NextReplicationEntire != 0 )
+    {
+        BattleTeam team = bInfo.GetCritterTeam( cr.Id );
+        if( valid( team ) && bInfo.Stage == STAGE_BEGIN )
+        {
+            if( team.StartMapIndex == cr.NextReplicationMap && team.StartEntire == cr.NextReplicationEntire )
+            {
+                cr.ReplicationMoney += cr.ReplicationCost;
+                cr.ReplicationCount -= 1;
+                return true;
+            }
+        }
+    }
+    DL( "false" );
+    return false;
+}
+
+class PurgatoryInviteCallback : IBattleTeamInviteCallback
+{
+    void OnInvite( Critter cr, bool transit, BattleTeam team )
+    {
+        if( valid( cr ) && cr.IsNpc() )
+            return;
+        Item[] items = {};
+        Item container;
+        if( TeamContainerId > 0 )
+            container = GetItem( TeamContainerId );
+        if( !valid( cr ) )
+            return;
+        if( valid( container ) )
+            if( Obsolete::GetItems( cr, -1, items ) > 0 )
+            {
+                MoveItems( items, container, cr.Id );
+            }
+        CritterState::ToDead( cr, Anim2Actions::DeadPulseDust, null  );
+        cr.SayMsg( SAY_NETMSG, TEXTMSG_TEXT, STR_KILL );
+        cr.SayMsg( SAY_NETMSG, TEXTMSG_TEXT, STR_ITEMS );
+        if( valid( team ) )
+        {
+            cr.NextReplicationMap = team.StartMapIndex;
+            cr.NextReplicationEntire = team.StartEntire;
+        }
+        transit = false;
+    }
+
+    void OnTransit( Critter cr )
+    {
+        // не требуется
+    }
+}
+
+PurgatoryStageChangedHandler stageHandler;
+PurgatoryInviteCallback      inviteCallback;
+
+void RunPreparationStage()
+{
+Log("purg RunPreparationStage" );
+    bInfo = BattleInfo();
+    bInfo.SetStageHandler( stageHandler );
+    bInfo.SetCallBack( stageHandler );
+    Location loc = GetLocationByPid( Content::Location::hub_purgatory, 0 );
+    if( valid( loc ) )
+    {
+        loc.Hidden = true;
+        loc.AutoGarbage = true;
+    }
+
+    loc = CreateLocation( Content::Location::hub_purgatory, PURGATORY_WORLD_X, PURGATORY_WORLD_Y, null );
+    if( !valid( loc ) )
+        return;
+
+    bInfo.LocId = loc.Id;
+    Map map = loc.GetMapByIndex( 0 );
+    bInfo.AddTeam( ENTIRE_TEAM_1, map.Id, COLOR_SAND, inviteCallback );
+    bInfo.AddTeam( ENTIRE_TEAM_2, map.Id, COLOR_LBLUE, inviteCallback );
+    bInfo.AddTeam( ENTIRE_TEAM_3, map.Id, COLOR_LRED, inviteCallback );
+    bInfo.AddTeam( ENTIRE_TEAM_4, map.Id, COLOR_GREEN_RED, inviteCallback );
+    bInfo.PrepareBattle();
+    uint16 x = 0;
+    uint16 y = 0;
+
+    // Расстановка нпц-нанимателей
+    for( uint i = Content::Location::den; i < = Content::Location::replication_hell; i++ )
+    {
+        if( LOCATION_IS_CITY( i ) || i == Content::Location::replication_hell )
+        {
+            loc = GetLocationByPid( i, 0 );
+            if( !valid( loc ) )
+                continue;
+
+            map = loc.GetMapByIndex( 0 );
+            if( !valid( map ) )
+                continue;
+
+            if( Entire::GetNearEntire( map, SPAWN_ENTIRE( i ), x, y ) )
+            {
+                int[] props =
+                {
+                    CritterProperty::DialogId, Content::Dialog::purg_executor, CritterProperty::TeamId, Teams::Slaver,
+                    CritterProperty::AiId, Fallout2AIPackets::BountyHunter, CritterProperty::BagId, Bags::NavarroEnclavePatrolMale2,
+                    CritterProperty::Level, 50, CritterProperty::IsNoLoot, 1, CritterProperty::IsNoKnock, 1,
+                    CritterProperty::IsNoLooseLimbs, 1, CritterProperty::IsNoEnemyStack, 1, CritterProperty::IsNoSteal, 1,
+                    CritterProperty::IsUnlimitedAmmo, 1, CritterProperty::PerkTerminator, 1, CritterProperty::PerkLivingAnatomy, 1,
+                    CritterProperty::PerkBetterCriticals, 1, CritterProperty::PerkBonusRateOfFire, 1, CritterProperty::ActionPoints, 30,
+                    CritterProperty::SkillEnergyWeapons, 300, CritterProperty::StrengthBase, 10, CritterProperty::EnduranceBase, 10,
+                    CritterProperty::PerkSniper, 1, CritterProperty::CriticalChanceBase, 100, CritterProperty::NormalResistanceBase, 200,
+                    CritterProperty::LaserResistanceBase, 200, CritterProperty::FireResistanceBase, 200, CritterProperty::PlasmaResistanceBase, 200,
+                    CritterProperty::ExplodeResistanceBase, 200, CritterProperty::MaxLifeBase, 1000, CritterProperty::CurrentHp, 1500
+                };
+                Critter npc = map.AddNpc( Content::Critter::ElronologistMale, x, y, Random( 0, 5 ), TlaExtended::GetCritPropsDict(props));
+				npc.SetScript ( _RiperInit );
+                DL( "Location pid" + i + " executor placed" );
+            }
+        }
+    }
+    SavedDeferredCall( 0, RadioPurgatory1 );
+}
+
+void RadioPurgatory1()
+{
+    if( valid( bInfo ) && bInfo.Stage == STAGE_PREPARE )
+    {
+        RadioMessageMsg( 0, TEXTMSG_TEXT, STR_RADIO_STAGE1 );
+        SavedDeferredCall( GAME_SECOND_TO_TICK( TIME_NEXT_RADIO_STAGE1 ), RadioPurgatory1 );
+    }
+}
+
+// экзекуторы
+
+void _RiperInit( Critter cr, bool firstTime )
+{
+    cr.CurrentHp = cr.MaxLife;
+    cr.AddTimeEvent( cte_RipperShout, REAL_MINUTE( 5 ), 0 );
+    __EventCritterIdle.SubscribeToCritter( cr, _RiperIdle );
+}
+
+uint cte_RipperShout( Critter cr, int identifier, uint& rate )
+{
+    if( valid( bInfo ) && bInfo.Stage == STAGE_PREPARE )
+    {
+        cr.SayMsg( SAY_SHOUT, TEXTMSG_DLG, DLGSTR( cr.DialogId, 1 ) );
+        return REAL_MINUTE( 9 );
+    }
+    return 0;
+}
+
+void _RiperIdle( Critter cr )
+{
+    cr.CurrentHp = cr.MaxLife;
+}
+
+// второй этап: перемещение игроков к бою
+
+void RunBeginStage()
+{
+    Critter[] critters = {};
+    Critter  cr;
+    Location loc;
+    Map      map;
+    // Добавление в участники каждой команды по одному нпц из хранилища
+    // Чтобы бой состоялся, даже есть только один игрок
+    map = GetMapByPid( Content::Map::purgatory3, 0 );
+    if( valid( map ) )
+        Obsolete::GetCritters( map,  0, FIND_LIFE | FIND_ONLY_NPC, critters  );
+    for( uint i = 0; i < 4 && i < critters.length(); i++ )
+        bInfo.AddRequest( i, critters[ i ].Id );
+
+    bInfo.BeginBattle();
+
+    critters.clear();
+    // Удаление экзекуторов
+    for( uint i = Content::Location::den; i < = Content::Location::replication_hell; i++ )
+    {
+        if( LOCATION_IS_CITY( i ) || i == Content::Location::replication_hell )
+        {
+            loc = GetLocationByPid( i, 0 );
+            if( valid( loc ) )
+            {
+                map = loc.GetMapByIndex( 0 );
+                if( valid( map ) )
+                    Obsolete::GetCritters( map,  Content::Critter::ElronologistMale, FIND_ALL | FIND_ONLY_NPC, critters  );
+            }
+        }
+    }
+    for( uint i = 0, l = critters.length(); i < l; i++ )
+    {
+        cr = critters[ i ];
+        if( valid( cr ) && cr.DialogId == Content::Dialog::purg_executor )
+            DeleteNpc( cr );
+    }
+}
+
+// третий этап: начало боя
+void RunFightStage()
+{
+    bInfo.Fight();
+}
+
+// четвертый этап: завершение боя после того, как истекло время
+void RunEndStage()
+{
+    if( bInfo.Stage == STAGE_FIGHT )
+        bInfo.Finish();
+}
+
+// Карты чистилища
+void _PurgatoryInit( Map map, bool firstTime )
+{
+    __EventMapCritterIn.SubscribeToMap( map, _PurgatoryMapIn );
+    __EventMapCritterOutEx.SubscribeToMap( map, _PurgatoryMapOut );
+}
+
+void _PurgatoryMapIn( Map map, Critter cr )
+{
+    cr.IsNoPvp = false;
+    if( cr.IsPlayer() && Entire::IsCritterInDeadZone( cr, map, 0, ENTIRE_NOPVP_FIRST, ENTIRE_NOPVP_LAST ) )
+    {
+        cr.IsNoPvp = true;
+        cr.SayMsg( SAY_NETMSG, TEXTMSG_TEXT, 1 );
+        if( cr.GetTimeEvents( CTE_NOPVP_OFF, null, null, null ) == 0 )
+        {
+            cr.AddTimeEvent( cte_NoPvpOff, TIME_CHECK, CTE_NOPVP_OFF );
+        }
+    }
+}
+
+void _PurgatoryMapOut( Map map, Critter cr )
+{
+    Map mapCr = cr.GetMap();
+    if( valid( mapCr ) && Entire::IsCritterInDeadZone( cr, map, 0, ENTIRE_NOPVP_FIRST, ENTIRE_NOPVP_LAST ) )
+        return;
+    cr.IsNoPvp = false;
+    cr.SayMsg( SAY_NETMSG, TEXTMSG_TEXT, 2 );
+    _BattleMapCritterIn( map, cr );
+}
+
+uint cte_NoPvpOff( Critter cr, int identifier, uint& rate )
+{
+    if( !cr.IsNoPvp )
+        return 0;
+    Map map = cr.GetMap();
+    if( valid( map ) && Entire::IsCritterInDeadZone( cr, map, 0, ENTIRE_NOPVP_FIRST, ENTIRE_NOPVP_LAST ) )
+        return TIME_CHECK;
+    cr.IsNoPvp = false;
+    cr.SayMsg( SAY_NETMSG, TEXTMSG_TEXT, 2 );
+    return 0;
+}
+
+void _GateKeeperInit( Critter cr, bool firstTime )
+{
+    cr.IsInvulnerable = true;
+}
+
+void dlg_WhenBegin( Critter cr, Critter npc, string lexems )
+{
+    if( !IS_DIALOG_GENERATED( lexems ) )
+        return;
+    lexems = "$time" + Time::DateTimeToString( GameEvent::GetEventOccurenceTime( 8 ) );
+}
+
+void dlg_CountPlayers( Critter player, Critter npc, string lexems )
+{
+    if( !IS_DIALOG_GENERATED( lexems ) )
+        return;
+    uint     total = 0;
+    uint     alive = 0;
+    Critter cr;
+    for( uint i = 0, l = bInfo.Teams.length(); i < l; i++ )
+    {
+        alive += bInfo.Teams[ i ].CountAlive();
+        total += bInfo.Stage >= STAGE_BEGIN ? bInfo.Teams[ i ].Players.length() : bInfo.Teams[ i ].Requests.length();
+    }
+    lexems = "$total" + total + "$alive" + alive;
+}
+
+void dlg_Team1( Critter player, Critter npc, string lexems )
+{
+    if( !IS_DIALOG_GENERATED( lexems ) )
+        return;
+    lexems = "$players" + GetTeamPlayers( bInfo.Teams[ 0 ] );
+}
+
+void dlg_Team2( Critter player, Critter npc, string lexems )
+{
+    if( !IS_DIALOG_GENERATED( lexems ) )
+        return;
+    lexems = "$players" + GetTeamPlayers( bInfo.Teams[ 1 ] );
+}
+
+void dlg_Team3( Critter player, Critter npc, string lexems )
+{
+    if( !IS_DIALOG_GENERATED( lexems ) )
+        return;
+    lexems = "$players" + GetTeamPlayers( bInfo.Teams[ 2 ] );
+}
+
+void dlg_Team4( Critter player, Critter npc, string lexems )
+{
+    if( !IS_DIALOG_GENERATED( lexems ) )
+        return;
+    lexems = "$players" + GetTeamPlayers( bInfo.Teams[ 3 ] );
+}
+
+// Генерация итемов в ящиках
+// На третьей карте Чистилища стоят ящики с лутом
+// периодически совершается попытка переместить из одного из ящиков содержимое на территорию бг
+void _PurgatoryLoop( Map map )
+{
+    if( valid( bInfo ) && bInfo.Stage == STAGE_FIGHT )
+    {
+        Location loc = map.GetLocation();
+        if( valid( loc ) )
+        {
+            if( __FullSecond >= loc.LastLootTransfer + REAL_MINUTE( 1 ) )
+            {
+                loc.LastLootTransfer = __FullSecond;
+                Map mapFrom = loc.GetMapByIndex( 2 );
+                if( valid( mapFrom ) )
+                {
+                    Item[] containersFrom = {};
+                    Item[] containersTo = {};
+                    Obsolete::GetItemsByType( map,  ItemType::Container, containersTo  );
+                    Obsolete::GetItemsByType( mapFrom,  ItemType::Container, containersFrom  );
+                    if( containersFrom.length() > 0 && containersTo.length() > 0 )
+                    {
+                        Item[] items = {};
+                        Item contFrom = containersFrom[ Random( 0, containersFrom.length() - 1 ) ];
+                        if( valid( contFrom ) && Obsolete::GetItems( contFrom, 0, items ) > 0 )
+                        {
+                            Item contTo = containersTo[ Random( 0, containersTo.length() - 1 ) ];
+                            if( valid( contTo ) )
+                            {
+                                DL( "Moving " + items.length() + " items to container at x:" + contTo.HexX + "; y:" + contTo.HexY );
+                                MoveItems( items, contTo, 0 );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// Удаление локации после того, как время истекло
+void DeletePurgatory( uint value )
+{
+    Location loc = GetLocation( value );
+    if( valid( loc ) )
+    {
+        Map map;
+        Critter[] critters = {};
+        for( uint i = 0; i < 3; i++ )
+        {
+            map = loc.GetMapByIndex( i );
+            Obsolete::GetCritters( map,  0, FIND_ALL | FIND_ONLY_PLAYERS, critters  );
+        }
+        for( uint i = 0, l = critters.length(); i < l; i++ )
+        {
+            critters[ i ].SayMsg( SAY_NETMSG, TEXTMSG_TEXT, 7128 );
+        }
+        DeleteLocation( loc.Id );
+    }
+}

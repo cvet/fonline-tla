@@ -1,1 +1,1 @@
-svn co https://xp-dev.com/svn/fonline_sdk@828 FOnlineSDK
+svn co https://svn.fonline.ru/sdk/@832 FOnlineSDK

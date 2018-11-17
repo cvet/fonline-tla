@@ -5,6 +5,7 @@ void ModuleInit()
 	__EventStart.Subscribe( start );
     __EventFinish.Subscribe( finish );
     __EventLoop.Subscribe( loop );
+    __EventMouseMove.Subscribe( mouse_move );
     __EventGetActiveScreens.Subscribe( get_active_screens );
     __EventScreenChange.Subscribe( screen_change );
     __EventRenderIface.Subscribe( render_iface );
@@ -33,7 +34,7 @@ void ModuleInit()
 bool start()
 {
     Config::InitializeGame();
-Message("TEST START ");
+	
     if( __ScreenWidth < 800 || __ScreenWidth > 1280 || __ScreenHeight < 600 || __ScreenHeight > 1024 )
     {
         // Recomendation message
@@ -75,11 +76,52 @@ void finish()
     //
 }
 
+
+uint MouseStayTick = 0;
 // //////////////////////////////////////////////////////////////////////////////////////////////////
 // Main loop function. Next call every cycle.
 void loop()//(uint& wait)
 {
     Gui::EngineCallback_Loop();
+	
+	if( __Cursor != CursorType::Default )
+        return;
+
+    if( GetTick() - 1200 >= MouseStayTick && MouseStayTick != 0 )
+    {
+        MouseStayTick = 0;
+        Gui::Screen screen = Gui::GetActiveScreen();
+        if( screen == null )
+            return;
+
+        Item        item;
+        Critter     cr;
+
+        Gui::Object hoveredObj = screen.FindMouseHit();
+        if( hoveredObj != null )
+        {
+            if( hoveredObj.Grid != null && cast< Gui::ItemView >( hoveredObj.Grid ) != null )
+                item = cast< Gui::ItemView >( hoveredObj.Grid ).GetItem( hoveredObj.CellIndex );
+        }
+        else if( !screen.IsModal )
+        {
+            Entity entity = GetMonitorEntity( __MouseX, __MouseY );
+            item = cast< Item >( entity );
+            cr = cast< Critter >( entity );
+        }
+        if( item != null )
+            Message( item_description( item, ItemLookTypes::OnlyName ) );
+        else if( cr != null )
+            Message( critter_description( cr, CritterLookTypes::LookShort ) );
+    }
+}
+
+void mouse_move( int offsetX, int offsetY )
+{
+    if( __Cursor == CursorType::Default )
+        MouseStayTick = GetTick();
+    else
+        MouseStayTick = 0;
 }
 
 // //////////////////////////////////////////////////////////////////////////////////////////////////
@@ -816,7 +858,7 @@ string generic_description( int descType, int& offsX, int& offsY )
         result += GetMsgStr( TEXTMSG_GAME, STR_INV_SHORT_SPECIAL( CritterProperty::Luck ) )       + "\n";
         result += "---------------------\n";
 
-        Item@ weaponMain = chosen.GetItemBySlot( SLOT_HAND1 );
+        const Item@ weaponMain = Obsolete::GetConstItemBySlot( chosen, SLOT_HAND1  );
         if( valid( weaponMain ) )
         {
             int use = _WeaponModeUse( weaponMain.Mode );
@@ -870,7 +912,7 @@ string generic_description( int descType, int& offsX, int& offsY )
         }
         result += "---------------------\n";
 
-        Item@ weaponExt = chosen.GetItemBySlot( SLOT_HAND2 );
+        const Item@ weaponExt = Obsolete::GetConstItemBySlot( chosen, SLOT_HAND2  );
         if( valid( weaponExt ) )
         {
             int use = _WeaponModeUse( weaponExt.Mode );
@@ -970,7 +1012,7 @@ string generic_description( int descType, int& offsX, int& offsY )
 
 // //////////////////////////////////////////////////////////////////////////////////////////////////
 // Item description. Look types look in _client_defines.fos, Item look types.
-string item_description( Item item, int lookType )
+string item_description( Item item, ItemLookTypes lookType )
 {
     // Default error text
     if( not IsMsgStr( TEXTMSG_ITEM, STR_ITEM_NAME( item ) + ( lookType != ItemLookTypes::OnlyName ? 1 : 0 ) ) )
@@ -1067,10 +1109,10 @@ string item_description( Item item, int lookType )
 
 // //////////////////////////////////////////////////////////////////////////////////////////////////
 // Critter description. Look types look in _client_defines.fos, Critter look types.
-string critter_description( Critter& cr, int lookType )
+string critter_description( Critter& cr, CritterLookTypes lookType )
 {
     string result;
-    int    gender = cr.Gender;
+    int gender = cr.Gender;
 
     // Player
     if( cr.IsPlayer() )
@@ -1171,7 +1213,7 @@ string critter_description( Critter& cr, int lookType )
             result = ReplaceText( result, "CUR", cr.CurrentHp );
             result = ReplaceText( result, "MAX", cr.MaxLife );
 
-            Item@ item = cr.GetItemBySlot( SLOT_HAND1 );
+            const Item@ item = Obsolete::GetConstItemBySlot( cr, SLOT_HAND1  );
             if( _CritIsInjured( cr ) )
             {
                 if( valid( item ) )

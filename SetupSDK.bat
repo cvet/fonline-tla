@@ -1,1 +1,1 @@
-svn co https://svn.fonline.ru/sdk/@832 FOnlineSDK
+svn co https://svn.fonline.ru/sdk/@840 FOnlineSDK

@@ -1,12 +1,12 @@
-// FOS Client
+// FOS Server Client
+#pragma rpc Server PickItem( uint16 hx, uint16 hy, hash pid )
+#pragma property Critter PrivateCommon uint ApRegenerationTick Temporary Default=0
+#pragma property Critter Protected uint ApRegenerationTime Default=0
 
 //#pragma rpc Server UseSneak( bool enable )
-
-//#include "Tla"
-
+#ifdef __CLIENT
 uint[] ChosenActions = {};
 uint8[] MovePath = {};
-
 
 void ModuleInit()
 {
@@ -23,11 +23,10 @@ uint GetChosenActions( array< uint > actions )
 void SetChosenActions( array< uint >@ actions )
 {
     ChosenActions.resize( 0 );
-
     if( actions !is null )
     {
         Assert( actions.length() % 7 == 0 );
-        ChosenActions = actions;
+        ChosenActions = actions.clone();
     }
 }
 
@@ -37,7 +36,6 @@ void SetAction( uint[] action, bool append, bool toBeginning )
 
     if( !append )
         ChosenActions.resize( 0 );
-
     if( toBeginning )
     {
         for( int i = int( action.length() ) - 1; i >= 0; i-- )
@@ -54,7 +52,7 @@ void SetAction( uint[] action, bool append, bool toBeginning )
     # ( needAp )                                                  \
     if( chosen.ActionPoints < int(needAp) )                       \
     {                                                             \
-        /* Message( GetMsgStr( MsgStr::StrCombatNeedAp, needAp ) ); */ \
+        Message( ReplaceText( GetMsgStr( TEXTMSG_COMBAT, MsgStr::StrCombatNeedAp), "%d", needAp ) );  \
         break;                                                    \
     }                                                             \
     if( chosen.CurrentAp / AP_DIVIDER < int(needAp) )             \
@@ -65,7 +63,6 @@ void ChosenProcess()
     Critter  chosen = GetChosen();
     if( chosen is null )
         return;
-
     if( CurMap !is null )
     {
         // Roof
@@ -82,7 +79,7 @@ void ChosenProcess()
     // Game pause
     // if( __Singleplayer && __GamePaused )
     //    return;
-	/*
+	
     // Ap regeneration
     if( chosen.CurrentAp < chosen.ActionPoints * AP_DIVIDER )
     {
@@ -90,7 +87,7 @@ void ChosenProcess()
         if( chosen.ApRegenerationTick == 0 )
             chosen.ApRegenerationTick = tick;
 
-        uint delta = tick - chosen.ApRegenerationTick;
+        int delta = tick - chosen.ApRegenerationTick;
         if( delta >= 500 )
         {
             chosen.ApRegenerationTick = tick;
@@ -103,25 +100,23 @@ void ChosenProcess()
             chosen.CurrentAp = chosen.CurrentAp + maxAp * delta / apRegeneration;
             if( chosen.CurrentAp > int(maxAp) )
                 chosen.CurrentAp = maxAp;
+				Log("NEW CURREMNT AP:" + chosen.CurrentAp);
         }
     }
 
     if( chosen.CurrentAp / AP_DIVIDER > chosen.ActionPoints )
         chosen.CurrentAp = chosen.ActionPoints * AP_DIVIDER;
-	*/
     if( ChosenActions.length() == 0 )
         return;
-
     if( !chosen.IsLife() )
     {
         ChosenActions.clear();
         return;
     }
 
-    uint[] curAction = ChosenActions;
-    curAction.resize( 7 );
+    uint[] curAction = ChosenActions.clone();
+    curAction.resize( 7 );	
     int actionType = curAction[ 0 ];
-
     // Force end move
     if( actionType != TlaExtended::ChosenMove && actionType != TlaExtended::ChosenMoveToCrit && MovePath.length() > 0 )
     {
@@ -684,6 +679,7 @@ void ChosenProcess()
         hash   pid = ChosenActions[ 1 ];
         uint16 hx = ChosenActions[ 2 ];
         uint16 hy = ChosenActions[ 3 ];
+		uint itemId = ChosenActions[ 4 ];
 
         if( CurMap is null )
             break;
@@ -693,13 +689,14 @@ void ChosenProcess()
         if( dist > useDist )
         {
            bool   isRun = false; //814 ( __AlwaysRun && dist >= __AlwaysRunUseDist );
-            SetAction( array< uint > = { TlaExtended::ChosenMove, hx, hy, isRun ? 1 : 0, useDist, 0, 1 }, false, false );
+           SetAction( array< uint > = { TlaExtended::ChosenMove, hx, hy, isRun ? 1 : 0, useDist, 0, 1 }, false, false );
+
             // if( HexMngr.CutPath( chosen, chosen.HexX, chosen.HexY, hx, hy, useDist ) )
             //    SetAction( curAction, true, false );
-            SetAction( curAction, true, false );
+			//if( GetPathLength( chosen, hx, hy, useDist ) > 0 )
+                SetAction( array< uint > = { TlaExtended::ChosenPickItem, pid, hx, hy, 0, 0, 0 }, true, false );
             return;
         }
-
         uint apCost = __RtApCostPickItem;
         CHECK_NEED_AP( apCost );
 
@@ -708,7 +705,17 @@ void ChosenProcess()
         if( GetDistantion( chosen.HexX, chosen.HexY, hx, hy ) >= 1 && chosen.Dir != dir )
             CustomCall( "ChangeDir " + dir );
 
-        CustomCall( "PickItem " + apCost + " " + pid + " " + hx + " " + hy );
+        chosen.CurrentAp = chosen.CurrentAp - apCost*AP_DIVIDER;
+		// CustomCall( "PickItem " + apCost + " " + pid + " " + hx + " " + hy );
+        ServerRpc.PickItem( hx, hy, pid );
+		
+		if(itemId > 0 )
+		{
+			Item item = GetItem(itemId);
+			if(item != null)
+				__EventCritterAction.Raise( true, chosen, ACTION_PICK_ITEM, 0, item );
+		}
+		Log("Current ap after pick item:" + chosen.CurrentAp );
     }
     break;
     case TlaExtended::ChosenPickCrit:
@@ -776,3 +783,76 @@ void UseSneak( Critter client, bool enable )
     client.IsHide = !client.IsHide;
     client.Wait( __Breaktime );
 }*/
+
+#endif
+#ifdef __SERVER
+
+#pragma event "EventCritterPickItem( Critter critter, Item item )"
+#pragma event "EventCritterPickScenery( Critter critter, const Item scenery )"
+
+void PickItem( Critter cr, uint16 hx, uint16 hy, hash pid )
+{
+   // Spend ap
+    if( !ProcessAp( cr, __RtApCostPickItem ) )
+        return;
+
+    if( !cr.IsLife() )
+        ThrowException( "Critter is not alive", cr );
+    if( GetDistantion( cr.HexX, cr.HexY, hx, hy ) > 1 + cr.Multihex )
+        ThrowException( "Target too far", cr, cr.HexX, cr.HexY, hx, hy );
+
+    Map map = cr.GetMap();
+    if( map == null )
+        ThrowException( "Critter is on global map", cr );
+    if( hx >= map.Width || hy >= map.Height )
+        ThrowException( "Invalid hex position", cr, hx, hy );
+
+    const Item proto = GetProtoItem( pid );
+    if( proto == null )
+        ThrowException( "Invalid pid", cr, pid );
+
+    if( !proto.IsScenery && !proto.IsWall )
+    {
+        Item item = map.GetItem( hx, hy, pid );
+        if( item == null )
+            ThrowException( "Item not found", cr, hx, hy, pid );
+        cr.Action( ACTION_PICK_ITEM, 0, item );
+		__EventCritterUseSkill.Raise( cr, SKILL_PICK_ON_GROUND, null, item, null);
+    }
+    else if( proto.IsScenery )
+    {
+        const Item scenery = map.GetStaticItem( hx, hy, pid );
+        if( scenery == null )
+            ThrowException( "Scenery not found", cr, hx, hy, pid );
+
+        cr.Action( ACTION_PICK_ITEM, 0, scenery );
+		__EventCritterUseSkill.Raise( cr, SKILL_PICK_ON_GROUND, null, null, scenery);
+    }
+    else if( proto.IsWall )
+    {
+        cr.SayMsg( SAY_NETMSG, TEXTMSG_GAME, MsgStr::Get( "StrUseNothing" ) );
+    }
+    else
+    {
+        cr.SayMsg( SAY_NETMSG, TEXTMSG_GAME, MsgStr::Get( "StrUseNothing" ) );
+    }
+}
+
+bool ProcessAp( Critter cr, uint ap )
+{
+    if( cr.CurrentAp/AP_DIVIDER < int(ap) )
+    {
+        uint apRegeneration = cr.ApRegenerationTime;
+        if( apRegeneration == 0 )
+            apRegeneration = __ApRegeneration;
+		cr.Wait( apRegeneration / cr.ActionPoints * ( ap - cr.CurrentAp/AP_DIVIDER ) );
+        return false;
+    }
+	cr.CurrentAp = (cr.CurrentAp/AP_DIVIDER - ap) * AP_DIVIDER;
+    cr.ApRegenerationTick = GetTick() + __Breaktime;
+    cr.Wait( __Breaktime );
+	
+    return true;
+	
+}
+#endif

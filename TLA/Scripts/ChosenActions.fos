@@ -1,7 +1,11 @@
 // FOS Server Client
 #pragma rpc Server PickItem( uint16 hx, uint16 hy, hash pid )
+#pragma rpc Server MoveInvItem( uint itemId, uint8 slot )
+#pragma rpc Server DropInvItem( uint itemId, uint count )
+#pragma rpc Server OperateContainer( bool take, bool all, uint itemId, uint itemCount )
 #pragma property Critter PrivateCommon uint ApRegenerationTick Temporary Default=0
 #pragma property Critter Protected uint ApRegenerationTime Default=0
+#pragma event "EventClientOperateContainer( Critter client, Entity container, Item item, bool take )"
 
 //#pragma rpc Server UseSneak( bool enable )
 #ifdef __CLIENT
@@ -100,7 +104,6 @@ void ChosenProcess()
             chosen.CurrentAp = chosen.CurrentAp + maxAp * delta / apRegeneration;
             if( chosen.CurrentAp > int(maxAp) )
                 chosen.CurrentAp = maxAp;
-				Log("NEW CURREMNT AP:" + chosen.CurrentAp);
         }
     }
 
@@ -488,6 +491,8 @@ void ChosenProcess()
         uint8 toSlot = ChosenActions[ 3 ];
         bool  isSecondTry = ( ChosenActions[ 5 ] != 0 );
 
+		Assert( itemCount > 0 );
+		
         Item  item = chosen.GetItem( itemId );
         if( item is null )
             break;
@@ -495,27 +500,27 @@ void ChosenProcess()
         uint8 fromSlot = item.CritSlot;
         if( fromSlot == toSlot )
             break;
-        if( toSlot != SLOT_GROUND )
-            break;
+        //if( toSlot != SLOT_GROUND ) ??? странное
+        //    break;
 
         if( toSlot == SLOT_GROUND )
         {
-            if( !__EventItemCheckMove.Raise( item, itemCount, chosen, chosen ) )
+            if( !__EventItemCheckMove.Raise( item, itemCount, chosen, CurMap ) )
                 break;
         }
-
+		
         Item  itemSwap = null;
-        /*if( toSlot != SLOT_INV && toSlot != SLOT_GROUND )
-        //     itemSwap = chosen.GetItem( 0, toSlot );
+        if( toSlot != SLOT_INV && toSlot != SLOT_GROUND )
+             itemSwap = chosen.GetItemBySlot( toSlot );
 
-        if( !__EventCritterCheckMoveItem.Raise( chosen, item, toSlot, itemSwap ) )
+        if( !__EventCritterCheckMoveItem.Raise( chosen, item, toSlot ) )
         {
             // Gameplay swap workaround
             if( itemSwap !is null && !isSecondTry )
             {
                 // Add actions
-                if( __EventCritterCheckMoveItem.Raise( chosen, itemSwap, SLOT_INV, null ) &&
-                    __EventCritterCheckMoveItem.Raise( chosen, item, toSlot, null ) )
+                if( __EventCritterCheckMoveItem.Raise( chosen, itemSwap, SLOT_INV ) &&
+                    __EventCritterCheckMoveItem.Raise( chosen, item, toSlot ) )
                 {
                     ChosenActions.reverse();
                     ChosenActions.resize( ChosenActions.length() - 7 );
@@ -528,7 +533,6 @@ void ChosenProcess()
             }
             break;
         }
-		*/
         // Action points
         uint apCost = __RtApCostMoveItemInventory;
         if( ( fromSlot == SLOT_HAND1 && toSlot == SLOT_HAND2 ) || ( fromSlot == SLOT_HAND2 && toSlot == SLOT_HAND1 ) )
@@ -537,7 +541,17 @@ void ChosenProcess()
             apCost = __RtApCostDropItem;
         CHECK_NEED_AP( apCost );
 
-        CustomCall( "MoveItem " + apCost + " " + itemCount + " " + itemId + " " + ( itemSwap !is null ? itemSwap.Id : 0 ) + " " + toSlot );
+        //CustomCall( "MoveItem " + apCost + " " + itemCount + " " + itemId + " " + ( itemSwap !is null ? itemSwap.Id : 0 ) + " " + toSlot );
+		
+        CustomCall( "MoveItem " + itemCount + " " + itemId + " " + ( itemSwap != null ? itemSwap.Id : 0 ) + " " +
+                    ( toSlot == SLOT_GROUND ? "-1" : "" + toSlot ) );
+		chosen.CurrentAp -= apCost;
+
+        if( toSlot != SLOT_GROUND)
+            ServerRpc.MoveInvItem( itemId, toSlot );
+        else
+            ServerRpc.DropInvItem( itemId, itemCount );
+
     }
     break;
     case TlaExtended::ChosenMoveItemCont:
@@ -572,13 +586,24 @@ void ChosenProcess()
             }
            }*/
 
-        Entity  contEntity;
-        /*uint contId = 0;
-           if( PupTransferType == TransferTypes::CritLoot || PupTransferType == TransferTypes::CritSteal || PupTransferType == TransferTypes::FarCrit )
-            contEntity = GetCritter( contId );
-           else if( PupTransferType == TransferTypes::HexContUp || PupTransferType == TransferTypes::HexContDown || PupTransferType == TransferTypes::SelfCont || PupTransferType == TransferTypes::FarCont )
-            contEntity = GetItem( contId );*/
-
+       Entity       contEntity;
+        TransferTypes transferType = chosen.TransferType;
+        uint         transferContainerId = chosen.TransferContainerId;
+        if( transferContainerId != 0 )
+        {
+            if( transferType == TransferTypes::CritLoot || transferType == TransferTypes::CritSteal || transferType == TransferTypes::FarCrit )
+                contEntity = GetCritter( transferContainerId );
+            else if( transferType == TransferTypes::HexContUp || transferType == TransferTypes::HexContDown || transferType == TransferTypes::SelfCont || transferType == TransferTypes::FarCont )
+                contEntity = GetItem( transferContainerId );
+        }
+        else
+        {
+            // Container disappeared
+            break;
+        }
+		
+		auto colType = ClientItems::GetCollectionFromType( itemCont );
+		bool   take = ( colType == ClientItems::Collection::Loot );
         Entity  from = ( itemCont == ITEMS_PICKUP ? cast< Entity >( chosen ) : contEntity );
         Entity  to = ( itemCont == ITEMS_PICKUP ? contEntity : cast< Entity >( chosen ) );
         if( !__EventItemCheckMove.Raise( item, count, from, to ) )
@@ -587,8 +612,23 @@ void ChosenProcess()
         uint apCost = __RtApCostMoveItemContainer;
         CHECK_NEED_AP( apCost );
 
-        CustomCall( "MoveItemCont " + apCost + " " + count + " " + itemId + " " + itemCont );
-    }
+		if( take || cast< Critter >( to ) != null )
+        {
+            Critter toCr = take ? chosen : cast< Critter >( to );
+            if( toCr.ItemsWeight + item.Weight * count > toCr.CarryWeight )
+            {
+                Message( TEXTMSG_GAME, ( take ? MsgStr::StrOverweight : MsgStr::StrOvervolume ) );
+                break;
+            }
+        }
+		//CustomCall( "MoveItemCont " + apCost + " " + count + " " + itemId + " " + itemCont );
+		ClientItems::RemoveItem( colType, item, count );
+		chosen.Wait( __Breaktime );
+
+        __EventCritterAction.Raise( true, chosen, ACTION_OPERATE_CONTAINER, transferType, item );
+
+		ServerRpc.OperateContainer( take, false, item.Id, count );
+	}
     break;
     /*case TlaExtended::ChosenTakeAll:
        {
@@ -836,6 +876,300 @@ void PickItem( Critter cr, uint16 hx, uint16 hy, hash pid )
     {
         cr.SayMsg( SAY_NETMSG, TEXTMSG_GAME, MsgStr::Get( "StrUseNothing" ) );
     }
+}
+
+void DropInvItem( Critter cr, uint itemId, uint count )
+{
+    // Spend ap
+    if( !ProcessAp( cr, __RtApCostDropItem ) )
+        return;
+
+    // Critter checks
+    if( !cr.IsLife() )
+        ThrowException( "Critter is not alive", cr );
+
+    // Get item
+    Item item = cr.GetItem( itemId );
+    if( item == null )
+        ThrowException( "Item not found", cr, itemId );
+    if( count == 0 )
+        count = item.Count;
+    if( count > item.Count )
+        ThrowException( "Invalid count", cr, item, count );
+
+    // Animation
+    cr.Action( ACTION_DROP_ITEM, -1, item );
+
+    // Drop
+    Map map = cr.GetMap();
+    if( map != null )
+        MoveItem( item, count, map, cr.HexX, cr.HexY );
+    else if( count < item.Count )
+        item.Count -= count;
+    else
+        DeleteItem( item );
+
+    return;
+}
+
+void MoveInvItem( Critter cr, uint itemId, uint8 slot )
+{
+       // Get item
+    Item item = cr.GetItem( itemId );
+    if( item == null )
+        ThrowException( "Item not found", cr, itemId );
+
+    // Calculate move cost
+    uint apCost = __RtApCostMoveItemInventory;
+    if( ( item.CritSlot == SLOT_HAND1 && slot == SLOT_HAND2 ) || ( item.CritSlot == SLOT_HAND2 && slot == SLOT_HAND1 ) )
+        apCost = 0;
+
+    // Spend ap
+    if( !ProcessAp( cr, apCost ) )
+        return;
+
+    // Critter checks
+    if( !cr.IsLife() )
+        ThrowException( "Critter is not alive", cr );
+
+    // Move
+    cr.ChangeItemSlot( item.Id, slot );
+
+    return;
+}
+
+
+void OperateContainer( Critter client, bool take, bool all, uint itemId, uint itemCount )
+{
+    if( !client.IsLife() )
+        ThrowException( "Client is not alive", client );
+
+    client.Wait( __Breaktime );
+
+    TransferTypes transferType = client.TransferType;
+    if( transferType == TransferTypes::Close )
+        ThrowException( "Transfer is closed", client );
+    if( client.GetMap() == null && (
+            transferType != TransferTypes::CritSteal && transferType != TransferTypes::FarCont && transferType != TransferTypes::FarCrit &&
+            transferType != TransferTypes::CritBarter && transferType != TransferTypes::SelfCont ) )
+        ThrowException( "Invalid transfer type for global map", client, transferType );
+    if( all && transferType == TransferTypes::CritSteal )
+        ThrowException( "Can't operate with stealing with all items", client );
+
+    // Get container
+    Item    itemCont;
+    Critter crCont;
+    if( transferType == TransferTypes::HexContUp || transferType == TransferTypes::HexContDown ||
+        transferType == TransferTypes::SelfCont || transferType == TransferTypes::FarCont )
+    {
+        if( transferType == TransferTypes::HexContUp || transferType == TransferTypes::HexContDown )
+        {
+            itemCont = GetItem( client.TransferContainerId );
+            if( itemCont == null )
+                ThrowException( "Hex container not found", client, client.TransferContainerId );
+            if( itemCont.Type != ItemType::Container )
+                ThrowException( "Hex container is not container type", client, itemCont );
+            if( itemCont.Accessory != ItemOwnership::MapHex )
+                ThrowException( "Hex container not on map", client, itemCont );
+            if( itemCont.MapId != client.GetMap().Id )
+                ThrowException( "Hex container not on client map", client, itemCont );
+            if( GetDistantion( client.HexX, client.HexY, itemCont.HexX, itemCont.HexY ) > 1 + client.Multihex )
+                ThrowException( "Hex container too far", client, itemCont );
+        }
+        else if( transferType == TransferTypes::FarCont )
+        {
+            itemCont = GetItem( client.TransferContainerId );
+            if( itemCont == null )
+                ThrowException( "Hex container not found", client, client.TransferContainerId );
+            if( itemCont.Type != ItemType::Container )
+                ThrowException( "Hex container is not container type", client, itemCont );
+        }
+        else
+        {
+            itemCont = client.GetItem( client.TransferContainerId );
+            if( itemCont == null )
+                ThrowException( "Hex container not found", client, client.TransferContainerId );
+            if( itemCont.Type != ItemType::Container )
+                ThrowException( "Hex container is not container type", client, itemCont );
+        }
+    }
+    else if( transferType == TransferTypes::CritLoot || transferType == TransferTypes::CritSteal ||
+             transferType == TransferTypes::CritBarter || transferType == TransferTypes::FarCrit )
+    {
+        crCont = GetCritter( client.TransferContainerId );
+        if( crCont == null )
+            ThrowException( "Critter container not found", client, client.TransferContainerId );
+        if( transferType != TransferTypes::FarCrit && !client.IsSee( crCont ) )
+            ThrowException( "Critter container is not seen by client", client, crCont );
+        if( transferType != TransferTypes::FarCrit && GetDistantion( client.HexX, client.HexY, crCont.HexX, crCont.HexY ) > 1 + client.Multihex + crCont.Multihex )
+            ThrowException( "Critter container is too far", client, crCont );
+        if( client.Id == client.TransferContainerId )
+            ThrowException( "Critter container id is same as client id", client, crCont );
+        if( transferType == TransferTypes::CritSteal && crCont.IsNoSteal )
+            ThrowException( "Critter container marked as NoSteal", client, crCont );
+   //     if( transferType == TransferTypes::CritSteal && crCont.IsNpc() && Ai::IsAttacking( crCont ) )
+   //         ThrowException( "Critter container is in battle", client, crCont );
+        if( transferType == TransferTypes::CritLoot && !crCont.IsDead() )
+            ThrowException( "Critter container loot is not dead", client, crCont );
+    }
+    else
+    {
+        Assert( false );
+    }
+
+    // Get item(s)
+    Item[] items;
+    if( take )
+    {
+        if( itemCont != null )
+        {
+            if( !all )
+            {
+                Item item = GetItem( itemId );
+                if( item == null )
+                    ThrowException( "Hex container item not found", client, itemId );
+                if( item.Accessory != ItemOwnership::ItemContainer || item.ContainerId != itemCont.Id )
+                    ThrowException( "Item not in hex container", client, item, itemCont );
+                if( item.ContainerStack != 0 )
+                    ThrowException( "Item hex container stack is not zero", client, item, itemCont );
+                if( itemCount > item.Count )
+                    ThrowException( "Hex container item invalid count", client, item, itemCount );
+
+                items = array< Item > = { item };
+            }
+            else
+            {
+                items = itemCont.GetItems( 0 );
+            }
+        }
+        else
+        {
+            if( !all )
+            {
+                Item item = crCont.GetItem( itemId );
+                if( item == null )
+                    ThrowException( "Critter container item not found", client, itemId );
+                if( item.Accessory != ItemOwnership::CritterInventory || item.CritId != crCont.Id )
+                    ThrowException( "Item not in critter container", client, item, crCont );
+                if( item.CritSlot != SLOT_INV )
+                    ThrowException( "Item critter container slot is not innventory", client, item, crCont );
+                if( itemCount > item.Count )
+                    ThrowException( "Critter container item invalid count", client, item, itemCount );
+
+                items = array< Item > = { item };
+            }
+            else
+            {
+                items = crCont.GetItemsBySlot( SLOT_INV );
+            }
+        }
+    }
+    else
+    {
+        if( !all )
+        {
+            Item item = client.GetItem( itemId );
+            if( item == null )
+                ThrowException( "Client item not found", client, itemId );
+            if( itemCount > item.Count )
+                ThrowException( "Client item invalid count", client, item, itemCount );
+
+            items = array< Item > = { item };
+        }
+        else
+        {
+            items = client.GetItemsBySlot( SLOT_INV );
+        }
+    }
+
+    // Filter
+    if( take && ( transferType == TransferTypes::CritLoot || transferType == TransferTypes::CritSteal ) )
+    {
+        for( uint i = 0; i < items.length();)
+        {
+            if( ( transferType == TransferTypes::CritLoot && items[ i ].IsNoLoot ) ||
+                ( transferType == TransferTypes::CritSteal && items[ i ].IsNoSteal ) )
+                items.removeAt( i );
+            else
+                i++;
+        }
+    }
+
+    if( items.length() == 0 )
+        return;
+
+    // Check ability
+    uint weight = 0;
+    for( uint i = 0; i < items.length(); i++ )
+        weight += items[ i ].Weight * ( all ? items[ i ].Count : itemCount );
+
+    if( itemCont == null )
+    {
+        Critter target = take ? client : crCont;
+        if( target.CarryWeight < target.ItemsWeight + weight )
+            ThrowException( "Critter is overweight", target );
+    }
+
+    // Animation
+    client.Action( ACTION_OPERATE_CONTAINER, transferType, !all ? items[ 0 ] : null );
+
+    // Moving
+    if( transferType == TransferTypes::CritSteal )
+    {
+        /*if( Steal::CritterStealing( crCont, client, items[ 0 ], itemCount, take ) )
+        {
+            MoveItem( items[ 0 ], itemCount, client );
+        }
+        else
+        {*/
+            items.clear();
+            client.TransferType = TransferTypes::Close;
+            client.TransferContainerId = 0;
+            client.SendItems( items );
+            return;
+        /*}*/
+    }
+    else
+    {
+        if( take )
+        {
+            if( !all )
+                MoveItem( items[ 0 ], itemCount, client );
+            else
+                MoveItems( items, client );
+        }
+        else
+        {
+            if( itemCont != null )
+            {
+                if( !all )
+                    MoveItem( items[ 0 ], itemCount, itemCont, 0 );
+                else
+                    MoveItems( items, itemCont, 0 );
+            }
+            else
+            {
+                if( !all )
+                    MoveItem( items[ 0 ], itemCount, crCont );
+                else
+                    MoveItems( items, crCont );
+            }
+        }
+    }
+
+    // Events
+    Entity cont = ( itemCont != null ? cast< Entity >( itemCont ) : cast< Entity >( crCont ) );
+    for( uint i = 0; i < items.length(); i++ )
+        __EventClientOperateContainer.Raise( client, cont, items[ i ], take );
+
+    // Refresh container info
+    Item[] curItems;
+    if( itemCont != null )
+        curItems = itemCont.GetItems( 0 );
+    else
+        curItems = crCont.GetItemsBySlot( SLOT_INV );
+
+    client.SendItems( curItems, 1 );
 }
 
 bool ProcessAp( Critter cr, uint ap )

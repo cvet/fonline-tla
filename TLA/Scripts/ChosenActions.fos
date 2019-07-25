@@ -2,6 +2,7 @@
 #pragma rpc Server PickItem( uint16 hx, uint16 hy, hash pid )
 #pragma rpc Server MoveInvItem( uint itemId, uint8 slot )
 #pragma rpc Server DropInvItem( uint itemId, uint count )
+#pragma rpc Server ReloadWeapon( uint itemId, uint ammoId )
 #pragma rpc Server OperateContainer( bool take, bool all, uint itemId, uint itemCount )
 #pragma property Critter PrivateCommon uint ApRegenerationTick Temporary Default=0
 #pragma property Critter Protected uint ApRegenerationTime Default=0
@@ -358,6 +359,15 @@ void ChosenProcess()
 
             // if( isMainItem )
             //    item->SetWeaponMode( USE_PRIMARY );
+			/*
+			в старых исходниках было еще это
+			if( is_main_item )
+            {
+                item->SetWeaponMode( USE_PRIMARY );
+                if( GetActiveScreen() == SCREEN_NONE )
+                    SetCurMode( CUR_USE_WEAPON );
+            }
+			*/
 
             if( item.Weapon_MaxAmmoCount == 0 )
                 break;                           // No have holder
@@ -368,11 +378,39 @@ void ChosenProcess()
                     break;                       // Is empty
                 targetId = 0;
             }
-            else if( targetSelfItem !is null )   // Reload
+            else if( targetSelfItem is null )   // Reload
             {
                 if( item.AmmoCount >= item.Weapon_MaxAmmoCount )
                     break;                       // Is full
+Log("TRY TO RELOAD"  + item.Weapon_Caliber );//item =weapon, targetSelfItem=ammo
+				if( item.Weapon_Caliber != 0 )
+				{
+					hash ammoPid = item.AmmoPid != 0 ? item.AmmoPid : item.Weapon_DefaultAmmoPid;
+					Item ammoCaliber;
+					Item[] items = chosen.GetItems( function( i )
+                                            {
+                                                return i.Type == ItemType::Ammo;
+                                            } );
+					 for( uint i = 0; i < items.length(); i++ )
+					{
+						if( items[ i ].ProtoId == ammoPid )
+						{
+							targetSelfItem = items[ i ];
+							break;
+						}
 
+						if( ammoCaliber == null && items[ i ].Ammo_Caliber == item.Weapon_Caliber )
+							ammoCaliber = items[ i ];
+					}
+					if( targetSelfItem == null )
+					{
+						if( ammoCaliber != null )
+							targetSelfItem = ammoCaliber;
+						else
+							break;
+					}
+					targetId = targetSelfItem.Id;
+				}
                 /*if( item.Weapon_Caliber )
                    {
                     targetSelfItem = chosen->GetAmmoAvialble( item );
@@ -383,11 +421,14 @@ void ChosenProcess()
             }
             else                // Load
             {
-                // if( item->WeapGetAmmoCaliber() != targetSelfItem->AmmoGetCaliber() )
-                //    break;      // Different caliber
-                // if( item->WeapGetAmmoPid() == targetSelfItem->GetProtoId() && item->WeapIsFull() )
-                //    break;      // Is full
+                 if( item.Weapon_Caliber != targetSelfItem.Ammo_Caliber )
+					break;      // Different caliber
+                if( item.AmmoPid == targetSelfItem.ProtoId && item.AmmoCount == item.Weapon_MaxAmmoCount )
+                    break;      // Is full
             }
+			
+			ServerRpc.ReloadWeapon( item.Id, targetId );
+			chosen.CurrentAp -= apCost;
         }
         else                    // Use
         {
@@ -743,7 +784,6 @@ void ChosenProcess()
 			if(item != null)
 				__EventCritterAction.Raise( true, chosen, ACTION_PICK_ITEM, 0, item );
 		}
-		Log("Current ap after pick item:" + chosen.CurrentAp );
     }
     break;
     case TlaExtended::ChosenPickCrit:
@@ -1176,5 +1216,63 @@ bool ProcessAp( Critter cr, uint ap )
 	
     return true;
 	
+}
+
+void ReloadWeapon( Critter cr, uint weaponId, uint ammoId )
+{
+    if( !cr.IsLife() )
+        ThrowException( "Client is not alive", cr );
+
+    // Get weapon
+    Item weapon = cr.GetItem( weaponId );
+    if( weapon == null )
+        ThrowException( "Unable to find weapon", cr, weaponId );
+    if( weapon.Type != ItemType::Weapon )
+        ThrowException( "Invalid type of weapon", cr, weapon );
+    if( weapon.Weapon_Caliber == 0 )
+        ThrowException( "Weapon doesn't have caliber", cr, weapon );
+    if( weapon.Weapon_MaxAmmoCount == 0 )
+        ThrowException( "Weapon doesn't have ammo holder", cr, weapon );
+
+    // Spend ap
+    uint ap = __RtApCostReloadWeapon;
+    if( !ProcessAp( cr, ap ) )
+        return;
+
+    // Get ammo
+    Item ammo = ( ammoId != 0 ? cr.GetItem( ammoId ) : null );
+    if( ammoId != 0 && ammo == null )
+        ThrowException( "Ammo not found", cr, weapon, ammoId );
+    if( ammo != null && weapon.AmmoPid == ammo.ProtoId && weapon.AmmoCount >= weapon.Weapon_MaxAmmoCount )
+        ThrowException( "Weapon is full", cr, weapon, ammo );
+
+    // Unload
+    if( ammo == null || ( weapon.AmmoCount > 0 && weapon.AmmoPid != ammo.ProtoId ) )
+    {
+        if( weapon.AmmoPid != 0 )
+        {
+            Item existAmmo = cr.GetItemByPid( weapon.AmmoPid );
+            if( existAmmo == null )
+                cr.AddItem( weapon.AmmoPid, weapon.AmmoCount );
+            else
+                existAmmo.Count += weapon.AmmoCount;
+        }
+        weapon.AmmoCount = 0;
+    }
+
+    // Load
+    if( ammo != null )
+    {
+        uint count = Math::Min( ammo.Count, weapon.Weapon_MaxAmmoCount - weapon.AmmoCount );
+        weapon.AmmoCount += count;
+        weapon.AmmoPid = ammo.ProtoId;
+
+        if( ammo.Count > count )
+            ammo.Count -= count;
+        else
+            DeleteItem( ammo );
+    }
+
+    cr.Action( ACTION_RELOAD_WEAPON, 0, weapon );
 }
 #endif

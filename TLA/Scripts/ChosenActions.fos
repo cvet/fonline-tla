@@ -7,6 +7,7 @@
 #pragma property Critter PrivateCommon uint ApRegenerationTick Temporary Default=0
 #pragma property Critter Protected uint ApRegenerationTime Default=0
 #pragma event "EventClientOperateContainer( Critter client, Entity container, Item item, bool take )"
+#pragma rpc Server UseSkill( CritterProperty skill, uint targetCrId, uint targetItemId, hash sceneryPid, uint16 hx, uint16 hy  )
 
 //#pragma rpc Server UseSneak( bool enable )
 #ifdef __CLIENT
@@ -382,7 +383,6 @@ void ChosenProcess()
             {
                 if( item.AmmoCount >= item.Weapon_MaxAmmoCount )
                     break;                       // Is full
-Log("TRY TO RELOAD"  + item.Weapon_Caliber );//item =weapon, targetSelfItem=ammo
 				if( item.Weapon_Caliber != 0 )
 				{
 					hash ammoPid = item.AmmoPid != 0 ? item.AmmoPid : item.Weapon_DefaultAmmoPid;
@@ -706,6 +706,104 @@ Log("TRY TO RELOAD"  + item.Weapon_Caliber );//item =weapon, targetSelfItem=ammo
         //CustomCall( "UseCritterSkill " + CritterProperty::UseSneak + " " + apCost + " " + chosen.Id );
     }
     break;
+	case TlaExtended::ChosenUseSklOnItem:
+	{
+Log("ChosenUseSklOnItem");
+		CritterProperty skill = CritterProperty( ChosenActions[ 1 ] );
+		uint itemId = ChosenActions[ 2 ];
+		bool is_inv = ( ChosenActions[ 3 ] > 0 );
+		
+		Item item_action = null;
+		
+		if( is_inv )
+		{
+Log("inventory");
+			Item item = chosen.GetItem( itemId );
+			if( !valid( item ))
+				break;
+			item_action = item;
+			if( item.IsHolodisk )
+			{
+				// TODO: запись и чтение голодисков. см CHOSEN_USE_SKL_ON_ITEM client.cpp
+				break;
+			}
+			ServerRpc.UseSkill(skill, 0, item_action.Id, 0, 0, 0 );
+			
+		}
+		else
+		{
+Log("use map item");
+			Item item = GetItem( itemId );
+			if( !valid(item) )
+				break;
+			item_action = item;
+			
+			
+			if( valid( CurMap) )
+			{
+Log("valid map");
+				uint16 hx = item_action.HexX;
+				uint16 hy = item_action.HexY;
+				uint dist = GetDistantion( chosen.HexX, chosen.HexY, hx, hy);
+				uint useDist = 1 + chosen.Multihex;
+				if( dist > useDist )
+				{
+Log("log move");
+					bool   isRun = false; //814 ( __AlwaysRun && dist >= __AlwaysRunUseDist );
+					SetAction( array< uint > = { TlaExtended::ChosenMove, hx, hy, isRun ? 1 : 0, useDist, 0, 1 }, false, false );
+					if( GetPathLength( chosen, hx, hy, useDist ) > 0 )
+						SetAction( array< uint > = { TlaExtended::ChosenUseSklOnItem, uint( skill ), itemId, ChosenActions[ 3 ], 0, 0, 0 }, true, false );
+
+					return;
+				}
+			}
+			uint apCost = __RtApCostUseSkill;
+			CHECK_NEED_AP( apCost );
+			ServerRpc.UseSkill(skill, 0, item_action.Id, 0, 0, 0 );			
+		}
+	}
+	break;
+	case TlaExtended::ChosenUseSklOnCritter:
+	{
+Log("USE SKILL ON");
+		CritterProperty skill = CritterProperty( ChosenActions[ 1 ] );
+		uint     		crId = ChosenActions[ 2 ];
+		
+		Critter cr = ( crId > 0 ? GetCritter( crId ) : chosen );
+		
+		if( cr.Id != chosen.Id )
+        {
+			if( CurMap is null )
+            break;
+
+			uint dist = GetDistantion( chosen.HexX, chosen.HexY, cr.HexX, cr.HexY );
+			uint useDist = 3 + chosen.Multihex;
+			if( dist > useDist )
+			{
+				bool   isRun = false; //814 ( __AlwaysRun && dist >= __AlwaysRunUseDist );
+				SetAction( array< uint > = { TlaExtended::ChosenMoveToCrit, cr.Id, 0, isRun ? 1 : 0, useDist, 0, 0 }, false, false );
+				// Возможна ситуация, когда до цели нельзя дойти.
+				if( GetPathLength( chosen, cr.HexX, cr.HexY, useDist ) > 0 )
+					SetAction( array< uint > = { TlaExtended::ChosenUseSklOnCritter, uint( skill ), cr.Id, 0, 0, 0, 0 }, true, false );
+
+				return;
+			}
+		}
+		
+		uint apCost = __RtApCostUseSkill;
+        CHECK_NEED_AP( apCost );
+
+        // Refresh orientation
+        uint8 dir = GetDirection( chosen.HexX, chosen.HexY, cr.HexX, cr.HexY );
+        if( GetDistantion( chosen.HexX, chosen.HexY, cr.HexX, cr.HexY ) >= 1 && chosen.Dir != dir )
+            CustomCall( "ChangeDir " + dir );
+
+        chosen.CurrentAp = chosen.CurrentAp - apCost*AP_DIVIDER;
+		
+		
+        ServerRpc.UseSkill(skill, cr.Id, 0, 0, 0, 0 );
+	}
+	break;
     case TlaExtended::ChosenTalkNpc:
     {
         uint     crId = ChosenActions[ 1 ];
@@ -718,14 +816,16 @@ Log("TRY TO RELOAD"  + item.Weapon_Caliber );//item =weapon, targetSelfItem=ammo
 
         uint dist = GetCrittersDistantion( chosen, cr );
         uint talkDistance = ( cr.TalkDistance > 0 ? cr.TalkDistance : __TalkDistance ) + chosen.Multihex;
-        if( dist > talkDistance )
+
+		if( dist > talkDistance )
         {
             bool   isRun = false; //814 ( __AlwaysRun && dist >= __AlwaysRunUseDist );
             SetAction( array< uint > = { TlaExtended::ChosenMoveToCrit, cr.Id, 0, isRun ? 1 : 0, talkDistance, 0, 0 }, false, false );
             uint16 hx = cr.HexX;
             uint16 hy = cr.HexY;
-            // if( HexMngr.CutPath( chosen, chosen.HexX, chosen.HexY, hx, hy, talkDistance ) )
-            //	SetAction( curAction, false, false );
+            if( GetPathLength( chosen, hx, hy, talkDistance ) > 0 )
+				SetAction( array< uint > = { TlaExtended::ChosenTalkNpc, cr.Id, 0, 0, 0, 0, 0 }, true, false );
+            
             return;
         }
 
@@ -740,7 +840,7 @@ Log("TRY TO RELOAD"  + item.Weapon_Caliber );//item =weapon, targetSelfItem=ammo
         if( GetDistantion( chosen.HexX, chosen.HexY, cr.HexX, cr.HexY ) >= 1 && chosen.Dir != dir )
             CustomCall( "ChangeDir " + dir );
 
-        CustomCall( "DialogAnswer true " + cr.Id + " " + 240 );
+        ServerRpc.StartDialog( cr.Id );
     }
     break;
     case TlaExtended::ChosenPickItem:
@@ -760,9 +860,7 @@ Log("TRY TO RELOAD"  + item.Weapon_Caliber );//item =weapon, targetSelfItem=ammo
            bool   isRun = false; //814 ( __AlwaysRun && dist >= __AlwaysRunUseDist );
            SetAction( array< uint > = { TlaExtended::ChosenMove, hx, hy, isRun ? 1 : 0, useDist, 0, 1 }, false, false );
 
-            // if( HexMngr.CutPath( chosen, chosen.HexX, chosen.HexY, hx, hy, useDist ) )
-            //    SetAction( curAction, true, false );
-			//if( GetPathLength( chosen, hx, hy, useDist ) > 0 )
+            if( GetPathLength( chosen, hx, hy, useDist ) > 0 )
                 SetAction( array< uint > = { TlaExtended::ChosenPickItem, pid, hx, hy, 0, 0, 0 }, true, false );
             return;
         }
@@ -940,6 +1038,81 @@ void DropInvItem( Critter cr, uint itemId, uint count )
     return;
 }
 
+void UseSkill( Critter cr, CritterProperty skill, uint targetCrId, uint targetItemId, hash sceneryPid, uint16 hx, uint16 hy )
+{
+	if( !cr.IsLife() )
+        ThrowException( "Client is not alive", cr );
+Log("using skill");
+    // Spend ap
+    uint ap = __RtApCostUseSkill;
+    if( !ProcessAp( cr, ap ) )
+        return;
+
+    Critter    targetCr;
+    Item       targetItem;
+    const Item targetScen;
+    uint       useDist = 3 + cr.Multihex;
+
+    if( targetCrId != 0 )
+    {
+        if( cr.Id != targetCrId )
+        {
+            if( cr.GetMap() != null )
+            {
+                targetCr = GetCritter( targetCrId );
+                if( targetCr == null )
+                    ThrowException( "Target critter not found", cr, targetCrId );
+                if( !cr.IsSee( targetCr ) )
+                    ThrowException( "Critter doesn't see target critter", cr, targetCr );
+                if( GetDistantion( cr.HexX, cr.HexY, targetCr.HexX, targetCr.HexY ) > useDist + targetCr.Multihex )
+                    ThrowException( "Target critter too far", cr, targetCr );
+            }
+            else
+            {
+				// need realization
+                ThrowException( "Target critter not found in global group", cr, targetCrId );
+            }
+        }
+        else
+            targetCr = cr;
+    }
+    else if( targetItemId != 0 || sceneryPid > 0)
+    {
+        Map map = cr.GetMap();
+        if( map == null )
+            ThrowException( "Critter on global map", cr );
+
+        if( sceneryPid == 0 )
+        {
+            targetItem = map.GetItem( targetItemId );
+            if( targetItem == null )
+                ThrowException( "Target item not found on map", cr, map, targetItemId );
+            if( targetItem.IsHidden )
+                ThrowException( "Target item is hidden", cr, map, targetItem );
+            if( GetDistantion( cr.HexX, cr.HexY, targetItem.HexX, targetItem.HexY ) > useDist )
+                ThrowException( "Target item too far", cr, targetItem );
+        }
+        else
+        {
+            const Item proto = GetProtoItem( sceneryPid );
+            if( proto == null )
+                ThrowException( "Proto item not found", cr, proto );
+
+            if( GetDistantion( cr.HexX, cr.HexY, hx, hy ) > useDist )
+                ThrowException( "Target scenery too far", cr, hx, hy, sceneryPid );
+
+            targetScen = map.GetStaticItem( hx, hy, sceneryPid );
+            if( targetScen == null )
+                ThrowException( "Scenery not found", cr, hx, hy, sceneryPid );
+        }
+    }
+    // Send action
+    cr.Action( ACTION_USE_SKILL, 0, null );
+
+	__EventCritterUseSkill.Raise( cr, skill, targetCr, targetItem, targetScen );
+
+}
+
 void MoveInvItem( Critter cr, uint itemId, uint8 slot )
 {
        // Get item
@@ -965,7 +1138,6 @@ void MoveInvItem( Critter cr, uint itemId, uint8 slot )
 
     return;
 }
-
 
 void OperateContainer( Critter client, bool take, bool all, uint itemId, uint itemCount )
 {

@@ -8,7 +8,8 @@
 #pragma property Critter Protected uint ApRegenerationTime Default=0
 #pragma event "EventClientOperateContainer( Critter client, Entity container, Item item, bool take )"
 #pragma rpc Server UseSkill( CritterProperty skill, uint targetCrId, uint targetItemId, hash sceneryPid, uint16 hx, uint16 hy  )
-
+#pragma rpc Server Attack( uint targetId, uint8 mode)
+//#pragma rpc Server Attack( uint targetId, uint8 mode, uint16 hexX, uint16 hexY ) TODO: Hex attacks
 //#pragma rpc Server UseSneak( bool enable )
 #ifdef __CLIENT
 uint[] ChosenActions = {};
@@ -321,6 +322,8 @@ void ChosenProcess()
         // Check weapon
         if( isAttack )
         {
+		//ChosenActions::SetChosenActions( array< uint > = { TlaExtended::ChosenUseItem, useItem.Id, 0, TARGET_CRITTER, cr.Id, isAttack ? mode : USE_USE, 0 } );
+
             if( CurMap is null )
                 break;
             if( isSelf )
@@ -347,9 +350,10 @@ void ChosenProcess()
             }
             if( item.Deteriorable && item.IsBroken )
             {
-                // Message( TEXTMSG_GAME, STR_INV_WEAR_WEAPON_BROKEN );
+                Message( TEXTMSG_GAME, MsgStr::StrDeteriorationWeaponBroken );
                 break;
             }
+
         }
         else if( isReload )
         {
@@ -448,6 +452,7 @@ void ChosenProcess()
             if( isAttack )
             {
                 const Item  weap = Obsolete::GetConstItemBySlot( chosen, SLOT_HAND1 );
+				//TODO: проверить, что работает для рукопашных ударов.
                 __EventCritterGetAttackDistantion.Raise( chosen, weap, weap.Mode, maxDist );
             }
             else
@@ -457,27 +462,25 @@ void ChosenProcess()
             if( targetCr !is null )
                 maxDist += targetCr.Multihex;
 
-            // Target find
-            bool needMove = false;
+			// Target find
+			uint dist = GetDistantion( chosen.HexX, chosen.HexY, hx, hy );
+            bool needMove = dist > maxDist;
             // if( isAttack )
             //    needMove = !HexMngr.TraceBullet( chosen.HexX, chosen.HexY, hx, hy, maxDist, 0.0f, targetCr, false, nullptr, 0, nullptr, nullptr, nullptr, true );
             // else
             //    needMove = !CheckDist( chosen.HexX, chosen.HexY, hx, hy, maxDist );
-
+			// TODO: r17 trace 
             if( needMove )
             {
-                // If target too far, then move to it
-                uint dist = GetDistantion( chosen.HexX, chosen.HexY, hx, hy );
                 if( dist > maxDist )
                 {
-                    //bool isRun = ( __AlwaysRun && dist >= __AlwaysRunUseDist );
-                    // if( targetCr !is null )
-                    //    SetAction( array<uint> ={ TlaExtended::ChosenMoveToCrit, targetCr->GetId(), 0, isRun, maxDist );
-                    // else
-                    //    SetAction( array<uint> ={ TlaExtended::ChosenMove, hx, hy, isRun, maxDist, 0 );
-
-                    // if( HexMngr.CutPath( chosen, chosen.HexX, chosen.HexY, hx, hy, maxDist ) )
-                    //    SetAction( curAction, false, false );
+					bool   isRun = false; //814 ( __AlwaysRun && dist >= __AlwaysRunUseDist );
+					if( targetCr !is null )					
+						SetAction( array< uint > = { TlaExtended::ChosenMoveToCrit, targetCr.Id, 0, isRun ? 1 : 0, maxDist, 0, 0 }, false, false );
+					else
+						SetAction( array< uint > = { TlaExtended::ChosenMove, hx, hy, isRun ? 1 : 0, maxDist, 0, 1 }, false, false );
+					if( GetPathLength( chosen, hx, hy, maxDist ) > 0 )
+						SetAction( curAction, true, false );
 
                     return;
                 }
@@ -502,16 +505,20 @@ void ChosenProcess()
             Net_SendUseItem( apCost, itemId, rate, targetType, targetId, 0, param );  // Item or critter
          */
 
-        /*if( use >= USE_PRIMARY && use <= USE_THIRD )
-            chosen.Action( ACTION_USE_WEAPON, rate, item );
-           else if( use == USE_RELOAD )
-            chosen.Action( ACTION_RELOAD_WEAPON, 0, item );
-           else
-            chosen.Action( ACTION_USE_ITEM, 0, item );*/
+        if( use >= USE_PRIMARY && use <= USE_THIRD )
+			__EventCritterAction.Raise( true, chosen, ACTION_USE_WEAPON, rate, item );
+         else if( use == USE_RELOAD )
+			__EventCritterAction.Raise( true, chosen, ACTION_RELOAD_WEAPON, 0, item );
+        else
+			__EventCritterAction.Raise( true, chosen, ACTION_USE_ITEM, 0, item );
 
-        // chosen->SubAp( apCost );
 
-        /*if( isAttack && !aim && Keyb::ShiftDwn )               // Continue battle after attack
+        chosen.CurrentAp -= apCost;
+		if( isAttack && valid(  targetCr ) )
+		{
+			ServerRpc.Attack( targetCr.Id, rate );
+		}
+		/*if( isAttack && !aim && Keyb::ShiftDwn )               // Continue battle after attack
            {
             SetAction( curAction, false, false );
             return;
@@ -701,7 +708,6 @@ void ChosenProcess()
     break;
 	case TlaExtended::ChosenUseSklOnItem:
 	{
-Log("ChosenUseSklOnItem");
 		CritterProperty skill = CritterProperty( ChosenActions[ 1 ] );
 		uint itemId = ChosenActions[ 2 ];
 		bool is_inv = ( ChosenActions[ 3 ] > 0 );
@@ -710,7 +716,6 @@ Log("ChosenUseSklOnItem");
 		
 		if( is_inv )
 		{
-Log("inventory");
 			Item item = chosen.GetItem( itemId );
 			if( !valid( item ))
 				break;
@@ -725,7 +730,6 @@ Log("inventory");
 		}
 		else
 		{
-Log("use map item");
 			Item item = GetItem( itemId );
 			if( !valid(item) )
 				break;
@@ -734,14 +738,12 @@ Log("use map item");
 			
 			if( valid( CurMap) )
 			{
-Log("valid map");
 				uint16 hx = item_action.HexX;
 				uint16 hy = item_action.HexY;
 				uint dist = GetDistantion( chosen.HexX, chosen.HexY, hx, hy);
 				uint useDist = 1 + chosen.Multihex;
 				if( dist > useDist )
 				{
-Log("log move");
 					bool   isRun = false; //814 ( __AlwaysRun && dist >= __AlwaysRunUseDist );
 					SetAction( array< uint > = { TlaExtended::ChosenMove, hx, hy, isRun ? 1 : 0, useDist, 0, 1 }, false, false );
 					if( GetPathLength( chosen, hx, hy, useDist ) > 0 )
@@ -758,7 +760,6 @@ Log("log move");
 	break;
 	case TlaExtended::ChosenUseSklOnCritter:
 	{
-Log("USE SKILL ON");
 		CritterProperty skill = CritterProperty( ChosenActions[ 1 ] );
 		uint     		crId = ChosenActions[ 2 ];
 		
@@ -1035,7 +1036,6 @@ void UseSkill( Critter cr, CritterProperty skill, uint targetCrId, uint targetIt
 {
 	if( !cr.IsLife() )
         ThrowException( "Client is not alive", cr );
-Log("using skill");
     // Spend ap
     uint ap = __RtApCostUseSkill;
     if( !ProcessAp( cr, ap ) )
@@ -1440,4 +1440,98 @@ void ReloadWeapon( Critter cr, uint weaponId, uint ammoId )
 
     cr.Action( ACTION_RELOAD_WEAPON, 0, weapon );
 }
+
+void Attack( Critter cr, uint targetId, uint8 mode)
+{
+	Critter target = GetCritter( targetId );
+
+	uint8 use = mode & 0xF;
+    uint8 aim = mode >> 4;
+
+    const Item weapon = Obsolete::GetConstItemBySlot( cr, SLOT_HAND1 );
+    if( weapon.Type != ItemType::Weapon )
+        ThrowException( "Critter item is not weapon", cr, weapon );
+    if( weapon.Weapon_IsTwoHanded && ( cr.IsDamagedLeftArm || cr.IsDamagedRightArm ) )
+        ThrowException( "Critter is damaged arm for two handed weapon", cr, weapon );
+    if( weapon.Id != 0 && cr.IsDamagedLeftArm && cr.IsDamagedRightArm )
+        ThrowException( "Critter is damaged two arms for armed attack", cr, weapon );
+
+    if( weapon.Weapon_ActiveUses <= use )
+        ThrowException( "Weapon use is not allowed", cr, weapon, use );
+
+    if( aim != HitLocations::LocationNone )
+    {
+        if( cr.IsNoAim )
+            ThrowException( "Critter try aim when mode IsNoAim", cr, weapon, aim );
+        if( !_WeaponAim ( weapon, use ))
+            ThrowException( "Critter try aim when weapon no aim for use", cr, weapon, aim, use );
+    }
+
+    // Spend ap
+    uint ap = Parameters::GetItemUseApCost( cr, weapon, mode );
+    if( !ProcessAp( cr, ap ) )
+        return;
+
+    if( target != null && cr.Id == target.Id )
+        ThrowException( "Critter tried attack himself", cr );
+
+    Map map = cr.GetMap();
+    if( map == null )
+        ThrowException( "Critter on global map", cr );
+
+    if( target != null )
+    {
+        if( !cr.IsSee( target ) )
+            ThrowException( "Critter don't sees target", cr, target );
+        if( target.IsDead() )
+            ThrowException( "Target critter is dead", cr, target );
+    }
+	else
+	{
+		//TODO: hex attack
+		ThrowException( "Target is null for critter", cr );
+	}	
+	
+    uint16 targetHexX = target.HexX;
+    uint16 targetHexY = target.HexY;
+    uint16 hx = cr.HexX;
+    uint16 hy = cr.HexY;
+
+    uint   maxDist = 0;
+	__EventCritterGetAttackDistantion.Raise( cr, weapon, mode, maxDist );
+    if( maxDist == 0 )
+        ThrowException( "Invalid weapon range", cr, weapon, use, targetHexX, targetHexY );
+		
+    uint dist = GetDistantion( hx, hy, targetHexX, targetHexY );
+    if( dist - ( target != null ? target.Multihex : 0 ) > maxDist )
+        ThrowException( "Target too far", cr, weapon, use, targetHexX, targetHexY );
+
+    uint16 tracedHexX = targetHexX;
+    uint16 tracedHexY = targetHexY;
+    map.GetHexCoord( hx,  hy, tracedHexX, tracedHexY,  0.0f, dist );
+    if( targetHexX != tracedHexX || targetHexY != tracedHexY )
+        ThrowException( "Target blocked", cr, weapon, use, targetHexX, targetHexY );
+
+    // Ammo
+    const Item ammo;
+    if( weapon.Weapon_Caliber != 0 && weapon.Weapon_MaxAmmoCount > 0 )
+    {
+        ammo = GetProtoItem( weapon.AmmoPid );
+        if( ammo == null )
+            ammo = GetProtoItem( weapon.Weapon_DefaultAmmoPid );
+        if( ammo == null )
+            ThrowException( "Weapon ammo not found", cr, weapon );
+        if( ammo.Type != ItemType::Ammo )
+            ThrowException( "Weapon ammo item isn't have ammo type", cr, weapon, ammo );
+        if( !cr.IsUnlimitedAmmo && weapon.AmmoCount == 0 )
+            ThrowException( "Weapon ammo count is zero", cr, weapon, ammo );
+    }
+
+    // Raise attack event
+    cr.TimeoutAggressor = __FullSecond + REAL_MINUTE( 1 );
+    Combat::CombatAttack( cr, target, weapon, mode, ammo );
+
+}
+
+
 #endif

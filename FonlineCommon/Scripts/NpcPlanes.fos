@@ -49,8 +49,614 @@
 #define REASON_ATTACK_DISTANTION           ( 52 )
 #define REASON_ATTACK_USE_AIM              ( 53 )
 
+void NL( Critter npc, string str )
+{
+     Log( npc.Name + " - " + str );
+	 npc.Say( SAY_NORM_ON_HEAD, str );
+}
+
+
+
+
 
 funcdef void NpcPlaneMiscFunc( Critter cr );
+
+void ModuleInit()
+{
+    __EventCritterIdle.Subscribe( OnCritterIdle );
+
+}
+
+void OnCritterIdle( Critter npc )
+{
+    if( !npc.IsNpc() || npc.IsBusy() )
+        return;
+
+	/*	//debug planes for repl
+	Map map = npc.GetMap();
+	
+	if( !valid(map) )
+		return;
+	
+	Location loc = map.GetLocation();
+	if( !valid(loc) || loc.ProtoId !=Content::Location::replication_1)
+		return;
+	*/
+    const uint wait = ProcessAi( npc );
+    if( wait != 0 )
+        npc.Wait( wait );
+}
+
+bool CheckHasEnoughAP( Critter cr, int ap )
+{
+	return cr.CurrentAp >= int( ap ) ;
+}
+
+uint ProcessAi( Critter npc )
+{
+    // Check busy
+    if( npc.IsBusy() )
+        return 1000;
+    // Global map
+    if( npc.MapId == 0 )
+    {
+		//TODO: global and groups
+        /*if( !npc->GroupMove )
+            return;
+        MapMngr.GM_GlobalProcess( npc, npc->GroupMove, GLOBAL_PROCESS_NPC_IDLE );
+        if( !npc->GetMapId() && !npc->IsWait() )
+            npc->SetWait( GameOpt.CritterIdleTick );*/
+        return 5000;
+    }
+
+    // Get map
+    Map map = GetMap( npc.MapId );
+    if( !valid( map ) )
+        return 5000;
+
+    // Check turn based
+    // TODO: turnbased
+	//if( map->IsTurnBasedOn && !map->IsCritterTurn( npc ) )
+    //    return;
+
+    // Check wait 
+	// r17: 
+    /*if( npc->IsWait() )
+    {
+        if( map->IsTurnBasedOn )
+            map->EndCritterTurn();
+        return;
+    }*/
+
+    // Get current plane
+    NpcPlane plane = GetCurPlane( npc );
+    // Begin
+    if( !valid( plane ) )
+    {
+
+        // Check talking
+        if( npc.GetTalkedPlayers().length() > 0 )
+            return 2000;
+
+        // Enemy stack
+        Critter enemy = EnemyStack::ScanEnemyStack( npc );
+        if( valid( enemy ) )
+        {
+			if( AddAttackPlane( npc, 0, enemy ) )
+				return 0;
+        }
+
+        // Go home
+		if( !npc.IsNoHome && map.Id == npc.HomeMapId && ( npc.HexX != npc.HomeHexX || npc.HexY != npc.HomeHexY ) )
+		{
+            if( !npc.IsNoWalk )
+            {
+                AddWalkPlane( npc, 0, 0, 0, npc.HomeHexX, npc.HomeHexY, npc.HomeDir, false, 0 );			
+			}
+            else if( map.IsHexesPassed( npc.HomeHexX, npc.HomeHexY, npc.Multihex ) )
+            {
+				npc.TransitToMap( map, npc.HomeHexX, npc.HomeHexY, npc.HomeDir );
+				return 0;
+            }
+        }
+        // Set home direction
+        else if( !npc.IsNoHome && !npc.IsNoRotate && map.Id == npc.HomeMapId && npc.Dir != npc.HomeDir )
+        {
+            npc.SetDir( npc.HomeDir );
+        }
+		return 0;
+    }
+	else
+	{
+	
+		// Process move
+		if( plane.IsMove )
+		{
+			// Check run availability
+			if( plane.Run )
+			{
+				if( npc.IsDamagedRightLeg || npc.IsDamagedLeftLeg || npc.IsOverweight )
+					plane.Run = false;
+			}
+
+			// Check ap availability
+			int ap_move = ( plane.Run ?  __RtApCostCritterRun : __RtApCostCritterWalk);
+			
+			//TODO:tb
+			/*
+			if( map->IsTurnBasedOn )
+				ap_move += npc->GetMoveAp();
+				*/
+			plane.IsMove = false;
+			if( !CheckHasEnoughAP( npc, ap_move ) )
+			{
+				uint wait = __ApRegeneration/npc.ActionPoints * (ap_move - npc.CurrentAp )/AP_DIVIDER;
+				//npc->SetWait( GameOpt.ApRegeneration / npc->GetActionPoints() * ( (int) ( need_ap ) - npc->GetRealAp() ) / AP_DIVIDER ); 
+				Log("npc wait " + wait );
+				return wait;
+			}
+			plane.IsMove = true;
+			
+			MovingState state = npc.GetMovingState();
+			if( state != MovingState::InProgress && state != MovingState::Success )
+			{
+				uint gagId = 0;
+				npc.ResetMovingState( gagId );
+				int reason = REASON_TRACE_FAIL;
+				switch( state )
+				{
+					case MovingState::GagCritter:
+						reason = REASON_GAG_CRITTER;
+						break;
+					case MovingState::GagItem:
+						reason = REASON_GAG_ITEM;
+						break;				
+				}
+				
+				if( __EventNpcPlaneEnd.Raise( npc, plane.PlaneId, reason, GetCritter( gagId ), GetItem( gagId ) ) )
+					ErasePlane(npc, 0); //TODO: возможно, здесь нужночто-то другое, не удалять план
+				return 0;
+			}
+		}
+		
+
+		bool is_busy = ( plane.IsMove || npc.IsBusy() );//|| npc.IsWait );
+
+		// Process planes
+		switch( plane.Type )
+		{
+	/************************************************************************/
+	/* ==================================================================== */
+	/* ========================   Misc   ================================== */
+	/* ==================================================================== */
+	/************************************************************************/
+		case AI_PLANE_MISC:
+		{
+			if( is_busy )
+				break;
+
+			uint wait = plane.Misc_WaitSecond;
+			NpcPlaneMiscFunc func = plane.Misc_Script;
+
+			if( wait > __FullSecond )
+			{
+				return ( ( wait - __FullSecond ) * 1000 / __TimeMultiplier );
+			}
+			else if( func !is null )
+			{
+				func( npc );
+			}
+			else
+			{
+				NextPlane( npc, REASON_SUCCESS );
+			}
+		}
+		break;
+	/************************************************************************/
+	/* ==================================================================== */
+	/* ========================   Attack   ================================ */
+	/* ==================================================================== */
+	/************************************************************************/
+		case AI_PLANE_ATTACK:
+		{
+			//TODO: tb 
+			// if( map->Data.IsTurnBasedAviable && !map->IsTurnBasedOn )
+			//	map->BeginTurnBased( npc );
+
+			/************************************************************************/
+			/* Target is visible                                                    */
+			/************************************************************************/
+			Critter targ = GetCritter( plane.Attack_TargId );
+
+			if( valid( targ ) && npc.IsSee( targ )  )
+			{
+				/************************************************************************/
+				/* Step 0: Check for success plane and continue target timeout          */
+				/************************************************************************/
+			
+				if( plane.Attack_IsGag && ( targ.HexX != plane.Attack_GagHexX || targ.HexY != plane.Attack_GagHexY ) )
+				{
+					NextPlane( npc, REASON_SUCCESS );
+					break;
+				}
+
+				bool attack_to_dead = ( plane.Attack_MinHp <= __DeadHitPoints );
+				if( !plane.Attack_IsGag && ( !attack_to_dead && targ.CurrentHp <= plane.Attack_MinHp ) || ( attack_to_dead && targ.IsDead() ) )
+				{
+					NextPlane( npc, REASON_SUCCESS );
+					break;
+				}
+
+				if( plane.IsMove && plane.Attack_LastHexX == 0 && plane.Attack_LastHexY == 0 )
+				{
+					plane.IsMove = false;
+				}
+				
+				plane.Attack_LastHexX = targ.HexX;
+				plane.Attack_LastHexY = targ.HexY;
+
+				if( is_busy )
+					break;
+					
+				// Is moving
+				if( npc.GetMovingState() == MovingState::InProgress )
+				{
+					return 1000;
+				}
+				/************************************************************************/
+				/* Step 1: Choose weapon                                                */
+				/************************************************************************/
+				// Get battle weapon
+				int   use;
+				const Item weap;
+				uint  r0 = targ.Id, r1 = 0, r2 = 0;
+				if( !__EventNpcPlaneRun.Raise( npc, plane.PlaneId, REASON_ATTACK_WEAPON, r0, r1, r2 ) )
+				{
+					Log( "REASON_ATTACK_WEAPON fail. Skip attack.\n" );
+					break;
+				}
+				if( plane.PlaneId != plane.GetCurPlane().PlaneId )//TODO: проверить, что тут нет ошибки
+					break;                                               // Validate plane
+
+				if( r0 > 0 )
+				{
+					weap = npc.GetItem( r0 ); //TODO: проверить, что оружие найдено 
+				}
+				else
+				{
+					if( npc.IsNoUnarmed )
+					{
+						NextPlane( npc, REASON_NO_UNARMED );
+						break;
+					}
+
+					const Item unarmed = GetProtoItem( r2 );
+					if( !valid ( unarmed ) || !unarmed.Weapon_IsUnarmed )
+						unarmed = GetProtoItem( HASH( "default_weapon" ) );
+
+					weap = unarmed;
+				}
+				use = r1;
+
+				if( !valid( weap ) || weap.Type != ItemType::Weapon || weap.Weapon_ActiveUses <= use )
+				{
+					Log( "REASON_ATTACK_WEAPON fail" );
+					break;
+				}
+
+				
+				const Item mainItem = npc.GetItemBySlot( SLOT_HAND1 );
+
+				// Hide cur, show new
+				if( mainItem!=null && weap.Id != mainItem.Id && mainItem.Id > 0)
+				{
+					ChosenActions::MoveInvItem( npc, mainItem.Id, SLOT_INV );
+					break; //TODO: проверить, не слишком ли долго будет думать нпц при замене оружия
+				}
+				
+				if( mainItem == null && weap.Id > 0)
+				{
+					ChosenActions::MoveInvItem( npc, weap.Id, SLOT_HAND1 );
+					break;				
+				}
+				
+				if( weap.Id > 0 )
+					Parameters::SetWeaponMode( weap, _WeaponModeMake( use, 0 ) );
+				else
+					npc.HandsItemMode = _WeaponModeMake( use, 0 );
+
+				// Load weapon
+				if( !npc.IsUnlimitedAmmo && weap.Weapon_MaxAmmoCount > 0 && weap.AmmoCount == 0 )
+				{
+					const Item ammo = Obsolete::FindAmmoForWeapon( npc, weap );
+					if( !valid( ammo ) )
+					{						
+						Item weapon = GetItem( weap.Id );
+						Log( "Ammo for weapon not found, full load, npc " + npc.Id );
+						if( weapon.AmmoPid == 0 )
+							weapon.AmmoPid = weap.Weapon_DefaultAmmoPid;
+						weapon.AmmoCount = weap.Weapon_MaxAmmoCount;
+					}
+					else
+					{
+						ChosenActions::ReloadWeapon( npc, weap.Id, ammo.Id );
+						break;
+					}
+				}
+				else if( npc.IsUnlimitedAmmo && weap.Weapon_MaxAmmoCount > 0 )
+				{
+					Item weapon = GetItem( weap.Id );
+					if( weap.AmmoPid == 0 )
+						weapon.AmmoPid = weap.Weapon_DefaultAmmoPid;
+					weapon.AmmoCount = weap.Weapon_MaxAmmoCount;
+				}
+
+				/************************************************************************/
+				/* Step 2: Move to target                                               */
+				/************************************************************************/
+				bool is_can_walk = !npc.IsNoWalk;
+				uint best_dist = 0, min_dist = 0, max_dist = 0;
+				r0 = targ.Id;
+				r1 = 0;
+				r2 = 0;
+				if( !__EventNpcPlaneRun.Raise( npc, plane.PlaneId, REASON_ATTACK_DISTANTION, r0, r1, r2 ) )
+				{
+					Log( "REASON_ATTACK_DISTANTION fail. Skip attack.\n" );
+					break;
+				}
+				if( plane.PlaneId != plane.GetCurPlane().PlaneId )
+					break;                                               // Validate plane
+
+				best_dist = r0;
+				min_dist = r1;
+				max_dist = r2;
+
+				if( r2 <= 0 )                 // Run away
+				{
+					NextPlane( npc, REASON_RUN_AWAY );
+					break;
+				}
+
+				if( max_dist <= 0 )
+				{
+					uint look = npc.LookDistance;
+					max_dist = Parameters::GetItemAttackDistantion( npc, weap, use );
+					if( max_dist > look )
+						max_dist = look;
+				}
+				if( min_dist <= 0 )
+					min_dist = 1;
+
+				if( min_dist > max_dist )
+					min_dist = max_dist;
+				best_dist = CLAMP( best_dist, min_dist, max_dist );
+				uint actualDist = GetDistantion( npc.HexX, npc.HexY, targ.HexX, targ.HexY );
+
+				if( actualDist > max_dist )
+				{
+					if( !npc.IsNoWalk )
+					{
+						plane.IsMove = true;
+						npc.MoveToCritter( targ, best_dist, plane.Run );
+						break;						
+					}
+					NextPlane( npc, REASON_CANT_WALK );
+					break;
+				}				
+
+				// Find better position
+				uint16 hx = npc.HexX;
+				uint16 hy = npc.HexY;
+				uint16 targetHx = targ.HexX;
+				uint16 targetHy = targ.HexY;
+				uint16 resHx = targetHx;
+				uint16 resHy = targetHy;
+				bool   is_range = ( max_dist > 2 );
+				if( is_range && !npc.IsNoWalk )
+				{
+					// Check target reachability
+					auto tracer = AttackCritterTracer( targ );
+					LineTracer::LineTracerHex( hx, hy, targetHx, targetHy, map, max_dist, tracer );
+					if( !tracer.Success )
+					{
+						float angleDir = ( Random( 0, 1 ) == 0 ? 1 : -1 );
+						float baseAngle = LineTracer::GetDirectionF( targetHx, targetHy, hx, hy );
+						for( int i = 0; i < 17; i++ )
+						{
+							float  angle = baseAngle * 20.0 * float(i / 2 + 1) * ( i % 2 == 0 ? angleDir : -angleDir );
+							uint16 tx = hx;
+							uint16 ty = hy;
+							map.GetHexCoordWall( targetHx, targetHy, tx, ty, angle, best_dist );
+							uint   dist = GetDistantion( targetHx, targetHy, tx, ty );
+							if( dist >= min_dist )
+							{
+								LineTracer::LineTracerHex( tx, ty, targetHx, targetHy, map, max_dist, tracer );
+								if( tracer.Success )
+								{
+									plane.IsMove = true;
+									npc.MoveToHex( tx, ty, 0, plane.Run );
+									break;
+								}
+							}
+						}
+
+						// Better position not found
+						NextPlane( npc, REASON_POSITION_NOT_FOUND );
+						break;
+					}
+				}
+				// Find precision HtH attack
+				else if( !is_range )
+				{
+					if( GetDistantion( npc.HexX, npc.HexY, targ.HexX, targ.HexY ) > max_dist )
+					{
+						if( !is_can_walk )
+							NextPlane( npc, REASON_CANT_WALK );
+						else if( max_dist > 1 && best_dist == 1 )
+						{
+							plane.IsMove = true;
+							npc.MoveToCritter( targ, best_dist, plane.Run );
+						}
+						
+						break;
+					}
+					
+				}
+
+				/************************************************************************/
+				/* Step 3: Attack                                                       */
+				/************************************************************************/
+
+				r0 = targ.Id;
+				r1 = 0;
+				r2 = 0;
+				if( !__EventNpcPlaneRun.Raise( npc, plane.PlaneId, REASON_ATTACK_USE_AIM, r0, r1, r2 ) )
+				{
+					Log( "REASON_ATTACK_USE_AIM fail. Skip attack.\n" );
+					break;
+				}
+
+				if( r2 > 0 )
+				{
+					return r2;
+				}
+
+				if( r0 != uint( use ) && weap.Weapon_ActiveUses > r0)
+					use = r0;
+
+				int aim = r1;
+				if( npc.IsNoAim  || !_WeaponAim( weap, use ) )
+					aim = 0;
+				if( weap.Id > 0 )
+					Parameters::SetWeaponMode( weap, _WeaponModeMake( use, aim ) );
+				else
+					npc.HandsItemMode = _WeaponModeMake( use, 0 );
+				ChosenActions::Attack( npc, targ.Id, _WeaponModeMake( use, aim ) );
+			}
+			/************************************************************************/
+			/* Target not visible, try find by last stored position                 */
+			/************************************************************************/
+			else
+			{
+				if( is_busy )
+					break;
+
+				if( ( plane.Attack_LastHexX ==0 && plane.Attack_LastHexY == 0 ) || npc.IsNoWalk )
+				{
+					//Critter targ_ = GetCritter( plane.Attack_TargId );
+					NextPlane( npc, REASON_TARGET_DISAPPEARED );
+					break;
+				}
+				// AttackPlan Is moving last pos"
+				if( npc.GetMovingState() == MovingState::InProgress )
+					break;
+
+				AddWalkPlane( npc, 0, 0, 0, plane.Attack_LastHexX, plane.Attack_LastHexY, 1, plane.Run, npc.LookDistance/2 );			
+			
+				plane.Attack_LastHexX = 0;
+				plane.Attack_LastHexY = 0;
+			}
+		}
+		break;
+	/************************************************************************/
+	/* ==================================================================== */
+	/* ========================   Walk   ================================== */
+	/* ==================================================================== */
+	/************************************************************************/
+		case AI_PLANE_WALK:
+		{
+			if( is_busy )
+				break;
+
+			if( GetDistantion( npc.HexX, npc.HexY, plane.Walk_HexX, plane.Walk_HexY ) <= plane.Walk_Cut )
+			{
+				if( plane.Walk_Dir < 6 )
+				{
+					npc.SetDir( plane.Walk_Dir );
+				}
+				else if( plane.Walk_Cut > 0 )
+				{
+					npc.SetDir( GetDirection( npc.HexX, npc.HexY, plane.Walk_HexX, plane.Walk_HexY ) );
+				}
+
+				NextPlane( npc, REASON_SUCCESS );
+			}
+			else
+			{
+				if( npc.IsNoWalk )
+				{
+					NextPlane( npc, REASON_CANT_WALK );
+				}
+				npc.MoveToHex( plane.Walk_HexX, plane.Walk_HexY, plane.Walk_Cut, plane.Run );
+			}
+		}
+		break;
+	/************************************************************************/
+	/* ==================================================================== */
+	/* ========================   Pick   ================================== */
+	/* ==================================================================== */
+	/************************************************************************/
+		case AI_PLANE_PICK:
+		{
+			uint16 hx = plane.Pick_HexX;
+			uint16 hy = plane.Pick_HexY;
+			uint16 pid = plane.Pick_Pid;
+			uint   use_item_id = plane.Pick_UseItemId;
+			bool   to_open = plane.Pick_ToOpen;
+			bool   is_run = plane.Pick_IsRun;
+
+			Item  item = map.GetItem( hx, hy, pid );        
+			if( !valid( item ) || ( item.Type == ItemType::Door && 
+				( to_open ? item.Opened  : !item.Opened ) ) )
+			{
+				NextPlane( npc, REASON_SUCCESS );
+				break;
+			}
+
+			if( use_item_id > 0 && ! valid( npc.GetItem( use_item_id ) ) )
+			{
+				NextPlane( npc, REASON_USE_ITEM_NOT_FOUND );
+				break;
+			}
+
+			if( is_busy )
+				break;
+			
+			const Item proto_item = GetProtoItem( pid );
+			if( !valid( proto_item ) )
+			{
+				NextPlane( npc, REASON_SUCCESS );
+				break;
+			}
+
+			if( GetDistantion( npc.HexX, npc.HexY, hx, hy ) > 1 + npc.Multihex )
+			{
+				npc.MoveToHex( hx, hy, 1 + npc.Multihex, is_run );
+			}
+			else
+			{
+				npc.SetDir( GetDirection( npc.HexX, npc.HexY, hx, hy ) );
+				ChosenActions::PickItem( npc, hx, hy, pid );
+				//	npc->NextPlane( REASON_SUCCESS );
+			}
+		}
+		break;
+	/************************************************************************/
+	/* ==================================================================== */
+	/* ==================================================================== */
+	/* ==================================================================== */
+	/************************************************************************/
+		default:
+		{
+			NextPlane( npc, REASON_SUCCESS );
+		}
+		break;
+		}
+
+	//	if(map->IsTurnBasedOn && map->IsCritterTurn(npc) && !is_busy && (npc->IsNoPlanes() || !npc->GetCurPlane()->IsMove) && !npc->IsBusy() && !npc->IsWait()) map->EndCritterTurn();
+	}
+	return 0;
+}
 
 NpcPlane CreatePlane()
 {
@@ -60,6 +666,42 @@ NpcPlane CreatePlane()
 dict< uint, NpcPlane[] > AllNpcPlanes = {};
 int LastPlaneId = 0;
 
+
+class AttackCritterTracer : LineTracer::ITraceContext
+{
+    const Critter Target;
+    bool          Success;
+
+    AttackCritterTracer( const Critter target )
+    {
+        Target = target;
+    }
+
+    void StartExec( const Map map, uint16 hx, uint16 hy, uint16 tx, uint16 ty, uint maxDist ) override
+    {
+        Success = false;
+    }
+
+    void FinishExec( const Map map, uint resultDist ) override
+    {
+        // Nothing
+    }
+
+    bool Exec( const Map map, uint16 hx, uint16 hy ) override
+    {
+        if( !map.IsHexRaked( hx, hy ) )
+            return true;
+
+        const Critter cr = map.GetCritter( hx, hy );
+        if( cr != null && cr.Cond != CritterCondition::Dead )
+        {
+            Success = ( cr.Id == Target.Id );
+            return true;
+        }
+
+        return false;
+    }
+}
 
 class NpcPlane
 {
@@ -214,17 +856,24 @@ uint ErasePlane(Critter cr, int planeType, bool all)
 
 bool ErasePlane(Critter cr, uint index)
 {
+	if( ! valid(cr ) )
+		ThrowException( "Attempt to call method on destroyed object." );
+	if( !cr.IsPlayer() )
+		ThrowException( "Critter is not npc." );
+	
 	NpcPlane[] planes = AllNpcPlanes.get( cr.Id, null );
     if( planes != null && !planes.isEmpty() )
 	{
 		for(uint i = 0, l = planes.length(); i < l; i++)
 		{
+			if( index >= l )
+				ThrowException( "Invalid index arg." );
 			if( i == index )
 			{
 				NpcPlane plane = planes[i];
 				if( plane != null )
 				{
-					planes.remove(plane);
+					planes.remove( plane );
 					AllNpcPlanes.set( cr.Id, planes );
 					return true;
 				}
@@ -422,13 +1071,42 @@ void NextPlane(Critter cr, int reason)
     if( planes != null && !planes.isEmpty() )
 	{
 		// Remove first plane and notify about
-		NpcPlane plane = planes[0];
-		if( valid(plane) )
+		NpcPlane plane = planes[ 0 ];
+		if( valid( plane ) )
 		{
-			planes.remove(plane);
+			planes.removeFirst();
 			
+			if( __EventNpcPlaneEnd.Raise( cr, plane.PlaneId, reason, null, null ) )
+			{
+				if( plane.GetCurPlane().PlaneId == plane.PlaneId )
+					return;
+				NpcPlane cur = plane;
+				NpcPlane child = plane.ChildPlane;
+				while( child.ChildPlane != null )
+				{
+					cur = child;
+					child = cur.ChildPlane;
+				}
+				cur.ChildPlane = null;
+				planes.insertFirst( cur );
+			}
+			else
+			{
+				// поменять приоритет
+				uint position = 0;
+				if( planes.length() > 0 )
+				{
+					for( uint l = planes.length(); position < l; position++ )
+					{
+						if( plane.Priority > planes[ position].Priority )
+							break;
+					}
+				}
+				planes.insertAt( position, plane );
+			}			
 		}
 	}
+	
 }
 
 
@@ -492,6 +1170,7 @@ void NextPlane(Critter cr, int reason)
 
 /*EXPORT*/ bool AddAttackPlane( Critter npc, uint priority, Critter target )
 {
+NL(npc, "AddAttackPlane");
     NpcPlane plane = CreatePlane();
     plane.Type = AI_PLANE_ATTACK;
     plane.Priority = ( priority == 0 ? AI_PLANE_ATTACK_PRIORITY : priority );

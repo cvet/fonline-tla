@@ -1,0 +1,395 @@
+// FOS Common
+/******************************************************************************
+ *                                                                            *
+ *  TOKENIZER                                                                 *
+ *  Takes a JSON text and produces an array of JSON tokens.                   *
+ *                                                                            *
+ ******************************************************************************/
+
+enum TokenType
+{
+    LEFT_SQUARE_BRACKET  = '[',
+    RIGHT_SQUARE_BRACKET = ']',
+    LEFT_CURLY_BRACKET   = '{',
+    RIGHT_CURLY_BRACKET  = '}',
+    COMMA                = ',',
+    COLON                = ':',
+    TRUE                 = 't',
+    FALSE                = 'f',
+    NULL                 = 'n',
+    STRING               = '"',
+    NUMBER               = '#',
+    INTEGER              = 'I'
+}
+
+class Token
+{
+    TokenType type;
+    string value;
+
+    uint row;
+    uint col;
+
+    Token(TokenType type, string value)
+    {
+        this.type = type;
+        this.value = value;
+    }
+    string name()
+    {
+        switch (this.type)
+        {
+            case TokenType::LEFT_SQUARE_BRACKET:
+                return "[";
+            case TokenType::RIGHT_SQUARE_BRACKET:
+                return "]";
+            case TokenType::LEFT_CURLY_BRACKET:
+                return "{";
+            case TokenType::RIGHT_CURLY_BRACKET:
+                return "}";
+            case TokenType::COMMA:
+                return ",";
+            case TokenType::COLON:
+                return ":";
+            case TokenType::TRUE:
+                return "true";
+            case TokenType::FALSE:
+                return "false";
+            case TokenType::NULL:
+                return "null";
+            case TokenType::STRING:
+                return "string";
+            case TokenType::NUMBER:
+            case TokenType::INTEGER:
+                return "number";
+        }
+        return "unknown";
+    }
+}
+
+
+//  Returns true if reached end of text
+bool growToken(string& tokenValue, uint& tokenLength, uint& offset, uint length, uint8 character)
+{
+    tokenLength++;
+    _CharAdd(tokenValue, character);
+    offset++;
+    return offset >= length;
+}
+
+
+bool eatNumberToken(const string& text, uint& offset, uint length, array<Token@>@ tokens)
+{
+    string tokenValue = "";
+    uint tokenLength = 0;
+    TokenType tokenType = TokenType::INTEGER;
+
+    if (_CharGet(text, offset) == '-')
+    {
+        if (growToken(tokenValue, tokenLength, offset, length, '-'))
+        {
+            return false;
+        }
+    }
+    if (_CharGet(text, offset) == '0')
+    {
+        if (growToken(tokenValue, tokenLength, offset, length, '0'))
+        {
+            tokens.insertLast(@Token(tokenType, tokenValue));
+            offset++;
+            return true;
+        }
+    }
+    else if (_CharGet(text, offset) >= '1' && _CharGet(text, offset) <= '9')
+    {
+        if (growToken(tokenValue, tokenLength, offset, length, _CharGet(text, offset)))
+        {
+            tokens.insertLast(@Token(tokenType, tokenValue));
+            offset++;
+            return true;
+        }
+        while (offset < length)
+        {
+            if (_CharGet(text, offset) >= '0' && _CharGet(text, offset) <= '9')
+            {
+                if (growToken(tokenValue, tokenLength, offset, length, _CharGet(text, offset)))
+                {
+                    tokens.insertLast(@Token(tokenType, tokenValue));
+                    offset++;
+                    return true;
+                }
+            }
+            else
+            {
+                break;
+            }
+        }
+    }
+    if (_CharGet(text, offset) == '.')
+    {
+        tokenType = TokenType::NUMBER;
+        if (growToken(tokenValue, tokenLength, offset, length, _CharGet(text, offset)))
+        {
+            return false;
+        }
+        while (offset < length)
+        {
+            if (_CharGet(text, offset) >= '0' && _CharGet(text, offset) <= '9')
+            {
+                if (growToken(tokenValue, tokenLength, offset, length, _CharGet(text, offset)))
+                {
+                    tokens.insertLast(@Token(tokenType, tokenValue));
+                    offset++;
+                    return true;
+                }
+            }
+            else
+            {
+                break;
+            }
+        }
+    }
+    if (_CharGet(text, offset) == 'e' || _CharGet(text, offset) == 'E') {
+        tokenType = TokenType::NUMBER;
+        if (growToken(tokenValue, tokenLength, offset, length, _CharGet(text, offset)))
+        {
+            return false;
+        }
+    }
+    if (_CharGet(text, offset) == '+' || _CharGet(text, offset) == '-') {
+        if (growToken(tokenValue, tokenLength, offset, length, _CharGet(text, offset)))
+        {
+            return false;
+        }
+    }
+    if (_CharGet(text, offset) >= '0' && _CharGet(text, offset) <= '9')
+    {
+        if (growToken(tokenValue, tokenLength, offset, length, _CharGet(text, offset)))
+        {
+            tokens.insertLast(@Token(tokenType, tokenValue));
+            offset++;
+            return true;
+        }
+    }
+    while (offset < length)
+    {
+        if (_CharGet(text, offset) >= '0' && _CharGet(text, offset) <= '9')
+        {
+            if (growToken(tokenValue, tokenLength, offset, length, _CharGet(text, offset)))
+            {
+                tokens.insertLast(@Token(tokenType, tokenValue));
+                offset++;
+                return true;
+            }
+        }
+        else
+        {
+            break;
+        }
+    }
+    tokens.insertLast(@Token(tokenType, tokenValue));
+    return true;
+}
+
+
+bool eatStringToken(const string& text, uint& offset, uint length, array<Token@>@ tokens)
+{
+    string tokenValue = "";
+    uint tokenLength = 0;
+    offset++;
+
+    while (offset < length)
+    {
+        if (_CharGet(text, offset) == '"') // end of string
+        {
+            tokens.insertLast(@Token(TokenType::STRING, tokenValue));
+            offset++;
+            return true;
+        }
+        else if (_CharGet(text, offset) == 92) // escape sequence
+        {
+            offset++;
+            if (offset >= length)
+            {
+                return false;
+            }
+            switch (_CharGet(text, offset))
+            {
+            case '"':
+            case '/':
+            case 92:
+                growToken(tokenValue, tokenLength, offset, length, _CharGet(text, offset));
+                break;
+            case 'b':
+                growToken(tokenValue, tokenLength, offset, length, 8);
+                break;
+            case 'f':
+                growToken(tokenValue, tokenLength, offset, length, 12);
+                break;
+            case 'n':
+                growToken(tokenValue, tokenLength, offset, length, 10);
+                break;
+            case 'r':
+                growToken(tokenValue, tokenLength, offset, length, 13);
+                break;
+            case 't':
+                growToken(tokenValue, tokenLength, offset, length, 9);
+                break;
+            case 'u': // TODO: implement unicode sequence
+                offset += 5;
+                if (offset >= length)
+                {
+                    return false;
+                }
+            }
+        }
+        else
+        {
+			growToken(tokenValue, tokenLength, offset, length, _CharGet(text, offset));
+        }
+    }
+    return false;
+}
+
+
+bool eatLiteralToken(const string& text, uint& offset, string match, array<Token@>@ tokens)
+{
+    uint tokenLength = _CharLength(match);
+
+    if (offset + tokenLength > _CharLength(text))
+    {
+        return false;
+    }
+    for (uint i = 1; i < tokenLength; i++)
+    {
+        if (_CharGet(text, offset + i) != _CharGet(match, i))
+        {
+            return false;
+        }
+    }
+    tokens.insertLast(@Token(TokenType(_CharGet(text, offset)), ""));
+    offset += tokenLength;
+    return true;
+}
+
+
+void eatStructuralToken(const string& text, uint& offset, array<Token@>@ tokens)
+{
+    tokens.insertLast(@Token(TokenType(_CharGet(text, offset)), ""));
+    offset++;
+}
+
+
+void eatWhitespace(const string& text, uint& offset, uint length)
+{
+    offset++;
+    while (offset < length)
+    {
+        switch (_CharGet(text, offset))
+        {
+            case 9:
+            case 10:
+            case 13:
+            case 32:
+                offset++;
+                break;
+            default:
+                return;
+        }
+    }
+}
+
+
+bool tokenize(const string& text, array<Token@>@ tokens)
+{
+    uint length = _CharLength(text);
+    uint offset = 0;
+    uint8 symbol;
+
+    // Skip UTF-8 BOM
+    if (length > 2)
+    {
+        if (_CharGet(text, 0) == 239 &&
+            _CharGet(text, 1) == 187 &&
+            _CharGet(text, 2) == 191)
+        {
+            offset += 3;
+        }
+    }
+
+    while (offset < length)
+    {
+        symbol = _CharGet(text, offset);
+        switch (symbol)
+        {
+            case 9:
+            case 10:
+            case 13:
+            case 32:
+            {
+                eatWhitespace(text, offset, length);
+                break;
+            }
+            case TokenType::COMMA:
+            case TokenType::COLON:
+            case TokenType::LEFT_SQUARE_BRACKET:
+            case TokenType::RIGHT_SQUARE_BRACKET:
+            case TokenType::LEFT_CURLY_BRACKET:
+            case TokenType::RIGHT_CURLY_BRACKET:
+            {
+                eatStructuralToken(text, offset, tokens);
+                break;
+            }
+            case TokenType::TRUE:
+                if (!eatLiteralToken(text, offset, "true", tokens))
+                {
+                    return false;
+                }
+                break;
+            case TokenType::FALSE:
+                if (!eatLiteralToken(text, offset, "false", tokens))
+                {
+                    Log("Failed to eat literal false token " + symbol);
+                    return false;
+                }
+                break;
+            case TokenType::NULL:
+                if (!eatLiteralToken(text, offset, "null", tokens))
+                {
+                    return false;
+                }
+                break;
+            case TokenType::STRING:
+            {
+                if (!eatStringToken(text, offset, length, tokens))
+                {
+                    return false;
+                }
+                break;
+            }
+            case '-':
+            case '0':
+            case '1':
+            case '2':
+            case '3':
+            case '4':
+            case '5':
+            case '6':
+            case '7':
+            case '8':
+            case '9':
+            {
+                if (!eatNumberToken(text, offset, length, tokens))
+                {
+                    return false;
+                }
+                break;
+            }
+            default:
+            {
+                return false;
+            }
+        }
+    }
+    return true;
+}

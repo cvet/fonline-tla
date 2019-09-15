@@ -1,0 +1,189 @@
+// FOS Server Client
+
+# pragma rpc Client GetGlobalMapData( uint flags, uint8[] data )
+
+#define GM_INFO_LOCATIONS            ( 0x01 )
+#define GM_INFO_CRITTERS             ( 0x02 )
+#define GM_INFO_GROUP_PARAM          ( 0x04 )
+#define GM_INFO_ZONES_FOG            ( 0x08 )
+#define GM_INFO_ALL                  ( 0x0F )
+#define GM_INFO_FOG                  ( 0x10 )
+#define GM_INFO_LOCATION             ( 0x20 )
+
+// На клиенте неизвестен класс Location, поэтому данные о локациях передаются отдельной структурой.
+class LocationData
+{
+
+#ifdef __SERVER
+	LocationData( Location loc )
+	{
+		LocId = loc.Id;
+		LocPid = loc.ProtoId;
+		LocWx = loc.WorldX;
+		LocWy = loc.WorldY;
+		Radius = loc.Radius;
+		Color = loc.Color;
+	}	
+#endif
+
+	uint   LocId;
+    hash   LocPid;
+    uint16 LocWx;
+    uint16 LocWy;
+    uint16 Radius;
+    uint   Color;
+	//uint[]  Entrances;
+	
+	void Save( Serializator::Serializator save )
+	{
+		save.Set( LocId );
+		save.Set( LocPid );
+		save.Set( LocWx );
+		save.Set( LocWy );
+		save.Set( Radius );
+		save.Set( Color );		
+	}
+	
+	void Load( Serializator::Serializator load )
+	{
+		load.Get( LocId );
+		load.Get( LocPid );
+		load.Get( LocWx );
+		load.Get( LocWy );
+		load.Get( Radius );
+		load.Get( Color );	
+		//LocWx = 50 * GMLocations.length();
+		//LocWy = 50 * GMLocations.length();		
+	}
+	
+	string ToString()
+	{
+		return "LocPid: " + GetHashStr( LocPid ) + "; LocId: " + LocId + "; LocWx: " + LocWx + "; LocWy: " + LocWy + "; Radius: " + Radius + "; Color: " + Color ;
+	}
+}
+
+#ifdef __SERVER
+
+void ModuleInit()
+{
+	__EventGlobalMapCritterIn.Subscribe( OnGlobalMapCritterIn );
+	__EventPlayerLogin.Subscribe( OnPlayerLogin );
+	
+	 AddPropertySetCallback( CritterProperty::KnownLocations, OnPlayerSetKnownLocations, true );
+}
+
+void OnPlayerSetKnownLocations( const Critter cr, CritterProperty perk, int[] knownLocations )
+{
+	if( !valid( cr.GetMap() ) )
+	{
+		uint[] values = { cr.Id, GM_INFO_LOCATIONS };
+		DeferredCall( 0, DeferredSendGlobalMapData, values );	
+	}
+}
+
+void OnPlayerLogin( uint ip, string name, uint id, uint& textMsg, uint& strNum, string& lexems )
+{
+	uint[] values = { id, GM_INFO_ALL };
+	DeferredCall( 0, DeferredSendGlobalMapData, values );
+}
+
+void DeferredSendGlobalMapData( uint[] values )
+{
+	Assert( values.length() == 2 );
+	
+	uint id = values[ 0 ];
+	uint flags = values[ 1 ];
+	
+	Critter cr = GetCritter( id );
+	if( valid( cr ) && !valid( cr.GetMap() ) && cr.IsPlayer() )
+	{
+		SetGlobalMapData( flags, cr );
+	}
+}
+
+void OnGlobalMapCritterIn( Critter cr )
+{
+	SetGlobalMapData( GM_INFO_LOCATIONS, cr );
+}
+
+void SetGlobalMapData( uint flags, Critter cr )
+{
+	uint8[] data = {};
+	auto save = Serializator::Serializator();
+
+	if( FLAG( flags, GM_INFO_LOCATIONS ) )
+	{
+		Location::ValidateKnownLocations( cr );
+		
+		uint[] locations = cr.KnownLocations.clone();
+		save.Set( locations.length() );
+		for( uint i = 0, l = locations.length(); i < l; i ++ )
+		{
+			Location loc = GetLocation( locations[ i ] );
+			if( valid ( loc ) )
+			{
+				auto locData = LocationData( loc );
+				locData.Save ( save );
+			}
+		}
+		
+		//UtilsForArray::MergeArrays( data, save.GetData() );
+		
+	}
+	if( FLAG( flags, GM_INFO_GROUP_PARAM ) )
+	{
+		auto group = GlobalmapGroup::GetGlobalMapGroup( cr );
+		if( valid( group ) )
+			group.Save( save );	
+	}
+	cr.Rpc.GetGlobalMapData( flags, save.GetData()  );
+}
+
+#endif
+
+
+#ifdef __CLIENT
+
+LocationData[] GMLocations = {};
+
+LocationData GetHoveredLocationData (uint16 x, uint16 y )
+{
+	for(uint i = 0, l = GMLocations.length(); i < l; i++ )
+	{
+		auto locInfo = GMLocations[ i ];
+		// TODO: проверка наложения локаций
+		if( valid( locInfo )  && uint( sqrt( float( Math::Pow2( x  - locInfo.LocWx ) + Math::Pow2( y - locInfo.LocWy ) ) ) ) <= locInfo.Radius )
+		{
+			return locInfo;
+		}
+	}
+	return null;
+}
+
+
+void GetGlobalMapData( uint flags, uint8[] data )
+{
+	auto load = Serializator::Serializator();
+	if( load.SetData( data ) == 0 )
+		return;
+	if( FLAG( flags, GM_INFO_LOCATIONS ) )
+	{
+		GMLocations.clear();
+		uint count = 0;
+		load.Get( count );
+		for( uint i = 0; i < count; i++ )
+		{
+			auto locData = LocationData();
+			locData.Load( load );
+			GMLocations.insertLast( locData );
+		}
+	}
+	if( FLAG( flags, GM_INFO_GROUP_PARAM ) )
+	{
+		GlobalmapGroup::LoadGlobalMapGroupData( load );
+	}
+
+}
+
+
+#endif

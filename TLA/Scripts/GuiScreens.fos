@@ -3512,6 +3512,8 @@ namespace GlobalMap
             value = CLAMP( value, 0, 99 );
             return value < 10 ? "0" + value : "" + value;
         }
+    int GMWidth;
+    int GMHeight;
 
     class GlobalMap : Gui::Screen
     {
@@ -3519,15 +3521,389 @@ namespace GlobalMap
         {
             SetModal( true );
             SetAnchor( ANCHOR_LEFT| ANCHOR_TOP );
+            SetNotHittable( true );
+        }
+
+        void OnInit() override
+        {
+            
+                auto globalMapObjects = FindPanel( "GMObjects" );
+                globalMapObjects.SetPosition( 0, 0 );
+                cast< GMObjects >( globalMapObjects ).ChangeGMZoom( 0, true );
         }
     }
 
-    class HardCodeMap : Gui::Panel
+    class GlobalMapBase : Gui::Panel
     {
         void OnConstruct() override
         {
             SetPosition( 180, 20 );
             SetSize( 453, 444 );
+            SetNotHittable( true );
+            SetCropContent( true );
+        }
+    }
+
+    class GMObjects : Gui::Panel
+    {
+        float GlobalZoom = 1.0f;
+        int LastX;
+        int LastY;
+        
+        int NormalX( int x)
+        {
+            return int( x * Width / GMWidth );
+        }
+        
+        int NormalX2( int x)
+        {
+            return int( x * GMWidth / Width );
+        }
+        
+        int NormalY( int y )
+        {
+            return int( y * Height/ GMHeight );
+        }
+        
+        int NormalY2( int y )
+        {
+            return int( y * GMHeight / Height );
+        }
+        
+        void ChangeGMZoom( float zoom, bool force = false )
+        {
+            if( !this.IsMouseHit() && !force )
+                return;
+            float zoomMax = 4.0f;
+            float zoomMin = 2*Math::MaxF( 1.0f*Parent.Height/GMHeight,  1.0f*Parent.Width/GMWidth );
+            
+            if( GlobalZoom > 2 )
+                zoom *=2;
+            
+            if( GlobalZoom + zoom < zoomMin && zoom < 0)
+                return;
+            if( GlobalZoom + zoom > zoomMax && zoom > 0)
+                return;
+            GlobalZoom += zoom;
+            if( zoom == 0.0 )
+                GlobalZoom = 1.0f;
+            
+            
+            auto globalMapBase = cast< GlobalMapBase > ( Parent );
+            int curX           = NormalX2( __MouseX - PosX - globalMapBase.AbsolutePosX );
+            int curY           = NormalY2( __MouseY - PosY - globalMapBase.AbsolutePosY );
+            
+            SetSize( int( GMWidth * GlobalZoom ), int( GMHeight * GlobalZoom ) );
+            
+            
+            curX = Math::Clamp( __MouseX - globalMapBase.AbsolutePosX - NormalX( curX ), Parent.Width - Width, 0 );
+            curY = Math::Clamp( __MouseY - globalMapBase.AbsolutePosY - NormalY( curY ), Parent.Height - Height, 0 );
+            SetPosition( curX, curY );
+            
+            auto grid = cast< Gui::Grid >( Find( "GMTiledBGGrid" ) );
+            for( int i = 0, l = grid.Cells.length(); i < l; i++ )
+            {
+                auto cell = cast< GMTileTemplate >( grid.Cells[ i ] ); 
+                cell.SetSize( int( cell.PictureWidth * GlobalZoom ), int( cell.PictureHeight * GlobalZoom ) );
+            }
+            
+            grid.RefreshContentPositions();
+            
+            auto locGrid = cast< LocationsGrid >( Find( "LocationsGrid" ) );
+            
+            for( int i = 0, l = locGrid.Cells.length(); i < l; i++ )
+            {
+                auto cell = cast< LocationPic >( locGrid.Cells[ i ] ); 
+                cell.SetLocPosition( GlobalZoom );
+            }
+            
+        }
+
+        void OnConstruct() override
+        {
+            SetPosition( -1, 2 );
+        }
+
+        void OnInit() override
+        {
+            GMWidth  = __GlobalMapWidth * __GlobalMapZoneLength;
+            GMHeight = __GlobalMapHeight * __GlobalMapZoneLength;
+            SetSize(GMWidth, GMHeight);
+            
+        }
+
+        void OnDraw() override
+        {
+            
+            auto info = GlobalmapGroup::GetCurrentGroup();
+            FindButton( "PositionButton" ).SetActive( valid( info ) && !info.IsMoving && !info.IsEncounter );
+            FindPanel( "PositionMove" ).SetActive( valid( info ) && info.IsMoving );
+        }
+
+        void OnLMousePressed() override
+        {
+            ServerRpc.ProcessGlobalMapCommand( 1, NormalX2(__MouseX - PosX - Parent.AbsolutePosX ), NormalY2(__MouseY - PosY - Parent.AbsolutePosY ) );
+            
+        }
+
+        void OnRMousePressed() override
+        {
+            LastX = __MouseX;
+            LastY = __MouseY;
+        }
+
+        void OnMouseMove() override
+        {
+            if( !Input::IsMousePressed( MOUSE_BUTTON_RIGHT ) )
+                return;
+            
+            int NewPosX = PosX + ( __MouseX - LastX );
+            int NewPosY = PosY + ( __MouseY - LastY );
+            
+            NewPosX = Math::Clamp( NewPosX, Parent.Width - Width, 0 );
+            NewPosY = Math::Clamp( NewPosY, Parent.Height - Height, 0 );
+            
+            SetPosition( NewPosX, NewPosY );
+            
+            LastX = __MouseX;
+            LastY = __MouseY;
+        }
+
+        void OnGlobalMouseDown( int button ) override
+        {
+            if( button == MOUSE_BUTTON_WHEEL_DOWN )
+                ChangeGMZoom( -0.02 );
+            else if( button == MOUSE_BUTTON_WHEEL_UP )
+                ChangeGMZoom( 0.04 );
+            else if( button == MOUSE_BUTTON_MIDDLE )
+                ChangeGMZoom( 0 );
+        }
+    }
+
+    class GMTiledBG : Gui::Panel
+    {
+        void OnConstruct() override
+        {
+            SetNotHittable( true );
+        }
+    }
+
+    class GMTiledBGGrid : Gui::Grid
+    {
+        void OnConstruct() override
+        {
+            SetNotHittable( true );
+            SetCellPrototype( "GMTileTemplate" );
+            SetGridSize( 20 );
+            SetColumns( 4 );
+        }
+    }
+
+    class GMTileTemplate : Gui::Panel
+    {
+         string FormatXX( int value )
+            {
+                value = CLAMP( value, 0, 99 );
+                return value < 10 ? "0" + value : "" + value;
+            }
+            float PictureHeight = 300;
+            float PictureWidth  = 350;
+
+        void OnConstruct() override
+        {
+            SetNotHittable( true );
+        }
+
+        void OnResizeGrid( Gui::Object cell, uint cellIndex ) override
+        {
+            SetBackgroundImage( "art/Intrface/GlobalMap/WRLDMP" + FormatXX(cellIndex) + ".png", IMAGE_LAYOUT_ZOOM);
+        }
+    }
+
+    class LocationsGrid : Gui::Grid
+    {
+        void OnConstruct() override
+        {
+            SetNotHittable( true );
+            SetCellPrototype( "LocationPic" );
+            SetGridSize( 0 );
+        }
+
+        void OnShow( dictionary params ) override
+        {
+            Critter@ chosen = GetChosen();
+            if( chosen is null )
+                return;
+            
+            ResizeGrid( GlobalMapLocations::GMLocations.length() );
+            
+        }
+    }
+
+    class LocationPic : Gui::Panel
+    {
+        GlobalMapLocations::LocationData Location;
+        
+        void SetLocPosition( float zoom )
+        {
+            if( Location == null )
+                return;
+            uint radius = uint ( Location.Radius * 2 * zoom );
+            SetPosition( uint( Location.LocWx * zoom ) - radius / 2,  uint( Location.LocWy * zoom ) - radius / 2 );
+            SetSize( radius, radius );
+        }
+
+        void OnConstruct() override
+        {
+            SetSize( 49, 49 );
+            SetBackgroundImage( "art/Intrface/globalmap/WRLDSPR2.png", IMAGE_LAYOUT_STRETCH );
+        }
+
+        void OnShow( dictionary params ) override
+        {
+            SetLocPosition( 1.0f );
+            if( Location != null && Location.Color > 0 )
+                SetColor( Location.Color );
+            else
+                SetColor( COLOR_GREEN );
+        }
+
+        void OnLMousePressed() override
+        {
+            Parent.Parent.OnLMousePressed();
+        }
+
+        void OnRMousePressed() override
+        {
+            Parent.Parent.OnRMousePressed();
+        }
+
+        void OnResizeGrid( Gui::Object cell, uint cellIndex ) override
+        {
+            Location = GlobalMapLocations::GMLocations[ cellIndex ];
+        }
+    }
+
+    class Position : Gui::Panel
+    {
+        void OnConstruct() override
+        {
+        }
+
+        void OnDraw() override
+        {
+            Critter chosen = GetChosen();
+            if( chosen == null )
+                return;
+            SetPosition( 
+                    cast< GMObjects > ( Parent ).NormalX( int( chosen.WorldX ) ), 
+                    cast< GMObjects > ( Parent ).NormalY( int( chosen.WorldY ) )
+                    );
+        }
+    }
+
+    class PositionButton : Gui::Button
+    {
+        void OnConstruct() override
+        {
+            SetPosition( -12, -6 );
+            SetSize( 25, 13 );
+            SetBackgroundImage( "art/intrface/GM_Town/town_view_sh.png" );
+            SetPressedImage( "art/intrface/GM_Town/town_view_sh_dn.png" );
+            SetHoverImage( "art/intrface/GM_Town/town_view_sh_dn.png" );
+        }
+
+        void OnLMouseClick() override
+        {
+            uint locPid = 0;
+            auto group  = GlobalmapGroup::GetCurrentGroup();
+            if( group != null && !group.IsMoving && !group.IsEncounter)
+            {
+                auto locInfo = GlobalMapLocations::GetHoveredLocationData( group.CurX, group.CurY );
+                if( locInfo != null )
+                {
+                    locPid = locInfo.LocId;
+                }
+            
+            }
+            Log("locPid!" + locPid);
+            if( locPid > 0 )
+                GlobalmapGroup::RuleGlobalCommand( 3, locPid, 0 );
+        }
+    }
+
+    class PositionMove : Gui::Panel
+    {
+        void OnConstruct() override
+        {
+            SetPosition( -3, -3 );
+            SetSize( 6, 6 );
+            SetNotHittable( true );
+            SetBackgroundImage( "art/intrface/GlobalMap/WMAPLOC.png" );
+        }
+    }
+
+    class GMOverlay : Gui::Panel
+    {
+        Sprite::Sprite GMPos;
+        Sprite::Sprite GMPosMove;
+        Sprite::Sprite GMTarget;
+        Sprite::Sprite GMEncOn;
+        Sprite::Sprite GMEncOff;
+        Sprite::Sprite GMEncSpecialOff;
+        Sprite::Sprite GMEncSpecialOn;
+        uint EncOnOffTick;
+
+        void OnConstruct() override
+        {
+            SetNotHittable( true );
+        }
+
+        void OnInit() override
+        {
+            GMPos           = Sprite::Sprite( "art/intrface/GM_Town/town_view_sh.png" );
+            GMPosMove       = Sprite::Sprite( "art/intrface/GlobalMap/WMAPLOC.png" );
+            GMTarget        = Sprite::Sprite( "art/intrface/GlobalMap/WMAPTARG.png" );
+            GMEncOn         = Sprite::Sprite( "art/intrface/GlobalMap/WMAPFGT1.png" );
+            GMEncOff        = Sprite::Sprite( "art/intrface/GlobalMap/WMAPFGT0.png" );
+            GMEncSpecialOn  = Sprite::Sprite( "art/intrface/GlobalMap/WMRNDEN2.png" );
+            GMEncSpecialOff = Sprite::Sprite( "art/intrface/GlobalMap/WMRNDEN3.png" );
+        }
+
+        void OnDraw() override
+        {
+            string text;
+                        
+            auto hoveredLocation = cast< GuiScreens::GlobalMap::LocationPic >( Gui::GetHoveredObject() );
+            if( hoveredLocation != null )
+                text += MSG_LOCATION(STR_LOC_NAME( hoveredLocation.Location.LocPid )) +"\n";
+            
+            auto gmBase           = cast< GlobalMapBase > ( Parent.Parent );
+            auto globalMapObjects = cast< GMObjects > ( Parent );
+            
+            if( Parent.IsMouseHit() )
+            {
+                int CoordX               = globalMapObjects.NormalX2( __MouseX - Parent.PosX - gmBase.AbsolutePosX );
+                int CoordY               = globalMapObjects.NormalY2( __MouseY - Parent.PosY - gmBase.AbsolutePosY );
+            
+                string Coordinates = MSG_GAME( MsgStr::StrGlobalMapCoordInfo );
+                Coordinates        = ReplaceText( Coordinates, "%d", CoordX );
+                Coordinates        = ReplaceText( Coordinates, "%d", CoordY );
+                Coordinates        = ReplaceText( Coordinates, "%s", "\n" );
+                Coordinates        = ReplaceText( Coordinates, "%d", CoordX / __GlobalMapZoneLength );
+                Coordinates        = ReplaceText( Coordinates, "%d", CoordY / __GlobalMapZoneLength );
+            
+                text += Coordinates;
+            
+                DrawText( text, __MouseX + 30, __MouseY + 10, 200, 100, COLOR_GREEN, FONT_DEFAULT, FT_BORDERED );
+            }
+            
+            auto info = GlobalmapGroup::GetCurrentGroup();
+            if( info.IsMoving )
+            {
+                GMTarget.Draw( globalMapObjects.NormalX( info.ToX ) + gmBase.AbsolutePosX + Parent.PosX, globalMapObjects.NormalY( info.ToY) + gmBase.AbsolutePosY + Parent.PosY, 0, 0, 0, 0 );
+              
+            }
         }
     }
 
@@ -3536,6 +3912,7 @@ namespace GlobalMap
         void OnConstruct() override
         {
             SetSize( 800, 600 );
+            SetNotHittable( true );
             SetBackgroundImage( "art/intrface/GlobalMap/wm_iface800x600.png" );
         }
     }
@@ -3749,6 +4126,8 @@ namespace GlobalMap
 
     class KnownProtoLocs : Gui::Grid
     {
+        hash[] KnownCityLocations;
+
         void OnConstruct() override
         {
             SetPosition( 23, 4 );
@@ -3764,9 +4143,16 @@ namespace GlobalMap
             Critter@ chosen = GetChosen();
             if( chosen is null )
                 return;
-            hash[] knownLocPid = array<hash>( chosen.KnownLocProtoId );
-            if( GridSize != knownLocPid.length() + 5 )
-                ResizeGrid( knownLocPid.length() + 5 );
+            KnownCityLocations = array<hash>();
+            for( uint i = 0, l = chosen.KnownLocProtoId.length(); i < l; i++)
+            {
+                // Не для всех городов и локаций есть ярлыки
+                if( MSG_LOCATION(STR_LOC_LABEL_PIC( chosen.KnownLocProtoId[ i ] ) ) != "error" )
+                    KnownCityLocations.insertLast( chosen.KnownLocProtoId[ i ] );
+            }
+            
+            if( GridSize != KnownCityLocations.length() + 5 )
+                ResizeGrid( KnownCityLocations.length() + 5 );
         }
     }
 
@@ -3791,7 +4177,7 @@ namespace GlobalMap
             Critter@ chosen = GetChosen();
             if( chosen is null )
                 return;
-            SetActive( cellIndex >= chosen.KnownLocProtoId.length() );
+            SetActive( cellIndex >= cast<KnownProtoLocs>(Parent.Parent).KnownCityLocations.length());
         }
     }
 
@@ -3808,7 +4194,7 @@ namespace GlobalMap
             Critter@ chosen = GetChosen();
             if( chosen is null )
                 return;
-            SetActive( cellIndex < chosen.KnownLocProtoId.length() );
+            SetActive( cellIndex < cast<KnownProtoLocs>(Parent.Parent).KnownCityLocations.length());
         }
     }
 
@@ -3826,11 +4212,16 @@ namespace GlobalMap
             Critter@ chosen = GetChosen();
             if( chosen is null )
                 return;
-            if( cellIndex >= chosen.KnownLocProtoId.length() )
+            auto locs = cast<KnownProtoLocs>(Parent.Parent.Parent).KnownCityLocations;
+            if( cellIndex >= locs.length() )
                 return;
-            hash proto     = chosen.KnownLocProtoId[ cellIndex ];
+            hash proto     = locs[ cellIndex ];
             string picName = MSG_LOCATION(STR_LOC_LABEL_PIC( proto ) );
-            SetBackgroundImage( picName );
+            if( picName != "error" )
+                 SetBackgroundImage( picName );
+            
+                 
+            
         }
     }
 
@@ -3968,15 +4359,95 @@ namespace GlobalMap
     GlobalMap CreateGlobalMapHierarchy( Gui::Object parent )
     {
         GlobalMap obj = GlobalMap();
-        CreateHardCodeMapHierarchy( obj );
+        CreateGlobalMapBaseHierarchy( obj );
         CreateMainPanelHierarchy( obj );
         obj.Init( parent );
         return obj;
     }
 
-    HardCodeMap CreateHardCodeMapHierarchy( Gui::Object parent )
+    GlobalMapBase CreateGlobalMapBaseHierarchy( Gui::Object parent )
     {
-        HardCodeMap obj = HardCodeMap();
+        GlobalMapBase obj = GlobalMapBase();
+        CreateGMObjectsHierarchy( obj );
+        obj.Init( parent );
+        return obj;
+    }
+
+    GMObjects CreateGMObjectsHierarchy( Gui::Object parent )
+    {
+        GMObjects obj = GMObjects();
+        CreateGMTiledBGHierarchy( obj );
+        CreateLocationsGridHierarchy( obj );
+        CreatePositionHierarchy( obj );
+        CreateGMOverlayHierarchy( obj );
+        obj.Init( parent );
+        return obj;
+    }
+
+    GMTiledBG CreateGMTiledBGHierarchy( Gui::Object parent )
+    {
+        GMTiledBG obj = GMTiledBG();
+        CreateGMTiledBGGridHierarchy( obj );
+        obj.Init( parent );
+        return obj;
+    }
+
+    GMTiledBGGrid CreateGMTiledBGGridHierarchy( Gui::Object parent )
+    {
+        GMTiledBGGrid obj = GMTiledBGGrid();
+        CreateGMTileTemplateHierarchy( obj );
+        obj.Init( parent );
+        return obj;
+    }
+
+    GMTileTemplate CreateGMTileTemplateHierarchy( Gui::Object parent )
+    {
+        GMTileTemplate obj = GMTileTemplate();
+        obj.Init( parent );
+        return obj;
+    }
+
+    LocationsGrid CreateLocationsGridHierarchy( Gui::Object parent )
+    {
+        LocationsGrid obj = LocationsGrid();
+        CreateLocationPicHierarchy( obj );
+        obj.Init( parent );
+        return obj;
+    }
+
+    LocationPic CreateLocationPicHierarchy( Gui::Object parent )
+    {
+        LocationPic obj = LocationPic();
+        obj.Init( parent );
+        return obj;
+    }
+
+    Position CreatePositionHierarchy( Gui::Object parent )
+    {
+        Position obj = Position();
+        CreatePositionButtonHierarchy( obj );
+        CreatePositionMoveHierarchy( obj );
+        obj.Init( parent );
+        return obj;
+    }
+
+    PositionButton CreatePositionButtonHierarchy( Gui::Object parent )
+    {
+        PositionButton obj = PositionButton();
+        obj.Init( parent );
+        return obj;
+    }
+
+    PositionMove CreatePositionMoveHierarchy( Gui::Object parent )
+    {
+        PositionMove obj = PositionMove();
+        obj.Init( parent );
+        return obj;
+    }
+
+    GMOverlay CreateGMOverlayHierarchy( Gui::Object parent )
+    {
+        GMOverlay obj = GMOverlay();
         obj.Init( parent );
         return obj;
     }

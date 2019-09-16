@@ -17,6 +17,35 @@
 
 #ifdef __CLIENT
 
+void ModuleInit()
+{
+	#ifdef __CLIENT
+    __EventLoop.Subscribe( OnLoop );
+    #endif
+}
+
+void OnLoop()
+{
+	auto group = GetCurrentGroup();
+    if( valid( group ) && group.IsMoving )
+    {
+        Critter chosen = GetChosen();
+        if( chosen == null || CurMap != null )
+        {
+            group.IsMoving  = false;
+            return;
+        }
+
+        group.StepCount++;
+        if( group.StepCount % 167 == 1 )
+			group.Points.insertLast( array< int > = { int(group.CurX), int(group.CurY), int(COLOR_RED) } );
+    }
+    else if( group.StepCount > 0 )
+    {
+        group.Stop();
+    }
+}
+
 class GlobalMapGroupClientInfo
 {
 	uint    CarId;
@@ -24,6 +53,21 @@ class GlobalMapGroupClientInfo
     uint   ToX, ToY;
     bool    IsMoving;
 	bool IsEncounter;
+	uint	StepCount;
+	int[] Points;
+
+	GlobalMapGroupClientInfo()
+	{
+		Points = array<int>();
+		StepCount = 0;
+		Clear();
+	}
+	
+	void Stop()
+	{
+		Points.clear();
+		StepCount = 0;
+	}
 	
 	void Clear()
 	{
@@ -1134,7 +1178,7 @@ bool         GM_GroupToMap( GlobalMapGroup group, Map map, uint entire, uint16 m
     Critter rule = group.Rule;
     uint16   hx, hy;
     uint8    dir;
-    uint16   car_hx, car_hy;
+    uint16   car_hx = 0, car_hy = 0;
     Item    car = group.GetCar();
     Critter car_owner;
 
@@ -1155,7 +1199,7 @@ bool         GM_GroupToMap( GlobalMapGroup group, Map map, uint entire, uint16 m
 			uint entiresPass = Entire::MapCountEntire( map, ENTIRE_CAR_CRITTERS  );
 			int entireNum = -1;
 			
-			for( int i = 0; i < entires && i < entiresPass; i++ )
+			for( uint i = 0; i < entires && i < entiresPass; i++ )
 			{
 				Entire::MapGetEntireCoords( map, ENTIRE_CAR, i, car_hx, car_hy );
 				if( map.CheckPlaceForItem( car_hx, car_hy, car.ProtoId ) )
@@ -1201,7 +1245,7 @@ bool         GM_GroupToMap( GlobalMapGroup group, Map map, uint entire, uint16 m
 			uint entiresPass = Entire::MapCountEntire( map, ENTIRE_CAR_CRITTERS  );
 			int entireNum = -1;
 			
-			for( int i = 0; i < entires && i < entiresPass; i++ )
+			for( uint i = 0; i < entires && i < entiresPass; i++ )
 			{
 				Entire::MapGetEntireCoords( map, ENTIRE_CAR, i, car_hx, car_hy );
 				if( map.CheckPlaceForItem( car_hx, car_hy, car.ProtoId ) )
@@ -1223,8 +1267,8 @@ bool         GM_GroupToMap( GlobalMapGroup group, Map map, uint entire, uint16 m
     auto transit_cr = group.CritMove;
 
     // Transit rule
-    rule.WorldX = group.CurX;
-    rule.WorldY = group.CurY;
+    rule.WorldX = uint16( group.CurX );
+    rule.WorldY = uint16( group.CurY );
     if( valid( car ) )
 		MoveItem( car, 1, map, car_hx, car_hy );
 	rule.TransitToMap( map, hx, hy, Random( 0, 5 ) );
@@ -1235,8 +1279,8 @@ bool         GM_GroupToMap( GlobalMapGroup group, Map map, uint entire, uint16 m
         if( !valid( cr1 ) || cr1.Id == rule.Id )
             continue;
 
-        cr1.WorldX = group.CurX;
-        cr1.WorldY = group.CurY;
+        cr1.WorldX = uint16( group.CurX );
+        cr1.WorldY = uint16( group.CurY );
 
 		cr1.TransitToMap( map, hx, hy, Random( 0, 5 ) );
 		if(!valid( cr1.GetMap() ) )// Проверить, что криттер успеет сюда попасть
@@ -1287,7 +1331,7 @@ bool GM_GroupToLoc( Critter rule, uint loc_id, uint8 entrance, bool force = fals
     }
 
 	// force позволяет избежать проверки расстояния до локи
-    if( !force && uint( sqrt( float( Math::Pow2( group.CurX  - loc.WorldX ) + Math::Pow2( group.CurY - loc.WorldY ) ) ) ) > loc.Radius )
+    if( !force && uint( sqrt( float( Math::Pow2( uint16( group.CurX ) - loc.WorldX ) + Math::Pow2( uint16( group.CurY ) - loc.WorldY ) ) ) ) > loc.Radius )
     {
 
         if( rule.IsPlayer() )
@@ -1333,7 +1377,7 @@ bool GM_GroupToLoc( Critter rule, uint loc_id, uint8 entrance, bool force = fals
 
     Map map = loc.GetMap( mapProto );*/
 	hash entire = 0;
-	uint mapIndex;
+	uint mapIndex = 0;
 		
 	if(!loc.GetEntrance( entrance, mapIndex, entire) )
 		return false;
@@ -1347,7 +1391,7 @@ bool GM_GroupToLoc( Critter rule, uint loc_id, uint8 entrance, bool force = fals
         return false;
     }
 
-    return GM_GroupToMap( group, map, entire, -1, -1, -1 );
+    return GM_GroupToMap( group, map, entire, uint16( -1 ), uint16( -1 ), uint8( -1 ) );
 }
 
 
@@ -1682,8 +1726,8 @@ void ProcessGlobalMapCommand( Critter cl, uint8 command, uint param1, uint param
 		//hash mapProto = loc.MapEntrances[ entrance * 2 ];
 		//hash entire = loc.MapEntrances[ entrance * 2 + 1 ];
         //Map map = loc.GetMap( mapProto );
-		hash entire;
-		uint mapIndex;
+		hash entire = 0;
+		uint mapIndex = 0;
 		Map map;
 		
 		if( !loc.GetEntrance( entrance, mapIndex, entire ) )
@@ -1695,7 +1739,7 @@ void ProcessGlobalMapCommand( Critter cl, uint8 command, uint param1, uint param
             break;
 
         uint8  dir;
-        uint16 hx, hy;
+        uint16 hx = 0, hy = 0;
         //if( !map->GetStartCoord( hx, hy, dir, loc->Proto->Entrance[ entrance ].second ) )
 		if( !Entire::GetEntireFreeHex( map, entire, hx, hy ) )
             break;

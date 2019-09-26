@@ -93,6 +93,7 @@ namespace Login
         {
             SetPosition( 22, 1 );
             SetTextFont( Fonts::Fat );
+            SetTextColor( COLOR_BLACK );
         }
 
         string get_Text() override
@@ -3632,6 +3633,11 @@ namespace GlobalMap
             
         }
 
+        void OnShow( dictionary params ) override
+        {
+            ChangeGMZoom( 0 );
+        }
+
         void OnDraw() override
         {
             
@@ -3900,9 +3906,9 @@ namespace GlobalMap
             
             auto info = GlobalmapGroup::GetCurrentGroup();
             if( info.IsMoving )
-            {
+            { 
                 GMTarget.Draw( globalMapObjects.NormalX( info.ToX ) + gmBase.AbsolutePosX + Parent.PosX, globalMapObjects.NormalY( info.ToY) + gmBase.AbsolutePosY + Parent.PosY, 0, 0, 0, 0 );
-                
+            
                 auto group = GlobalmapGroup::GetCurrentGroup();
                 if( valid( group ) )
                 {
@@ -4238,11 +4244,39 @@ namespace GlobalMap
 
     class PickCityButton : Gui::Button
     {
+        uint LocIndex;
+
         void OnConstruct() override
         {
             SetPosition( 7, 7 );
             SetSize( 15, 16 );
             SetPressedImage( "art/intrface/smallbutton_on.png" );
+            SetHoverImage( "art/intrface/smallbutton_on.png" );
+        }
+
+        void OnLMouseClick() override
+        {
+            Critter@ chosen = GetChosen();
+            if( chosen is null )
+                return;
+            auto locs = cast<KnownProtoLocs>(Parent.Parent.Parent).KnownCityLocations;
+            if( LocIndex >= locs.length() )
+                return;
+            hash proto = locs[ LocIndex ];
+            
+            uint16 x = 0, y = 0;
+            
+            if( GlobalMapLocations::GetLocationCoordinates ( proto, x, y ) )
+            {
+                ServerRpc.ProcessGlobalMapCommand( 1, x, y );
+            }
+            
+                 
+        }
+
+        void OnResizeGrid( Gui::Object cell, uint cellIndex ) override
+        {
+            LocIndex = cellIndex;
         }
     }
 
@@ -4289,7 +4323,22 @@ namespace GlobalMap
 
         void OnLMouseClick() override
         {
-            ServerRpc.Rpc_ShowGMTown( 0 );
+            //ServerRpc.Rpc_ShowGMTown( 0 );
+            
+            auto group  = GlobalmapGroup::GetCurrentGroup();
+            if( group != null && !group.IsMoving && !group.IsEncounter)
+            {
+                auto locInfo = GlobalMapLocations::GetHoveredLocationData( group.CurX, group.CurY );
+                if( MSG_LOCATION(STR_LOC_PIC( locInfo.LocPid ) ) != "error" )
+                {
+                    if( locInfo != null )
+                    {
+                        ServerRpc.ProcessGlobalMapCommand( 9, locInfo.LocId, 0 );//GM_CMD_ENTRANCES
+                    }
+                }
+            
+            }
+            
         }
     }
 
@@ -10704,7 +10753,7 @@ namespace FixBoy
                 uint craftId = int( params[ "CraftId" ] );
                 if( craftId == 0 )
                 {
-                    int[] data = array< int >( params[ "Data" ] );
+                    int[] data = cast<array< int >>( params[ "Data" ] );
                     CraftList.clear();
                     uint index = 0;
                     while( index + 5 < data.length() )
@@ -10722,8 +10771,9 @@ namespace FixBoy
                 }
                 else
                 {
+                    Log("Crafft id!");
                     uint index = 0;
-                    int[] data = array< int >( params[ "Data" ] );
+                    int[] data = cast<array< int >>( params[ "Data" ] );
                     if( data.length() == 0 )
                         return;
                     
@@ -10813,7 +10863,7 @@ namespace FixBoy
         void OnLMouseClick() override
         {
             @cast< FixBoy >( Screen ).CraftItem  = ItemCraft;
-            ServerRpc.Rpc_CraftItem( Tla::FixboyList, 0, 0 );
+            ServerRpc.Rpc_CraftItem( Tla::FixboyList, ItemCraft.Id, 0 );
         }
 
         void OnHoverChanged() override
@@ -13495,6 +13545,8 @@ namespace GMTown
         void OnConstruct() override
         {
             SetModal( true );
+            SetPosition( 180, 20 );
+            SetAnchor( ANCHOR_LEFT| ANCHOR_TOP );
         }
 
         void OnShow( dictionary params ) override
@@ -13571,8 +13623,8 @@ namespace GMTown
         {
             GMTown@ gmTown = cast< GMTown >( Screen );
             uint locId    = gmTown.LocId;
-            uint indexMap = gmTown.IndexMaps[ CellIndex ];
-            ServerRpc.Rpc_ShowTownView( locId, indexMap, 0 );
+            uint entrance = gmTown.IndexMaps[ CellIndex ];
+            ServerRpc.ProcessGlobalMapCommand( 10, locId, entrance );//GM_CMD_VIEW_MAP
         }
     }
 
@@ -13590,8 +13642,8 @@ namespace GMTown
         {
             GMTown@ gmTown = cast< GMTown >( Screen );
             uint locId    = gmTown.LocId;
-            uint indexMap = gmTown.IndexMaps[ CellIndex ];
-            ServerRpc.Rpc_TransitToMap( locId, indexMap, 0 );
+            uint entrance = gmTown.IndexMaps[ CellIndex ];
+            ServerRpc.ProcessGlobalMapCommand( 3, locId, entrance );//GM_CMD_TOLOCAL
         }
     }
 
@@ -14570,12 +14622,11 @@ namespace TownView
 {
     class TownView : Gui::Screen
     {
-        uint LocId;
-        hash MapIndex;
+        uint LocationId;
+        uint LocationEntrance;
 
         void OnConstruct() override
         {
-            SetModal( true );
             SetCanMove( true, false );
             SetSize( 164, 158 );
             SetBackgroundImage( "art/intrface/town_view.png" );
@@ -14585,9 +14636,11 @@ namespace TownView
         {
             if( params !is null )
             {
-                LocId    = uint( params[ "LocationId" ] );
-                MapIndex = hash( params[ "MapIndex" ] );
+                LocationId       = uint( params[ "LocationId" ] );
+                LocationEntrance = uint( params[ "LocationEntrance" ] );
             }
+            
+            
         }
     }
 
@@ -14602,7 +14655,8 @@ namespace TownView
 
         void OnLMouseClick() override
         {
-            HideScreen();
+            CustomCall( "TryExit" );
+            
         }
     }
 
@@ -14631,7 +14685,9 @@ namespace TownView
         void OnLMouseClick() override
         {
             TownView@ townView = cast< TownView >( Screen );
-            ServerRpc.Rpc_TransitToMap( townView.LocId, townView.MapIndex, 0 );
+            int locId     = GMTown::CurrentLocationId;
+            uint entrance = GMTown::CurrentEntrance;
+            ServerRpc.ProcessGlobalMapCommand( 3, locId, entrance );//GM_CMD_TOLOCAL
         }
     }
 

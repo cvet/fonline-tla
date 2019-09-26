@@ -19,9 +19,7 @@
 
 void ModuleInit()
 {
-	#ifdef __CLIENT
     __EventLoop.Subscribe( OnLoop );
-    #endif
 }
 
 void OnLoop()
@@ -137,7 +135,7 @@ void LoadGlobalMapGroupData( Serializator::Serializator load )
 #define GM_ANSWER_WAIT_TIME          ( 20000 )
 #define GM_LIGHT_TIME                ( 5000 )
 #define GM_ZONE( x )                          ( ( x ) / GM_ZONE_LEN )
-#define GM_ENTRANCES_SEND_TIME       ( 60000 )
+#define GM_ENTRANCES_SEND_TIME       ( 6000 )
 #define GM_TRACE_TIME                ( 1000 )
 
 // Follow
@@ -186,11 +184,13 @@ void OnCritterIdle( Critter cr )
 
 void OnGlobalMapCritterIn( Critter cr )
 {
+	// Log("OnGlobalMapCritterIn");
     if( valid( cr ) )
 		GM_AddCritToGroup( cr, 0 );
 }
 void OnGlobalMapCritterOut( const Critter cr )
 {
+	// Log("OnGlobalMapCritterOut");
     if( valid( cr ) )
 		GM_LeaveGroup( cr );
 }
@@ -863,7 +863,6 @@ GlobalMapGroup GetGlobalMapGroup( Critter cr )
 	auto group = AllGlobalGroups[ cr.Id ];
 	if( valid( group ) )
 		return group;
-	Log("cr.GlobalMapLeaderId " + cr.GlobalMapLeaderId  + " RefGlobalMapLeaderId"  + cr.RefGlobalMapLeaderId);
 	if( cr.GlobalMapLeaderId > 0 )
 	{
 		return AllGlobalGroups[ cr.GlobalMapLeaderId ];
@@ -910,8 +909,6 @@ void GM_AddCritToGroup( Critter cr, uint rule_id )
     //cr->Data.GlobalGroupUid = rule->Data.GlobalGroupUid;
 }
 
-
-
 // Начало движения группы на глобальной карте для лидера группы. Он может быть одним криттером в составе группы.
 void GM_GroupStartMove( Critter cr )
 {
@@ -952,8 +949,7 @@ void GM_GroupStartMove( Critter cr )
 void GM_GlobalProcess( Critter cr, GlobalMapGroup group, int type )//13 hits
 {
 	if( !valid( group ) )
-		return;
-		
+		return;	
     // Catchers
     uint     encounter_descriptor = 0;
     bool     wait_for_answer = false;
@@ -986,10 +982,8 @@ void GM_GlobalProcess( Critter cr, GlobalMapGroup group, int type )//13 hits
 	
     if( callGlobalProcess )
 		GlobalmapGroup::global_process( type, cr, group.GetCar(), cur_wx, cur_wy, to_wx, to_wy, speed, encounter_descriptor, wait_for_answer );
-
 	if( !group.IsValid() )
 		return;
-		
     // Check ranges
     float max_wx = float( GM_MAXX );
     float max_wy = float( GM_MAXY );
@@ -1071,12 +1065,12 @@ void GM_GlobalProcess( Critter cr, GlobalMapGroup group, int type )//13 hits
         {
             if( wait_for_answer )
             {
-                group.EncounterTick = __FullSecond + GM_ANSWER_WAIT_TIME;
+                group.EncounterTick = GetTick() + GM_ANSWER_WAIT_TIME;
                 group.EncounterForce = false;
             }
             else
             {
-                group.EncounterTick = __FullSecond + GM_LIGHT_TIME;
+                group.EncounterTick = GetTick() + GM_LIGHT_TIME;
                 group.EncounterForce = true;
             }
 			group.SendGlobalData( GM_INFO_GROUP_PARAM );
@@ -1085,15 +1079,20 @@ void GM_GlobalProcess( Critter cr, GlobalMapGroup group, int type )//13 hits
 
 }
 
-
-void         GM_LeaveGroup( const Critter critter)//6 hits
+void GM_LeaveGroup( const Critter critter)//6 hits
 {
 	Critter cr = GetCritter( critter.Id );
-	if(!valid( cr ) )
-		return;
+
 	auto group = GetGlobalMapGroup( cr );
-	if( valid( cr.GetMap() ) || !valid( group ) || group.CritMove.length() < 2 ) 
+	//if( valid( cr.GetMap() ) || !valid( group ) || group.CritMove.length() < 2 ) 
+	if( !valid( group ) )
 		return;
+	
+	if( group.CritMove.length() < 2 ) 
+	{
+		AllGlobalGroups.remove( cr.Id );
+		return;
+	}
 		
     if( cr.Id != group.Rule.Id )
     {
@@ -1154,7 +1153,7 @@ void GM_GiveRule( Critter cr, Critter new_rule )//5 hits
     }*/
 }
 
-void         GM_StopGroup( Critter cr )//3hits
+void GM_StopGroup( Critter cr )//3hits
 {
 	auto group = GetGlobalMapGroup( cr );
     if( !valid( group ) || valid( cr.GetMap() ) )
@@ -1167,7 +1166,7 @@ void         GM_StopGroup( Critter cr )//3hits
     GM_GlobalProcess( cr, group, GLOBAL_PROCESS_STOPPED );
 }
 
-bool         GM_GroupToMap( GlobalMapGroup group, Map map, uint entire, uint16 mx, uint16 my, uint8 mdir )// 6hits
+bool GM_GroupToMap( GlobalMapGroup group, Map map, uint entire, uint16 mx, uint16 my, uint8 mdir )// 6hits
 {
 	if( !valid( map ) || map.Id == 0 )
     {
@@ -1429,7 +1428,7 @@ void GM_GroupSetMove( GlobalMapGroup group, float to_x, float to_y, float speed 
     }
 }
 
-void         GM_GroupMove( GlobalMapGroup group )//3hits
+void GM_GroupMove( GlobalMapGroup group )//3hits
 {
 	uint     tick = GetTick();
     Critter rule = group.Rule;
@@ -1465,7 +1464,6 @@ void         GM_GroupMove( GlobalMapGroup group )//3hits
     if( group.IsMoving() )
     {
         uint dtime = tick - group.ProcessLastTick;
-		//Log("dtime " + dtime);
         if( dtime >= __GlobalMapMoveTime )
         {
             if( dtime >= __GlobalMapMoveTime * 2 )
@@ -1483,9 +1481,8 @@ void         GM_GroupMove( GlobalMapGroup group )//3hits
         }
     }
 }
-	
 
-void         GM_GlobalInvite( GlobalMapGroup group, int combat_mode )//5hits
+void GM_GlobalInvite( GlobalMapGroup group, int combat_mode )//5hits
 {
 	uint     encounter_descriptor = group.EncounterDescriptor;
     group.EncounterDescriptor = 0;
@@ -1556,6 +1553,7 @@ void ProcessGlobalMapCommand( Critter cl, uint8 command, uint param1, uint param
     case GM_CMD_SETMOVE:
 	{
 		auto group = GetGlobalMapGroupByRuler( cl );
+
         if( valid( cl.GetMap() ) || !valid( group ) || cl.Id != group.Rule.Id )
             break;
         if( param1 >= GM_MAXX || param2 >= GM_MAXY )
@@ -1683,11 +1681,13 @@ void ProcessGlobalMapCommand( Critter cl, uint8 command, uint param1, uint param
             break;
 
         uint      loc_id = param1;
+		if( loc_id == 0 )
+			break;
         Location loc = GetLocation( loc_id );
         if( !valid( loc ) || DistSqrt( int( group.CurX ), int( group.CurY ), loc.WorldX, loc.WorldY ) > loc.Radius )
             break;
 
-        uint tick = __FullSecond;
+        uint tick = GetTick();
         if( cl.LastSendEntrancesLocId == loc_id && tick < cl.LastSendEntrancesTick + GM_ENTRANCES_SEND_TIME )
         {
             Log( " Client '%s' ignore send entrances timeout." + cl.Id );
@@ -1696,7 +1696,7 @@ void ProcessGlobalMapCommand( Critter cl, uint8 command, uint param1, uint param
         cl.LastSendEntrancesLocId = loc_id;
         cl.LastSendEntrancesTick = tick;
 
-		uint[] allowedEntrances = {};
+		int[] allowedEntrances = {};
 		
         for( uint i = 0, l = loc.MapEntrances.length(); i < l; i+=2 )
 		{
@@ -1704,23 +1704,29 @@ void ProcessGlobalMapCommand( Critter cl, uint8 command, uint param1, uint param
 				allowedEntrances.insertLast( i/2 );	
         }
 
-		cl.Rpc.SetCurrentLocationEntrances( loc.ProtoId, allowedEntrances );
+		//cl.Rpc.SetCurrentLocationEntrances( loc.ProtoId, allowedEntrances );
+		cl.Rpc.ShowGMTown( loc.Id, loc.ProtoId, 0, allowedEntrances );
     }
     break;
     case GM_CMD_VIEW_MAP:
     {
         auto group = GetGlobalMapGroupByRuler( cl );
+		
 		if( valid( cl.GetMap() ) || !valid( group ) || group.EncounterDescriptor > 0)
             break;
 
         uint      loc_id = param1;
+		if(loc_id == 0)
+			break;
         Location loc = GetLocation( loc_id );
-        if( !valid( loc ) || DistSqrt( int( group.CurX ), int( group.CurY ), loc.WorldX, loc.WorldX ) > loc.Radius )
+        if( !valid( loc ) || DistSqrt( int( group.CurX ), int( group.CurY ), loc.WorldX, loc.WorldY ) > loc.Radius )
             break;
 
         uint entrance = param2;
+		
         if( entrance >= loc.MapEntrances.length() )
             break;
+			
 		if( !GM_CheckEntrance( loc, group.CritMove, entrance ))
 			break;
 		//hash mapProto = loc.MapEntrances[ entrance * 2 ];
@@ -1737,14 +1743,16 @@ void ProcessGlobalMapCommand( Critter cl, uint8 command, uint param1, uint param
 		
         if( !valid( map ) )
             break;
-
+			
         uint8  dir;
         uint16 hx = 0, hy = 0;
         //if( !map->GetStartCoord( hx, hy, dir, loc->Proto->Entrance[ entrance ].second ) )
 		if( !Entire::GetEntireFreeHex( map, entire, hx, hy ) )
             break;
-		uint look = 0; // 0? cr.LookDistance	
+		uint look = 0; // 0? cr.LookDistance
+		
 		cl.ViewMap( map, 0, hx, hy, 0);
+		cl.Rpc.ShowTownView( loc_id, entrance, 0 );
 
 	}
     break;

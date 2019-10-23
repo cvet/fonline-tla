@@ -6,7 +6,7 @@ First game (demo) for FOnline engine.
 
 ## Work in progress
 
-Main project developer who maintain whole process here is [@rifleman17](https://github.com/rifleman17)
+Main project developer who maintain whole process here is [@rifleman17](https://github.com/rifleman17).
 
 ## Help and support
 

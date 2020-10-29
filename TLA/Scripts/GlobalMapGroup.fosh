@@ -1,0 +1,1393 @@
+#pragma globalvar uint __EncounterTime = 0       // Как часто пробовать создать энкаунтер, в миллисекундах
+#pragma globalvar uint __GlobalMapGroupMaxCount = 6       // Макс размер группы
+#define TIME_CAN_FOLLOW_GM           ( REAL_SECOND( 5 ) ) // Can less than Map timeout
+
+#pragma property Global PrivateServer int LastGlobalMapTrip Default = 0 // Индекс последней группы на глобальной карте
+
+
+// Global map
+#define GM_MAXX                      ( GameOpt.GlobalMapWidth * GameOpt.GlobalMapZoneLength )
+#define GM_MAXY                      ( GameOpt.GlobalMapHeight * GameOpt.GlobalMapZoneLength )
+#define GM_ZONE_LEN                  ( GameOpt.GlobalMapZoneLength ) // Can be multiple to GM_MAXX and GM_MAXY
+#define GM__MAXZONEX                 ( 100 )
+#define GM__MAXZONEY                 ( 100 )
+#define GM_ZONES_FOG_SIZE            ( ( ( GM__MAXZONEX / 4 ) + ( ( GM__MAXZONEX % 4 ) ? 1 : 0 ) ) * GM__MAXZONEY )
+#define GM_FOG_FULL                  ( 0 )
+#define GM_FOG_HALF                  ( 1 )
+#define GM_FOG_HALF_EX               ( 2 )
+#define GM_FOG_NONE                  ( 3 )
+#define GM_MAX_GROUP_COUNT           ( GameOpt.GlobalMapMaxGroupCount )
+#define GM_ANSWER_WAIT_TIME          ( 20000 )
+#define GM_LIGHT_TIME                ( 5000 )
+#define GM_ZONE( x )                          ( ( x ) / GM_ZONE_LEN )
+#define GM_ENTRANCES_SEND_TIME       ( 60000 )
+#define GM_TRACE_TIME                ( 1000 )
+
+// Follow
+#define FOLLOW_DIST                  ( 10 )
+#define FOLLOW_FORCE                 ( 1 )
+#define FOLLOW_PREP                  ( 2 )
+
+int GetGlobalMapTripId ()
+{
+	LastGlobalMapTrip = LastGlobalMapTrip + 1;
+	return LastGlobalMapTrip;
+}
+
+class GlobalMapGroup
+{
+    Critter[]    CritMove = {};
+    Critter Rule;
+    uint    CarId;
+    float   CurX, CurY;
+    float   ToX, ToY;
+    float   Speed;
+    bool    IsSetMove;
+    uint    TimeCanFollow;
+    uint    ProcessLastTick;
+    uint    EncounterDescriptor;
+    uint    EncounterTick;
+    bool    EncounterForce;
+
+   void    Stop()
+	{
+	    Speed = 0.0f;
+		 ToX = CurX;
+		 ToY = CurY;
+	}
+	 
+	// Critter can follow leader on GM trip start
+   bool    CheckForFollow( Critter cr )
+	{
+		if( IsSetMove ) //?? уже началось движение
+			return false;
+		if( __FullSecond >= TimeCanFollow ) // прошло время, пока криттер мог присоединиться в группу
+			return false;
+		if( valid( GetCritter ( cr.Id ) ) // криттер уже в группе
+			return false;
+		if( CritMove.length() >= __GlobalMapGroupMaxCount )
+        return false;
+		return true;
+	}
+	 
+	GlobalMapGroup() 
+	{ 
+		Clear(); 
+	}
+	
+	GlobalMapGroup(Critter rule) 
+	{ 
+		Rule = rule;
+		Clear(); 
+	}
+	
+	Item	GetCar()
+	{
+		if( CarId > 0 )
+		{
+			Item car = GetItem( CarId );
+			if( valid( car ) )
+				return car;
+			else
+				CarId = 0;
+		}
+		return null;
+	}
+	
+	void    AddCrit( Critter cr )
+	{
+		for( uint i = 0, l = CritMove.length(); i < l; i++ )
+		{
+			if( valid( CritMove[ i ] ) && CritMove[ i ].Id = cr.Id )
+				return;
+		}
+		CritMove.insertLast( cr );
+	}
+	
+	bool    IsValid()
+	{
+		return CritMove.length() > 0;
+	}
+	
+	Critter	GetCritter( uint crid )
+	{
+		for( uint i = 0, l = CritMove.length(); i < l; i++ )
+			if( valid( CritMove[ i ] ) && CritMove[ i ].Id = crid )
+				return CritMove[ i ];
+		return null;
+	}
+	
+	bool    IsMoving()
+	{
+		return Speed > 0.0f && ( CurX != ToX || CurY != ToY );
+	}
+	
+	uint    GetSize()
+	{
+		return CritMove.length();
+	}
+	
+	void EraseCrit( Critter cr )
+	{
+		for( uint i = 0, l = CritMove.length(); i < l; i++ )
+		{
+			if( valid( CritMove[ i ] ) && CritMove[ i ].Id = cr.Id )
+			{
+				CritMove.removeAt( i );
+				return;
+			}
+		}
+	}
+	
+	void Clear()
+	{
+		 CritMove.clear();
+		 CurX = CurY = ToX = ToY = 0.0f;
+		 CarId = 0;
+		 IsSetMove = false;
+		 TimeCanFollow = 0;
+		 ProcessLastTick = GetTick();
+		 EncounterDescriptor = 0;
+		 EncounterTick = 0;
+		 EncounterForce = false;
+	}
+	
+	void SendGlobalData( int type )
+	{
+		for( uint i = 0, l = CritMove.length(); i < l; i++ )
+		{
+			Critter cr = CritMove[ i ];
+			if( valid( cr ) )
+				GlobalMapLocations::SetGlobalMapData( type, cr );
+		}
+	}
+}
+
+dict< uint, GlobalMapGroup > AllGlobalGroups = {};
+
+GlobalMapGroup GetGlobalMapGroupByRuler( Critter cr )
+{
+	//AllGlobalGroups.getIfNotExist( cr.Id, GlobalMapGroup( cr ) );
+	
+	return ( AllGlobalGroups[ cr.Id ] );
+}
+
+GlobalMapGroup GetOrCreateGlobalMapGroupByRuler( Critter cr )
+{
+	AllGlobalGroups.getIfNotExist( cr.Id, GlobalMapGroup( cr ) );
+	
+	return ( AllGlobalGroups[ cr.Id ] );
+}
+
+GlobalMapGroup GetGlobalMapGroup( Critter cr )
+{
+	// Для лидера группы
+	auto group = AllGlobalGroups[ cr.Id ];
+	if( valid( group ) )
+		return group;
+	if( cr.GlobalMapLeaderId > 0 )
+	{
+		return AllGlobalGroups[ cr.GlobalMapLeaderId ];
+	}
+	return null;
+}
+
+// Добавить криттера в группу на глобале к лидеру с id = rule_id
+void GM_AddCritToGroup( Critter cr, uint rule_id )
+{
+	if( !valid( cr ) )
+    {
+        ThrowException( "Critter is null" );
+        return;
+    }
+
+    if( rule_id == 0)
+    {
+        GM_GroupStartMove( cr );
+        return;
+    }
+
+    Critter rule = GetCritter( rule_id );
+	auto group = GetGlobalMapGroupByRuler( rule );
+    if( !valid( rule ) || valid( rule.GetMap() ) || !valid( group ) || rule != group.Rule )
+    {
+        if( cr.IsNpc() )
+            Log( " - Invalid rule on global map. Start move alone.\n" );
+        GM_GroupStartMove( cr );
+        return;
+    }
+
+	cr.WorldX = group.CurX;
+	cr.WorldY = group.CurY;
+	
+    //for( auto it = group->CritMove.begin(), end = group->CritMove.end(); it != end; ++it )
+    //    ( *it )->Send_AddCritter( cr );
+    group.AddCrit( cr );
+	
+	cr.GlobalMapLeaderId = rule.Id;
+	cr.GlobalMapTripId = rule.GlobalMapTripId;
+	
+    //cr->GroupMove = group;
+    //cr->Data.GlobalGroupUid = rule->Data.GlobalGroupUid;
+}
+
+// Начало движения группы на глобальной карте для лидера группы. Он может быть одним криттером в составе группы.
+void GM_GroupStartMove( Critter cr )
+{
+    if( valid( cr.GetMap() )
+    {
+        cr.TransitToGlobal();
+        return;
+    }
+
+    cr.HexX = 0;
+    cr.HexY = 0;
+	auto group = GetOrCreateGlobalMapGroupByRuler( cr );
+
+    group.Clear();
+    group.CurX = cr.WorldX;
+    group.CurY = cr.WorldY;
+    group.ToX = group.CurX;
+    group.ToY = group.CurY;
+    group.Speed = 0.0f;
+    cr.GlobalMapTripId = GetGlobalMapTripId();
+
+	Item[] items = cr.GetItems( function( i )
+                                    {
+                                        return i.Type == ItemType::Car;
+                                    } );
+	if( items.length() > 0 )
+		group.CarId = items[ 0 ].Id;
+
+    group.TimeCanFollow = __FullSecond + TIME_CAN_FOLLOW_GM;
+    //SETFLAG( cr->Flags, FCRIT_RULEGROUP );
+
+    group.AddCrit( cr );
+    GlobalMapLocations::SetGlobalMapData( GlobalMapLocations::GM_INFO_ALL, cr );
+    
+	GM_GlobalProcess( cr, group, GLOBAL_PROCESS_START_FAST );
+}
+
+void GM_GlobalProcess( Critter cr, GlobalMapGroup group, int type )//13 hits
+{
+	if( !valid( group ) )
+		return;
+		
+    // Catchers
+    uint     encounter_descriptor = 0;
+    bool     wait_for_answer = false;
+    Critter rule = group.Rule;
+    float    cur_wx = group.CurX;
+    float    cur_wy = group.CurY;
+    float    to_wx = group.ToX;
+    float    to_wy = group.ToY;
+    float    speed = group.Speed;
+    float    base_speed = group.Speed;
+    bool     callGlobalProcess = true;
+
+    if( __EventGlobalMapProcess.Raise( type, cr, group.GetCar(), cur_wx, cur_wy, to_wx, to_wy, speed, encounter_descriptor, wait_for_answer ) )
+    {
+        callGlobalProcess = false;
+    }
+    else
+    {
+        encounter_descriptor = 0;
+        wait_for_answer = false;
+        cur_wx = group.CurX;
+        cur_wy = group.CurY;
+        to_wx = group.ToX;
+        to_wy = group.ToY;
+        speed = group.Speed;
+    }
+
+	if(!group.IsValid() )
+		return;
+	
+    if( callGlobalProcess )
+		GlobalmapGroup::global_process( type, cr, group.GetCar(), cur_wx, cur_wy, to_wx, to_wy, speed, encounter_descriptor, wait_for_answer );
+
+	if(!group.IsValid() )
+		return;
+		
+    // Check ranges
+    float max_wx = (float) GM_MAXX;
+    float max_wy = (float) GM_MAXY;
+    if( cur_wx < 0.0f )
+        cur_wx = 0.0f;
+    if( cur_wy < 0.0f )
+        cur_wy = 0.0f;
+    if( cur_wx >= max_wx )
+        cur_wx = max_wx - 1;
+    if( cur_wy >= max_wy )
+        cur_wy = max_wy - 1;
+    if( to_wx < 0.0f )
+        to_wx = 0.0f;
+    if( to_wy < 0.0f )
+        to_wy = 0.0f;
+    if( to_wx >= max_wx )
+        to_wx = max_wx - 1;
+    if( to_wy >= max_wy )
+        to_wy = max_wy - 1;
+    if( speed < 0.0f )
+        speed = 0.0f;
+    if( cur_wx == to_wx && cur_wy == to_wy )
+        speed = 0.0f;
+    if( speed == 0.0f )
+        to_wx = cur_wx, to_wy = cur_wy;
+
+    // Current position
+    if( cur_wx != group.CurX || cur_wy != group.CurY || speed != group.Speed )
+    {
+        group.CurX = cur_wx;
+        group.CurY = cur_wy;
+        group.Speed = speed;
+
+        int cur_wxi = (int) cur_wx;
+        int cur_wyi = (int) cur_wy;
+		
+		for( uint i = 0, l = group.CritMove.length(); i < l; i ++ )
+		{
+			Critter cr = group.CritMove[ i ];
+			if( valid( cr ) )
+			{
+				cr.WorldX = cur_wxi;
+				cr.WorldY = cur_wyi;
+				GlobalMapLocations::SetGlobalMapData( GM_INFO_GROUP_PARAM, cr );
+			}
+		}
+    }
+
+    // New target
+    if( type == GLOBAL_PROCESS_SET_MOVE || to_wx != group.ToX || to_wy != group.ToY )
+    {
+        GM_GroupSetMove( group, to_wx, to_wy, speed );
+        return;
+    }
+
+    // Stop
+    if( base_speed > 0.0f && speed <= 0.0f )
+    {
+        group.Stop();
+        GM_GlobalProcess( rule, group, GLOBAL_PROCESS_STOPPED );
+        return;
+    }
+	
+    if( type == GLOBAL_PROCESS_STOPPED )
+		group.SendGlobalData( GM_INFO_GROUP_PARAM );
+
+    // Encounter
+    if( encounter_descriptor )
+    {
+        group.EncounterDescriptor = encounter_descriptor;
+        if( type == GLOBAL_PROCESS_ENTER )
+        {
+            GM_GlobalInvite( group, 0 );
+            //GM_GlobalInvite( group, rule->GetDefaultCombat() );
+        }
+        else
+        {
+            if( wait_for_answer )
+            {
+                group.EncounterTick = __FullSecond + GM_ANSWER_WAIT_TIME;
+                group.EncounterForce = false;
+            }
+            else
+            {
+                group.EncounterTick = __FullSecond + GM_LIGHT_TIME;
+                group.EncounterForce = true;
+            }
+			group.SendGlobalData( GM_INFO_GROUP_PARAM );
+        }
+    }
+
+}
+
+void         GM_LeaveGroup( Critter cr )//6 hits
+{
+	auto group = GetGlobalMapGroup( cr );
+	if( valid( cr.GetMap() || !valid( group ) || group.CritMove.length() < 2 )
+		return;
+		
+    if( cr != group.Rule )
+    {
+        group.EraseCrit( cr );
+        //TODO: уведомления для игроков в составе группы, один из покинул группу
+		//for( auto it = group->CritMove.begin(), end = group->CritMove.end(); it != end; ++it )
+        //    ( *it )->Send_RemoveCritter( cr );
+
+		
+        Item car = Obsolete::GetItemCar( cr );
+        if( valid( car ) && car.Id == group.CarId )
+        {
+            group.CarId = 0;
+            GM_GroupSetMove( group, group.ToX, group.ToY, 0.0f );
+        }
+
+        GM_GroupStartMove( cr );
+    }
+    else
+    {
+        // Give rule to critter with highest charisma
+        Critter new_rule;
+        int      max_charisma = 0;
+        for( int i = 0, l = group.CriteMove.length(); i < l; i++ )// auto it = group->CritMove.begin(), end = group->CritMove.end(); it != end; ++it )
+        {
+            Critter cr = group.CriteMove[ i ];
+            if( cr == group.Rule )
+                continue;
+            int charisma = cr.Charisma;
+            if( !max_charisma || charisma > max_charisma )
+            {
+                new_rule = cr;
+                max_charisma = charisma;
+            }
+        }
+        GM_GiveRule( cr, new_rule );
+
+        // Call again
+        if( cr != cr.GroupMove.Rule )
+            GM_LeaveGroup( cr );
+}
+
+void GM_GiveRule( Critter cr, Critter new_rule )//5 hits
+{
+	auto group = GetGlobalMapGroup( cr );
+	if( valid( cr.GetMap() ) || !valid( group ) || group.CritMove.length() < 2 || group.Rule != cr || cr == new_rule )
+        return;
+
+		group.Rule = new_rule;
+/*
+    for( auto it = new_rule->GroupSelf->CritMove.begin(), end = new_rule->GroupSelf->CritMove.end(); it != end; ++it )
+    {
+        Critter* cr_ = *it;
+        cr_->GroupMove = new_rule->GroupSelf;
+        cr_->Send_CustomCommand( cr, OTHER_FLAGS, cr->Flags );
+        cr_->Send_CustomCommand( new_rule, OTHER_FLAGS, new_rule->Flags );
+    }*/
+}
+
+void         GM_StopGroup( Critter* cr )//3hits
+{
+	auto group = GetGlobalMapGroup( cr );
+    if( !valid( group ) || valid( cr.GetMap() ) )
+        return;
+
+    group.ToX = group.CurX;
+    group.ToY = group.CurY;
+    group.Speed = 0.0f;
+
+    GM_GlobalProcess( cr, cgroup, GLOBAL_PROCESS_STOPPED );
+}
+
+bool         GM_GroupToMap( GlobalMapGroup group, Map map, uint entire, uint16 mx, uint16 my, uint8 mdir )// 6hits
+{
+	if( !valid( map ) || map.Id == 0 )
+    {
+        Log( "Map null ptr or zero id, pointer '%p'.\n" );
+        return false;
+    }
+
+    Critter rule = group.Rule;
+    uint16   hx, hy;
+    uint8    dir;
+    uint16   car_hx, car_hy;
+    Item    car = group.GetCar();
+    Critter car_owner;
+
+    if( valid( car ) )
+    {
+        car_owner = group.GetCritter( car.item.CritId );
+        if( !valid( car_owner ) )
+        {
+            Log( " - Car owner not found" );
+        }
+    }
+
+    if( mx >= map.Width || my >= map.Height || mdir >= 6 )
+    {
+        if( valid( car ) )
+        {
+			uint entires = MapCountEntire( map, ENTIRE_CAR );
+			uint entiresPass = MapCountEntire( map, ENTIRE_CAR_CRITTERS  );
+			int entireNum = -1;
+			
+			for( int i = 0; i < entires && i < entiresPass; i++ )
+			{
+				Entire::MapGetEntireCoords( map, ENTIRE_CAR, i, car_hx, car_hy );
+				if( map.CheckPlaceForItem( car_hx, car_hy, car.ProtoId ) )
+				{
+					Entire::MapGetEntireCoords( map, ENTIRE_CAR_CRITTERS, i, hx, hx );
+					entireNum = i;
+					break;
+				}
+			}
+			
+			if( entireNum < 0 )
+			{
+				rule.SayMsg( SAY_NETMSG, TEXTMSG_GAME, STR_GLOBAL_CAR_PLACE_NOT_FOUND );
+                return false;
+			}
+			
+			Entire::MapGetEntireCoords( map, ENTIRE_CAR, i, hx, hy );
+            if( !map.CheckPlaceForItem( car_hx, car_hy, car.ProtoId ) )
+            {
+				rule.SayMsg( SAY_NETMSG, TEXTMSG_GAME, STR_GLOBAL_CAR_PLACE_NOT_FOUND );
+                return false;
+            }
+            if( mdir < 6 )
+                dir = mdir;
+        }
+        else
+        {
+			if( !Entire::GetEntireFreeHex( map, ENTIRE_DEFAULT, hx, hy ) )
+            {
+				rule.SayMsg( SAY_NETMSG, TEXTMSG_GAME, STR_GLOBAL_PLACE_NOT_FOUND );
+                return false;
+            }
+        }
+    }
+    else
+    {
+        hx = mx;
+        hy = my;
+        dir = mdir;
+        if( valid( car )  )
+        {
+			uint entires = MapCountEntire( map, ENTIRE_CAR );
+			uint entiresPass = MapCountEntire( map, ENTIRE_CAR_CRITTERS  );
+			int entireNum = -1;
+			
+			for( int i = 0; i < entires && i < entiresPass; i++ )
+			{
+				Entire::MapGetEntireCoords( map, ENTIRE_CAR, i, car_hx, car_hy );
+				if( map.CheckPlaceForItem( car_hx, car_hy, car.ProtoId ) )
+				{
+					Entire::MapGetEntireCoords( map, ENTIRE_CAR_CRITTERS, i, hx, hx );
+					entireNum = i;
+					break;
+				}
+			}
+			
+			if( entireNum < 0 )
+			{
+				rule.SayMsg( SAY_NETMSG, TEXTMSG_GAME, STR_GLOBAL_CAR_PLACE_NOT_FOUND );
+                return false;
+			}
+        }
+    }
+
+    auto transit_cr = group.CritMove;
+
+    // Transit rule
+    rule.WorldX = group.CurX;
+    rule.WorldY = group.CurY;
+    if( valid( car ) )
+		MoveItem( car, 1, map, car_hx, car_hy );
+	rule.TransitToMap( map, hx, hy, Random( 0, 5 ) );
+    // Transit other
+    for( int i = 0,l = transit_cr.length(); i < l; i++ )
+    {
+        Critter cr = transit_cr[ i ];
+        if( !valid( cr ) ||cr == rule )
+            continue;
+
+        cr.WorldX = group.CurX;
+        cr.WorldY = group.CurY;
+
+		cr.TransitToMap( map, hx, hy, Random( 0, 5 ) );
+		if(!valid( cr.GetMap() ) // Проверить, что криттер успеет сюда попасть
+        if( !Transit( cr, map, hx, hy, dir, car ? 3 : 2, true ) )
+        {
+            GM_GroupStartMove( cr );
+            continue;
+        }
+    }
+
+    group.Clear();
+    return true;
+}
+
+bool GM_GroupToLoc( Critter rule, uint loc_id, uint8 entrance, bool force = false )//3 hits
+{
+	if( valid( rule.GetMap() )
+		return false;
+	auto group = GetGlobalMapGroupByRuler( cr );
+	if( !valid( group ) )
+		return;
+    if( !rule->GroupMove )
+        return false;
+    if( rule.IsPlayer() && rule.IsOffline() )
+        return false;                                                      // Offline on encounter
+    if( loc_id == 0)
+        return false;
+
+    if( rule != group.Rule )
+    {
+        Log( " - Critter is not rule.\n");
+        return false;
+    }
+
+    if( !force && !Location::IsKnownLoc( rule, true, loc_id ) && rule.IsPlayer() )
+    {
+        Log( " - Critter '%s' is not known location. CriterId: " + rule.Id);
+        return false;
+    }
+
+    Location loc = GetLocation( loc_id );
+    if( !valid( loc ) )
+    {
+        if( rule.IsPlayer() )
+			Location::UnsetKnownLoc( rule, true, loc_id)
+		GlobalMapLocations::SetGlobalMapData( GM_INFO_LOCATION, rule );
+        //rule->Send_GlobalInfo( GM_INFO_LOCATIONS );
+		rule.SayMsg( SAY_NETMSG, TEXTMSG_GAME, STR_GLOBAL_LOCATION_NOT_FOUND );
+        return false;
+    }
+
+    if( !force && uint( sqrt( float( Math::Pow2( group.CurX  - loc.WorldX ) + Math::Pow2( group.CurX - loc.WorldY ) ) ) ) > loc.Radius )
+    {
+        if( rule.IsPlayer() )
+            GlobalMapLocations::SetGlobalMapData( GM_INFO_LOCATION, rule );
+		rule.SayMsg( SAY_NETMSG, TEXTMSG_GAME, STR_GLOBAL_LOCATION_REMOVED );
+        return false;
+    }
+
+    if( !force && !Location::IsCanEnter( loc, group.CritMove.length() ) )
+    {
+		rule.SayMsg( SAY_NETMSG, TEXTMSG_GAME, STR_GLOBAL_PLAYERS_OVERFLOW );
+        return false;
+    }
+
+    if( loc.GetMapCount() == 0)
+    {
+        if( rule.IsPlayer() )
+            Location::UnsetKnownLoc( rule, true, loc_id );
+        Log( " - Location is empty." );
+        return false;
+    }
+
+    if( entrance >= loc.MapEntrances.length() )
+    {
+        Log( " - Invalid entrance." );
+        return false;
+    }
+
+    if( loc.EntranceScript != null )
+    {
+        bool result = GM_CheckEntrance( loc, group.GroupMove, entrance );
+        if( !result )
+        {
+            Log( " - Can't enter in entrance ", entrance );
+            return false;
+        }
+    }
+
+	if( !__EventLocationEnter.Raise( group.CritMove, entrance ) )
+	{
+		return false;
+	}
+	
+	hash mapProto = loc.MapEntrances[ entrance * 2 ];
+	hash entire = loc.MapEntrances[ entrance * 2 + 1 ];
+
+    Map map = loc.GetMap( mapProto );
+    if( !valid( map ) )
+    {
+        if( rule.IsPlayer() )
+            Location::UnsetKnownLoc( rule, true, loc_id );
+        Log( " - Map " + GetHashStr( mapProto ) +  " not found in location " + loc_id );
+        return false;
+    }
+
+    return GM_GroupToMap( group, map, entire, -1, -1, -1 );
+}
+
+uint DistSqrt( int x1, int y1, int x2, int y2 )
+{
+    int dx = x1 - x2;
+    int dy = y1 - y2;
+    return (uint) sqrt( double(dx * dx + dy * dy) );
+}
+
+void GM_GroupSetMove( GlobalMapGroup group, float to_x, float to_y, float speed )//6 hits
+{
+	int dist = DistSqrt( (int) to_x, (int) to_y, (int) group.CurX, (int) group.CurY );
+
+    if( speed <= 0.0f || dist == 0 )
+    {
+        group.Speed = 0.0f;
+        group.ToX = group.CurX;
+        group.ToY = group.CurY;
+    }
+    else
+    {
+        group.Speed = speed;
+        group.ToX = to_x;
+        group.ToY = to_y;
+    }
+	GlobalMapLocations::SetGlobalMapData( GM_INFO_GROUP_PARAM, rule );
+    //group->Rule->SendA_GlobalInfo( group, GM_INFO_GROUP_PARAM );
+    if( __FullSecond - groupProcessLastTick > __GlobalMapMoveTime  )
+        group.ProcessLastTick = __FullSecond;
+    if( !group.IsSetMove )
+    {
+        group.IsSetMove = true;
+        GM_GlobalProcess( group.Rule, group, GLOBAL_PROCESS_START );
+    }
+}
+
+void         GM_GroupMove( GlobalMapGroup group )//3hits
+{
+	uint     tick = __FullSecond;
+    Critter rule = group.Rule;
+
+    // Encounter
+    if( group.EncounterDescriptor > 0)
+    {
+        if( tick < group.EncounterTick )
+            return;
+
+        // Force invite
+        if( group.EncounterForce )
+        {
+            GM_GlobalInvite( group, 0 );//TODO: turnbasedrule->GetDefaultCombat() );
+            return;
+        }
+
+        // Continue walk
+        group.EncounterDescriptor = 0;
+        GlobalMapLocations::SetGlobalMapData( GM_INFO_GROUP_PARAM, rule );
+        group.ProcessLastTick = tick;
+    }
+
+    // Start callback
+    if( !group.IsSetMove && tick >= group.TimeCanFollow )
+    {
+        group.IsSetMove = true;
+        GM_GlobalProcess( rule, group, GLOBAL_PROCESS_START );
+        return;
+    }
+
+    // Move
+    if( groupIsMoving() )
+    {
+        uint dtime = tick - group.ProcessLastTick;
+        if( dtime >= __GlobalMapMoveTime )
+        {
+            if( dtime >= __GlobalMapMoveTime * 2 )
+                dtime = 0;
+            group.ProcessLastTick = tick - dtime % __GlobalMapMoveTime;
+
+            if( rule.IsPlayer() && rule.IsOffline() )
+            {
+                group.Stop();
+                GM_GlobalProcess( rule, group, GLOBAL_PROCESS_STOPPED );
+                return;
+            }
+
+            GM_GlobalProcess( rule, group, GLOBAL_PROCESS_MOVE );
+        }
+    }
+}
+	
+void         GM_GlobalInvite( GlobalMapGroup group, int combat_mode )//5hits
+{
+	uint     encounter_descriptor = group.EncounterDescriptor;
+    group.EncounterDescriptor = 0;
+    uint     map_id = 0;
+    uint16   hx = 0, hy = 0;
+    uint8    dir = 0;
+    Critter rule = group.Rule;
+    bool     global_invite = true;
+
+	if( __EventGlobalMapInvite.Raise( rule, group.GetCar(),  encounter_descriptor, combat_mode, map_id, hx, hy, dir ) )
+    {
+        global_invite = false;
+    }
+    else
+    {
+        map_id = 0;
+        hx = 0;
+        hy = 0;
+        dir = 0;
+    }
+
+    if( !group.IsValid() )
+        return;
+		
+	GlobalmapGroup::global_invite( rule, group.GetCar(), encounter_descriptor, combat_mode, map_id, hx, hy, dir );
+
+    if( !group.IsValid() )
+        return;
+
+    if( map_id > 0 )
+    {
+        Map map = GetMap( map_id );
+        if( map )
+            GM_GroupToMap( group, map, 0, hx, hy, dir < DIRS_COUNT ? dir : rule.Dir );
+    }
+    else
+    {
+        group.SendGlobalData( GM_INFO_GROUP_PARAM );
+    }
+}
+
+bool GM_CheckEntrance( Location loc, Critter[] arr, uint8 entrance )//5 hits
+{
+    if( loc.EntranceScript == null )
+        return true;
+
+	return loc.EntranceScript( loc, arr, entrance );
+		
+}
+
+void ProcessGlobalMapCommand( Critter cl, uint8 command, uint param1, uint param2 ) //Process_RuleGlobal
+{
+	if( !valid( cl ) || !cl.IsPlayer() )
+		return;
+    switch( command )
+    {
+    case GM_CMD_FOLLOW_CRIT:
+    {
+        if( param1 == 0 )
+            break;
+
+        Critter cr = cl.GetCritter( param1 );
+        if( !valid( cr ) )
+            break;
+
+        if( cl.FollowLeaderId == cr.Id )
+            cl.FollowLeaderId = 0; // unfollow
+        else
+            cl.FollowLeaderId = cr.Id;
+    }
+    break;
+    case GM_CMD_SETMOVE:
+		auto group = GetGlobalMapGroupByRuler( cl );
+        if( valid( cl.GetMap() ) || !valid( group ) || cl != group.Rule )
+            break;
+        if( param1 >= GM_MAXX || param2 >= GM_MAXY )
+            break;
+        if( group.EncounterDescriptor > 0 )
+            break;
+        group.ToX = (float) param1;
+        group.ToY = (float) param2;
+        GM_GlobalProcess( cl, group, GLOBAL_PROCESS_SET_MOVE );
+        break;
+    case GM_CMD_STOP:
+        break;
+    case GM_CMD_TOLOCAL:
+		auto group = GetGlobalMapGroupByRuler( cl );
+        if( valid( cl.GetMap() ) || !valid( group ) || cl != group.Rule )
+            break;
+        if( group.EncounterDescriptor > 0 )
+            break;
+        if( IS_TIMEOUT( chosen.TimeoutTransfer ) )
+        {
+            cl.SayMsg( SAY_NETMSG, TEXTMSG_GAME, MsgStr::StrTimeoutTransferWait );
+            break;
+        }
+
+        if( param1 == 0 )
+        {
+            if( valid( cl.GetMap() ) || !valid( group ) || cl != group.Rule )
+                break;
+            group.EncounterDescriptor = 0;
+            MapMngr.GM_GlobalProcess( cl, group, GLOBAL_PROCESS_ENTER );
+        }
+        else
+        {
+            MapMngr.GM_GroupToLoc( cl, param1, param2 );
+        }
+        return;
+    case GM_CMD_ANSWER:
+		auto group = GetGlobalMapGroupByRuler( cl );
+        if( valid( cl.GetMap() ) || !valid( group ) || cl != group.Rule )
+			break;
+        if( group.EncounterDescriptor == 0 || group.EncounterForce )
+            break;
+
+        if( (int) param1 >= 0 )    // Yes
+        {
+            GM_GlobalInvite( group, param1 );
+            return;
+        }
+        else if( group.EncounterDescriptor > 0 )       // No
+        {
+            group.EncounterDescriptor = 0;
+            group.SendGlobalData( GM_INFO_GROUP_PARAM );
+        }
+        break;
+    case GM_CMD_FOLLOW:
+    {
+        // Find rule
+        Critter rule = GetCritter( param1 );
+        if( !valid( rule ) || valid( rule.GetMap() ) )
+		
+		auto group = GetGlobalMapGroupByRuler( rule );
+		if( !valid( group ) || rule != group.Rule )
+            break;
+
+        // Check for follow
+        if( !group.CheckForFollow( cl ) )
+            break;
+        if( !GetDistantion( rule.LastMapHexX, rule.LastMapHexY, cl.HexX, cl.HexX ) > FOLLOW_DIST + rule.Multihex + cl.Multihex )
+            break;
+
+        if( !cl.TransitToGlobalGroup( rule ) )
+            break;
+    }
+        return;
+    case GM_CMD_KICKCRIT:
+    {
+        auto group = GetGlobalMapGroup( cl );
+        if( valid( cl.GetMap() ) || !valid( group ) || group.CritMove.length() < 2 || group.EncounterDescriptor > 0 )
+            break;
+
+        Critter        kick_cr;
+
+        if( cl.Id == param1 )             // Kick self
+        {
+            if( cl == group.Rule )
+                break;
+            kick_cr = cl;
+        }
+        else                 // Kick other
+        {
+            if( cl != group.Rule )
+                break;
+            kick_cr = group.GetCritter( param1 );
+            if( !valid( kick_cr ) )
+                break;
+        }
+
+        GM_GlobalProcess( kick_cr, group, GLOBAL_PROCESS_KICK );
+    }
+    break;
+    case GM_CMD_GIVE_RULE:
+    {
+        auto group = GetGlobalMapGroupByRuler( cl );
+		// Check
+        if( cl.Id == param1 || valid( cl.GetMap() ) || !valid( group ) || cl != group.Rule || group.EncounterDescriptor > 0 )
+            break;
+        Critter new_rule = group.GetCritter( param1 );
+        if( !valid( new_rule ) || !new_rule.IsPlayer() || !new_rule.IsOnline() )
+            break;
+
+        GM_GiveRule( cl, new_rule );
+        GM_StopGroup( cl );
+    }
+    break;
+    case GM_CMD_ENTRANCES:
+    {
+        auto group = GetGlobalMapGroupByRuler( cl );
+		if( valid( cl.GetMap() ) || !valid( group ) || group.EncounterDescriptor > 0)
+            break;
+
+        uint      loc_id = param1;
+        Location loc = GetLocation( loc_id );
+        if( !valid( loc ) || DistSqrt( (int) group.CurX, (int) group.CurY, loc.WorldX, loc.WorldY ) > loc.Radius ) )
+            break;
+
+        uint tick = Timer::FastTick();
+        if( cl.LastSendEntrancesLocId == loc_id && tick < cl.LastSendEntrancesTick + GM_ENTRANCES_SEND_TIME )
+        {
+            Log( " Client '%s' ignore send entrances timeout." + cl.Id );
+            break;
+        }
+        cl.LastSendEntrancesLocId = loc_id;
+        cl.LastSendEntrancesTick = tick;
+
+		uint[] allowedEntrances = {};
+		
+        if( loc.EntranceScript != null )
+        {
+           for( uint i = 0, l = loc.MapEntrances.length(); i < l; i+=2 )
+			{
+				if( GM_CheckEntrance( group.CritMove, loc, i );loc.MapEntrances[ i ], loc.MapEntrances[ i + 1 ] ) )// TODO: тут нужно поменять проверки на карта + ентайр в хашах
+					allowedEntrances.insertLast( i/2 );	
+			}
+        }
+        else
+        {
+            for( uint i = 0, l = loc.MapEntrances.length(); i < l; i+=2 )
+				allowedEntrances.insertLast( i/2 );	
+	    }
+		cr.SetCurrentLocationEntrances( loc.ProtoId, allowedEntrances );
+    }
+    break;
+    case GM_CMD_VIEW_MAP:
+    {
+        auto group = GetGlobalMapGroupByRuler( cl );
+		if( valid( cl.GetMap() ) || !valid( group ) || group.EncounterDescriptor > 0)
+            break;
+
+        uint      loc_id = param1;
+        Location loc = MapMngr.GetLocation( loc_id );
+        if( !valid( loc ) || DistSqrt( (int) group.CurX, (int) group.CurY, loc.WorldX, loc.WorldX ) > loc.Radius )
+            break;
+
+        uint entrance = param2;
+        if( entrance >= loc.MapEntrances.length() )
+            break;
+        if( loc.EntranceScript != null )
+        {
+            if( !GM_CheckEntrance( loc, group.CritMove, entrance ))
+                break;
+        }
+		hash mapProto = loc.MapEntrances[ entrance * 2 ];
+		hash entire = loc.MapEntrances[ entrance * 2 + 1 ];
+        Map map = loc.GetMap( mapProto );
+        if( !valid( map ) )
+            break;
+
+        uint8  dir;
+        uint16 hx, hy;
+        //if( !map->GetStartCoord( hx, hy, dir, loc->Proto->Entrance[ entrance ].second ) )
+		if( !Entire::GetEntireFreeHex( map, ENTIRE_DEFAULT, hx, hy ) )
+            break;
+		uint look = 0; // 0? cr.LookDistance	
+		cl.ViewMap( map, 0, hx, hy, 0);
+
+		}
+    break;
+    default:
+        Log( " - Unknown command " + command + "; from critter:   " +cl.Id );
+        break;
+    }
+	
+	cl.Wait( __Breaktime );
+}
+
+void ProcessGlobalMapCommand( Critter cl, uint8 command, uint param1, uint param2 ) //Process_RuleGlobal
+{
+	if( !valid( cl ) || !cl.IsPlayer() )
+		return;
+    switch( command )
+    {
+    case GM_CMD_FOLLOW_CRIT:
+    {
+        if( param1 == 0 )
+            break;
+
+        Critter cr = cl.GetCritter( param1 );
+        if( !valid( cr ) )
+            break;
+
+        if( cl.FollowLeaderId == cr.Id )
+            cl.FollowLeaderId = 0; // unfollow
+        else
+            cl.FollowLeaderId = cr.Id;
+    }
+    break;
+    case GM_CMD_SETMOVE:
+		auto group = GetGlobalMapGroupByRuler( cl );
+        if( valid( cl.GetMap() ) || !valid( group ) || cl != group.Rule )
+            break;
+        if( param1 >= GM_MAXX || param2 >= GM_MAXY )
+            break;
+        if( group.EncounterDescriptor > 0 )
+            break;
+        group.ToX = (float) param1;
+        group.ToY = (float) param2;
+        GM_GlobalProcess( cl, group, GLOBAL_PROCESS_SET_MOVE );
+        break;
+    case GM_CMD_STOP:
+        break;
+    case GM_CMD_TOLOCAL:
+		auto group = GetGlobalMapGroupByRuler( cl );
+        if( valid( cl.GetMap() ) || !valid( group ) || cl != group.Rule )
+            break;
+        if( group.EncounterDescriptor > 0 )
+            break;
+        if( IS_TIMEOUT( chosen.TimeoutTransfer ) )
+        {
+            cl.SayMsg( SAY_NETMSG, TEXTMSG_GAME, MsgStr::StrTimeoutTransferWait );
+            break;
+        }
+
+        if( param1 == 0 )
+        {
+            if( valid( cl.GetMap() ) || !valid( group ) || cl != group.Rule )
+                break;
+            group.EncounterDescriptor = 0;
+            MapMngr.GM_GlobalProcess( cl, group, GLOBAL_PROCESS_ENTER );
+        }
+        else
+        {
+            MapMngr.GM_GroupToLoc( cl, param1, param2 );
+        }
+        return;
+    case GM_CMD_ANSWER:
+		auto group = GetGlobalMapGroupByRuler( cl );
+        if( valid( cl.GetMap() ) || !valid( group ) || cl != group.Rule )
+			break;
+        if( group.EncounterDescriptor == 0 || group.EncounterForce )
+            break;
+
+        if( (int) param1 >= 0 )    // Yes
+        {
+            GM_GlobalInvite( group, param1 );
+            return;
+        }
+        else if( group.EncounterDescriptor > 0 )       // No
+        {
+            group.EncounterDescriptor = 0;
+            group.SendGlobalData( GM_INFO_GROUP_PARAM );
+        }
+        break;
+    case GM_CMD_FOLLOW:
+    {
+        // Find rule
+        Critter rule = GetCritter( param1 );
+        if( !valid( rule ) || valid( rule.GetMap() ) )
+		
+		auto group = GetGlobalMapGroupByRuler( rule );
+		if( !valid( group ) || rule != group.Rule )
+            break;
+
+        // Check for follow
+        if( !group.CheckForFollow( cl ) )
+            break;
+        if( !GetDistantion( rule.LastMapHexX, rule.LastMapHexY, cl.HexX, cl.HexX ) > FOLLOW_DIST + rule.Multihex + cl.Multihex )
+            break;
+
+        if( !cl.TransitToGlobalGroup( rule ) )
+            break;
+    }
+        return;
+    case GM_CMD_KICKCRIT:
+    {
+        auto group = GetGlobalMapGroup( cl );
+        if( valid( cl.GetMap() ) || !valid( group ) || group.CritMove.length() < 2 || group.EncounterDescriptor > 0 )
+            break;
+
+        Critter        kick_cr;
+
+        if( cl.Id == param1 )             // Kick self
+        {
+            if( cl == group.Rule )
+                break;
+            kick_cr = cl;
+        }
+        else                 // Kick other
+        {
+            if( cl != group.Rule )
+                break;
+            kick_cr = group.GetCritter( param1 );
+            if( !valid( kick_cr ) )
+                break;
+        }
+
+        GM_GlobalProcess( kick_cr, group, GLOBAL_PROCESS_KICK );
+    }
+    break;
+    case GM_CMD_GIVE_RULE:
+    {
+        auto group = GetGlobalMapGroupByRuler( cl );
+		// Check
+        if( cl.Id == param1 || valid( cl.GetMap() ) || !valid( group ) || cl != group.Rule || group.EncounterDescriptor > 0 )
+            break;
+        Critter new_rule = group.GetCritter( param1 );
+        if( !valid( new_rule ) || !new_rule.IsPlayer() || !new_rule.IsOnline() )
+            break;
+
+        GM_GiveRule( cl, new_rule );
+        GM_StopGroup( cl );
+    }
+    break;
+    case GM_CMD_ENTRANCES:
+    {
+        auto group = GetGlobalMapGroupByRuler( cl );
+		if( valid( cl.GetMap() ) || !valid( group ) || group.EncounterDescriptor > 0)
+            break;
+
+        uint      loc_id = param1;
+        Location loc = GetLocation( loc_id );
+        if( !valid( loc ) || DistSqrt( (int) group.CurX, (int) group.CurY, loc.WorldX, loc.WorldY ) > loc.Radius ) )
+            break;
+
+        uint tick = Timer::FastTick();
+        if( cl.LastSendEntrancesLocId == loc_id && tick < cl.LastSendEntrancesTick + GM_ENTRANCES_SEND_TIME )
+        {
+            Log( " Client '%s' ignore send entrances timeout." + cl.Id );
+            break;
+        }
+        cl.LastSendEntrancesLocId = loc_id;
+        cl.LastSendEntrancesTick = tick;
+
+		uint[] allowedEntrances = {};
+		
+        if( loc.EntranceScript != null )
+        {
+           for( uint i = 0, l = loc.MapEntrances.length(); i < l; i+=2 )
+			{
+				if( GM_CheckEntrance( group.CritMove, loc, i );loc.MapEntrances[ i ], loc.MapEntrances[ i + 1 ] ) )// TODO: тут нужно поменять проверки на карта + ентайр в хашах
+					allowedEntrances.insertLast( i/2 );	
+			}
+        }
+        else
+        {
+            for( uint i = 0, l = loc.MapEntrances.length(); i < l; i+=2 )
+				allowedEntrances.insertLast( i/2 );	
+	    }
+		cr.SetCurrentLocationEntrances( loc.ProtoId, allowedEntrances );
+    }
+    break;
+    case GM_CMD_VIEW_MAP:
+    {
+        auto group = GetGlobalMapGroupByRuler( cl );
+		if( valid( cl.GetMap() ) || !valid( group ) || group.EncounterDescriptor > 0)
+            break;
+
+        uint      loc_id = param1;
+        Location loc = MapMngr.GetLocation( loc_id );
+        if( !valid( loc ) || DistSqrt( (int) group.CurX, (int) group.CurY, loc.WorldX, loc.WorldX ) > loc.Radius )
+            break;
+
+        uint entrance = param2;
+        if( entrance >= loc.MapEntrances.length() )
+            break;
+        if( loc.EntranceScript != null )
+        {
+            if( !GM_CheckEntrance( loc, group.CritMove, entrance ))
+                break;
+        }
+		hash mapProto = loc.MapEntrances[ entrance * 2 ];
+		hash entire = loc.MapEntrances[ entrance * 2 + 1 ];
+        Map map = loc.GetMap( mapProto );
+        if( !valid( map ) )
+            break;
+
+        uint8  dir;
+        uint16 hx, hy;
+        //if( !map->GetStartCoord( hx, hy, dir, loc->Proto->Entrance[ entrance ].second ) )
+		if( !Entire::GetEntireFreeHex( map, ENTIRE_DEFAULT, hx, hy ) )
+            break;
+		uint look = 0; // 0? cr.LookDistance	
+		cl.ViewMap( map, 0, hx, hy, 0);
+
+		}
+    break;
+    default:
+        Log( " - Unknown command " + command + "; from critter:   " +cl.Id );
+        break;
+    }
+	
+	cl.Wait( __Breaktime );
+}
+	/*
+
+	        static uint         Crit_GetFollowGroup( Critter* cr, int find_type, ScriptArray* critters );
+        static Critter*     Crit_GetFollowLeader( Critter* cr );
+        static ScriptArray* Crit_GetGlobalGroup( Critter* cr );
+        static bool         Crit_IsGlobalGroupLeader( Critter* cr );
+        static void         Crit_LeaveGlobalGroup( Critter* cr );
+        static void         Crit_GiveGlobalGroupLead( Critter* cr, Critter* to_cr );
+	
+	 functionz
+	 
+    bool IsIntersectZone( int wx1, int wy1, int wx1_radius, int wx2, int wy2, int wx2_radius, int zones );
+    void GetZoneLocations( int zx, int zy, int zone_radius, UIntVec& loc_ids );
+
+    void         GM_GroupStartMove( Critter* cr ); 9 hits
+    void         GM_AddCritToGroup( Critter* cr, uint rule_id ); -- использовалось в bool MapManager::AddCrToMap( Critter* cr, Map* map, ushort tx, ushort ty, uint radius ), оно , собственно и приводило к началу движения
+    void         GM_LeaveGroup( Critter* cr );
+    void         GM_GiveRule( Critter* cr, Critter* new_rule );
+    void         GM_StopGroup( Critter* cr );
+    bool         GM_GroupToMap( GlobalMapGroup* group, Map* map, uint entire, ushort mx, ushort my, uchar mdir );
+    bool         GM_GroupToLoc( Critter* rule, uint loc_id, uchar entrance, bool force = false );
+    void         GM_GroupSetMove( GlobalMapGroup* group, float to_x, float to_y, float speed );
+    void         GM_GroupMove( GlobalMapGroup* group );
+    void         GM_GlobalProcess( Critter* cr, GlobalMapGroup* group, int type );
+    void         GM_GlobalInvite( GlobalMapGroup* group, int combat_mode );
+    bool         GM_CheckEntrance( Location* loc, ScriptArray* arr, uchar entrance );
+    ScriptArray* GM_CreateGroupArray( GlobalMapGroup* group );
+	 
+ API
+	array<Critter@>@ GetGlobalMapCritters(uint16 worldX, uint16 worldY, uint radius, int findType)    
+	Critter
+	    CLASS_PROPERTY( uint, GlobalMapLeaderId );
+    CLASS_PROPERTY( uint, GlobalMapTripId );
+    CLASS_PROPERTY( uint, RefGlobalMapLeaderId );
+    CLASS_PROPERTY( uint, RefGlobalMapTripId );
+	 
+	 server
+	 
+        static uint         Crit_GetFollowGroup( Critter* cr, int find_type, ScriptArray* critters );
+        static Critter*     Crit_GetFollowLeader( Critter* cr );
+        static ScriptArray* Crit_GetGlobalGroup( Critter* cr );
+        static bool         Crit_IsGlobalGroupLeader( Critter* cr );
+        static void         Crit_LeaveGlobalGroup( Critter* cr );
+        static void         Crit_GiveGlobalGroupLead( Critter* cr, Critter* to_cr );
+Flags and defines
+
+// Global map
+#define GM_MAXX                      ( GameOpt.GlobalMapWidth * GameOpt.GlobalMapZoneLength )
+#define GM_MAXY                      ( GameOpt.GlobalMapHeight * GameOpt.GlobalMapZoneLength )
+#define GM_ZONE_LEN                  ( GameOpt.GlobalMapZoneLength ) // Can be multiple to GM_MAXX and GM_MAXY
+#define GM__MAXZONEX                 ( 100 )
+#define GM__MAXZONEY                 ( 100 )
+#define GM_ZONES_FOG_SIZE            ( ( ( GM__MAXZONEX / 4 ) + ( ( GM__MAXZONEX % 4 ) ? 1 : 0 ) ) * GM__MAXZONEY )
+#define GM_FOG_FULL                  ( 0 )
+#define GM_FOG_HALF                  ( 1 )
+#define GM_FOG_HALF_EX               ( 2 )
+#define GM_FOG_NONE                  ( 3 )
+#define GM_MAX_GROUP_COUNT           ( GameOpt.GlobalMapMaxGroupCount )
+#define GM_ANSWER_WAIT_TIME          ( 20000 )
+#define GM_LIGHT_TIME                ( 5000 )
+#define GM_ZONE( x )                          ( ( x ) / GM_ZONE_LEN )
+#define GM_ENTRANCES_SEND_TIME       ( 60000 )
+#define GM_TRACE_TIME                ( 1000 )
+
+// Follow
+#define FOLLOW_DIST                  ( 10 )
+#define FOLLOW_FORCE                 ( 1 )
+#define FOLLOW_PREP                  ( 2 )
+
+// GM Info
+#define GM_INFO_LOCATIONS            ( 0x01 )
+#define GM_INFO_CRITTERS             ( 0x02 )
+#define GM_INFO_GROUP_PARAM          ( 0x04 )
+#define GM_INFO_ZONES_FOG            ( 0x08 )
+#define GM_INFO_ALL                  ( 0x0F )
+#define GM_INFO_FOG                  ( 0x10 )
+#define GM_INFO_LOCATION             ( 0x20 )
+
+// Global process types
+#define GLOBAL_PROCESS_MOVE          ( 0 )
+#define GLOBAL_PROCESS_ENTER         ( 1 )
+#define GLOBAL_PROCESS_START_FAST    ( 2 )
+#define GLOBAL_PROCESS_START         ( 3 )
+#define GLOBAL_PROCESS_SET_MOVE      ( 4 )
+#define GLOBAL_PROCESS_STOPPED       ( 5 )
+#define GLOBAL_PROCESS_NPC_IDLE      ( 6 )
+#define GLOBAL_PROCESS_KICK          ( 7 )
+
+// GM Rule command
+#define GM_CMD_SETMOVE               ( 1 ) // +r-a*x,y
+#define GM_CMD_STOP                  ( 2 ) // +r-a
+#define GM_CMD_TOLOCAL               ( 3 ) // +r-a*num_city,num_map
+#define GM_CMD_KICKCRIT              ( 4 ) // +r-a*cr_id
+#define GM_CMD_FOLLOW_CRIT           ( 5 ) // +r+a*cr_id
+#define GM_CMD_FOLLOW                ( 6 )
+#define GM_CMD_GIVE_RULE             ( 7 )
+#define GM_CMD_ANSWER                ( 8 )
+#define GM_CMD_ENTRANCES             ( 9 )
+#define GM_CMD_VIEW_MAP              ( 10 )
+
+// GM Walk types
+#define GM_WALK_GROUND               ( 0 )
+#define GM_WALK_FLY                  ( 1 )
+#define GM_WALK_WATER                ( 2 )
+//удаление машины
+    if( !GetMapId() && GroupMove && GroupMove->CarId == item->GetId() )
+    {
+        GroupMove->CarId = 0;
+        SendA_GlobalInfo( GroupMove, GM_INFO_GROUP_PARAM );
+    }
+
+	 
+	 сервер клиент
+	 void FOServer::Process_RuleGlobal( Client* cl )
+	 */

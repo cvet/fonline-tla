@@ -50,11 +50,27 @@ namespace Login
 
         void OnGlobalInput( uint8 key, string text ) override
         {
-            if( key == DIK_RETURN || key == DIK_NUMPADENTER )
+            if(Active && Gui::GetActiveScreen().Index == Index)
             {
-                string cmd = "Login\n" + Screen.FindText("InputLogin").Text + "\n" + Screen.FindText("InputPassword").Text ;
-                Log(cmd);
-                CustomCall(cmd , "\n");
+                if( key == DIK_RETURN || key == DIK_NUMPADENTER )
+                {
+                    string login = Screen.FindText("InputLogin").Text;
+                    string pass  = Screen.FindText("InputPassword").Text;
+                    if(pass!="" && login != "")
+                    {
+                        string cmd   = "Login\n" + login + "\n" + pass ;
+                        Log(cmd);
+                        CustomCall(cmd , "\n");
+                    }
+                }
+                
+                if(!Find( "MessageBox" ).Active)
+                    Find( "MessageBox" ).SetActive( true );
+            }
+            else
+            {
+                if(Find( "MessageBox" ).Active)
+                    Find( "MessageBox" ).SetActive( false );   
             }
         }
     }
@@ -114,7 +130,9 @@ namespace Login
         void OnLMouseClick() override
         {
             if( !__Singleplayer )
+            {
                 ShowScreen( CLIENT_MAIN_SCREEN_REGISTRATION );
+            }
             else
                 ShowScreen( CLIENT_SCREEN_SAVE_LOAD );
         }
@@ -511,7 +529,7 @@ namespace Registration
             SetTextColor( COLOR_SAND );
         }
 
-        void OnInit() override
+        void OnShow( dictionary params ) override
         {
             Text = MSG_GAME( STR_INV_SHORT_SPECIAL( cast< BaseStat >( Parent ).Prop ) );
         }
@@ -715,7 +733,7 @@ namespace Registration
             SetTextFlags( FT_CENTERY );
         }
 
-        void OnInit() override
+        void OnShow( dictionary params ) override
         {
             CritterProperty prop = cast< ExtendedStat >( Parent ).Prop;
             Text                 = MSG_GAME( STR_PARAM_NAME_SHORT( prop ) );
@@ -819,7 +837,7 @@ namespace Registration
             SetTextFlags( FT_CENTERY );
         }
 
-        void OnInit() override
+        void OnShow( dictionary params ) override
         {
             Text = MSG_GAME( STR_PARAM_NAME( cast< TraitLeft >( Parent ).Prop ) );
         }
@@ -892,7 +910,7 @@ namespace Registration
             SetTextFlags( FT_CENTERY );
         }
 
-        void OnInit() override
+        void OnShow( dictionary params ) override
         {
             Text = MSG_GAME( STR_PARAM_NAME( cast< TraitRight >( Parent ).Prop ) );
         }
@@ -968,7 +986,7 @@ namespace Registration
             SetTextFlags( FT_CENTERY );
         }
 
-        void OnInit() override
+        void OnShow( dictionary params ) override
         {
             Text = MSG_GAME( STR_PARAM_NAME( cast< Skill >( Parent ).Prop ) );
         }
@@ -1079,7 +1097,7 @@ namespace Registration
                 CurTip = prop;
                 FindText( "Name" ).Text = MSG_GAME( STR_PARAM_NAME( prop ) );
                 FindText( "Desc" ).Text = MSG_GAME( STR_PARAM_DESC( prop ) );
-                FindPanel( "Image" ).SetBackgroundImage( STR_PARAM_PIC( prop ) );
+                FindPanel( "Image" ).SetBackgroundImage( MSG_GAME( STR_PARAM_PIC( prop ) ) );
             }
         }
     }
@@ -8610,7 +8628,12 @@ namespace Dialog
 
         void OnLMouseClick() override
         {
-            ShowScreen( CLIENT_SCREEN_SAY );
+             dictionary dict = {};
+             dict[ "TalkerIsNpc" ] = cast<Dialog>(Parent).TalkerIsNpc;
+             dict[ "TalkerId" ] = cast<Dialog>(Parent).TalkerIsNpc;
+             dict[ "TalkStartTick" ] = cast<Dialog>(Parent).TalkStartTick;
+             dict["FromDialog"] = true;
+             ShowScreen( CLIENT_SCREEN_SAY, dict );
         }
     }
 
@@ -13376,12 +13399,29 @@ namespace Say
 {
     class Say : Gui::Screen
     {
+        // Окно вызвано из интерфейса диалога
+        bool FromDialog;
+        //Признак: не выводить введенный текст в лог
+        bool DontShowMessage;
+        bool TalkerIsNpc;
+        uint TalkerId;
+
         void OnConstruct() override
         {
             SetModal( true );
             SetCanMove( true, false );
             SetSize( 290, 85 );
             SetBackgroundImage( "art/intrface/say.png" );
+        }
+
+        void OnShow( dictionary params ) override
+        {
+            if(!(params is null))
+            {
+                    TalkerIsNpc = bool( params[ "TalkerIsNpc" ] );
+                 FromDialog  = bool( params[ "FromDialog" ] );
+                 TalkerId    = uint( params[ "TalkerId" ] );
+            }
         }
     }
 
@@ -13430,8 +13470,18 @@ namespace Say
         void OnLMouseClick() override
         {
             string inputText = Screen.FindText( "MainSayText" ).Text;
-            Message( inputText );
+            if( !cast< Say >( Parent ).DontShowMessage )
+                Message( inputText );
             //CustomCall( "ScreenSay_" + inputText );
+            Critter@ chosen = GetChosen();
+            if( chosen is null )
+            {
+                HideScreen();
+                return;
+            }
+            if( chosen.CanSendSay )
+                ServerRpc.Rpc_ProcessSay( inputText, cast< Say >( Parent ).FromDialog, 
+                cast< Say >( Parent ).TalkerId, cast< Say >( Parent ).TalkerIsNpc );
             HideScreen();
         }
     }

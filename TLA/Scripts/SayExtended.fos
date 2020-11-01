@@ -3,8 +3,26 @@
 #pragma rpc Client ShowDialogBoxIllBrahmin (int )
 #pragma rpc Client ShowSayExtended (int msgIdHeader, int p1, int p2 )
 
-#pragma rpc Server Rpc_ProcessSayExtended (int, string text )
+// Перевести диалог на указанный результат
+#pragma rpc Client ForceDialogResult( uint talkerId, bool isNpc, int result, bool refresh )
+// Добавить к тексту диалога строку из FODLG_MSG
+#pragma rpc Client AddDialogStr( uint msg, string lexems, bool append )
+
+#pragma rpc Server Rpc_ProcessSayExtended ( int, string text )
 #pragma rpc Server Rpc_AnswerDialogBox (int dialogID, int answerIndex, int )
+
+#pragma rpc Server Rpc_ProcessSay ( string text, bool fromDialog, uint talkerId, bool isNpc )
+#pragma event "EventPlayerSaidText( Critter critter, const string text, bool fromDialog, uint talkerId, bool isNpc )"
+
+#define MAX_SAY_TEXT_LENGTH ( 100 )
+// Игрок может отправлять текст на сервер. Переменную нужно уставлять вручную в dlg_ - функциях
+// введена, чтобы не отправляли любые тексты из любых диалогов
+#pragma property Critter Protected bool CanSendSay 
+
+// Answer
+#define ANSWER_BEGIN                 ( 0xF0 )
+#define ANSWER_END                   ( 0xF1 )
+#define ANSWER_BARTER                ( 0xF2 )
 
 #ifdef __SERVER
 
@@ -13,16 +31,66 @@ void ShowScreenEx( Critter player, int msgIdHeader)
 	player.Rpc.ShowSayExtended( msgIdHeader, 0, 0 );
 }
 
-void Rpc_ProcessSayExtended (Critter  player, int, string text)
- 
+void Rpc_ProcessSayExtended (Critter player, int, string text)
 {
     player.Wait( 1000 );
-	Log(text);
+	Log("called Rpc_ProcessSayExtended" + text);
+}
+
+void Rpc_ProcessSay (Critter player, string text, bool fromDialog, uint talkerId, bool isNpc)
+{
+	player.Wait( 1000 );
+	if( !player.CanSendSay )
+	{
+		player.Wait( 10000 ); // Защита от взлома? если оно работает
+		Log( "Player said restricted text " + player.Id );
+	}
+    if( text.length() > MAX_SAY_TEXT_LENGTH )
+	{
+		player.Wait( 10000 );
+		Log( "Too long text from player " + player.Id + ": " + text.length() ); 
+	}
+		
+	ReplicationTerminal::OnPlayerSaidText( player, text, fromDialog, talkerId, isNpc );
+	
+	//__EventPlayerSaidText.Raise( player, text, fromDialog );
+	
 }
 
 #endif
 
 #ifdef __CLIENT
+
+void ForceDialogResult( uint talkerId, bool isNpc, int result, bool refresh )
+{
+	//Перегенерация диалога
+	if( refresh )
+		CustomCall( "DialogAnswer " + isNpc + " " + talkerId + " " + ANSWER_BEGIN );
+	CustomCall( "DialogAnswer " + isNpc + " " + talkerId + " " + result );
+}
+
+void AddDialogStr( uint msg, string lexems, bool append )
+{
+	auto screen = Gui::GetActiveScreen();
+	if(screen.Index == CLIENT_SCREEN_DIALOG )
+	{
+		 auto dialog = cast<GuiScreens::Dialog::Dialog> ( screen );
+		 if( dialog != null )
+		 {
+			string text = GetMsgStr( TEXTMSG_DLG, msg );
+			
+			auto panel = screen.FindPanel( "SpeechPanel" );
+			auto textbox = panel.FindText( "SpeechText" );
+			text =  append ? dialog.Text + "##" + text : text + "##" + dialog.Text;
+			text = FormatTags( text, lexems );
+			
+			int tw = 0, th = 0, lines = 0;
+			GetTextInfo( text, textbox.Width, 1000, textbox.TextFont, textbox.TextFlags, tw, th, lines );
+			textbox.SetSize( textbox.Parent.Width, Math::Max( th, textbox.Parent.Height ) );
+			textbox.SetText( text );
+		 }
+	}
+}
 
 void ShowSayExtended (int msgIdHeader, int p1, int p2 )
 {

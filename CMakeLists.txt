@@ -1,0 +1,17 @@
+cmake_minimum_required( VERSION 3.16.3 )
+project( FOnlineTLA )
+
+set( FONLINE_VERBOSE_BUILD OFF CACHE BOOL "Verbose build mode" FORCE )
+set( FONLINE_OUTPUT_PATH "${CMAKE_BINARY_DIR}" CACHE PATH "Common output path" FORCE )
+set( FONLINE_BUILD_CLIENT OFF CACHE BOOL "Build Multiplayer client binaries" FORCE )
+set( FONLINE_BUILD_SERVER OFF CACHE BOOL "Build Multiplayer server binaries" FORCE )
+set( FONLINE_BUILD_SINGLE OFF CACHE BOOL "Build Singleplayer binaries" FORCE )
+set( FONLINE_BUILD_MAPPER OFF CACHE BOOL "Build Mapper binaries" FORCE )
+set( FONLINE_BUILD_ASCOMPILER OFF CACHE BOOL "Build AngelScript compiler" FORCE )
+set( FONLINE_BUILD_BAKER OFF CACHE BOOL "Build Baker binaries" FORCE )
+set( FONLINE_UNIT_TESTS ON CACHE BOOL "Build only binaries for Unit Testing" FORCE )
+set( FONLINE_CODE_COVERAGE OFF CACHE BOOL "Build only binaries for Code Coverage reports" FORCE )
+set( FONLINE_CMAKE_CONTRIBUTION "../TLA.cmake" CACHE FILEPATH "CMake contribution file" FORCE )
+set( FONLINE_INFO_MARKDOWN_OUTPUT "" CACHE PATH "Path where information markdown files will be stored" FORCE )
+
+add_subdirectory( "Engine" )

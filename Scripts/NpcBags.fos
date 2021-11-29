@@ -1,247 +1,247 @@
-//FOS Server Sort 15
+// FOS Server Sort 15
 
-/* 
-BagInfo - описание класса сумки
-	BagId - Порядковый номер сумки, устанавливается в свойствах криттера, равен BagsList::Bags
-	Description - описание сумки, применение #Горожанин (в кепке)
-	Location - место где можно встретить NPC
-	Name - обозначение, например AllCitHat
-	ChildBagsNames - в сумку могут быть включены другие сумки, каждая из них обрабатывается отдельно, например bag_13=AllCitHat BCapsSmall Rubbish2
-	BagItemsCollections - коллекции предметов. Выбирается одна из нескольких случайным образом
+/*
+   BagInfo - описание класса сумки
+        BagId - Порядковый номер сумки, устанавливается в свойствах криттера, равен BagsList::Bags
+        Description - описание сумки, применение #Горожанин (в кепке)
+        Location - место где можно встретить NPC
+        Name - обозначение, например AllCitHat
+        ChildBagsNames - в сумку могут быть включены другие сумки, каждая из них обрабатывается отдельно, например bag_13=AllCitHat BCapsSmall Rubbish2
+        BagItemsCollections - коллекции предметов. Выбирается одна из нескольких случайным образом
 
-BagItem - описание класса предмета в составе коллекции
-	ProtoId - прототип предмета
-	CountMin - миникальное количество предметов
-	CountMax - максимальное
-	Fixed - признак, что количество постоянное, в этом случае берется значение CountMin
-	Slot - слот в котором генерится предмет, по умолчанию инвентарь, если не инвентарь, предмет устанавливается как FavoriteItem
-*/
-	
+   BagItem - описание класса предмета в составе коллекции
+        ProtoId - прототип предмета
+        CountMin - миникальное количество предметов
+        CountMax - максимальное
+        Fixed - признак, что количество постоянное, в этом случае берется значение CountMin
+        Slot - слот в котором генерится предмет, по умолчанию инвентарь, если не инвентарь, предмет устанавливается как FavoriteItem
+ */
+
 void ModuleInit()
 {
     __EventInit.Subscribe( init );
-}	
+}
 
 void init()
 {
-	Json::JSON@ bagsInfo = Json::JSONLoad("BagsConfig.json");
+    Json::JSON@ bagsInfo = Json::JSONLoad( "BagsConfig.json" );
     bagsInfo.forEach( @ReadBagInfo );
-	__EventCritterInit.Subscribe( CritterInit );
+    __EventCritterInit.Subscribe( CritterInit );
     __EventCritterIdle.Subscribe( OnCritterIdle );
 }
-	
+
 void CritterInit( Critter cr, bool firstTime )
 {
-	if( cr.IsLife() && cr.IsNpc() )
-	{
-		cr.LastBagRefreshedTime = 0;
-	//FillCritterBag( cr );
-	}
+    if( cr.IsLife() && cr.IsNpc() )
+    {
+        cr.LastBagRefreshedTime = 0;
+        // FillCritterBag( cr );
+    }
 }
-	
-#pragma property Critter Protected        uint   LastBagRefreshedTime	
-	
+
+#pragma property Critter Protected        uint   LastBagRefreshedTime
+
 void OnCritterIdle( Critter cr )
 {
-    if( !cr.IsNpc() || cr.LastBagRefreshedTime > __FullSecond || !cr.IsLife() )//TODO: переделать, 
-		return;
-	cr.LastBagRefreshedTime = __FullSecond + REAL_MINUTE( __BagRefreshTime );
-	FillCritterBag( cr );
-}
-	
-void ReadBagInfo(Json::JSON@ bagInfo, uint index)
-{
-	BagInfo bag = BagInfo();
-	AllBags.insertLast( bag );
-	CurrentBag = bag;
-	string name;
-	bagInfo[ "Name" ] >> bag.Name;
-	bagInfo[ "BagId" ] >> bag.BagId;
-	
-	bagInfo[ "ChildBagsNames" ].forEach( @ReadChildBagNameInfo );
-	bagInfo[ "BagItemsCollections" ].forEach( @ReadCollection );
+    if( !cr.IsNpc() || cr.LastBagRefreshedTime > __FullSecond || !cr.IsLife() ) // TODO: переделать,
+        return;
+    cr.LastBagRefreshedTime = __FullSecond + REAL_MINUTE( __BagRefreshTime );
+    FillCritterBag( cr );
 }
 
-BagInfo CurrentBag;
+void ReadBagInfo( Json::JSON@ bagInfo, uint index )
+{
+    BagInfo bag = BagInfo();
+    AllBags.insertLast( bag );
+    CurrentBag = bag;
+    string name;
+    bagInfo[ "Name" ] >> bag.Name;
+    bagInfo[ "BagId" ] >> bag.BagId;
+
+    bagInfo[ "ChildBagsNames" ].forEach( @ReadChildBagNameInfo );
+    bagInfo[ "BagItemsCollections" ].forEach( @ReadCollection );
+}
+
+BagInfo        CurrentBag;
 ItemCollection CurrentCollection;
-BagItem CurrentBagItem;
+BagItem        CurrentBagItem;
 
-void ReadChildBagNameInfo(Json::JSON@ text, uint index)
-{	
-	string name = "";
-	text >> name;
-	CurrentBag.ChildBagsNames.insertLast( name );
-}
-
-void ReadCollection(Json::JSON@ collection, uint index)
+void ReadChildBagNameInfo( Json::JSON@ text, uint index )
 {
-	CurrentCollection = ItemCollection();
-	CurrentBag.BagItemsCollections.insertLast( CurrentCollection );
-	collection["BagItems"].forEach( @ReadBagItem );
+    string name = "";
+    text >> name;
+    CurrentBag.ChildBagsNames.insertLast( name );
 }
 
-void ReadBagItem(Json::JSON@ itemInfo, uint index)
+void ReadCollection( Json::JSON@ collection, uint index )
 {
-	CurrentBagItem = BagItem();
-	CurrentCollection.Items.insertLast( CurrentBagItem );
-
-	string value;
-	itemInfo[ "ProtoId" ] >> value;
-	CurrentBagItem.ProtoId = GetStrHash( value );
-	itemInfo[ "CountMin" ] >> CurrentBagItem.CountMin;
-	itemInfo[ "CountMax" ] >> CurrentBagItem.CountMax;
-	itemInfo[ "Fixed" ] >> CurrentBagItem.Fixed;
-	itemInfo[ "Slot" ] >> value;	
-	CurrentBagItem.Slot = SLOT_INV;
-	if( value == "SLOT_HAND1")
-		CurrentBagItem.Slot = SLOT_HAND1;
-	if( value == "SLOT_HAND2")
-		CurrentBagItem.Slot = SLOT_HAND2;
-	if( value == "SLOT_ARMOR")
-		CurrentBagItem.Slot = SLOT_ARMOR;
-
-	
+    CurrentCollection = ItemCollection();
+    CurrentBag.BagItemsCollections.insertLast( CurrentCollection );
+    collection[ "BagItems" ].forEach( @ReadBagItem );
 }
-	
+
+void ReadBagItem( Json::JSON@ itemInfo, uint index )
+{
+    CurrentBagItem = BagItem();
+    CurrentCollection.Items.insertLast( CurrentBagItem );
+
+    string value;
+    itemInfo[ "ProtoId" ] >> value;
+    CurrentBagItem.ProtoId = GetStrHash( value );
+    itemInfo[ "CountMin" ] >> CurrentBagItem.CountMin;
+    itemInfo[ "CountMax" ] >> CurrentBagItem.CountMax;
+    itemInfo[ "Fixed" ] >> CurrentBagItem.Fixed;
+    itemInfo[ "Slot" ] >> value;
+    CurrentBagItem.Slot = SLOT_INV;
+    if( value == "SLOT_HAND1" )
+        CurrentBagItem.Slot = SLOT_HAND1;
+    if( value == "SLOT_HAND2" )
+        CurrentBagItem.Slot = SLOT_HAND2;
+    if( value == "SLOT_ARMOR" )
+        CurrentBagItem.Slot = SLOT_ARMOR;
+
+
+}
+
 class BagInfo
 {
-	uint BagId; 
-	string Description;
-	string Name;
-	string[] ChildBagsNames = {};
-	ItemCollection[] BagItemsCollections = {};
-	
-	BagItem[] GetBagItems()
-	{
-		BagItem[] items = {};
-		uint len = BagItemsCollections.length();
-		if( len > 0 )
-		{
-			uint index = Random( 0, len - 1 );
-			ItemCollection collection = BagItemsCollections[ index ];
-			for( uint i = 0, l = collection.Items.length(); i < l; i ++ )
-				items.insertLast( collection.Items[ i ] );			
-		}
-		
-		for( uint i = 0, l = ChildBagsNames.length(); i < l; i++ )
-		{
-			BagInfo childBag = GetBag( ChildBagsNames[ i ] );
-			BagItem[] childItems = childBag.GetBagItems();
-			for(uint k = 0, m = childItems.length(); k < m; k ++ )
-				items.insertLast( childItems[ k ] );
-		}
-		
-		return items;
-	}
-	
-	BagItem[] GetAllBagItems()
-	{
-		BagItem[] items = {};
-		
-		for( int j = 0, k = BagItemsCollections.length(); j < k; j ++)
-		{
-			auto collection = BagItemsCollections[ j ];
-			for( uint i = 0, l = collection.Items.length(); i < l; i ++ )
-					items.insertLast( collection.Items[ i ] );
-		}
-			
-		for( uint i = 0, l = ChildBagsNames.length(); i < l; i++ )
-		{
-			BagInfo childBag = GetBag( ChildBagsNames[ i ] );
-			BagItem[] childItems = childBag.GetAllBagItems();
-			for(uint k = 0, m = childItems.length(); k < m; k ++ )
-				items.insertLast( childItems[ k ] );
-		}
-		
-		return items;
-	}
+    uint   BagId;
+    string Description;
+    string Name;
+    string[] ChildBagsNames = {};
+    ItemCollection[] BagItemsCollections = {};
+
+    BagItem[] GetBagItems()
+    {
+        BagItem[] items = {};
+        uint len = BagItemsCollections.length();
+        if( len > 0 )
+        {
+            uint           index = Random( 0, len - 1 );
+            ItemCollection collection = BagItemsCollections[ index ];
+            for( uint i = 0, l = collection.Items.length(); i < l; i++ )
+                items.insertLast( collection.Items[ i ] );
+        }
+
+        for( uint i = 0, l = ChildBagsNames.length(); i < l; i++ )
+        {
+            BagInfo childBag = GetBag( ChildBagsNames[ i ] );
+            BagItem[] childItems = childBag.GetBagItems();
+            for( uint k = 0, m = childItems.length(); k < m; k++ )
+                items.insertLast( childItems[ k ] );
+        }
+
+        return items;
+    }
+
+    BagItem[] GetAllBagItems()
+    {
+        BagItem[] items = {};
+
+        for( int j = 0, k = BagItemsCollections.length(); j < k; j++ )
+        {
+            auto collection = BagItemsCollections[ j ];
+            for( uint i = 0, l = collection.Items.length(); i < l; i++ )
+                items.insertLast( collection.Items[ i ] );
+        }
+
+        for( uint i = 0, l = ChildBagsNames.length(); i < l; i++ )
+        {
+            BagInfo childBag = GetBag( ChildBagsNames[ i ] );
+            BagItem[] childItems = childBag.GetAllBagItems();
+            for( uint k = 0, m = childItems.length(); k < m; k++ )
+                items.insertLast( childItems[ k ] );
+        }
+
+        return items;
+    }
 }
 
 class ItemCollection
 {
-	BagItem[] Items = {};
+    BagItem[] Items = {};
 }
 
 class BagItem
 {
-	hash ProtoId;
-	uint CountMin;
-	uint CountMax;
-	bool Fixed;
-	uint Slot;
-	
-	bool AddCritterItem( Critter cr )
-	{
-		uint count = 0;
-		
-		if( Fixed )
-			count = CountMin;
-		else
-			count = Random( CountMin, CountMax );
-		
-		if( count > 0 )
-		{		
-			Item item = cr.AddItem( ProtoId, count );
-			if( Slot != 0 && valid( item ) )
-			{
-				//TODO: нужна проверка по анимациям, может ли нпц использовать данный прототип.
-				cr.ChangeItemSlot( item.Id, Slot );
-				FavoriteItem::SetFavoriteItemPid( cr, Slot, ProtoId );
-			}
-		}
-	
-		return false;
-	}
-	
-	string ToString()
-	{
-		string s = "BagItem info. " + 
-		"Pid: " + GetHashStr( this.ProtoId ) + 
-		"; min: " + this.CountMin + "; max: " + this.CountMax +
-		"; Slot: " + this.Slot;
-		
-		return s;
-	}
+    hash ProtoId;
+    uint CountMin;
+    uint CountMax;
+    bool Fixed;
+    uint Slot;
+
+    bool AddCritterItem( Critter cr )
+    {
+        uint count = 0;
+
+        if( Fixed )
+            count = CountMin;
+        else
+            count = Random( CountMin, CountMax );
+
+        if( count > 0 )
+        {
+            Item item = cr.AddItem( ProtoId, count );
+            if( Slot != 0 && valid( item ) )
+            {
+                // TODO: нужна проверка по анимациям, может ли нпц использовать данный прототип.
+                cr.ChangeItemSlot( item.Id, Slot );
+                FavoriteItem::SetFavoriteItemPid( cr, Slot, ProtoId );
+            }
+        }
+
+        return false;
+    }
+
+    string ToString()
+    {
+        string s = "BagItem info. " +
+                   "Pid: " + GetHashStr( this.ProtoId ) +
+                   "; min: " + this.CountMin + "; max: " + this.CountMax +
+                   "; Slot: " + this.Slot;
+
+        return s;
+    }
 }
 
 BagInfo[] AllBags = {};
 
 BagInfo GetBag( uint bagId )
 {
-	for( uint i = 0, l = AllBags.length(); i < l; i++ )
-	{
-		BagInfo bag = AllBags[i];
-		if( bag.BagId == bagId )
-			return bag;
-	}
-	ThrowException( "Bag " + bagId + " not found." );
-	return null;
+    for( uint i = 0, l = AllBags.length(); i < l; i++ )
+    {
+        BagInfo bag = AllBags[ i ];
+        if( bag.BagId == bagId )
+            return bag;
+    }
+    ThrowException( "Bag " + bagId + " not found." );
+    return null;
 }
 
 BagInfo GetBag( string bagName )
 {
-	for( uint i = 0, l = AllBags.length(); i < l; i++ )
-	{
-		BagInfo bag = AllBags[i];
-		if( bag.Name == bagName )
-			return bag;
-	}
-	ThrowException( "Bag " + bagName + " not found." );
-	return null;
+    for( uint i = 0, l = AllBags.length(); i < l; i++ )
+    {
+        BagInfo bag = AllBags[ i ];
+        if( bag.Name == bagName )
+            return bag;
+    }
+    ThrowException( "Bag " + bagName + " not found." );
+    return null;
 }
 
 void FillCritterBag( Critter cr )
 {
-	if( cr.BagId > 0 )
-	{
-		BagInfo bag = GetBag( cr.BagId );
+    if( cr.BagId > 0 )
+    {
+        BagInfo bag = GetBag( cr.BagId );
 
-		if( !valid( bag ) )
-			ThrowException( "Bag " + cr.BagId + " not found." );
-		DeleteItems( cr.GetItems() );
-		auto bagItems = bag.GetBagItems();
-		//return;
-		for( uint i = 0, l = bagItems.length(); i < l; i++ )
-			bagItems[ i ].AddCritterItem( cr );
-	}
+        if( !valid( bag ) )
+            ThrowException( "Bag " + cr.BagId + " not found." );
+        DeleteItems( cr.GetItems() );
+        auto bagItems = bag.GetBagItems();
+        // return;
+        for( uint i = 0, l = bagItems.length(); i < l; i++ )
+            bagItems[ i ].AddCritterItem( cr );
+    }
 }

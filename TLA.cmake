@@ -1,29 +1,4 @@
-# SetupGame option value option value...
-# - DEV_NAME (default: "Unknown")
-# - NICE_NAME (default: "Unknown")
-# - COMPANY_NAME (default: "Unknown")
-# - GAME_VERSION (default: "0.0.1")
-# - ENGINE_VERSION (default: "")
-# - MULTIPLAYER_SCRIPTING (default: YES)
-# - SINGLEPLAYER_SCRIPTING (default: YES)
-# - NATIVE_SCRIPTING (default: YES)
-# - ANGELSCRIPT_SCRIPTING (default: YES)
-# - MONO_SCRIPTING (default: YES)
-# AddContent dir(s)
-# AddResources packName dir(s)
-# AddRawResources dir(s)
-# AddScriptApi headerPath(s)
-# AddNativeIncludeDir target dir(s)
-# AddNativeSource target pathPattern(s)
-# AddAngelScriptSource pathPattern(s)
-# AddMonoAssembly assembly
-# AddMonoReference assembly target ref(s)
-# AddMonoSource assembly target pathPattern(s)
-# CreateConfig config inheritenConfig
-# TweakConfig config option value
-# CreatePackage package config debug
-# AddToPackage package binary platform arch packType [customConfig]
-
+# Project info
 SetupGame( DEV_NAME "TLA"
     NICE_NAME "FOnline: The Life After"
     COMPANY_NAME "MyCorpLtd"
@@ -35,25 +10,30 @@ SetupGame( DEV_NAME "TLA"
 	MONO_SCRIPTING NO )
 
 # Content
-AddContent( TLA/Critters )
-AddContent( TLA/Items )
-AddContent( TLA/Maps )
-AddContent( TLA/Scenery )
-# FOnlineSDK/Modules/Core; FOnlineSDK/Modules/Scores; FOnlineSDK/Modules/BuildSystem; TLA; FonlineCommon; Fonline-JSON;
-
-# Resources
-AddResources( "Pack1" "Resources/FOnline" )
-AddResources( "Pack2" "Resources/FOnlineMusic" )
-AddResources( "Pack3" "Resources/FOnlineVideo" )
-AddResources( "Pack4" "Resources/Mapper" )
-AddResources( "Pack5" "Resources/VanBuren" )
-AddRawResources( "Resources/Mapper/Packs_Raw" )
+AddContent( Maps )
+AddContent( Critters )
+AddContent( Critters/Types )
+AddContent( Items )
+AddContent( Items/Static )
+AddContent( Items/Custom )
+AddContent( Dialogs )
+AddContent( Texts )
 
 # Scripts
-AddScriptApi( "Scripts/MyScriptApi.h" )
-AddAngelScriptSource( "Scripts/Test.fos" )
+AddScriptApi( Scripts/TLA.h )
+AddAngelScriptSource( Scripts/*.fos )
+AddAngelScriptSource( Scripts/Common/*.fos )
+AddAngelScriptSource( Scripts/Json/*.fos )
 
-# Default config
+# Resources
+AddResources( Base Resources/FOnline )
+AddResources( Music Resources/FOnlineMusic )
+AddResources( Video Resources/FOnlineVideo )
+AddResources( Mapper Resources/Mapper )
+AddResources( VanBuren Resources/VanBuren )
+AddRawResources( Resources/Mapper/Packs_Raw )
+
+# Configs
 CreateConfig( Default "" )
 TweakConfig( Default WindowName "The Life After" )
 TweakConfig( Default ListenPort 4008 )
@@ -91,6 +71,8 @@ TweakConfig( Default FullScreen False )
 TweakConfig( Default AlwaysOnTop False )
 TweakConfig( Default FixedFPS 100 )
 TweakConfig( Default VSync False )
+CreateConfig( Multiplayer Default )
+CreateConfig( Singleplayer Default )
 
 # Test builds
 CreatePackage( "Test" "LocalTest" YES )

@@ -4,9 +4,9 @@ SetupGame( DEV_NAME "TLA"
     COMPANY_NAME "MyCorpLtd"
     GAME_VERSION "0.1.0"
     MULTIPLAYER_SCRIPTING YES
-    SINGLEPLAYER_SCRIPTING YES
+    SINGLEPLAYER_SCRIPTING NO
     ANGELSCRIPT_SCRIPTING YES 
-	NATIVE_SCRIPTING YES 
+	NATIVE_SCRIPTING NO 
 	MONO_SCRIPTING NO )
 
 # Content
@@ -20,9 +20,9 @@ AddContent( Dialogs )
 AddContent( Texts )
 
 # Scripts
-AddScriptApi( Scripts/TLA.h )
+# AddAngelScriptExtensionSource( Scripts/AngelScriptExtension.cpp )
+# AddAngelScriptExtensionEntry( InitAngelScriptExtension )
 AddAngelScriptSource( Scripts/*.fos )
-AddAngelScriptSource( Scripts/Common/*.fos )
 AddAngelScriptSource( Scripts/Json/*.fos )
 
 # Resources

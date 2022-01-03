@@ -1,4 +1,5 @@
 // FOS Server Client
+
 ///@ RemoteCall Server PickItem(uint16 hx, uint16 hy, hstring pid)
 ///@ RemoteCall Server MoveInvItem(uint itemId, uint8 slot)
 ///@ RemoteCall Server DropInvItem(uint itemId, uint count)
@@ -6,18 +7,21 @@
 ///@ RemoteCall Server OperateContainer(bool take, bool all, uint itemId, uint itemCount)
 ///@ Property Critter PrivateCommon uint ApRegenerationTick Temporary Default=0
 ///@ Property Critter Protected uint ApRegenerationTime Default=0
-///@ Event Common ClientOperateContainer(Critter client, Entity container, Item item, bool take)
 ///@ RemoteCall Server UseSkill(CritterProperty skill, uint targetCrId, uint targetItemId, hstring sceneryPid, uint16 hx, uint16 hy)
 ///@ RemoteCall Server Attack(uint targetId, uint8 mode)
 /// RemoteCall Server Attack(uint targetId, uint8 mode, uint16 hexX, uint16 hexY)
 /// RemoteCall Server UseSneak(bool enable)
+///@ Event Common ClientOperateContainer(Critter client, Entity container, Item item, bool take)
+///@ Event Server CritterPickItem(Critter critter, Item item)
+///@ Event Server CritterPickScenery(Critter critter, ItemProto scenery)
+
 #ifdef __CLIENT
 uint[] ChosenActions = {};
 uint8[] MovePath = {};
 
 void ModuleInit()
 {
-    __EventLoop.Subscribe(ChosenProcess);
+    GameInstance.OnLoop.Subscribe(ChosenProcess);
 }
 
 uint GetChosenActions(array<uint> actions)
@@ -119,14 +123,14 @@ void ChosenProcess()
     curAction.resize(7);
     int actionType = curAction[0];
     // Force end move
-    if (actionType != TlaExtended::ChosenMove && actionType != TlaExtended::ChosenMoveToCrit && MovePath.length() > 0) {
+    if (actionType != Tla::ChosenMove && actionType != Tla::ChosenMoveToCrit && MovePath.length() > 0) {
         MovePath.resize(0);
         CustomCall("SendMove");
     }
 
     switch (actionType) {
-    case TlaExtended::ChosenMoveToCrit:
-    case TlaExtended::ChosenMove: {
+    case Tla::ChosenMoveToCrit:
+    case Tla::ChosenMove: {
         uint16 hx = ChosenActions[1];
         uint16 hy = ChosenActions[2];
         bool isRun = (ChosenActions[3] != 0);
@@ -139,7 +143,7 @@ void ChosenProcess()
             break;
 
         // Move to critter
-        if (actionType == TlaExtended::ChosenMoveToCrit) {
+        if (actionType == Tla::ChosenMoveToCrit) {
             Critter cr = GetCritter(ChosenActions[1]);
             if (cr !is null) {
                 hx = cr.HexX;
@@ -224,7 +228,7 @@ void ChosenProcess()
         if (MovePath.length() > 0)
             return;
     } break;
-    case TlaExtended::ChosenDir: {
+    case Tla::ChosenDir: {
         bool cw = (ChosenActions[1] == 0);
 
         if (CurMap is null)
@@ -244,7 +248,7 @@ void ChosenProcess()
 
         CustomCall("ChangeDir " + dir);
     } break;
-    case TlaExtended::ChosenUseItem: {
+    case Tla::ChosenUseItem: {
         uint itemId = ChosenActions[1];
         uint8 targetType = ChosenActions[3];
         uint targetId = ChosenActions[4];
@@ -295,11 +299,11 @@ void ChosenProcess()
 
         // Calculate ap cost
         uint apCost = 1;
-        __EventCritterGetUseApCost.Raise(chosen, item, rate, apCost);
+        GameInstance.OnCritterGetUseApCost.Fire(chosen, item, rate, apCost);
 
         // Check weapon
         if (isAttack) {
-            // ChosenActions::SetChosenActions( array< uint > = { TlaExtended::ChosenUseItem, useItem.Id, 0, TARGET_CRITTER, cr.Id, isAttack ? mode : USE_USE, 0
+            // ChosenActions::SetChosenActions( array< uint > = { Tla::ChosenUseItem, useItem.Id, 0, TARGET_CRITTER, cr.Id, isAttack ? mode : USE_USE, 0
             // } );
 
             if (CurMap is null)
@@ -413,7 +417,7 @@ void ChosenProcess()
             if (isAttack) {
                 const Item weap = Obsolete::GetConstItemBySlot(chosen, SLOT_HAND1);
                 // TODO: проверить, что работает для рукопашных ударов.
-                __EventCritterGetAttackDistantion.Raise(chosen, weap, weap.Mode, maxDist);
+                GameInstance.OnCritterGetAttackDistantion.Fire(chosen, weap, weap.Mode, maxDist);
             }
             else {
                 maxDist = 1 + chosen.Multihex;
@@ -434,9 +438,9 @@ void ChosenProcess()
                 if (dist > maxDist) {
                     bool isRun = false; // 814 ( __AlwaysRun && dist >= __AlwaysRunUseDist );
                     if (targetCr !is null)
-                        SetAction(array<uint> = {TlaExtended::ChosenMoveToCrit, targetCr.Id, 0, isRun ? 1 : 0, maxDist, 0, 0}, false, false);
+                        SetAction(array<uint> = {Tla::ChosenMoveToCrit, targetCr.Id, 0, isRun ? 1 : 0, maxDist, 0, 0}, false, false);
                     else
-                        SetAction(array<uint> = {TlaExtended::ChosenMove, hx, hy, isRun ? 1 : 0, maxDist, 0, 1}, false, false);
+                        SetAction(array<uint> = {Tla::ChosenMove, hx, hy, isRun ? 1 : 0, maxDist, 0, 1}, false, false);
                     if (GetPathLength(chosen, hx, hy, maxDist) > 0)
                         SetAction(curAction, true, false);
 
@@ -464,11 +468,11 @@ void ChosenProcess()
          */
 
         if (use >= USE_PRIMARY && use <= USE_THIRD)
-            __EventCritterAction.Raise(true, chosen, ACTION_USE_WEAPON, rate, item);
+            GameInstance.OnCritterAction.Fire(true, chosen, ACTION_USE_WEAPON, rate, item);
         else if (use == USE_RELOAD)
-            __EventCritterAction.Raise(true, chosen, ACTION_RELOAD_WEAPON, 0, item);
+            GameInstance.OnCritterAction.Fire(true, chosen, ACTION_RELOAD_WEAPON, 0, item);
         else
-            __EventCritterAction.Raise(true, chosen, ACTION_USE_ITEM, 0, item);
+            GameInstance.OnCritterAction.Fire(true, chosen, ACTION_USE_ITEM, 0, item);
 
         chosen.CurrentAp -= apCost;
         if (isAttack && valid(targetCr)) {
@@ -480,7 +484,7 @@ void ChosenProcess()
            return;
            }*/
     } break;
-    case TlaExtended::ChosenMoveItem: {
+    case Tla::ChosenMoveItem: {
         uint itemId = ChosenActions[1];
         uint itemCount = ChosenActions[2];
         uint8 toSlot = ChosenActions[3];
@@ -499,7 +503,7 @@ void ChosenProcess()
         //    break;
 
         if (toSlot == SLOT_GROUND) {
-            if (!__EventItemCheckMove.Raise(item, itemCount, chosen, CurMap))
+            if (!GameInstance.OnItemCheckMove.Fire(item, itemCount, chosen, CurMap))
                 break;
         }
 
@@ -507,17 +511,17 @@ void ChosenProcess()
         if (toSlot != SLOT_INV && toSlot != SLOT_GROUND)
             itemSwap = chosen.GetItemBySlot(toSlot);
 
-        if (!__EventCritterCheckMoveItem.Raise(chosen, item, toSlot)) {
+        if (!GameInstance.OnCritterCheckMoveItem.Fire(chosen, item, toSlot)) {
             // Gameplay swap workaround
             if (itemSwap !is null && !isSecondTry) {
                 // Add actions
-                if (__EventCritterCheckMoveItem.Raise(chosen, itemSwap, SLOT_INV) && __EventCritterCheckMoveItem.Raise(chosen, item, toSlot)) {
+                if (GameInstance.OnCritterCheckMoveItem.Fire(chosen, itemSwap, SLOT_INV) && GameInstance.OnCritterCheckMoveItem.Fire(chosen, item, toSlot)) {
                     ChosenActions.reverse();
                     ChosenActions.resize(ChosenActions.length() - 7);
                     ChosenActions.reverse();
 
-                    SetAction(array<uint> = {TlaExtended::ChosenMoveItem, itemId, itemCount, toSlot, 0, 1, 0}, false, true);
-                    SetAction(array<uint> = {TlaExtended::ChosenMoveItem, itemSwap.Id, itemSwap.Count, SLOT_INV, 0, 1, 0}, false, true);
+                    SetAction(array<uint> = {Tla::ChosenMoveItem, itemId, itemCount, toSlot, 0, 1, 0}, false, true);
+                    SetAction(array<uint> = {Tla::ChosenMoveItem, itemSwap.Id, itemSwap.Count, SLOT_INV, 0, 1, 0}, false, true);
                     return;
                 }
             }
@@ -543,7 +547,7 @@ void ChosenProcess()
             ServerRpc.DropInvItem(itemId, itemCount);
 
     } break;
-    case TlaExtended::ChosenMoveItemCont: {
+    case Tla::ChosenMoveItemCont: {
         uint itemId = ChosenActions[1];
         uint itemCont = ChosenActions[2];
         uint count = ChosenActions[3];
@@ -579,7 +583,7 @@ void ChosenProcess()
         bool take = (colType == ClientItems::Collection::Loot);
         Entity from = (itemCont == ITEMS_PICKUP ? cast<Entity>(chosen) : contEntity);
         Entity to = (itemCont == ITEMS_PICKUP ? contEntity : cast<Entity>(chosen));
-        if (!__EventItemCheckMove.Raise(item, count, from, to))
+        if (!GameInstance.OnItemCheckMove.Fire(item, count, from, to))
             break;
 
         uint apCost = __RtApCostMoveItemContainer;
@@ -596,11 +600,11 @@ void ChosenProcess()
         ClientItems::RemoveItem(colType, item, count);
         chosen.Wait(__Breaktime);
 
-        __EventCritterAction.Raise(true, chosen, ACTION_OPERATE_CONTAINER, transferType, item);
+        GameInstance.OnCritterAction.Fire(true, chosen, ACTION_OPERATE_CONTAINER, transferType, item);
 
         ServerRpc.OperateContainer(take, false, item.Id, count);
     } break;
-    /*case TlaExtended::ChosenTakeAll:
+    /*case Tla::ChosenTakeAll:
        {
         CHECK_NEED_AP( chosen->GetApCostMoveItemContainer() );
 
@@ -626,7 +630,7 @@ void ChosenProcess()
         WaitPing();
        }
        break;*/
-    /*case TlaExtended::ChosenPutAll:
+    /*case Tla::ChosenPutAll:
        {
         CHECK_NEED_AP( chosen->GetApCostMoveItemContainer() );
 
@@ -639,13 +643,13 @@ void ChosenProcess()
         WaitPing();
        }
        break;*/
-    case TlaExtended::ChosenSneak: {
+    case Tla::ChosenSneak: {
         uint apCost = __RtApCostUseSkill;
         CHECK_NEED_AP(apCost);
 
         // CustomCall( "UseCritterSkill " + CritterProperty::UseSneak + " " + apCost + " " + chosen.Id );
     } break;
-    case TlaExtended::ChosenUseSklOnItem: {
+    case Tla::ChosenUseSklOnItem: {
         CritterProperty skill = CritterProperty(ChosenActions[1]);
         uint itemId = ChosenActions[2];
         bool is_inv = (ChosenActions[3] > 0);
@@ -676,9 +680,9 @@ void ChosenProcess()
                 uint useDist = 1 + chosen.Multihex;
                 if (dist > useDist) {
                     bool isRun = false; // 814 ( __AlwaysRun && dist >= __AlwaysRunUseDist );
-                    SetAction(array<uint> = {TlaExtended::ChosenMove, hx, hy, isRun ? 1 : 0, useDist, 0, 1}, false, false);
+                    SetAction(array<uint> = {Tla::ChosenMove, hx, hy, isRun ? 1 : 0, useDist, 0, 1}, false, false);
                     if (GetPathLength(chosen, hx, hy, useDist) > 0)
-                        SetAction(array<uint> = {TlaExtended::ChosenUseSklOnItem, uint(skill), itemId, ChosenActions[3], 0, 0, 0}, true, false);
+                        SetAction(array<uint> = {Tla::ChosenUseSklOnItem, uint(skill), itemId, ChosenActions[3], 0, 0, 0}, true, false);
 
                     return;
                 }
@@ -688,7 +692,7 @@ void ChosenProcess()
             ServerRpc.UseSkill(skill, 0, item_action.Id, 0, 0, 0);
         }
     } break;
-    case TlaExtended::ChosenUseSklOnCritter: {
+    case Tla::ChosenUseSklOnCritter: {
         CritterProperty skill = CritterProperty(ChosenActions[1]);
         uint crId = ChosenActions[2];
 
@@ -702,10 +706,10 @@ void ChosenProcess()
             uint useDist = 3 + chosen.Multihex;
             if (dist > useDist) {
                 bool isRun = false; // 814 ( __AlwaysRun && dist >= __AlwaysRunUseDist );
-                SetAction(array<uint> = {TlaExtended::ChosenMoveToCrit, cr.Id, 0, isRun ? 1 : 0, useDist, 0, 0}, false, false);
+                SetAction(array<uint> = {Tla::ChosenMoveToCrit, cr.Id, 0, isRun ? 1 : 0, useDist, 0, 0}, false, false);
                 // Возможна ситуация, когда до цели нельзя дойти.
                 if (GetPathLength(chosen, cr.HexX, cr.HexY, useDist) > 0)
-                    SetAction(array<uint> = {TlaExtended::ChosenUseSklOnCritter, uint(skill), cr.Id, 0, 0, 0, 0}, true, false);
+                    SetAction(array<uint> = {Tla::ChosenUseSklOnCritter, uint(skill), cr.Id, 0, 0, 0, 0}, true, false);
 
                 return;
             }
@@ -723,7 +727,7 @@ void ChosenProcess()
 
         ServerRpc.UseSkill(skill, cr.Id, 0, 0, 0, 0);
     } break;
-    case TlaExtended::ChosenTalkNpc: {
+    case Tla::ChosenTalkNpc: {
         uint crId = ChosenActions[1];
 
         Critter cr = GetCritter(crId);
@@ -737,11 +741,11 @@ void ChosenProcess()
 
         if (dist > talkDistance) {
             bool isRun = false; // 814 ( __AlwaysRun && dist >= __AlwaysRunUseDist );
-            SetAction(array<uint> = {TlaExtended::ChosenMoveToCrit, cr.Id, 0, isRun ? 1 : 0, talkDistance, 0, 0}, false, false);
+            SetAction(array<uint> = {Tla::ChosenMoveToCrit, cr.Id, 0, isRun ? 1 : 0, talkDistance, 0, 0}, false, false);
             uint16 hx = cr.HexX;
             uint16 hy = cr.HexY;
             if (GetPathLength(chosen, hx, hy, talkDistance) > 0)
-                SetAction(array<uint> = {TlaExtended::ChosenTalkNpc, cr.Id, 0, 0, 0, 0, 0}, true, false);
+                SetAction(array<uint> = {Tla::ChosenTalkNpc, cr.Id, 0, 0, 0, 0, 0}, true, false);
 
             return;
         }
@@ -760,7 +764,7 @@ void ChosenProcess()
 
         ServerRpc.StartDialog(cr.Id);
     } break;
-    case TlaExtended::ChosenPickItem: {
+    case Tla::ChosenPickItem: {
         hstring pid = ChosenActions[1];
         uint16 hx = ChosenActions[2];
         uint16 hy = ChosenActions[3];
@@ -773,10 +777,10 @@ void ChosenProcess()
         uint useDist = 1 + chosen.Multihex;
         if (dist > useDist) {
             bool isRun = false; // 814 ( __AlwaysRun && dist >= __AlwaysRunUseDist );
-            SetAction(array<uint> = {TlaExtended::ChosenMove, hx, hy, isRun ? 1 : 0, useDist, 0, 1}, false, false);
+            SetAction(array<uint> = {Tla::ChosenMove, hx, hy, isRun ? 1 : 0, useDist, 0, 1}, false, false);
 
             if (GetPathLength(chosen, hx, hy, useDist) > 0)
-                SetAction(array<uint> = {TlaExtended::ChosenPickItem, pid, hx, hy, 0, 0, 0}, true, false);
+                SetAction(array<uint> = {Tla::ChosenPickItem, pid, hx, hy, 0, 0, 0}, true, false);
             return;
         }
         uint apCost = __RtApCostPickItem;
@@ -794,10 +798,10 @@ void ChosenProcess()
         if (itemId > 0) {
             Item item = GetItem(itemId);
             if (item != null)
-                __EventCritterAction.Raise(true, chosen, ACTION_PICK_ITEM, 0, item);
+                GameInstance.OnCritterAction.Fire(true, chosen, ACTION_PICK_ITEM, 0, item);
         }
     } break;
-    case TlaExtended::ChosenPickCrit: {
+    case Tla::ChosenPickCrit: {
         uint crId = ChosenActions[1];
         bool isLoot = (ChosenActions[2] == 0);
 
@@ -817,7 +821,7 @@ void ChosenProcess()
         uint pickDist = 1 + chosen.Multihex + cr.Multihex;
         if (dist > pickDist) {
             bool isRun = false; // 814 ( __AlwaysRun && dist >= __AlwaysRunUseDist );
-            SetAction(array<uint> = {TlaExtended::ChosenMoveToCrit, cr.Id, 0, isRun ? 1 : 0, pickDist, 0, 0}, false, false);
+            SetAction(array<uint> = {Tla::ChosenMoveToCrit, cr.Id, 0, isRun ? 1 : 0, pickDist, 0, 0}, false, false);
             if (GetPathLength(chosen, cr.HexX, cr.HexY, pickDist) > 0)
                 SetAction(curAction, true, false);
             return;
@@ -862,9 +866,6 @@ void ChosenProcess()
 #endif
 #ifdef __SERVER
 
-///@ Event Server CritterPickItem(Critter critter, Item item)
-///@ Event Server CritterPickScenery(Critter critter, ItemProto scenery)
-
 void PickItem(Critter cr, uint16 hx, uint16 hy, hstring pid)
 {
     // Spend ap
@@ -891,7 +892,7 @@ void PickItem(Critter cr, uint16 hx, uint16 hy, hstring pid)
         if (item == null)
             ThrowException("Item not found", cr, hx, hy, pid);
         cr.Action(ACTION_PICK_ITEM, 0, item);
-        __EventCritterUseSkill.Raise(cr, SKILL_PICK_ON_GROUND, null, item, null);
+        GameInstance.OnCritterUseSkill.Fire(cr, SKILL_PICK_ON_GROUND, null, item, null);
     }
     else if (proto.IsScenery) {
         const Item scenery = map.GetStaticItem(hx, hy, pid);
@@ -899,7 +900,7 @@ void PickItem(Critter cr, uint16 hx, uint16 hy, hstring pid)
             ThrowException("Scenery not found", cr, hx, hy, pid);
 
         cr.Action(ACTION_PICK_ITEM, 0, scenery);
-        __EventCritterUseSkill.Raise(cr, SKILL_PICK_ON_GROUND, null, null, scenery);
+        GameInstance.OnCritterUseSkill.Fire(cr, SKILL_PICK_ON_GROUND, null, null, scenery);
     }
     else if (proto.IsWall) {
         cr.SayMsg(SAY_NETMSG, TEXTMSG_GAME, MsgStr::Get("StrUseNothing"));
@@ -1006,7 +1007,7 @@ void UseSkill(Critter cr, CritterProperty skill, uint targetCrId, uint targetIte
     // Send action
     cr.Action(ACTION_USE_SKILL, 0, null);
 
-    __EventCritterUseSkill.Raise(cr, skill, targetCr, targetItem, targetScen);
+    GameInstance.OnCritterUseSkill.Fire(cr, skill, targetCr, targetItem, targetScen);
 }
 
 void MoveInvItem(Critter cr, uint itemId, uint8 slot)
@@ -1230,7 +1231,7 @@ void OperateContainer(Critter client, bool take, bool all, uint itemId, uint ite
     // Events
     Entity cont = (itemCont != null ? cast<Entity>(itemCont) : cast<Entity>(crCont));
     for (uint i = 0; i < items.length(); i++)
-        __EventClientOperateContainer.Raise(client, cont, items[i], take);
+        GameInstance.OnClientOperateContainer.Fire(client, cont, items[i], take);
 
     // Refresh container info
     Item[] curItems;
@@ -1367,7 +1368,7 @@ void Attack(Critter cr, uint targetId, uint8 mode)
     uint16 hy = cr.HexY;
 
     uint maxDist = 0;
-    __EventCritterGetAttackDistantion.Raise(cr, weapon, mode, maxDist);
+    GameInstance.OnCritterGetAttackDistantion.Fire(cr, weapon, mode, maxDist);
     if (maxDist == 0)
         ThrowException("Invalid weapon range", cr, weapon, use, targetHexX, targetHexY);
 

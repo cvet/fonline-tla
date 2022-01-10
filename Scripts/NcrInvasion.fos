@@ -3,9 +3,7 @@
 ///@ Property Critter Protected uint8 QNcrElizeInvasion Group = Quests Quest = 4265 Max = 4
 ///@ Property Game PrivateServer bool NCRInvasion
 
-#define LOC_PID_START       (Content::Location::ncr_siege_1) // начала диапазона локаций лагерей нападающих
-#define LOC_PID_END         (Content::Location::ncr_siege_5) // конец диапазона локаций лагерей нападающих
-#define NPC_ROLE_RAIDER     (17)                             // роль рядового рейдера
+#define NPC_ROLE_RAIDER     (17) // роль рядового рейдера
 
 #define GANG_SIZE           (6) // размер одной банды
 
@@ -22,6 +20,13 @@
 #define NEXT_INVASION       (REAL_DAY(5)) // время следующего нападения (через 5 дней)
 
 #define TIME_TO_DELETE_DEAD (REAL_HOUR(1)) // трупы удаляются через час
+
+// локаций лагерей нападающих
+hstring[] LocPids = {Content::Location::ncr_siege_1,
+                     Content::Location::ncr_siege_2,
+                     Content::Location::ncr_siege_3,
+                     Content::Location::ncr_siege_4,
+                     Content::Location::ncr_siege_5};
 
 void DefineInvasionEvent()
 {
@@ -53,7 +58,7 @@ void BeginInvasion()
 
     for (uint i = 0; i < locations.length(); i++) {
         hstring locPid = locations[i].ProtoId;
-        if (locPid < LOC_PID_START || locPid > LOC_PID_END)
+        if (!LocPids.exists(locPid))
             continue;
 
         Map map = locations[i].GetMapByIndex(locations[i].GetMapCount() - 1);
@@ -80,7 +85,7 @@ void BeginInvasion()
                 continue;
             // Caravan::GetFreeHex
             int[] props = {CritterProperty::DialogId,
-                           donor.DialogId,
+                           donor.DialogId.hash,
                            CritterProperty::AiId,
                            donor.AiId,
                            CritterProperty::BagId,
@@ -110,7 +115,7 @@ void BeginInvasion()
     GameInstance.NCRInvasion = true; // нападение началось!
 }
 
-bool IsValidToattack(Critter raider, Critter target)
+bool IsValidToAttack(Critter raider, Critter target)
 {
     // DL("Script^ " + target.GetInitScript());
 
@@ -130,7 +135,7 @@ void _InvaderInit(Critter raider, bool firstTime)
 {
     EncounterNpc::_NpcInit(raider, firstTime);
     raider.IsNoSupply = true;
-    raider.OnShow.Subscribe(_OnShowCritter);
+    raider.OnCritterShown.Subscribe(_RaiderCritterShown);
     raider.OnAttacked.Subscribe(_RaiderAttacked);
     raider.OnIdle.Subscribe(_RaiderIdle);
     raider.OnDead.Subscribe(_RaiderDead);
@@ -156,6 +161,7 @@ void _RaiderDead(Critter cr, Critter killer)
 
     if (!valid(killer))
         return;
+
     SendMessage::SendMessage(cr, MSG_RAIDER_KILLED, killer.Id, MESSAGE_TO_ALL_ON_MAP);
     EncounterNpc::_NpcDead(cr, killer);
 
@@ -170,7 +176,6 @@ void _RaiderDead(Critter cr, Critter killer)
         return;
 
     uint invadersNum = map.GetNpcCount(NPC_ROLE_RAIDER, FIND_LIFE | FIND_ONLY_NPC);
-
     if (invadersNum > 0)
         return;
 
@@ -208,10 +213,11 @@ void _RaiderIdle(Critter cr)
         Map map = cr.GetMap();
         if (!valid(map))
             return;
+
         Critter[] critters = {};
         Obsolete::GetCrittersHex(map, cr.HexX, cr.HexY, ENEMY_SEARCH_RAD, FIND_LIFE | FIND_ALL, critters);
         for (uint i = 0; i < critters.length(); i++) {
-            if (IsValidToattack(cr, critters[i]))
+            if (IsValidToAttack(cr, critters[i]))
                 NpcPlanes::AddAttackPlane(cr, AI_PLANE_ATTACK * (critters[i].IsPlayer() ? 2 : 1), critters[i]);
         }
     }
@@ -220,7 +226,7 @@ void _RaiderIdle(Critter cr)
 // CRITTER_EVENT_ATTACKED
 bool _RaiderAttacked(Critter cr, Critter attacker)
 {
-    if (!IsValidToattack(cr, attacker)) {
+    if (!IsValidToAttack(cr, attacker)) {
         if (EnemyStack::CheckEnemyInStack(cr, attacker.Id))
             EnemyStack::EraseEnemyFromStack(cr, attacker.Id);
         if (EnemyStack::CheckEnemyInStack(attacker, cr.Id))
@@ -234,16 +240,14 @@ bool _RaiderAttacked(Critter cr, Critter attacker)
 }
 
 // CRITTER_EVENT_SHOW_CRITTER
-void _OnShowCritter(Critter cr, Critter showCrit)
+void _RaiderCritterShown(Critter cr, Critter showCrit)
 {
-    if (!IsValidToattack(cr, showCrit))
+    if (!IsValidToAttack(cr, showCrit))
         return;
 
     NpcPlanes::AddAttackPlane(cr, AI_PLANE_ATTACK * (showCrit.IsPlayer() ? 2 : 1), showCrit);
 
-    if (showCrit.IsPlayer())
-        return;
-    if (Random(1, 10) == 1) {
+    if (!showCrit.IsPlayer() && Random(1, 10) == 1) {
         cr.SayMsg(CLAMP(Random(0, 5), SAY_NORM_ON_HEAD, SAY_SHOUT_ON_HEAD), TEXTMSG_TEXT, STR_SHOUT_RAIDERS);
     }
 }

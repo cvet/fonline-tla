@@ -11,9 +11,9 @@
 ///@ RemoteCall Server Attack(uint targetId, uint8 mode)
 /// RemoteCall Server Attack(uint targetId, uint8 mode, uint16 hexX, uint16 hexY)
 /// RemoteCall Server UseSneak(bool enable)
-///@ Event Game Common ClientOperateContainer(Critter client, Entity container, Item item, bool take)
-///@ Event Game Server CritterPickItem(Critter critter, Item item)
-///@ Event Game Server CritterPickScenery(Critter critter, ItemProto scenery)
+///@ Event Common Game ClientOperateContainer(Critter cr, Entity container, Item item, bool take)
+///@ Event Server Game CritterPickItem(Critter cr, Item item)
+///@ Event Server Game CritterPickScenery(Critter cr, ItemProto scenery)
 
 #ifdef __CLIENT
 uint[] ChosenActions = {};
@@ -658,7 +658,7 @@ void ChosenProcess()
                 break;
             item_action = item;
             if (item.IsHolodisk) {
-                // TODO: запись и чтение голодисков. см CHOSEN_USE_SKL_ON_ITEM client.cpp
+                // TODO: запись и чтение голодисков. см CHOSEN_USE_SKL_ON_ITEM cr.cpp
                 break;
             }
             ServerCall.UseSkill(skill, 0, item_action.Id, 0, 0, 0);
@@ -845,25 +845,27 @@ void ChosenProcess()
 /*
    void UseSneak( Critter client, bool enable )
    {
-    if( client.IsHide == enable )
+    if( cr.IsHide == enable )
         return;
 
-    if( !client.IsAlive() )
+    if( !cr.IsAlive() )
         ThrowException( "Client is not alive", client );
-    if( enable && IS_TIMEOUT( client.TimeoutSneak ) )
+    if( enable && IS_TIMEOUT( cr.TimeoutSneak ) )
         ThrowException( "Sneak timeout", client );
 
     if( enable )
-        client.TimeoutSneak = SNEAK_TIMEOUT( client );
-    client.IsHide = !client.IsHide;
-    client.Wait( Settings.Breaktime );
+        cr.TimeoutSneak = SNEAK_TIMEOUT( client );
+    cr.IsHide = !cr.IsHide;
+    cr.Wait( Settings.Breaktime );
    }*/
 
 #endif
 #ifdef __SERVER
 
-void PickItem(Critter cr, uint16 hx, uint16 hy, hstring pid)
+void PickItem(Player player, uint16 hx, uint16 hy, hstring pid)
 {
+    Critter cr = player.GetOwnedCritter();
+
     // Spend ap
     if (!ProcessAp(cr, Settings.RtApCostPickItem))
         return;
@@ -906,8 +908,10 @@ void PickItem(Critter cr, uint16 hx, uint16 hy, hstring pid)
     }
 }
 
-void DropInvItem(Critter cr, uint itemId, uint count)
+void DropInvItem(Player player, uint itemId, uint count)
 {
+    Critter cr = player.GetOwnedCritter();
+
     // Spend ap
     if (!ProcessAp(cr, Settings.RtApCostDropItem))
         return;
@@ -940,8 +944,10 @@ void DropInvItem(Critter cr, uint itemId, uint count)
     return;
 }
 
-void UseSkill(Critter cr, CritterProperty skill, uint targetCrId, uint targetItemId, hstring sceneryPid, uint16 hx, uint16 hy)
+void UseSkill(Player player, CritterProperty skill, uint targetCrId, uint targetItemId, hstring sceneryPid, uint16 hx, uint16 hy)
 {
+    Critter cr = player.GetOwnedCritter();
+
     if (!cr.IsAlive())
         ThrowException("Client is not alive", cr);
     // Spend ap
@@ -1006,8 +1012,10 @@ void UseSkill(Critter cr, CritterProperty skill, uint targetCrId, uint targetIte
     GameInstance.OnCritterUseSkill.Fire(cr, skill, targetCr, targetItem, targetScen);
 }
 
-void MoveInvItem(Critter cr, uint itemId, uint8 slot)
+void MoveInvItem(Player player, uint itemId, uint8 slot)
 {
+    Critter cr = player.GetOwnedCritter();
+
     // Get item
     Item item = cr.GetItem(itemId);
     if (item == null)
@@ -1032,22 +1040,23 @@ void MoveInvItem(Critter cr, uint itemId, uint8 slot)
     return;
 }
 
-void OperateContainer(Critter client, bool take, bool all, uint itemId, uint itemCount)
+void OperateContainer(Player player, bool take, bool all, uint itemId, uint itemCount)
 {
-    if (!client.IsAlive())
-        ThrowException("Client is not alive", client);
+    Critter cr = player.GetOwnedCritter();
 
-    client.Wait(Settings.Breaktime);
+    if (!cr.IsAlive())
+        ThrowException("Critter is not alive", cr);
 
-    TransferTypes transferType = client.TransferType;
+    cr.Wait(Settings.Breaktime);
+
+    TransferTypes transferType = cr.TransferType;
     if (transferType == TransferTypes::Close)
-        ThrowException("Transfer is closed", client);
-    if (client.GetMap() == null &&
-        (transferType != TransferTypes::CritSteal && transferType != TransferTypes::FarCont && transferType != TransferTypes::FarCrit &&
-         transferType != TransferTypes::CritBarter && transferType != TransferTypes::SelfCont))
-        ThrowException("Invalid transfer type for global map", client, transferType);
+        ThrowException("Transfer is closed", cr);
+    if (cr.GetMap() == null && (transferType != TransferTypes::CritSteal && transferType != TransferTypes::FarCont && transferType != TransferTypes::FarCrit &&
+                                transferType != TransferTypes::CritBarter && transferType != TransferTypes::SelfCont))
+        ThrowException("Invalid transfer type for global map", cr, transferType);
     if (all && transferType == TransferTypes::CritSteal)
-        ThrowException("Can't operate with stealing with all items", client);
+        ThrowException("Can't operate with stealing with all items", cr);
 
     // Get container
     Item itemCont;
@@ -1055,50 +1064,50 @@ void OperateContainer(Critter client, bool take, bool all, uint itemId, uint ite
     if (transferType == TransferTypes::HexContUp || transferType == TransferTypes::HexContDown || transferType == TransferTypes::SelfCont ||
         transferType == TransferTypes::FarCont) {
         if (transferType == TransferTypes::HexContUp || transferType == TransferTypes::HexContDown) {
-            itemCont = GetItem(client.TransferContainerId);
+            itemCont = GetItem(cr.TransferContainerId);
             if (itemCont == null)
-                ThrowException("Hex container not found", client, client.TransferContainerId);
+                ThrowException("Hex container not found", cr, cr.TransferContainerId);
             if (itemCont.Type != ItemType::Container)
-                ThrowException("Hex container is not container type", client, itemCont);
+                ThrowException("Hex container is not container type", cr, itemCont);
             if (itemCont.Accessory != ItemOwnership::MapHex)
-                ThrowException("Hex container not on map", client, itemCont);
-            if (itemCont.MapId != client.GetMap().Id)
-                ThrowException("Hex container not on client map", client, itemCont);
-            if (GetDistance(client.HexX, client.HexY, itemCont.HexX, itemCont.HexY) > 1 + client.Multihex)
-                ThrowException("Hex container too far", client, itemCont);
+                ThrowException("Hex container not on map", cr, itemCont);
+            if (itemCont.MapId != cr.GetMap().Id)
+                ThrowException("Hex container not on cr map", cr, itemCont);
+            if (GetDistance(cr.HexX, cr.HexY, itemCont.HexX, itemCont.HexY) > 1 + cr.Multihex)
+                ThrowException("Hex container too far", cr, itemCont);
         }
         else if (transferType == TransferTypes::FarCont) {
-            itemCont = GetItem(client.TransferContainerId);
+            itemCont = GetItem(cr.TransferContainerId);
             if (itemCont == null)
-                ThrowException("Hex container not found", client, client.TransferContainerId);
+                ThrowException("Hex container not found", cr, cr.TransferContainerId);
             if (itemCont.Type != ItemType::Container)
-                ThrowException("Hex container is not container type", client, itemCont);
+                ThrowException("Hex container is not container type", cr, itemCont);
         }
         else {
-            itemCont = client.GetItem(client.TransferContainerId);
+            itemCont = cr.GetItem(cr.TransferContainerId);
             if (itemCont == null)
-                ThrowException("Hex container not found", client, client.TransferContainerId);
+                ThrowException("Hex container not found", cr, cr.TransferContainerId);
             if (itemCont.Type != ItemType::Container)
-                ThrowException("Hex container is not container type", client, itemCont);
+                ThrowException("Hex container is not container type", cr, itemCont);
         }
     }
     else if (transferType == TransferTypes::CritLoot || transferType == TransferTypes::CritSteal || transferType == TransferTypes::CritBarter ||
              transferType == TransferTypes::FarCrit) {
-        crCont = GetCritter(client.TransferContainerId);
+        crCont = GetCritter(cr.TransferContainerId);
         if (crCont == null)
-            ThrowException("Critter container not found", client, client.TransferContainerId);
-        if (transferType != TransferTypes::FarCrit && !client.IsSee(crCont))
-            ThrowException("Critter container is not seen by client", client, crCont);
-        if (transferType != TransferTypes::FarCrit && GetDistance(client.HexX, client.HexY, crCont.HexX, crCont.HexY) > 1 + client.Multihex + crCont.Multihex)
-            ThrowException("Critter container is too far", client, crCont);
-        if (client.Id == client.TransferContainerId)
-            ThrowException("Critter container id is same as client id", client, crCont);
+            ThrowException("Critter container not found", cr, cr.TransferContainerId);
+        if (transferType != TransferTypes::FarCrit && !cr.IsSee(crCont))
+            ThrowException("Critter container is not seen by cr", cr, crCont);
+        if (transferType != TransferTypes::FarCrit && GetDistance(cr.HexX, cr.HexY, crCont.HexX, crCont.HexY) > 1 + cr.Multihex + crCont.Multihex)
+            ThrowException("Critter container is too far", cr, crCont);
+        if (cr.Id == cr.TransferContainerId)
+            ThrowException("Critter container id is same as cr id", cr, crCont);
         if (transferType == TransferTypes::CritSteal && crCont.IsNoSteal)
-            ThrowException("Critter container marked as NoSteal", client, crCont);
+            ThrowException("Critter container marked as NoSteal", cr, crCont);
         //     if( transferType == TransferTypes::CritSteal && crCont.IsNpc() && Ai::IsAttacking( crCont ) )
-        //         ThrowException( "Critter container is in battle", client, crCont );
+        //         ThrowException( "Critter container is in battle", cr, crCont );
         if (transferType == TransferTypes::CritLoot && !crCont.IsDead())
-            ThrowException("Critter container loot is not dead", client, crCont);
+            ThrowException("Critter container loot is not dead", cr, crCont);
     }
     else {
         Assert(false);
@@ -1111,13 +1120,13 @@ void OperateContainer(Critter client, bool take, bool all, uint itemId, uint ite
             if (!all) {
                 Item item = GetItem(itemId);
                 if (item == null)
-                    ThrowException("Hex container item not found", client, itemId);
+                    ThrowException("Hex container item not found", cr, itemId);
                 if (item.Accessory != ItemOwnership::ItemContainer || item.ContainerId != itemCont.Id)
-                    ThrowException("Item not in hex container", client, item, itemCont);
+                    ThrowException("Item not in hex container", cr, item, itemCont);
                 if (item.ContainerStack != 0)
-                    ThrowException("Item hex container stack is not zero", client, item, itemCont);
+                    ThrowException("Item hex container stack is not zero", cr, item, itemCont);
                 if (itemCount > item.Count)
-                    ThrowException("Hex container item invalid count", client, item, itemCount);
+                    ThrowException("Hex container item invalid count", cr, item, itemCount);
 
                 items = array<Item> = {item};
             }
@@ -1129,13 +1138,13 @@ void OperateContainer(Critter client, bool take, bool all, uint itemId, uint ite
             if (!all) {
                 Item item = crCont.GetItem(itemId);
                 if (item == null)
-                    ThrowException("Critter container item not found", client, itemId);
+                    ThrowException("Critter container item not found", cr, itemId);
                 if (item.Accessory != ItemOwnership::CritterInventory || item.CritId != crCont.Id)
-                    ThrowException("Item not in critter container", client, item, crCont);
+                    ThrowException("Item not in critter container", cr, item, crCont);
                 if (item.CritSlot != SLOT_INV)
-                    ThrowException("Item critter container slot is not innventory", client, item, crCont);
+                    ThrowException("Item critter container slot is not innventory", cr, item, crCont);
                 if (itemCount > item.Count)
-                    ThrowException("Critter container item invalid count", client, item, itemCount);
+                    ThrowException("Critter container item invalid count", cr, item, itemCount);
 
                 items = array<Item> = {item};
             }
@@ -1146,16 +1155,16 @@ void OperateContainer(Critter client, bool take, bool all, uint itemId, uint ite
     }
     else {
         if (!all) {
-            Item item = client.GetItem(itemId);
+            Item item = cr.GetItem(itemId);
             if (item == null)
-                ThrowException("Client item not found", client, itemId);
+                ThrowException("Client item not found", cr, itemId);
             if (itemCount > item.Count)
-                ThrowException("Client item invalid count", client, item, itemCount);
+                ThrowException("Client item invalid count", cr, item, itemCount);
 
             items = array<Item> = {item};
         }
         else {
-            items = client.GetItemsBySlot(SLOT_INV);
+            items = cr.GetItemsBySlot(SLOT_INV);
         }
     }
 
@@ -1178,35 +1187,35 @@ void OperateContainer(Critter client, bool take, bool all, uint itemId, uint ite
         weight += items[i].Weight * (all ? items[i].Count : itemCount);
 
     if (itemCont == null) {
-        Critter target = take ? client : crCont;
+        Critter target = take ? cr : crCont;
         if (target.CarryWeight < target.ItemsWeight + weight)
             ThrowException("Critter is overweight", target);
     }
 
     // Animation
-    client.Action(ACTION_OPERATE_CONTAINER, transferType, !all ? items[0] : null);
+    cr.Action(ACTION_OPERATE_CONTAINER, transferType, !all ? items[0] : null);
 
     // Moving
     if (transferType == TransferTypes::CritSteal) {
-        /*if( Steal::CritterStealing( crCont, client, items[ 0 ], itemCount, take ) )
+        /*if( Steal::CritterStealing( crCont, cr, items[ 0 ], itemCount, take ) )
            {
-            MoveItem( items[ 0 ], itemCount, client );
+            MoveItem( items[ 0 ], itemCount, cr );
            }
            else
            {*/
         items.clear();
-        client.TransferType = TransferTypes::Close;
-        client.TransferContainerId = 0;
-        client.SendItems(items);
+        cr.TransferType = TransferTypes::Close;
+        cr.TransferContainerId = 0;
+        cr.SendItems(items);
         return;
         /*}*/
     }
     else {
         if (take) {
             if (!all)
-                MoveItem(items[0], itemCount, client);
+                MoveItem(items[0], itemCount, cr);
             else
-                MoveItems(items, client);
+                MoveItems(items, cr);
         }
         else {
             if (itemCont != null) {
@@ -1227,7 +1236,7 @@ void OperateContainer(Critter client, bool take, bool all, uint itemId, uint ite
     // Events
     Entity cont = (itemCont != null ? cast<Entity>(itemCont) : cast<Entity>(crCont));
     for (uint i = 0; i < items.length(); i++)
-        GameInstance.OnClientOperateContainer.Fire(client, cont, items[i], take);
+        GameInstance.OnClientOperateContainer.Fire(cr, cont, items[i], take);
 
     // Refresh container info
     Item[] curItems;
@@ -1236,7 +1245,7 @@ void OperateContainer(Critter client, bool take, bool all, uint itemId, uint ite
     else
         curItems = crCont.GetItemsBySlot(SLOT_INV);
 
-    client.SendItems(curItems, 1);
+    cr.SendItems(curItems, 1);
 }
 
 bool ProcessAp(Critter cr, uint ap)
@@ -1255,8 +1264,10 @@ bool ProcessAp(Critter cr, uint ap)
     return true;
 }
 
-void ReloadWeapon(Critter cr, uint weaponId, uint ammoId)
+void ReloadWeapon(Player player, uint weaponId, uint ammoId)
 {
+    Critter cr = player.GetOwnedCritter();
+
     if (!cr.IsAlive())
         ThrowException("Client is not alive", cr);
 
@@ -1310,8 +1321,9 @@ void ReloadWeapon(Critter cr, uint weaponId, uint ammoId)
     cr.Action(ACTION_RELOAD_WEAPON, 0, weapon);
 }
 
-void Attack(Critter cr, uint targetId, uint8 mode)
+void Attack(Player player, uint targetId, uint8 mode)
 {
+    Critter cr = player.GetOwnedCritter();
     Critter target = GetCritter(targetId);
 
     uint8 use = mode & 0xF;

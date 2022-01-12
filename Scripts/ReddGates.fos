@@ -17,8 +17,8 @@
    Внутренние - изнутри. Помощники нападут на того, кто попытается проникнуть внутрь охраняемой двери и наступит на гекс с дверью. Указание условной роли
    охранника производится с помощью NPC_ROLE. Можно сделать общий NPC_ROLE для всех охранников. Нельзя назначать NPC_ROLE=0
    - Условный номер ворот - это специальный параметр для поиска врат через диалоги. Обязан быть указан у двери, играющей роль ворот в параметре Val3.
-   - Дверь должна быть окружена Entire-гексами по всем 6ти сторонам. С наружней стороны у этих гексов должен быть номер ENTIRE_GATES_OUT, внутри
-   ENTIRE_GATES_IN. Эти гексы используются для определения относительного положения игрока и врат.
+   - Дверь должна быть окружена Entry-гексами по всем 6ти сторонам. С наружней стороны у этих гексов должен быть номер ENTRY_GATES_OUT, внутри
+   ENTRY_GATES_IN. Эти гексы используются для определения относительного положения игрока и врат.
    - Номера ролей охранников двери должны быть указаны у врат в полях Val0..Val3.
    - У двери используется Val5 для запоминания события закрытия двери.
 
@@ -33,15 +33,15 @@
         Val2 - GatesData::NpcRoleHelpers - номер роли нпц для группы поддержки - только вмешиваются в бой
         Val3 - Условный "номер двери", для поиска врат через диалог
    3) Рядом с вратами ставятся НПЦ, роли которых должны совпадать с ролями, указанными в Val0...Val2.
-   4) Дверь окружаем EntireHex'ами  c номерами 74 - для внешней стороны, 75 - для внутренней
+   4) Дверь окружаем EntryHex'ами  c номерами 74 - для внешней стороны, 75 - для внутренней
    5) Это все. Для управления открытием двери и получением разрешения на проход, нужно использовать дилаоги с охраной.
    В них передавать параметр gateNumber - в котором указывать номер врат (поле Val3 для двери)
  */
 #define GUARD_ROLE_OUTER       (1) // Условная роль "охранник внешней стороны врат"
 #define GUARD_ROLE_INNER       (2) // Условная роль "охранник внутренней стороны врат"
 #define GUARD_ROLE_HELPER      (3) // Условная роль "охранник поддержки" - помогает тем охранникам 1 и 2 ролей, которым может помочь.
-#define ENTIRE_GATES_OUT       (74) // Номер entire гекса перед вратами, который считается "внешним"
-#define ENTIRE_GATES_IN        (75) // Номер entire гекса перед вратами, который считается "внутренним"
+#define ENTRY_GATES_OUT        (74) // Номер entry гекса перед вратами, который считается "внешним"
+#define ENTRY_GATES_IN         (75) // Номер entry гекса перед вратами, который считается "внутренним"
 #define PLAYER_NEAR_OUT        (0)  // Игрок рядом с вратами, вплотную с внешней стороны
 #define PLAYER_NEAR_IN         (1)  // Игрок рядом с вратами, вплотную с внутренней стороны
 #define PLAYER_NEAR_ON         (2)  // Игрок находится прямо на воротах
@@ -160,20 +160,20 @@ class GatesControl // Описание и методы охраняемых во
         Map map = GatesMap();
         if (!valid(map))
             return POS_UNKNOWN;
-        Entire::Entire[] entires = {};
-        if (Obsolete::ParseEntires(map, entires, ENTIRE_GATES_IN) > 0) {
-            for (uint i = 0, l = entires.length(); i < l; i++) {
-                if (player.HexX == entires[i].HexX &&
-                    entires[i].HexY == player.HexY) // если игрок стоит ногами на гексе ENTIRE_GATES_OUT, он снаружи, вплотную к двери
+        Entrance::Entry[] entries = {};
+        if (Obsolete::ParseEntries(map, entries, ENTRY_GATES_IN) > 0) {
+            for (uint i = 0, l = entries.length(); i < l; i++) {
+                if (player.HexX == entries[i].HexX &&
+                    entries[i].HexY == player.HexY) // если игрок стоит ногами на гексе ENTRY_GATES_OUT, он снаружи, вплотную к двери
                 {
                     return PLAYER_NEAR_IN;
                 }
             }
         }
-        if (Obsolete::ParseEntires(map, entires, ENTIRE_GATES_OUT) > 0) {
-            for (uint i = 0, l = entires.length(); i < l; i++) {
-                if (player.HexX == entires[i].HexX &&
-                    entires[i].HexY == player.HexY) // если игрок стоит ногами на гексе ENTIRE_GATES_IN, он внутри, вплотную к двери
+        if (Obsolete::ParseEntries(map, entries, ENTRY_GATES_OUT) > 0) {
+            for (uint i = 0, l = entries.length(); i < l; i++) {
+                if (player.HexX == entries[i].HexX &&
+                    entries[i].HexY == player.HexY) // если игрок стоит ногами на гексе ENTRY_GATES_IN, он внутри, вплотную к двери
                 {
                     return PLAYER_NEAR_OUT;
                 }
@@ -356,7 +356,7 @@ void _GatesInit(Item gates, bool firstTime)
     gates.OnWalk.Subscribe(_GatesWalk);
 }
 
-bool _GatesSkill(Item item, Critter player, CritterProperty skill) // Попытка открыть или взломать дверь. Запрещено открывать дверь, этим занимается охрана
+bool _GatesSkill(Item gates, Critter player, CritterProperty skill) // Попытка открыть или взломать дверь. Запрещено открывать дверь, этим занимается охрана
 {
     GatesControl gc = GatesControlFromItem(gates);
     if (!valid(gc) || !player.IsPlayer()) {
@@ -465,7 +465,7 @@ void CloseGates(uint value)
         uint16 hY = gates.HexY;
         Critter cr = map.GetCritter(hX, hY);
         if (valid(cr)) {
-            if (Entire::GetNearEntire(map, ENTIRE_GATES_OUT, hX, hY)) {
+            if (Entrance::GetNearEntry(map, ENTRY_GATES_OUT, hX, hY)) {
                 Obsolete::CritterTransitToMapCoords(cr, map.Id, hX, hY, GetDirection(hX, hY, gates.HexX, gates.HexY));
             }
         }

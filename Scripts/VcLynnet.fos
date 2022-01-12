@@ -148,7 +148,7 @@ void t_Arest(Critter cr, StaticItem trigger, bool entered, uint8 dir)
         Critter player = Merc::GetMaster(cr);
         if (!valid(player))
             return;
-        if (cr.Id == player.VCLynettPrisonerId && player.VCLynettArest == 3 && Entire::IsCritterInDeadZone(player, cr.GetMap(), 0, HEX_FIRST, HEX_LAST)) {
+        if (cr.Id == player.VCLynettPrisonerId && player.VCLynettArest == 3 && Entrance::IsCritterInDeadZone(player, cr.GetMap(), 0, HEX_FIRST, HEX_LAST)) {
             player.Wait(0);
             NpcPlanes::DropPlanes(cr);
             cr.Wait(0);
@@ -156,7 +156,7 @@ void t_Arest(Critter cr, StaticItem trigger, bool entered, uint8 dir)
             Effects::FlushScreen(player, false, 2000);
             player.VCLynettArest = 4;
             Merc::CancelMerc(cr);
-            Obsolete::CritterTransitToMapEntire(cr, cr.GetMap().Id, HEX_PRISON);
+            Obsolete::CritterTransitToMapEntry(cr, cr.GetMap().Id, HEX_PRISON);
             uint[] values = {cr.Id};
             DeferredCall(1000, PrisonerTalk, values);
         }
@@ -171,8 +171,8 @@ void PrisonerTalk(uint[] values)
 }
 
 // Подлог
-#define ENTIRE_SPAWN_GUARD  (HASH("170")) // гекс на котором генерятся гвардейцы
-#define ENTIRE_MOVETO       (HASH("171")) // Гекс, к которому перемещаются гвардейцы в момент обыска
+#define ENTRY_SPAWN_GUARD   (HASH("170")) // гекс на котором генерятся гвардейцы
+#define ENTRY_MOVETO        (HASH("171")) // Гекс, к которому перемещаются гвардейцы в момент обыска
 #define HEX_FORG_FIRST      (HASH("172")) // Комната МакКлюра
 #define HEX_FORG_LAST       (HASH("175"))
 #define ROLE_MACLUR         (35)   // роль - Макклюр
@@ -208,13 +208,13 @@ bool _LynDocsPutCont(Item item, Critter cr, CritterProperty skill)
     if (!valid(map) || map.ProtoId != Content::Map::vcity || cr.IsNpc())
         return false;
     if (skill == SKILL_PUT_CONT) {
-        if ((cr.VCLynettForgery == 1 || cr.VCLynettForgery == 3) && Entire::IsCritterInDeadZone(cr, map, 0, HEX_FORG_FIRST, HEX_FORG_LAST)) {
+        if ((cr.VCLynettForgery == 1 || cr.VCLynettForgery == 3) && Entrance::IsCritterInDeadZone(cr, map, 0, HEX_FORG_FIRST, HEX_FORG_LAST)) {
             if (cr.IsHide && cr.SkillSneak > 50) {
                 cr.Experience += 2000;
                 cr.VCLynettForgery = 2;
                 return false; // Навык достаточен, персонаж в снике
             }
-            if (valid(npc) && npc.IsAlive() && Entire::IsCritterInDeadZone(npc, map, 0, HEX_FORG_FIRST, HEX_FORG_LAST)) {
+            if (valid(npc) && npc.IsAlive() && Entrance::IsCritterInDeadZone(npc, map, 0, HEX_FORG_FIRST, HEX_FORG_LAST)) {
                 npc.SayMsg(SAY_SHOUT, TEXTMSG_TEXT, STR_CATCH_LOW_SNEAK, "$pname" + Obsolete::GetPlayerName(cr.Id));
                 cr.VCLynettForgery = 3;
                 return true;
@@ -232,7 +232,7 @@ bool _LynDocsPutCont(Item item, Critter cr, CritterProperty skill)
             uint guards = map.GetNpcCount(ROLE_WITNESS, FIND_LIFE | FIND_ONLY_NPC);
             for (uint i = 0; i < guards; i++) {
                 Critter guard = map.GetNpc(ROLE_WITNESS, FIND_LIFE | FIND_ONLY_NPC, i);
-                if (valid(guard) && Entire::IsCritterInDeadZone(guard, map, 0, HEX_FORG_FIRST, HEX_FORG_LAST))
+                if (valid(guard) && Entrance::IsCritterInDeadZone(guard, map, 0, HEX_FORG_FIRST, HEX_FORG_LAST))
                     values.insertLast(guard.Id);
             }
             if (values.length() > 1) {
@@ -275,8 +275,8 @@ void r_AddGuards(Critter cr, Critter npc)
     if (!valid(map))
         return;
     Critter guard;
-    Entire::Entire[] entires = {};
-    if (Obsolete::ParseEntires(map, entires, ENTIRE_SPAWN_GUARD) == 0)
+    Entrance::Entry[] entries = {};
+    if (Obsolete::ParseEntries(map, entries, ENTRY_SPAWN_GUARD) == 0)
         return;
     int[] props = {CritterProperty::DialogId,
                    Content::Dialog::vc_guard_witness,
@@ -290,8 +290,8 @@ void r_AddGuards(Critter cr, Critter npc)
                    ROLE_WITNESS,
                    CritterProperty::Level,
                    20};
-    for (uint i = 0, l = entires.length(); i < l; i++) {
-        guard = map.AddNpc(Content::Critter::VCGuardsman, entires[i].HexX, entires[i].HexY, 3, Tla::GetCritPropsDict(props));
+    for (uint i = 0, l = entries.length(); i < l; i++) {
+        guard = map.AddNpc(Content::Critter::VCGuardsman, entries[i].HexX, entries[i].HexY, 3, Tla::GetCritPropsDict(props));
         if (valid(guard))
             guard.AddTimeEvent(cte_DeleteGuard, 60 * 60 * 24, CTE_DELETE);
     }
@@ -311,14 +311,14 @@ void r_MoveInto(Critter cr, Critter npc)
     if (!valid(map))
         return;
     uint guards = map.GetNpcCount(ROLE_WITNESS, FIND_LIFE | FIND_ONLY_NPC);
-    Entire::Entire[] entires = {};
-    Obsolete::ParseEntires(map, entires, ENTIRE_MOVETO);
-    for (uint i = 0, l = entires.length(); i < guards && i < l; i++) {
+    Entrance::Entry[] entries = {};
+    Obsolete::ParseEntries(map, entries, ENTRY_MOVETO);
+    for (uint i = 0, l = entries.length(); i < guards && i < l; i++) {
         guard = map.GetNpc(ROLE_WITNESS, FIND_LIFE | FIND_ONLY_NPC, i);
         if (valid(guard)) {
             guard.HomeMapId = map.Id;
-            guard.HomeHexX = entires[i].HexX;
-            guard.HomeHexY = entires[i].HexY;
+            guard.HomeHexX = entries[i].HexX;
+            guard.HomeHexY = entries[i].HexY;
             guard.HomeDir = 0;
         }
     }

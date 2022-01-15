@@ -328,19 +328,12 @@ class CaravanLeaderInfo
 // вспомогательный класс, предмет для караванной повозки
 class CaravanLootItem
 {
-    CaravanLootItem()
-    {
-        ItemPid = 0;
-        ItemMinAmount = 0;
-        ItemMaxAmount = 0;
-        ItemAppearChance = 0;
-        IsReversedRouteItem = false;
-    }
     hstring ItemPid;          // код прототипа итема
     uint16 ItemMinAmount;     // минимальное количество итемов
     uint16 ItemMaxAmount;     // максимальное количество итемов
     uint8 ItemAppearChance;   // шанс появления итема, в процентах, 100% = всегда появляется
     bool IsReversedRouteItem; // признак - итем появится только на обратном пути
+
     // текущее число итемов
     uint8 Amount()
     {
@@ -350,6 +343,7 @@ class CaravanLootItem
 
         return ItemMinAmount < ItemMaxAmount ? Random(ItemMinAmount, ItemMaxAmount) : Random(ItemMaxAmount, ItemMinAmount);
     }
+
     // признак, появилось или нет в этот раз
     bool IsAppear()
     {
@@ -360,16 +354,18 @@ class CaravanLootItem
 // караванная повозка, расписывается содержимое ящиков
 class CaravanCabInfo
 {
+    CaravanLootItem[] CabItems = {}; // вещи в повозке
+    hstring CabPid;                  // прототип повозки
+
     CaravanCabInfo()
     {
         CabPid = Random(0, 1) == 0 ? Content::Item::wagon_red : Content::Item::wagon_grey;
     }
+
     CaravanCabInfo(hstring cabPid)
     {
         CabPid = cabPid;
     }
-    CaravanLootItem[] CabItems = {}; // вещи в повозке
-    hstring CabPid;                  // прототип повозки
 
     // добавление итема в повозку
     void AddLoot(hstring itemPid, uint16 minNum, uint16 maxNum, uint8 chanceAppear, bool isReversLoot)
@@ -384,6 +380,7 @@ class CaravanCabInfo
         CabItems.insertLast(li);
         DL("cab items:" + CabItems.length());
     }
+
     // размещение повозки с лутом на энкаунтере
     Item PlaceCabOnMap(Map map, uint x, uint y, bool isReveresed)
     {
@@ -430,9 +427,10 @@ class GlobalPoint
 // маршрут следования каравана - ломаная линия
 class GlobalRouteCurve
 {
-    GlobalRouteCurve()
-    {
-    }
+    // массив координат узлов ломанного маршрута
+    // должен включать и начальную с конечной точкой
+    GlobalPoint[] Points = {};
+    int nextPoint;
 
     // добавление нового узла в маршрут
     void AddPoint(GlobalPoint point)
@@ -440,10 +438,6 @@ class GlobalRouteCurve
         Points.insertLast(point);
     }
 
-    // массив координат узлов ломанного маршрута
-    // должен включать и начальную с конечной точкой
-    GlobalPoint[] Points = {};
-    int nextPoint;
     bool RouteEnded()
     {
         return (nextPoint == -1);
@@ -500,24 +494,6 @@ class GlobalRouteCurve
 // вспомогательный класс - описания охранников каравана
 class CaravanGuardInfo
 {
-    CaravanGuardInfo(uint idCaravan, hstring pid, hstring dialogId, CritterInitFunc initScript, uint aiPack, uint bagId, uint teamId, uint level, uint reaction,
-                     uint isNervous, uint8 chanceJoin, bool isUnique)
-    {
-        CaravanId = idCaravan;
-        Pid = pid;
-        DialogId = dialogId;
-        @InitScript = initScript;
-        AiPack = aiPack;
-
-        BagId = bagId;
-        TeamId = teamId;
-        Level = level;
-        ReactionNum = reaction;
-        IsNervous = isNervous;
-        ChanceToJoin = CLAMP(chanceJoin, 0, 100);
-        IsUnique = isUnique;
-    }
-
     uint CaravanId;             // код каравана
     hstring Pid;                // код прототипа криттера
     hstring DialogId;           // диалог
@@ -530,6 +506,23 @@ class CaravanGuardInfo
     uint IsNervous;   // признак - нервный, будет часто жаловаться
     uint8 ChanceToJoin; // шанс присутствия в охране, в процентах
     bool IsUnique;      // признак, уникальный в рамках одного похода караванов
+
+    CaravanGuardInfo(uint idCaravan, hstring pid, hstring dialogId, CritterInitFunc initScript, uint aiPack, uint bagId, uint teamId, uint level, uint reaction,
+                     uint isNervous, uint8 chanceJoin, bool isUnique)
+    {
+        CaravanId = idCaravan;
+        Pid = pid;
+        DialogId = dialogId;
+        @InitScript = initScript;
+        AiPack = aiPack;
+        BagId = bagId;
+        TeamId = teamId;
+        Level = level;
+        ReactionNum = reaction;
+        IsNervous = isNervous;
+        ChanceToJoin = CLAMP(chanceJoin, 0, 100);
+        IsUnique = isUnique;
+    }
 
     // пытается поставить охранника с определенной долей вероятности.
     // если не удалось, возвращает  null
@@ -775,23 +768,23 @@ bool GetFreeHex(Map map, uint radius, uint16 hx, uint16 hy)
 
 // ищет на указанной карте криттера с нужным диалогом и прототипом
 // ищет только нпц
-uint GetCrittersByDialogId(Map map, hstring dialog, uint pid, Critter[] critters)
+Critter[] GetCrittersByDialogId(Map map, hstring dialog, hstring pid)
 {
+    Critter[] critters = {};
+
     if (!valid(map))
-        return 0;
-    if (dialog == 0)
-        return 0;
-    Critter[] foundCrits = {};
-    if (Obsolete::GetCritters(map, pid, FIND_ALL | FIND_ONLY_NPC, foundCrits) == 0)
-        return 0;
-    uint num = 0;
+        return critters;
+    if (dialog == hstring())
+        return critters;
+
+    Critter[] foundCrits = map.GetCritters(pid, FIND_ALL | FIND_ONLY_NPC);
     for (uint i = 0; i < foundCrits.length(); i++) {
         if (foundCrits[i].DialogId == dialog) {
-            num++;
             critters.insertLast(foundCrits[i]);
         }
     }
-    return num;
+
+    return critters;
 }
 
 ///@ Property Critter PrivateServer uint8 VCDeadPatrollers Max = 10
@@ -3248,13 +3241,14 @@ void PrepareCaravan(uint CaravanId)
 
     Critter leader = ci.Leader.GetLeader();
     if (!valid(leader)) {
-        Critter[] critters = {};
-        if (GetCrittersByDialogId(ci.Leader.StartPos.GetMap(), ci.Leader.DialogId, ci.Leader.NpcPid, critters) > 0) {
+        Critter[] critters = GetCrittersByDialogId(ci.Leader.StartPos.GetMap(), ci.Leader.DialogId, ci.Leader.NpcPid);
+        if (!critters.isEmpty()) {
             leader = critters[0];
             ci.Leader.SetLeaderCritter(leader);
         }
         else {
-            if (GetCrittersByDialogId(ci.Leader.EndPos.GetMap(), ci.Leader.DialogId, ci.Leader.NpcPid, critters) > 0) {
+            critters = GetCrittersByDialogId(ci.Leader.EndPos.GetMap(), ci.Leader.DialogId, ci.Leader.NpcPid);
+            if (!critters.isEmpty()) {
                 leader = critters[0];
                 ci.Leader.SetLeaderCritter(leader);
             }

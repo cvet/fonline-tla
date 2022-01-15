@@ -220,20 +220,21 @@ void PlaceReplicatorTanks(Map map)
 void StopEvent()
 {
     GameInstance.GEReplStationStatus = false;
+
     Location loc = GetLocationByPid(Content::Location::replication_4, 0);
     if (valid(loc)) {
         Map map = loc.GetMapByIndex(0);
-        if (valid(map))
-            SavedDeferredCall(GAME_HOUR_TO_TICK(1), DeleteSandbags, map.Id);
+        SavedDeferredCall(GAME_HOUR_TO_TICK(1), DeleteSandbags, map.Id);
+
         map = loc.GetMapByIndex(2);
-        Critter[] zombies = {};
-        if (Obsolete::GetCritters(map, 0, FIND_ONLY_NPC | FIND_ALL, zombies) > 0) {
-            for (uint i = 0, l = zombies.length(); i < l; i++) {
-                Critter cr = zombies[i];
-                if (valid(cr) && cr.IsNpc() && cr.NpcRole == ROLE_ZOMBIE)
-                    DeleteNpc(cr);
-            }
+
+        Critter[] zombies = map.GetCritters(FIND_ONLY_NPC | FIND_ALL);
+        for (uint i = 0; i < zombies.length(); i++) {
+            Critter cr = zombies[i];
+            if (valid(cr) && cr.IsNpc() && cr.NpcRole == ROLE_ZOMBIE)
+                DeleteNpc(cr);
         }
+
         GameInstance.OnMapLoop.UnsubscribeFromMap(map, _MapLoop);
         GameInstance.OnMapLoopEx1.UnsubscribeFromMap(map, _MapLoop);
         GameInstance.OnMapLoopEx2.UnsubscribeFromMap(map, _MapLoopEx1);
@@ -245,14 +246,13 @@ void DeleteSandbags(uint value)
     Map map = GetMap(value);
     if (valid(map)) {
         // Перенос игроков на глобал
-        Critter[] critters = {};
-        if (Obsolete::GetCritters(map, 0, FIND_ONLY_PLAYERS | FIND_LIFE, critters) > 0) {
-            for (uint i = 0, l = critters.length(); i < l; i++) {
-                Critter cr = critters[i];
-                if (valid(cr) && valid(cr.GetMap()))
-                    cr.TransitToGlobal();
-            }
+        Critter[] critters = map.GetCritters(FIND_ONLY_PLAYERS | FIND_ALIVE);
+        for (uint i = 0; i < critters.length(); i++) {
+            Critter cr = critters[i];
+            if (valid(cr) && valid(cr.GetMap()))
+                cr.TransitToGlobal();
         }
+
         // удаление мешков
         Item[] items = {};
         Obsolete::GetItems(map, Content::Item::sandbag_1, items);
@@ -265,15 +265,14 @@ void DeleteSandbags(uint value)
             if (valid(item))
                 DeleteItem(item);
         }
+
         // удаление зомби
         // удаление хабологов
-        critters.clear();
-        if (Obsolete::GetCritters(map, 0, FIND_ONLY_NPC | FIND_ALL, critters) > 0) {
-            for (uint i = 0, l = critters.length(); i < l; i++) {
-                Critter npc = critters[i];
-                if (valid(npc) && npc.IsNpc() && (npc.NpcRole == ROLE_ZOMBIE || npc.NpcRole == NPC_ROLE_DEF))
-                    DeleteNpc(npc);
-            }
+        critters = map.GetCritters(FIND_ONLY_NPC | FIND_ALL);
+        for (uint i = 0; i < critters.length(); i++) {
+            Critter npc = critters[i];
+            if (valid(npc) && npc.IsNpc() && (npc.NpcRole == ROLE_ZOMBIE || npc.NpcRole == NPC_ROLE_DEF))
+                DeleteNpc(npc);
         }
     }
 }
@@ -298,7 +297,7 @@ void t_Attack(Critter player, StaticItem trigger, bool entered, uint8 dir)
     if (player.IsPlayer() && entered) {
         Critter[] critters = {};
         Map map = player.GetMap();
-        if (valid(map) && Obsolete::GetCrittersHex(map, player.HexX, player.HexY, 20, FIND_LIFE | FIND_ONLY_NPC, critters) > 0) {
+        if (valid(map) && Obsolete::GetCrittersHex(map, player.HexX, player.HexY, 20, FIND_ALIVE | FIND_ONLY_NPC, critters) > 0) {
             for (uint i = 0, l = critters.length(); i < l; i++) {
                 Critter cr = critters[i];
                 if (valid(cr) && cr.IsNpc() && cr.NpcRole == ROLE_ZOMBIE) {
@@ -365,7 +364,8 @@ void _MapLoop2(Map map)
         // DL("loop 1---- убрать");
         // return;
     }
-    if (Obsolete::GetCritters(map, Content::Critter::Zombie, FIND_LIFE_AND_KO | FIND_ONLY_NPC, null) < 20) {
+
+    if (map.GetCritters(Content::Critter::Zombie, FIND_ALIVE_AND_KO | FIND_ONLY_NPC).length() < 20) {
         Item[] replicators = {};
         uint numRepl = Obsolete::GetItems(map, Content::Item::replicator_tank, replicators);
         if (numRepl == 0) {
@@ -407,49 +407,45 @@ void _MapLoop2(Map map)
 // Перемещение мобов на следующий пункт сбора
 void _MapLoopEx1(Map map)
 {
-    Critter[] zombies = {};
-    Critter cr;
     uint16 hX = 0;
     uint16 hY = 0;
     Location loc = map.GetLocation();
     Map mapGround = loc.GetMapByIndex(0);
-    Obsolete::GetCritters(map, Content::Critter::Zombie, FIND_LIFE | FIND_ONLY_NPC, zombies);
-    for (uint i = 0, l = zombies.length(); i < l; i++) {
-        cr = zombies[i];
-        if (valid(cr)) {
-            uint entry = cr.GEReplEntryZombie;
-            uint lastOrder = cr.GEReplLastOrder;
-            if (NpcPlanes::IsNoPlanes(cr) && lastOrder + TIME_MOVE < GetFullSecond()) {
-                hX = cr.HexX;
-                hY = cr.HexY;
-                switch (entry) {
-                case ENTRY_ZOMBIE_EXIT:
-                    // TODO:// Здесь нужно переключить счетчик сбежавших омбей
-                    DeleteNpc(cr);
-                    return;
-                case ENTRY_ZOMBIE_0:
-                    DL("0-");
-                case ENTRY_ZOMBIE_1:
-                case ENTRY_ZOMBIE_2:
-                    if (Entrance::GetEntryFreeHex(map, HASHI(cr.GEReplEntryZombie + 1), hX, hY)) {
-                        if (Caravan::GetFreeHex(map, 7, hX, hY)) {
-                            cr.GEReplLastOrder = GetFullSecond();
-                            cr.GEReplEntryZombie += 1;
-                            cr.HomeMapId = map.Id;
-                            cr.HomeHexX = hX;
-                            cr.HomeHexY = hY;
-                            cr.HomeDir = Random(0, 5);
-                        }
+    Critter[] zombies = map.GetCritters(Content::Critter::Zombie, FIND_ALIVE | FIND_ONLY_NPC);
+    for (uint i = 0; i < zombies.length(); i++) {
+        Critter cr = zombies[i];
+        uint entry = cr.GEReplEntryZombie;
+        uint lastOrder = cr.GEReplLastOrder;
+        if (NpcPlanes::IsNoPlanes(cr) && lastOrder + TIME_MOVE < GetFullSecond()) {
+            hX = cr.HexX;
+            hY = cr.HexY;
+            switch (entry) {
+            case ENTRY_ZOMBIE_EXIT:
+                // TODO:// Здесь нужно переключить счетчик сбежавших омбей
+                DeleteNpc(cr);
+                return;
+            case ENTRY_ZOMBIE_0:
+                DL("0-");
+            case ENTRY_ZOMBIE_1:
+            case ENTRY_ZOMBIE_2:
+                if (Entrance::GetEntryFreeHex(map, HASHI(cr.GEReplEntryZombie + 1), hX, hY)) {
+                    if (Caravan::GetFreeHex(map, 7, hX, hY)) {
+                        cr.GEReplLastOrder = GetFullSecond();
+                        cr.GEReplEntryZombie += 1;
+                        cr.HomeMapId = map.Id;
+                        cr.HomeHexX = hX;
+                        cr.HomeHexY = hY;
+                        cr.HomeDir = Random(0, 5);
                     }
-                    break;
-                case ENTRY_ZOMBIE_3:
-                    if (valid(mapGround)) {
-                        if (Obsolete::CritterTransitToMapEntry(cr, mapGround.Id, HASHI(ENTRY_SPECIAL))) {
-                            cr.SetupScript(_ZombieOutInit);
-                        }
-                    }
-                    break;
                 }
+                break;
+            case ENTRY_ZOMBIE_3:
+                if (valid(mapGround)) {
+                    if (Obsolete::CritterTransitToMapEntry(cr, mapGround.Id, HASHI(ENTRY_SPECIAL))) {
+                        cr.SetupScript(_ZombieOutInit);
+                    }
+                }
+                break;
             }
         }
     }
@@ -529,15 +525,17 @@ void _ZombieOutInit(Critter cr, bool firstTime)
 bool _OnZombieAttackedGround(Critter cr, Critter attacker)
 {
     SendMessage::SendMessage(cr, MSG_ALARM, attacker.Id, MESSAGE_TO_I_SEE);
+
     if (Random(1, 11) > 10) {
         cr.SayMsg(SAY_EMOTE, TEXTMSG_TEXT, 4001);
         return false;
     }
+
     if (not cr.GEReplIsAddedAttackPlane) {
-        Critter[] critters = {};
         Map map = cr.GetMap();
-        if (valid(map) && Obsolete::GetCritters(map, 0, FIND_LIFE_AND_KO | FIND_ALL, critters) > 0) {
-            for (uint i = 0, l = critters.length(); i < l; i++) {
+        if (map != null) {
+            Critter[] critters = map.GetCritters(FIND_ALIVE_AND_KO | FIND_ALL);
+            for (uint i = 0; i < critters.length(); i++) {
                 Critter target = critters[i];
                 if (valid(target) && target.NpcRole != cr.NpcRole) {
                     NpcPlanes::AddAttackPlane(cr, 0, target);
@@ -547,6 +545,7 @@ bool _OnZombieAttackedGround(Critter cr, Critter attacker)
         }
         cr.GEReplIsAddedAttackPlane = true;
     }
+
     return false;
 }
 
@@ -554,6 +553,7 @@ void _OnZombieIdleGround(Critter cr)
 {
     if (!cr.IsAlive())
         return;
+
     Map map = cr.GetMap();
     uint16 hX = cr.HexX;
     uint16 hY = cr.HexY;
@@ -563,7 +563,9 @@ void _OnZombieIdleGround(Critter cr)
             DeleteNpc(cr);
             return;
         }
+
         cr.GEReplEntryZombie = ENTRY_ZOMBIE_EXIT;
+
         if (Caravan::GetFreeHex(map, 3, hX, hY)) {
             cr.GEReplLastOrder = GetFullSecond();
             cr.GEReplEntryZombie = ENTRY_ZOMBIE_EXIT;
@@ -574,6 +576,7 @@ void _OnZombieIdleGround(Critter cr)
         }
     }
 }
+
 // Скрипт зомби в подземелье
 void _ZombieInit(Critter cr, bool firstTime)
 {
@@ -616,10 +619,11 @@ void _OnZombieIdle(Critter cr)
 {
     if (cr.IsDead())
         return;
+
     Map map = cr.GetMap();
     if (valid(map) && map.ProtoId == Content::Map::repl4a && Random(1, 3) == 3) {
         Critter[] critters = {};
-        if (Obsolete::GetCrittersHex(map, cr.HexX, cr.HexY, RADIUS_ATTACK, FIND_LIFE | FIND_ONLY_PLAYERS, critters) > 0) {
+        if (Obsolete::GetCrittersHex(map, cr.HexX, cr.HexY, RADIUS_ATTACK, FIND_ALIVE | FIND_ONLY_PLAYERS, critters) > 0) {
             for (uint i = 0, l = critters.length(); i < l; i++) {
                 Critter target = critters[i];
                 if (valid(target)) {
@@ -631,6 +635,7 @@ void _OnZombieIdle(Critter cr)
             return;
         }
     }
+
     if (cr.IsAlive() && NpcPlanes::IsNoPlanes(cr) && Random(0, 3) == 1) {
         MoveRandom::CritterMoveRandom(cr);
         if (Random(1, 12) == 1)
@@ -704,12 +709,12 @@ void t_Notify(Critter player, StaticItem trigger, bool entered, uint8 dir)
     if (entered && player.IsPlayer() && player.Level > 9) {
         if (GameInstance.GEReplStationStatus) {
             if (player.GEReplNotifictions < 3 && player.GEReplFindstation == 0) {
-                Critter[] critters = {};
                 Map map = player.GetMap();
-                if (valid(map) && Obsolete::GetCritters(map, 0, FIND_ONLY_NPC | FIND_LIFE, critters) > 0) {
-                    for (uint i = 0, l = critters.length(); i < l; i++) {
+                if (valid(map)) {
+                    Critter[] critters = map.GetCritters(FIND_ONLY_NPC | FIND_ALIVE);
+                    for (uint i = 0; i < critters.length(); i++) {
                         Critter cr = critters[i];
-                        if (valid(cr) && cr.DialogId == Content::Dialog::repl_trader) {
+                        if (cr.DialogId == Content::Dialog::repl_trader) {
                             cr.SayMsg(SAY_NORM, TEXTMSG_TEXT, 4004, "$player" + Obsolete::GetPlayerName(player.Id));
                             player.GEReplNotifictions += 1;
                             return;

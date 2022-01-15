@@ -569,45 +569,50 @@ void InitTriggers(CBarier barier)
 
 void _WalkOnTrigg(Item item, Critter cr, bool entered, uint8 dir) // TODO
 {
-    bool t = true;
-    Critter[] npcs = {};
-    Map map;
     uint netNum = 0;
+
     if (cr.IsNpc()) {
         return;
     }
-    if (entered) {
-        for (uint i = 0; i < BariersNets.length(); i++) {
-            for (uint k = 0; k < BariersNets[i].Bariers.length(); k++) {
-                if (BariersNets[i].Bariers[k].Barier.Id == uint(item.Val2)) {
-                    netNum = BariersNets[i].Bariers[k].Barier.Val1;
-                    if (BariersNets[i].Bariers[k].FieldMode == BM_OFF_NO_GUARD) {
-                        return;
-                    }
+
+    if (!entered) {
+        return;
+    }
+
+    for (uint i = 0; i < BariersNets.length(); i++) {
+        for (uint k = 0; k < BariersNets[i].Bariers.length(); k++) {
+            if (BariersNets[i].Bariers[k].Barier.Id == uint(item.Val2)) {
+                netNum = BariersNets[i].Bariers[k].Barier.Val1;
+                if (BariersNets[i].Bariers[k].FieldMode == BM_OFF_NO_GUARD) {
+                    return;
                 }
             }
         }
-        map = cr.GetMap();
-        if (not valid(map)) {
+    }
+
+    Map map = cr.GetMap();
+    if (not valid(map)) {
+        return;
+    }
+
+    Critter[] npcs = map.GetCritters(cr.HexX, cr.HexY, RADIUS, FIND_ALIVE | FIND_ONLY_NPC);
+    for (uint i = 0; i < npcs.length(); i++) {
+        if (npcs[i].NpcRole != uint(item.Val1)) {
+            npcs.removeAt(i);
+            i--;
+        }
+    }
+
+    if (!npcs.isEmpty()) {
+        CGuards g = GetGuards(npcs, netNum, item.Val2);
+        if (!valid(g)) {
             return;
         }
-        Obsolete::GetCrittersHex(map, cr.HexX, cr.HexY, RADIUS, FIND_ALIVE | FIND_ONLY_NPC, npcs);
-        for (uint i = 0; i < npcs.length(); i++) {
-            if (npcs[i].NpcRole != uint(item.Val1)) {
-                npcs.removeAt(i);
-            }
-        }
-        if (npcs.length() != 0) {
-            CGuards g = GetGuards(npcs, netNum, item.Val2);
-            if (!valid(g)) {
-                return;
-            }
-            if (not g.CritIsAccessible(cr)) {
-                cr.Wait(0);
-                // cr.MoveToDir((cr.Dir+3)%6);
-                uint i = Random(0, npcs.length() - 1);
-                RunDialog(cr, npcs[i], Content::Dialog::all_energy_barier_guards, true);
-            }
+        if (not g.CritIsAccessible(cr)) {
+            cr.Wait(0);
+            // cr.MoveToDir((cr.Dir+3)%6);
+            uint i = Random(0, npcs.length() - 1);
+            RunDialog(cr, npcs[i], Content::Dialog::all_energy_barier_guards, true);
         }
     }
 }
@@ -983,7 +988,6 @@ uint r_doHack(Critter master, Critter slave)
 
 uint doHack(Critter master, int hexX, int hexY)
 {
-    Critter[] npcs = {};
     bool guardNotFound = true;
     Map map = master.GetMap();
     if (not valid(map)) {
@@ -998,15 +1002,18 @@ uint doHack(Critter master, int hexX, int hexY)
     }
 
     CBariersNet net = GetBariersNet(master.EnergyBarierNetNum, loc.Id);
-    Obsolete::GetCrittersHex(map, master.HexX, master.HexY, RADIUS, FIND_ALIVE | FIND_ONLY_NPC, npcs);
+    Critter[] npcs = map.GetCritters(master.HexX, master.HexY, RADIUS, FIND_ALIVE | FIND_ONLY_NPC);
     for (uint i = 0; i < npcs.length(); i++) {
         for (uint k = 0; k < net.Bariers.length(); k++) {
             if (npcs[i].NpcRole == uint(net.Bariers[k].GetGuardNum()))
                 guardNotFound = false;
         }
-        if (guardNotFound)
+        if (guardNotFound) {
             npcs.removeAt(i);
+            i--;
+        }
     }
+
     if (npcs.length() != 0) {
         CGuards g = GetGuards(npcs, master.EnergyBarierNetNum, 0);
         if (!valid(g))

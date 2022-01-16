@@ -89,27 +89,24 @@ void InitCowboy(Map map, bool firstTime)
     FinishInvokeId = 0;
     CowsDeadCount = 0;
 
-    Critter[] Cows = {};
-    GetNpc(map, Cows, MapKlamath::RoleCows, CritterFindType::Any);
-    for (uint i = 0; i < Cows.length(); i++) {
-        Cows[i].OnDead.Subscribe(_CowDead);
-        if (Cows[i].IsDead())
+    Critter[] cows = map.GetCritters(CritterProperty::NpcRole, MapKlamath::RoleCows, CritterFindType::Npc);
+    for (uint i = 0; i < cows.length(); i++) {
+        cows[i].OnDead.Subscribe(_CowDead);
+        if (cows[i].IsDead())
             CowsDeadCount++;
     }
 
-    Critter[] Dogs = {};
-    GetNpc(map, Dogs, MapKlamath::RoleDogs, CritterFindType::Any);
-    for (uint i = 0; i < Dogs.length(); i++)
-        Dogs[i].OnShow.Subscribe(_DogSeeMob);
+    Critter[] dogs = map.GetCritters(CritterProperty::NpcRole, MapKlamath::RoleDogs, CritterFindType::Npc);
+    for (uint i = 0; i < dogs.length(); i++)
+        dogs[i].OnShow.Subscribe(_DogSeeMob);
 
-    Critter[] Mobs = {};
-    GetNpc(map, Mobs, ROLE_MOBS, CritterFindType::Alive);
-    for (uint i = 0; i < Mobs.length(); i++) {
-        Mobs[i].OnIdle.Subscribe(_MobIdle);
-        Mobs[i].OnDead.Subscribe(_MobDead);
-        Mobs[i].OnShow.Subscribe(_MobSeeCritter);
+    Critter[] mobs = map.GetCritters(CritterProperty::NpcRole, ROLE_MOBS, CritterFindType::Npc);
+    for (uint i = 0; i < mobs.length(); i++) {
+        mobs[i].OnIdle.Subscribe(_MobIdle);
+        mobs[i].OnDead.Subscribe(_MobDead);
+        mobs[i].OnShow.Subscribe(_MobSeeCritter);
     }
-    MobsCount = Mobs.length();
+    MobsCount = mobs.length();
 }
 
 // ------------------ Обработчики игровых событий -------------------------------
@@ -130,13 +127,10 @@ void StartAtack(uint value)
 
     // К началу квеста воскрешаем мертвых браминов.
     CowsDeadCount = 0;
-    Critter[] Cows = {};
-    GetNpc(map, Cows, MapKlamath::RoleCows, CritterFindType::Dead);
-    for (uint i = 0; i < Cows.length(); i++) {
-        if (not Cows[i].IsDead())
-            continue;
-        uint[] param = {Cows[i].Id, 0};
-        SavedDeferredCall(GAME_SECOND_TO_TICK(60), CowToLife, param);
+    Critter[] cows = map.GetCritters(CritterProperty::NpcRole, MapKlamath::RoleCows, CritterFindType::DeadNpc);
+    for (uint i = 0; i < cows.length(); i++) {
+        uint[] param = {cows[i].Id, 0};
+        SavedDeferredCall(GAME_SECOND_TO_TICK(60), CowToAlive, param);
     }
 
     FinishInvokeId = SavedDeferredCall(GAME_SECOND_TO_TICK(Time::GetNearFullSecond(0, 0, 0, QUEST_TIME_END, 0, 0) - GetFullSecond()), DeferredFinishQuest);
@@ -160,11 +154,10 @@ void SpawnMobsLoop(uint value)
     }
 
     // Собаки предупреждают о начале атаки
-    Critter[] Dogs = {};
-    GetNpc(map, Dogs, MapKlamath::RoleDogs, CritterFindType::Alive);
-    for (uint i = 0; i < Dogs.length(); i++) {
-        Dogs[i].KlamCowboyCountGav = 0;
-        DeferredCall(GAME_SECOND_TO_TICK(Random(1, 3) * 60), DogAlert, Dogs[i].Id);
+    Critter[] dogs = map.GetCritters(CritterProperty::NpcRole, MapKlamath::RoleDogs, CritterFindType::AliveNpc);
+    for (uint i = 0; i < dogs.length(); i++) {
+        dogs[i].KlamCowboyCountGav = 0;
+        DeferredCall(GAME_SECOND_TO_TICK(Random(1, 3) * 60), DogAlert, dogs[i].Id);
     }
 
     uint16 playerLevel = GetPlayerLevel();
@@ -281,13 +274,14 @@ void DeleteMobs(uint value)
 // Всего 10 попыток воскресить брамина. Если все 10 провалились, то брамин остается мертвым и
 // счетчик мертвых браминов увеличивается на 1.
 // Сохраняется в базе. Рестарт не страшен.
-void CowToLife(uint[] values)
+void CowToAlive(uint[] values)
 {
     Critter cow = GetCritter(values[0]);
     if (not valid(cow)) {
         Log("ERROR: critter not valid");
         return;
     }
+
     Map map = cow.GetMap();
     if (not valid(map)) {
         Log("ERROR: map not valid");
@@ -295,7 +289,7 @@ void CowToLife(uint[] values)
     }
 
     if (map.IsHexPassed(cow.HexX, cow.HexY)) {
-        CritterState::ToLife(cow);
+        CritterState::ToAlive(cow);
         return;
     }
 
@@ -303,11 +297,11 @@ void CowToLife(uint[] values)
 
     // если неудалось воскресить
     if (values[1] >= 10) {
-        CowsDeadCount = map.GetNpcCount(MapKlamath::RoleCows, CritterFindType::Dead);
+        CowsDeadCount = map.GetCritters(CritterProperty::NpcRole, MapKlamath::RoleCows, CritterFindType::DeadNpc).length();
         return;
     }
 
-    SavedDeferredCall(GAME_SECOND_TO_TICK(60), CowToLife, values);
+    SavedDeferredCall(GAME_SECOND_TO_TICK(60), CowToAlive, values);
 }
 
 // ------------------------ Обработчики событий -------------------------------
@@ -368,7 +362,7 @@ bool d_VerifyTime(Critter master, Critter slave, int val)
 {
     bool result = VerifyTime(ISSUANCE_TIME_START, ISSUANCE_TIME_END);
     if (val == 0)
-        return not result;
+        return !result;
     else
         return result;
 }
@@ -407,6 +401,7 @@ void plane_GoodByeMob(Critter mob)
 {
     if (mob.NpcRole != ROLE_MOBS)
         return;
+
     DeleteNpc(mob);
 }
 
@@ -454,17 +449,13 @@ Critter SpawnMob(Map map, uint8 entGroup, uint8 entNum, hstring npcPid, uint8 di
 // Агрит моба
 void MobSetAtackPlane(Map map, Critter mob)
 {
-    uint count = map.GetNpcCount(MapKlamath::RoleCows, CritterFindType::Alive);
-    if (count == 0) {
+    Critter[] cows = map.GetCritters(CritterProperty::NpcRole, MapKlamath::RoleCows, CritterFindType::AliveNpc);
+    if (cows.isEmpty()) {
         FinishQuest(FINISH_FAIL_ALL_COW_DEAD);
         return;
     }
 
-    Critter cow = map.GetNpc(MapKlamath::RoleCows, CritterFindType::Alive, Random(0, count - 1));
-    if (not valid(cow)) {
-        Log("ERROR: critter not valid");
-        return;
-    }
+    Critter cow = cows[Random(0, cows.length() - 1)];
     NpcPlanes::AddAttackPlane(mob, AI_PLANE_ATTACK_PRIORITY, cow);
 }
 
@@ -480,24 +471,6 @@ uint[] SelectEntsAndMobs(uint[] arr)
     arr[arr.length() - 2] = pid[mobsTypeNum];
     arr[arr.length() - 1] = dialog[mobsTypeNum];
     return arr;
-}
-
-// Дописывает массив указаными криттерами
-uint GetNpc(Map map, Critter[] arr, int npcRole, int findType)
-{
-    uint findCount = 0;
-    uint count = map.GetNpcCount(npcRole, findType);
-    for (uint i = 0; i < count; i++) {
-        Critter cr = map.GetNpc(npcRole, findType, i);
-        if (not valid(cr)) {
-            Log("ERROR: critter not valid");
-            continue;
-        }
-        findCount++;
-        arr.resize(arr.length() + 1);
-        arr[arr.length() - 1] = cr;
-    }
-    return findCount;
 }
 
 // Проверяет текущий час, он между заданым временем или нет

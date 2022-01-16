@@ -57,17 +57,13 @@ hstring[] prisonerDialogs = {Content::Dialog::vc_kohl, Content::Dialog::vc_randa
 
 Critter GetPrisoner(Location loc, hstring dialog)
 {
-    Critter[] critters = {};
-    Map map;
-    Critter cr;
-    for (uint i = 0, l = loc.GetMapCount(); i < l; i++) {
-        map = loc.GetMapByIndex(i);
-        if (valid(map)) {
-            for (uint j = 0, k = map.GetNpcCount(ROLE_PRISONER, CritterFindType::AliveNpc); j < k; j++) {
-                cr = map.GetNpc(ROLE_PRISONER, CritterFindType::AliveNpc, j);
-                if (valid(cr) && cr.DialogId == dialog && !Merc::IsMerc(cr))
-                    return cr; // Если нпц является чьим-то мерком уже, его засадить в тюрьму не получится
-            }
+    for (uint i = 0; i < loc.GetMapCount(); i++) {
+        Map map = loc.GetMapByIndex(i);
+        Critter[] critters = map.GetCritters(CritterProperty::NpcRole, ROLE_PRISONER, CritterFindType::AliveNpc);
+        for (uint j = 0; j < critters.length(); j++) {
+            Critter cr = critters[j];
+            if (cr.DialogId == dialog && !Merc::IsMerc(cr))
+                return cr; // Если нпц является чьим-то мерком уже, его засадить в тюрьму не получится
         }
     }
     return null;
@@ -203,7 +199,7 @@ void _LynDocsInit(Item item, bool firstTime)
 bool _LynDocsPutCont(Item item, Critter cr, CritterProperty skill)
 {
     Map map = cr.GetMap();
-    Critter npc = map.GetNpc(ROLE_MACLUR, CritterFindType::AliveNpc, 0);
+    Critter npc = map.GetCritter(CritterProperty::NpcRole, ROLE_MACLUR, CritterFindType::AliveNpc);
 
     if (!valid(map) || map.ProtoId != Content::Map::vcity || cr.IsNpc())
         return false;
@@ -229,10 +225,10 @@ bool _LynDocsPutCont(Item item, Critter cr, CritterProperty skill)
     if (skill == SKILL_TAKE_CONT || skill == SKILL_TAKE_ALL_CONT) {
         if (cr.VCLynettForgery == 4) {
             uint[] values = {cr.Id};
-            uint guards = map.GetNpcCount(ROLE_WITNESS, CritterFindType::AliveNpc);
-            for (uint i = 0; i < guards; i++) {
-                Critter guard = map.GetNpc(ROLE_WITNESS, CritterFindType::AliveNpc, i);
-                if (valid(guard) && Entrance::IsCritterInDeadZone(guard, map, 0, HEX_FORG_FIRST, HEX_FORG_LAST))
+            Critter[] guards = map.GetCritters(CritterProperty::NpcRole, ROLE_WITNESS, CritterFindType::AliveNpc);
+            for (uint i = 0; i < guards.length(); i++) {
+                Critter guard = guards[i];
+                if (Entrance::IsCritterInDeadZone(guard, map, 0, HEX_FORG_FIRST, HEX_FORG_LAST))
                     values.insertLast(guard.Id);
             }
             if (values.length() > 1) {
@@ -290,7 +286,7 @@ void r_AddGuards(Critter cr, Critter npc)
                    ROLE_WITNESS,
                    CritterProperty::Level,
                    20};
-    for (uint i = 0, l = entries.length(); i < l; i++) {
+    for (uint i = 0; i < entries.length(); i++) {
         guard = map.AddNpc(Content::Critter::VCGuardsman, entries[i].HexX, entries[i].HexY, 3, Tla::GetCritPropsDict(props));
         if (valid(guard))
             guard.AddTimeEvent(cte_DeleteGuard, 60 * 60 * 24, CTE_DELETE);
@@ -307,19 +303,17 @@ uint cte_DeleteGuard(Critter cr, int identifier, uint& stage)
 void r_MoveInto(Critter cr, Critter npc)
 {
     Map map = cr.GetMap();
-    Critter guard;
     if (!valid(map))
         return;
-    uint guards = map.GetNpcCount(ROLE_WITNESS, CritterFindType::AliveNpc);
+
+    Critter[] guards = map.GetCritters(CritterProperty::NpcRole, ROLE_WITNESS, CritterFindType::AliveNpc);
     Entrance::Entry[] entries = {};
     Obsolete::ParseEntries(map, entries, ENTRY_MOVETO);
-    for (uint i = 0, l = entries.length(); i < guards && i < l; i++) {
-        guard = map.GetNpc(ROLE_WITNESS, CritterFindType::AliveNpc, i);
-        if (valid(guard)) {
-            guard.HomeMapId = map.Id;
-            guard.HomeHexX = entries[i].HexX;
-            guard.HomeHexY = entries[i].HexY;
-            guard.HomeDir = 0;
-        }
+    for (uint i = 0; i < guards.length() && i < entries.length(); i++) {
+        Critter guard = guards[i];
+        guard.HomeMapId = map.Id;
+        guard.HomeHexX = entries[i].HexX;
+        guard.HomeHexY = entries[i].HexY;
+        guard.HomeDir = 0;
     }
 }

@@ -113,48 +113,53 @@ bool _GuardedItemSkill(Item item, Critter cr, CritterProperty skill)
     Map map = cr.GetMap();
     if (!valid(map))
         return false;
+
     int role = item.Val1;
     bool reset = (item.Val2 > 0 ? true : false);
     if (cr.IsPlayer()) {
-        uint guards = map.GetNpcCount(role, CritterFindType::AliveNpc);
-        if (guards == 0) {
+        Critter[] guards = map.GetCritters(CritterProperty::NpcRole, role, CritterFindType::AliveNpc);
+        if (guards.isEmpty()) {
             if (reset) {
                 GameInstance.OnCritterUseSkill.UnsubscribeFromOnItem(item, _GuardedItemSkill);
                 item.SetupScript(null);
             }
+
             if (item.Type == ItemType::Door || item.Type == ItemType::Container) {
                 if (item.Val0 > 0)
                     SavedDeferredCall((item.Val0 == 0 ? 2 : item.Val0) * 1000, AutoCloseDoor, item.Id);
             }
+
             return false;
         }
-        Critter guard = map.GetNpc(role, CritterFindType::AliveNpc, Random(0, guards - 1));
-        if (valid(guard)) {
-            auto guardedItemSkill = guard.GuardedItemSkill.clone();
-            guardedItemSkill.setIfNotExist(cr.Id, 0);
-            if (guardedItemSkill[cr.Id] < 2) {
-                NpcPlanes::NpcPlane[] planes = {};
-                if (NpcPlanes::GetPlanes(guard, AI_PLANE_ATTACK, planes) > 0) {
-                    for (uint i = 0, l = planes.length(); i < l; i++) {
-                        if (planes[i].Attack_TargId == cr.Id) {
-                            if (reset) {
-                                GameInstance.OnCritterUseSkill.UnsubscribeFromOnItem(item, _GuardedItemSkill);
-                                item.SetupScript(null);
-                            }
-                            return false;
+
+        Critter guard = guards[Random(0, guards.length() - 1)];
+        auto guardedItemSkill = guard.GuardedItemSkill.clone();
+        guardedItemSkill.setIfNotExist(cr.Id, 0);
+        if (guardedItemSkill[cr.Id] < 2) {
+            NpcPlanes::NpcPlane[] planes = {};
+            if (NpcPlanes::GetPlanes(guard, AI_PLANE_ATTACK, planes) > 0) {
+                for (uint i = 0, l = planes.length(); i < l; i++) {
+                    if (planes[i].Attack_TargId == cr.Id) {
+                        if (reset) {
+                            GameInstance.OnCritterUseSkill.UnsubscribeFromOnItem(item, _GuardedItemSkill);
+                            item.SetupScript(null);
                         }
+
+                        return false;
                     }
                 }
-                guardedItemSkill[cr.Id] = guardedItemSkill[cr.Id] + 1;
-                guard.GuardedItemSkill = guardedItemSkill;
-                guard.SayMsg(SAY_SHOUT, TEXTMSG_TEXT, STR_DONTOUCH, "$pname" + Obsolete::GetPlayerName(cr.Id));
             }
-            else {
-                guardedItemSkill[cr.Id] = 0;
-                guard.GuardedItemSkill = guardedItemSkill;
-                NpcPlanes::AddAttackPlane(guard, 0, cr);
-            }
+
+            guardedItemSkill[cr.Id] = guardedItemSkill[cr.Id] + 1;
+            guard.GuardedItemSkill = guardedItemSkill;
+            guard.SayMsg(SAY_SHOUT, TEXTMSG_TEXT, STR_DONTOUCH, "$pname" + Obsolete::GetPlayerName(cr.Id));
         }
+        else {
+            guardedItemSkill[cr.Id] = 0;
+            guard.GuardedItemSkill = guardedItemSkill;
+            NpcPlanes::AddAttackPlane(guard, 0, cr);
+        }
+
         return true;
     }
     else {

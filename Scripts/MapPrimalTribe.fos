@@ -70,22 +70,25 @@ void initQuest(Map map)
 {
     MapIdent = map.Id;
     //	Log("map.Id: "+map.Id+" MapIdent: "+MapIdent);
-    uint menCount = 0;
+
     map.OnCritterIn.Subscribe(_PlayerInMap);
     map.OnFinish.Subscribe(_SaveAD);
 
-    Critter[] citizens = {};
-    GetCritters(map, citizens, ROLE_TRIB_MEN, CritterFindType::Npc);
-    menCount = citizens.length();
     GetAD();
-    GetCritters(map, citizens, ROLE_TRIB_WOMEN, CritterFindType::Npc);
-    if (map.GetNpcCount(ROLE_TRIB_RAIDER, CritterFindType::AliveNpc) > 0) {
+
+    Critter[] citizens = map.GetCritters(CritterProperty::NpcRole, ROLE_TRIB_MEN, CritterFindType::Npc);
+    uint menCount = citizens.length();
+    citizens.insertLast(map.GetCritters(CritterProperty::NpcRole, ROLE_TRIB_WOMEN, CritterFindType::Npc));
+
+    if (map.GetCritters(CritterProperty::NpcRole, ROLE_TRIB_RAIDER, CritterFindType::AliveNpc).length() > 0) {
         AttackRuns = true;
     }
+
     //	Log("initQuest "+menCount);
     for (uint i = 0; i < citizens.length(); i++) {
         citizens[i].OnDead.Subscribe(_CDead);
         citizens[i].OnTalk.Subscribe(_OnDial);
+
         if (i < menCount) {
             citizens[i].OnAttacked.Subscribe(_MOnAttack);
         }
@@ -154,18 +157,14 @@ void StartAttack()
 void ChangeTarget(Critter crit)
 {
     Map map = crit.GetMap();
-    Critter[] raiders = {};
-    GetCritters(map, raiders, ROLE_TRIB_RAIDER, CritterFindType::AliveNpc);
-    uint count = map.GetNpcCount(ROLE_TRIB_RAIDER, CritterFindType::AliveNpc);
-    uint m;
-    if (count == 0) {
+    Critter[] raiders = map.GetCritters(CritterProperty::NpcRole, ROLE_TRIB_RAIDER, CritterFindType::AliveNpc);
+    if (raiders.isEmpty()) {
         AttackRuns = false;
     }
     else {
         // EnemyStack::ClearEnemyStack( crit );
         _NpcEraseAllPlanesAttack(crit);
-        m = Random(0, count - 1);
-        NpcPlanes::AddAttackPlane(crit, AI_PLANE_ATTACK_PRIORITY, raiders[m]);
+        NpcPlanes::AddAttackPlane(crit, AI_PLANE_ATTACK_PRIORITY, raiders[Random(0, raiders.length() - 1)]);
     }
 }
 
@@ -198,8 +197,8 @@ void CChangeTarget(uint value)
 
 void _RaiderDead(Critter crit, Critter killer)
 {
-    uint count = crit.GetMap().GetNpcCount(ROLE_TRIB_RAIDER, CritterFindType::AliveNpc);
-    uint CountAll = crit.GetMap().GetNpcCount(ROLE_TRIB_RAIDER, CritterFindType::Npc);
+    uint count = crit.GetMap().GetCritters(CritterProperty::NpcRole, ROLE_TRIB_RAIDER, CritterFindType::AliveNpc);
+    uint countAll = crit.GetMap().GetCritters(CritterProperty::NpcRole, ROLE_TRIB_RAIDER, CritterFindType::Npc);
 
     if (valid(killer)) {
         if (killer.IsNpc() && killer.NpcRole != ROLE_TRIB_RAIDER)
@@ -210,8 +209,9 @@ void _RaiderDead(Critter crit, Critter killer)
             if (questStat == QUEST_STAT_NONE || questStat == QUEST_STAT_FAIL_RUNAWAY || questStat == QUEST_STAT_FAIL_KILL ||
                 questStat == QUEST_STAT_FAIL_NO_HELP || questStat == QUEST_STAT_FAIL_NOT_START || questStat == QUEST_STAT_FAIL_TRIBE_IS_DEAD ||
                 questStat == QUEST_STAT_ATTACK_RUNS || questStat == QUEST_STAT_NOT_FULL_SUCC) {
-                if (killer.TribRaiderKillCount == CountAll - 1)
+                if (killer.TribRaiderKillCount == countAll - 1) {
                     killer.TribSulikRaid = QUEST_STAT_FULL_SUCC;
+                }
                 else {
                     if (killer.TribRaiderKillCount == 0)
                         killer.TribSulikRaid = QUEST_STAT_NOT_FULL_SUCC;
@@ -266,20 +266,6 @@ bool _WOnAttack(Critter crit, Critter attacker)
     }
 }
 
-uint GetCritters(Map map, Critter[] arr, int npcRole, int findType)
-{
-    uint findCount = 0;
-    uint count = map.GetNpcCount(npcRole, findType);
-    for (uint i = 0; i < count; i++) {
-        Critter cr = map.GetNpc(npcRole, findType, i);
-        if (not valid(cr))
-            continue;
-        findCount++;
-        arr.insertLast(cr);
-    }
-    return findCount;
-}
-
 Critter SpawnRaider(Map map, uint8 entGroup, uint8 entNum, hstring npcPid, uint8 dir, uint dialog, uint bagId, uint level)
 {
     uint16 x = 0, y = 0;
@@ -332,15 +318,10 @@ void RaiderChangeTarget(uint value)
     if (not valid(map))
         return;
 
-    uint citizenCount = map.GetNpcCount(ROLE_TRIB_MEN, CritterFindType::AliveNpc);
-#ifdef __DEBUG__
-    Log("Citizens Men: " + citizenCount);
-#endif
+    auto mens = map.GetCritters(CritterProperty::NpcRole, ROLE_TRIB_MEN, CritterFindType::AliveNpc);
+    auto womens = map.GetCritters(CritterProperty::NpcRole, ROLE_TRIB_WOMEN, CritterFindType::AliveNpc);
+    uint citizenCount = mens.length() + womens.length();
 
-    citizenCount += map.GetNpcCount(ROLE_TRIB_WOMEN, CritterFindType::AliveNpc);
-#ifdef __DEBUG__
-    Log("Citizens All: " + citizenCount);
-#endif
     if (citizenCount == 0) {
         NpcPlanes::AddWalkPlane(raider, AI_PLANE_WALK_PRIORITY, raider.MapPrimalTribeRaiderHx, raider.MapPrimalTribeRaiderHy, Random(0, 5), true, Random(0, 1));
         NpcPlanes::AddMiscPlane(raider, AI_PLANE_MISC_PRIORITY, 0, MapPrimalTribe::plane_DelRaider);
@@ -349,24 +330,25 @@ void RaiderChangeTarget(uint value)
         SendQuestStat();
     }
     else {
-        uint mCount = map.GetNpcCount(ROLE_TRIB_MEN, CritterFindType::AliveNpc);
-        uint wCount = map.GetNpcCount(ROLE_TRIB_WOMEN, CritterFindType::AliveNpc);
         EnemyStack::ClearEnemyStack(raider);
         _NpcEraseAllPlanesAttack(raider);
+
         Critter[] players = map.GetCritters(CritterFindType::AlivePlayers);
+
         Critter target;
-        if ((Random(0, 1) == 0) or (players.length() == 0)) {
-            if ((Random(0, 1) == 0) or (wCount == 0)) {
-                target = map.GetNpc(ROLE_TRIB_MEN, CritterFindType::AliveNpc, Random(0, mCount - 1));
+        if (Random(0, 1) == 0 || players.length() == 0) {
+            if (Random(0, 1) == 0 || womens.length() == 0) {
+                target = mens[Random(0, mens.length() - 1)];
             }
             else {
-                target = map.GetNpc(ROLE_TRIB_WOMEN, CritterFindType::AliveNpc, Random(0, wCount - 1));
+                target = womens[Random(0, womens.length() - 1)];
             }
         }
         else {
             target = players[Random(0, players.length() - 1)];
         }
-        if (valid(target))
+
+        if (target != null)
             NpcPlanes::AddAttackPlane(raider, AI_PLANE_ATTACK_PRIORITY, target);
 
         DeferredCall(GAME_SECOND_TO_TICK(TIME_TO_CHANGE_TARGET), RaiderChangeTarget, value);
@@ -382,48 +364,45 @@ void plane_DelRaider(Critter raider)
 
 void SpawnRaiders(uint mapId, uint entGroup, uint dialogId, uint mobLevel)
 {
-    hstring npcPid;
     Map map = GetMap(mapId);
-    uint count = 0;
     if (not valid(map)) {
         Log("\n<Trib: Rangers Attack> map not valid");
         return;
     }
-    uint bagId;
-    Critter[] raiders = {};
+
+    Critter[] raiders = map.GetCritters(CritterProperty::NpcRole, ROLE_TRIB_RAIDER, CritterFindType::Npc);
+    DeleteNpc(raiders);
+
     uint entCount = Entrance::MapCountEntry(map, entGroup);
-    GetCritters(map, raiders, ROLE_TRIB_RAIDER, CritterFindType::Npc);
-    count = raiders.length();
-    if (count > 0)
-        for (uint i = 0; i < raiders.length(); i++)
-            DeleteNpc(raiders[i]);
 
     for (uint i = 0; i < entCount; i++) {
-        npcPid = Random(Content::Critter::RaiderMale, Content::Critter::RaiderFemale);
+        hstring npcPid = Random(0, 1) == 0 ? Content::Critter::RaiderMale : Content::Critter::RaiderFemale;
+
+        uint bagId;
         if (npcPid == Content::Critter::RaiderMale)
             bagId = Random(Bags::RDRCRaidersRaiderMale, Bags::RDRCRaidersRaiderMale2);
         else
             bagId = Random(Bags::RDRCRaidersRaiderFemale, Bags::RDRCRaidersRaiderFemale2);
-        Critter raider = SpawnRaider(map, entGroup, i, npcPid, Random(0, 5), dialogId, bagId, mobLevel);
-        if (not valid(raider))
-            continue;
+
+        SpawnRaider(map, entGroup, i, npcPid, Random(0, 5), dialogId, bagId, mobLevel);
     }
+
     if (!AttackRuns) {
         AttackRuns = true;
+
         for (uint i = 0; i < QuestPlayers.length(); i++) {
             Critter crit = GetCritter(QuestPlayers[i]);
-            if (crit.TribSulikRaid == QUEST_STAT_TAKEN)
+            if (crit != null && crit.TribSulikRaid == QUEST_STAT_TAKEN)
                 crit.TribSulikRaid = QUEST_STAT_ATTACK_RUNS;
         }
     }
-    Critter[] citizensM = {};
-    Critter[] citizensW = {};
-    GetCritters(map, citizensM, ROLE_TRIB_MEN, CritterFindType::AliveNpc);
-    GetCritters(map, citizensW, ROLE_TRIB_WOMEN, CritterFindType::AliveNpc);
 
-    for (uint i = 0; i < citizensM.length(); i++)
+    Critter[] citizensM = map.GetCritters(CritterProperty::NpcRole, ROLE_TRIB_MEN, CritterFindType::AliveNpc);
+    for (uint i = 0; i < citizensM.length(); i++) {
         SavedDeferredCall(0, CChangeTarget, citizensM[i].Id);
+    }
 
+    Critter[] citizensW = map.GetCritters(CritterProperty::NpcRole, ROLE_TRIB_WOMEN, CritterFindType::AliveNpc);
     for (uint i = 0; i < citizensW.length(); i++) {
         DeferredCall(GAME_SECOND_TO_TICK(RUN_PERIOD), RunRandom, citizensW[i].Id);
         citizensW[i].IsNoHome = true;
@@ -510,7 +489,7 @@ void RunRandom(uint value)
     if (!valid(map))
         return;
 
-    uint count = map.GetNpcCount(ROLE_TRIB_RAIDER, CritterFindType::AliveNpc);
+    uint count = map.GetCritters(CritterProperty::NpcRole, ROLE_TRIB_RAIDER, CritterFindType::AliveNpc).length();
     if (count == 0) {
         if (GameInstance.TribRaid) {
             SendQuestStat();

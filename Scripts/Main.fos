@@ -636,7 +636,7 @@ bool critter_use_skill(Critter cr, CritterProperty skill, Critter targetCr, Item
         }
 
         int sk = cr.SkillFirstAid;
-        hstring activePid = Obsolete::GetConstItemBySlot(cr, SLOT_HAND1).ProtoId;
+        hstring activePid = Tla::GetItemBySlot(cr, SLOT_HAND1).ProtoId;
         if (activePid == Content::Item::first_aid_kit) {
             sk += 25;
             if (Random(0, 30) == 0)
@@ -706,7 +706,7 @@ bool critter_use_skill(Critter cr, CritterProperty skill, Critter targetCr, Item
 
         int uninjured = 0;
         int sk = cr.SkillDoctor;
-        hstring activePid = Obsolete::GetConstItemBySlot(cr, SLOT_HAND1).ProtoId;
+        hstring activePid = Tla::GetItemBySlot(cr, SLOT_HAND1).ProtoId;
         if (activePid == Content::Item::doctors_bag) {
             sk += 25;
             if (Random(0, 30) == 0)
@@ -787,7 +787,7 @@ void critter_reload_weapon(Critter cr, Item weapon, Item ammo)
     // Unload
     if (not valid(ammo) || (weapon.AmmoCount > 0 && weapon.AmmoPid != ammo.ProtoId)) {
         if (weapon.AmmoPid != 0) {
-            Item existAmmo = Obsolete::GetSlotItem(cr, weapon.AmmoPid, -1);
+            Item existAmmo = cr.GetItem(weapon.AmmoPid);
             if (not valid(existAmmo))
                 cr.AddItem(weapon.AmmoPid, weapon.AmmoCount);
             else
@@ -901,7 +901,7 @@ void critter_init(Critter cr, bool firstTime)
             Replication::SetStartLocation(cr);
 
         // Current skin validation
-        Item armor = Obsolete::GetSlotItem(cr, 0, SLOT_ARMOR);
+        Item armor = cr.GetItem(ItemProperty::CritSlot, SLOT_ARMOR);
         if (not valid(armor)) {
             uint modelName = cr.ModelNameBase;
             if (modelName == 0)
@@ -996,8 +996,8 @@ void critter_idle(Critter cr)
 void critter_dead(Critter cr, Critter killer)
 {
     // Move slot items to inventory
-    Item hands1 = Obsolete::GetSlotItem(cr, 0, SLOT_HAND1);
-    Item hands2 = Obsolete::GetSlotItem(cr, 0, SLOT_HAND2);
+    Item hands1 = cr.GetItem(ItemProperty::CritSlot, SLOT_HAND1);
+    Item hands2 = cr.GetItem(ItemProperty::CritSlot, SLOT_HAND2);
     if (hands1 !is null)
         cr.ChangeItemSlot(hands1.Id, SLOT_INV);
     if (hands2 !is null)
@@ -1008,16 +1008,14 @@ void critter_dead(Critter cr, Critter killer)
     if ((cr.Anim2Dead == Anim2Actions::DeadPulseDust || cr.Anim2Dead == Anim2Actions::DeadExplode) && _CritCanDropItemsOnDead(cr)) {
         // Drop all, exclude armor
         Item[] items = {};
-        Obsolete::GetItems(cr, SLOT_INV, items);
-        Obsolete::GetItems(cr, SLOT_HAND1, items);
-        Obsolete::GetItems(cr, SLOT_HAND2, items);
+        items.insertLast(cr.GetItems(ItemProperty::CritSlot, SLOT_INV));
+        items.insertLast(cr.GetItems(ItemProperty::CritSlot, SLOT_HAND1));
+        items.insertLast(cr.GetItems(ItemProperty::CritSlot, SLOT_HAND2));
         if (valid(map)) {
             // Disable drop of hidden items
-            for (uint i = 0, j = items.length(); i < j; i++) {
+            for (uint i = 0; i < items.length(); i++) {
                 if (items[i].IsGag) {
-                    Item item = items[i];
-                    if (valid(item))
-                        DeleteItem(item);
+                    DeleteItem(items[i]);
                     items[i] = null;
                 }
                 else if (items[i].IsHidden) {
@@ -1033,7 +1031,7 @@ void critter_dead(Critter cr, Critter killer)
 
     // Mob drops
     hstring npcPid = cr.ProtoId;
-    hstring dropPid = 0;
+    hstring dropPid;
     if (npcPid == Content::Critter::GoldenGecko || npcPid == Content::Critter::ToughGoldenGecko) {
         if (valid(killer) && killer.PerkGeckoSkinning != 0)
             dropPid = Content::Item::golden_gecko_pelt;
@@ -1056,7 +1054,7 @@ void critter_dead(Critter cr, Critter killer)
             dropPid = Content::Item::radscorpion_parts;
     }
 
-    if (dropPid != 0 && _CritCountItem(cr, dropPid) == 0)
+    if (dropPid != hstring() && _CritCountItem(cr, dropPid) == 0)
         _CritAddItem(cr, dropPid, 1);
 
     // Karma, temporary
@@ -1107,6 +1105,7 @@ void critter_dead(Critter cr, Critter killer)
             cr.DeadBlockerId = blocker.Id;
     }
     Hunter::OnCritterKilled(cr, killer);
+
     // R17 Доп. события
     Critter[] npcs = cr.GetCritters(false, CritterFindType::AliveNpc);
     for (uint i = 0; i < npcs.length(); i++) {

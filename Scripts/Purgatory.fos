@@ -743,6 +743,7 @@ class PurgatoryStageChangedHandler : IBattleInfoStageChangedHandler, IBattleInfo
             }
             return;
         }
+
         if (bInfo.Stage == STAGE_FINISH) {
             // Завершение испытания
             Location loc = GetLocationByPid(Content::Location::hub_purgatory, 0);
@@ -751,6 +752,7 @@ class PurgatoryStageChangedHandler : IBattleInfoStageChangedHandler, IBattleInfo
                 loc.AutoGarbage = true;
                 SavedDeferredCall(MINUTE_TICKS(20), DeletePurgatory, loc.Id);
             }
+
             BattleTeam winners = bInfo.GetWinnerTeam();
             if (valid(winners)) {
                 Map mapInfo = loc.GetMapByIndex(0);
@@ -758,17 +760,20 @@ class PurgatoryStageChangedHandler : IBattleInfoStageChangedHandler, IBattleInfo
                 for (uint i = 0; i < players.length(); i++) {
                     players[i].SayMsg(SAY_NETMSG, TEXTMSG_TEXT, 7131, "$team" + (winners.Index + 1));
                 }
+
                 int points = winners.BattlePoints;
                 int alive = winners.CountAlive();
                 Map map = loc.GetMapByIndex(1);
-                Item[] containers = {};
-                Item[] prizeContainers = {};
-                if (Obsolete::GetItemsByType(map, ItemType::Container, containers) > 0) {
-                    for (uint i = 0, l = containers.length(); i < l; i++) {
+
+                Item[] containers = map.GetItems(ItemProperty::Type, ItemType::Container);
+                if (!containers.isEmpty()) {
+                    Item[] prizeContainers = {};
+                    for (uint i = 0; i < containers.length(); i++) {
                         if (containers[i].Val0 != 0)
                             prizeContainers.insertLast(containers[i]);
                     }
-                    if (prizeContainers.length() > 0 && points > 0) {
+
+                    if (!prizeContainers.isEmpty() && points > 0) {
                         // Раздача призов
                         // Сначала обязательные призы
                         for (int i = 0; i < alive; i++) {
@@ -778,6 +783,7 @@ class PurgatoryStageChangedHandler : IBattleInfoStageChangedHandler, IBattleInfo
                             _RndCont(prizeContainers).AddItem(Content::Item::_223_fmj, points * 2, 0);
                             _RndCont(prizeContainers).AddItem(Content::Item::stimpak, 5, 0);
                         }
+
                         uint rnd = Random(1, 3);
                         // ПА
                         if (points > 200 && rnd == 1) {
@@ -876,16 +882,19 @@ class PurgatoryInviteCallback : IBattleTeamInviteCallback
     {
         if (valid(cr) && cr.IsNpc())
             return;
-        Item[] items = {};
+
         Item container;
         if (TeamContainerId > 0)
             container = GetItem(TeamContainerId);
+
         if (!valid(cr))
             return;
-        if (valid(container))
-            if (Obsolete::GetItems(cr, -1, items) > 0) {
-                MoveItems(items, container, cr.Id);
-            }
+
+        if (valid(container)) {
+            Item[] items = cr.GetItems();
+            MoveItems(items, container, cr.Id);
+        }
+
         CritterState::ToDead(cr, Anim2Actions::DeadPulseDust, null);
         cr.SayMsg(SAY_NETMSG, TEXTMSG_TEXT, STR_KILL);
         cr.SayMsg(SAY_NETMSG, TEXTMSG_TEXT, STR_ITEMS);
@@ -893,6 +902,7 @@ class PurgatoryInviteCallback : IBattleTeamInviteCallback
             cr.NextReplicationMap = team.StartMapIndex;
             cr.NextReplicationEntry = team.StartEntry;
         }
+
         transit = false;
     }
 
@@ -1198,22 +1208,14 @@ void _PurgatoryLoop(Map map)
             if (GetFullSecond() >= loc.LastLootTransfer + REAL_MINUTE(1)) {
                 loc.LastLootTransfer = GetFullSecond();
                 Map mapFrom = loc.GetMapByIndex(2);
-                if (valid(mapFrom)) {
-                    Item[] containersFrom = {};
-                    Item[] containersTo = {};
-                    Obsolete::GetItemsByType(map, ItemType::Container, containersTo);
-                    Obsolete::GetItemsByType(mapFrom, ItemType::Container, containersFrom);
-                    if (containersFrom.length() > 0 && containersTo.length() > 0) {
-                        Item[] items = {};
-                        Item contFrom = containersFrom[Random(0, containersFrom.length() - 1)];
-                        if (valid(contFrom) && Obsolete::GetItems(contFrom, 0, items) > 0) {
-                            Item contTo = containersTo[Random(0, containersTo.length() - 1)];
-                            if (valid(contTo)) {
-                                DL("Moving " + items.length() + " items to container at x:" + contTo.HexX + "; y:" + contTo.HexY);
-                                MoveItems(items, contTo, 0);
-                            }
-                        }
-                    }
+                Item[] containersTo = map.GetItems(ItemProperty::Type, ItemType::Container);
+                Item[] containersFrom = mapFrom.GetItems(ItemProperty::Type, ItemType::Container);
+                if (containersFrom.length() > 0 && containersTo.length() > 0) {
+                    Item contFrom = containersFrom[Random(0, containersFrom.length() - 1)];
+                    Item[] items = contFrom.GetItems(0);
+                    Item contTo = containersTo[Random(0, containersTo.length() - 1)];
+                    DL("Moving " + items.length() + " items to container at x:" + contTo.HexX + "; y:" + contTo.HexY);
+                    MoveItems(items, contTo, 0);
                 }
             }
         }

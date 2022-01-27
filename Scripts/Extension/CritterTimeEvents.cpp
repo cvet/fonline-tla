@@ -138,7 +138,7 @@ void Critter::ContinueTimeEvents(int offs_time) {
 ///# param identifier ...
 ///# return ...
 ///@ ExportMethod
-[[maybe_unused]] void Server_Critter_AddTimeEvent(Critter* self, const std::function<void(Critter*)>& func, uint duration, int identifier)
+[[maybe_unused]] void Server_Critter_AddTimeEvent(Critter* self, ScriptFuncName<uint, Critter, int, uint&> func, uint duration, int identifier)
 {
     /*hstring func_num = self->GetEngine()->ScriptSys.BindScriptFuncNumByFunc(func);
     if (!func_num)
@@ -154,7 +154,7 @@ void Critter::ContinueTimeEvents(int offs_time) {
 ///# param rate ...
 ///# return ...
 ///@ ExportMethod
-[[maybe_unused]] void Server_Critter_AddTimeEvent(Critter* self, const std::function<void(Critter*)>& func, uint duration, int identifier, uint rate)
+[[maybe_unused]] void Server_Critter_AddTimeEvent(Critter* self, ScriptFuncName<uint, Critter, int, uint&> func, uint duration, int identifier, uint rate)
 {
     /*hstring func_num = self->GetEngine()->ScriptSys.BindScriptFuncNumByFunc(func);
     if (!func_num)

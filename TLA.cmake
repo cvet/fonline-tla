@@ -32,7 +32,7 @@ AddResources( Music Resources/FOnlineMusic )
 AddResources( Video Resources/FOnlineVideo )
 AddResources( Mapper Resources/Mapper )
 AddResources( VanBuren Resources/VanBuren )
-AddRawResources( Resources/Mapper/Packs_Raw )
+AddRawResources( Resources/Mapper )
 
 # Configs
 CreateConfig( Default "" )

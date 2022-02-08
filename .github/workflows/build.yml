@@ -1,0 +1,106 @@
+name: build
+
+on: [push, pull_request]
+
+env:
+  FO_CMAKE_CONTRIBUTION: ./TLA.cmake
+
+jobs:
+  check-formatting:
+    runs-on: ubuntu-20.04
+    steps:
+    - uses: actions/checkout@v2
+    - uses: DoozyX/clang-format-lint-action@v0.13
+      with:
+        source: ./Scripts
+        extensions: 'fos,h,cpp'
+        clangFormatVersion: 12
+  unit-tests:
+    runs-on: ubuntu-20.04
+    steps:
+    - uses: actions/checkout@v2
+      with:
+        lfs: 'true'
+        submodules: 'recursive'
+    - run: BuildTools/validate.sh unit-tests
+  windows-build:
+    runs-on: windows-2019
+    strategy:
+      fail-fast: false
+      matrix:
+        app:
+        - win32 client
+        - win64 client
+        - win64 server
+        - win64 mapper
+    steps:
+    - uses: actions/checkout@v2
+      with:
+        lfs: 'true'
+        submodules: 'recursive'
+    - run: Engine/BuildTools/build.bat ${{ matrix.app }}
+    - uses: actions/upload-artifact@v2
+      with:
+        name: output
+        path: Workspace/output/*/
+  linux-build:
+    runs-on: ubuntu-20.04
+    strategy:
+      fail-fast: false
+      matrix:
+        app:
+        - linux client
+        - android arm-client
+        - android arm64-client
+        - web client
+        - linux server
+        - linux mapper
+        - linux ascompiler
+        - linux baker
+    steps:
+    - uses: actions/checkout@v2
+      with:
+        lfs: 'true'
+        submodules: 'recursive'
+    - run: Engine/BuildTools/build.sh ${{ matrix.app }}
+    - uses: actions/upload-artifact@v2
+      with:
+        name: output
+        path: Workspace/output/*/
+  macos-build:
+    runs-on: macos-10.15
+    strategy:
+      fail-fast: false
+      matrix:
+        app:
+        - mac client
+        - ios client
+    steps:
+    - uses: actions/checkout@v2
+      with:
+        lfs: 'true'
+        submodules: 'recursive'
+    - run: Engine/BuildTools/build.sh ${{ matrix.app }}
+    - uses: actions/upload-artifact@v2
+      with:
+        name: output
+        path: Workspace/output/*/
+  package:
+    runs-on: ubuntu-20.04
+    needs: [windows-build, linux-build, macos-build]
+    steps:
+    - uses: actions/checkout@v2
+      with:
+        lfs: 'true'
+        submodules: 'recursive'
+    - uses: actions/download-artifact@v2
+      with:
+        name: output
+    - run: ls -R
+    - run: BuildTools/compile-scripts.sh
+    - run: BuildTools/bake-resources.sh
+    - run: BuildTools/package.sh
+    - uses: actions/upload-artifact@v2
+      with:
+        name: package
+        path: Workspace/output/Packages/*/

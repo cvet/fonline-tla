@@ -21,11 +21,10 @@ void ModuleInit()
     GameInstance.OnCritterDead.Subscribe(critter_dead);
     GameInstance.OnCritterRespawn.Subscribe(critter_respawn);
     GameInstance.OnMapCritterIn.Subscribe(map_critter_in);
-    GameInstance.OnMapCritterOutEx.Subscribe(map_critter_out);
+    GameInstance.OnMapCritterOut.Subscribe(map_critter_out);
     GameInstance.OnMapCheckLook.Subscribe(check_look);
     GameInstance.OnMapCheckTrapLook.Subscribe(check_trap_look);
     GameInstance.OnItemsBarter.Subscribe(items_barter);
-    GameInstance.OnWorldSave.Subscribe(world_save);
     GameInstance.OnPlayerRegistration.Subscribe(player_registration);
     GameInstance.OnPlayerLogin.Subscribe(player_login);
     GameInstance.OnPlayerGetAccess.Subscribe(player_getaccess);
@@ -186,10 +185,9 @@ void critter_attack(Critter cr, Critter target, Item weapon, uint8 weaponMode, I
     cr.TimeoutAggressor = GetFullSecond() + REAL_MINUTE(1);
     Combat::CombatAttack(cr, target, weapon, weaponMode, ammo);
 
-    // R17
-    Critter[] npcs = cr.GetCritters(false, CritterFindType::AliveNpc);
-    for (uint i = 0; i < npcs.length(); i++) {
-        GameInstance.OnSomeCritterAttack.Fire(npcs[i], cr, target, weapon, weaponMode, ammo);
+    Critter[] other = cr.GetCritters(true, CritterFindType::Alive);
+    for (uint i = 0; i < other.length(); i++) {
+        other[i].OnSomeCritterAttack.Fire(cr, target, weapon, weaponMode, ammo);
     }
 
     GameInstance.OnCritterAttacked.Fire(target, cr);
@@ -199,10 +197,9 @@ void critter_attack(Critter cr, Critter target, Item weapon, uint8 weaponMode, I
 // Call on something critter attack another.
 void critter_attacked(Critter cr, Critter attacker)
 {
-    // R17
-    Critter[] npcs = cr.GetCritters(false, CritterFindType::AliveNpc);
-    for (uint i = 0; i < npcs.length(); i++) {
-        GameInstance.OnSomeCritterAttacked.Fire(npcs[i], cr, attacker);
+    Critter[] other = cr.GetCritters(true, CritterFindType::Alive);
+    for (uint i = 0; i < other.length(); i++) {
+        other[i].OnSomeCritterAttacked.Fire(cr, attacker);
     }
 
     if (cr.IsPlayer())
@@ -371,12 +368,13 @@ bool critter_stealing(Critter cr, Critter thief, Item item, uint count)
         }
     }
 
-    // R17 Доп. события
-    Critter[] npcs = thief.GetCritters(false, CritterFindType::AliveNpc);
-    for (uint i = 0; i < npcs.length(); i++) {
-        Critter npc = npcs[i];
-        GameInstance.OnSomeCritterUseSkill.Fire(npc, thief, CritterProperty::SkillSteal, cr, null, null);
-        GameInstance.OnSomeCritterStealing.Fire(npc, thief, cr, item, count);
+    // Доп. события
+    cr.OnStealing.Fire(thief, cr, item, count);
+
+    Critter[] other = thief.GetCritters(true, CritterFindType::Alive);
+    for (uint i = 0; i < other.length(); i++) {
+        other[i].OnSomeCritterUseSkill.Fire(thief, CritterProperty::SkillSteal, cr, null, null);
+        other[i].OnSomeCritterStealing.Fire(thief, cr, item, count);
 
         /// Event SomeCritterUseSkill(Critter critter)
         // Critter whoUse, CritterProperty skill, Critter onCritter, Item onItem, StaticItem onScenery )" deferred
@@ -465,11 +463,10 @@ bool critter_use_item(Critter cr, Item item, Critter targetCr, Item targetItem, 
     if (valid(targetItem) && targetItem.ProtoId == Content::Item::geiger_counter && Geiger::UseItemOnGeiger(cr, targetItem, item))
         return true;
 
-    // R17 Доп. события
-    Critter[] npcs = cr.GetCritters(false, CritterFindType::AliveNpc);
-    for (uint i = 0; i < npcs.length(); i++) {
-        Critter npc = npcs[i];
-        GameInstance.OnSomeCritterUseItem.Fire(npc, cr, item, targetCr, targetItem, targetScen, param);
+    // Доп. события
+    Critter[] other = cr.GetCritters(true, CritterFindType::Alive);
+    for (uint i = 0; i < other.length(); i++) {
+        other[i].OnSomeCritterUseItem.Fire(cr, item, targetCr, targetItem, targetScen, param);
     }
 
     // Take process to engine
@@ -636,7 +633,7 @@ bool critter_use_skill(Critter cr, CritterProperty skill, Critter targetCr, Item
         }
 
         int sk = cr.SkillFirstAid;
-        hstring activePid = Tla::GetItemBySlot(cr, SLOT_HAND1).ProtoId;
+        hstring activePid = cr.GetItem(ItemProperty::CritSlot, SLOT_HAND1).ProtoId;
         if (activePid == Content::Item::first_aid_kit) {
             sk += 25;
             if (Random(0, 30) == 0)
@@ -706,7 +703,7 @@ bool critter_use_skill(Critter cr, CritterProperty skill, Critter targetCr, Item
 
         int uninjured = 0;
         int sk = cr.SkillDoctor;
-        hstring activePid = Tla::GetItemBySlot(cr, SLOT_HAND1).ProtoId;
+        hstring activePid = cr.GetItem(ItemProperty::CritSlot, SLOT_HAND1).ProtoId;
         if (activePid == Content::Item::doctors_bag) {
             sk += 25;
             if (Random(0, 30) == 0)
@@ -1106,11 +1103,10 @@ void critter_dead(Critter cr, Critter killer)
     }
     Hunter::OnCritterKilled(cr, killer);
 
-    // R17 Доп. события
-    Critter[] npcs = cr.GetCritters(false, CritterFindType::AliveNpc);
-    for (uint i = 0; i < npcs.length(); i++) {
-        Critter npc = npcs[i];
-        GameInstance.OnSomeCritterDead.Fire(npc, cr, killer);
+    // Доп. события
+    Critter[] other = cr.GetCritters(true, CritterFindType::Alive);
+    for (uint i = 0; i < other.length(); i++) {
+        other[i].OnSomeCritterDead.Fire(cr, killer);
     }
 
     // R17
@@ -1196,24 +1192,6 @@ bool items_barter(Item[] saleItems, uint[] saleItemsCount, Item[] buyItems, uint
     }
 
     return true;
-}
-
-// Call on world saving
-// Range of currentIndex: 1..9999
-void world_save(uint currentIndex, uint[] deleteIndexes)
-{
-    // Keep only current and four last saves
-    if (currentIndex == 1) {
-        deleteIndexes.resize(5);
-        for (uint i = 0; i < 5; i++)
-            deleteIndexes[i] = 9999 - i;
-    }
-    else if (currentIndex > 4) {
-        deleteIndexes.resize(1);
-        deleteIndexes[0] = currentIndex - 5;
-    }
-    // bboards
-    BulletinBoard::SaveMessengerData();
 }
 
 // Call on player try register

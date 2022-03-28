@@ -63,9 +63,9 @@ class HostileLocationInfo
     uint QVarNum;  // Номер квестовой переменной, связанной с квестом
     uint CVarNum; // Номер локальной переменной для игрока - счетчика смертей союзников, если равна = 0, подсчет не происходит
     uint LocId;   // Id локации
-    uint LocPid;  // Код прототипа локации
-    uint LocX;    // Положение локации на глобальной карте по оси икс
-    uint LocY;    // Положение локации на глобальной карте по оси игрек
+    hstring LocPid;  // Код прототипа локации
+    uint LocX;       // Положение локации на глобальной карте по оси икс
+    uint LocY;       // Положение локации на глобальной карте по оси игрек
     uint CoordDelta; // Относительное смещение по координатным осям глобальной карты, на которое может быть смещена точка положения локации
     bool LocCreated; // Признак: Локация уже создана
 
@@ -116,35 +116,40 @@ class HostileLocationInfo
 
     bool CreateHostileLocation()
     {
-        if (PlayerId == 0 || LocCreated || LocPid == 0)
+        if (PlayerId == 0 || LocCreated || LocPid == hstring())
             return false; // Игрок неизвестен или локация создана ранее, или код прототипа неизвестен
+
         Critter player = GetCritter(PlayerId);
         if (!valid(player))
             return false; // Не найден игрок
-        LocId = CreateLocation(LocPid, LocX + Random(-1 * int(CoordDelta), CoordDelta), LocY + Random(-1 * int(CoordDelta), CoordDelta), null).Id;
-        if (LocId == 0)
+
+        Location loc = CreateLocation(LocPid, LocX + Random(-1 * int(CoordDelta), CoordDelta), LocY + Random(-1 * int(CoordDelta), CoordDelta), null);
+        if (loc == null)
             return false; // Ошибка при создании локации
+
+        LocId = loc.Id;
         DL("Location created ok. LocId = " + LocId);
         LocCreated = true;
+
         Save();
+
         Location::SetKnownLoc(player, LocId);
+
         // Прописывание скриптов для карт локации, а также сохранение ключевой информации о квесте в Map::Data
-        Location loc = GetLocation(LocId);
-        if (valid(loc)) {
-            for (uint i = 0, l = loc.GetMapCount(); i < l; i++) {
-                Map map = loc.GetMapByIndex(i);
-                if (valid(map)) {
-                    _SetPlayerId(map, PlayerId);
-                    _SetVarNum(map, QVarNum);
-                    map.SetupScript(_HostileMapInit);
-                }
-            }
+        for (uint i = 0; i < loc.GetMapCount(); i++) {
+            Map map = loc.GetMapByIndex(i);
+            _SetPlayerId(map, PlayerId);
+            _SetVarNum(map, QVarNum);
+            map.SetupScript(_HostileMapInit);
         }
+
         // Событие удаления локации через какое-то время, если игрок не успел выполнить квест
         uint[] values = {PlayerId, QVarNum};
         SavedDeferredCall(GAME_SECOND_TO_TICK(TIME_RESET), ResetHostileLoc, values);
+
         // Сериализация описания квеста и локации
         Save();
+
         return true;
     }
 
@@ -273,8 +278,8 @@ void _HostileMapCritterDead(Map map, Critter cr, Critter killer)
         DL("completed");
         info.CompleteQuest();
         map.SetupScript(null);
-        GameInstance.OnMapCritterDead.UnsubscribeFromMap(map, _HostileMapCritterDead);
-        GameInstance.OnMapCritterIn.UnsubscribeFromMap(map, _HostileMapInCritter);
+        map.OnCritterDead.Unsubscribe(_HostileMapCritterDead);
+        map.OnCritterIn.Unsubscribe(_HostileMapInCritter);
         return;
     }
     if (cr.IsPlayer() && cr.Id == info.PlayerId) // Убит игрок. Союзники возвращаются на домашнюю позицию.
@@ -300,7 +305,7 @@ void _AllyInit(Critter cr, bool firstTime)
     cr.IsNoHome = false;
     cr.OnIdle.Subscribe(_AllyIdle);
     cr.OnSomeCritterAttacked.Subscribe(_AllySmthAttacked);
-    cr.OnShow.Subscribe(_AllyShowCritter);
+    cr.OnCritterShown.Subscribe(_AllyShowCritter);
 }
 
 void _AllyIdle(Critter cr)
@@ -388,7 +393,7 @@ void _HostileInit(Critter cr, bool firstTime)
 {
     cr.OnIdle.Subscribe(_AllyIdle);
     cr.OnAttacked.Subscribe(_HostileAttacked);
-    cr.OnShowDist1.Subscribe(_HostileShowCritter);
+    cr.OnCritterShownDist1.Subscribe(_HostileShowCritter);
     cr.OnDead.Subscribe(_HostileDead);
     cr.OnMessage.Subscribe(_HostileMessage);
     cr.ShowCritterDist1 = 10;
@@ -436,8 +441,9 @@ void r_ShowLocation(Critter player, Critter npc, int qVar, int counterVar, int l
     HostileLocationInfo info = HostileLocationInfo(player.Id, qVar);
     if (!valid(info))
         return;
+
     info.CVarNum = counterVar;
-    info.LocPid = locPid;
+    info.LocPid = hstring_fromHash(locPid);
     info.LocX = locX;
     info.LocY = locY;
     info.CoordDelta = 0;
@@ -451,8 +457,9 @@ void r_ShowLocation2(Critter player, Critter npc, int qVar, int counterVar, int 
     HostileLocationInfo info = HostileLocationInfo(player.Id, qVar);
     if (!valid(info))
         return;
+
     info.CVarNum = counterVar;
-    info.LocPid = locPid;
+    info.LocPid = hstring_fromHash(locPid);
     info.LocX = locX;
     info.LocY = locY;
     info.CoordDelta = Settings.GlobalMapZoneLength;

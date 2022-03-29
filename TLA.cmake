@@ -20,6 +20,7 @@ AddContent( Dialogs )
 AddContent( Texts )
 
 # Scripts
+AddEngineSource( SERVER Scripts/Extension/ServerExtension.cpp )
 AddEngineSource( SERVER Scripts/Extension/CritterTimeEvents.cpp )
 # AddAngelScriptExtensionSource( Scripts/AngelScriptExtension.cpp )
 # AddAngelScriptExtensionEntry( InitAngelScriptExtension )

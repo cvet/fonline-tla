@@ -164,7 +164,7 @@ void ModuleInit()
     GameInstance.OnGlobalMapCritterIn.Subscribe(OnGlobalMapCritterIn);
     GameInstance.OnGlobalMapCritterOut.Subscribe(OnGlobalMapCritterOut);
     GameInstance.OnCritterIdle.Subscribe(OnCritterIdle);
-    LoadImage(Tla::ImageRelief, "relief_tla.png", 1);
+    LoadImage(Tla::ImageRelief, "relief_tla.png");
 }
 
 void OnCritterIdle(Critter cr)
@@ -462,7 +462,7 @@ void global_process(int processType, Critter cr, Item car, float& curX, float& c
 
         // Calculate speed
         speed = GLOBAL_MAP_BASE_SPEED;
-        if (cr.GetAccess() >= ACCESS_TESTER)
+        if (cr.IsPlayer() && cr.GetOwner().GetAccess() >= ACCESS_TESTER)
             speed *= 20.0f; // All, exclude clients have highly speed
 
         if (valid(car)) {
@@ -562,10 +562,10 @@ void global_invite(Critter leader, Item car, uint encounterDescriptor, int comba
 
 void ScanZone(Critter[] group, int zx, int zy)
 {
-    uint[] locIds1, locIds2;
-    bool locIds2Founded = false;
+    Location[] locs1, locs2;
+    bool loc2Founded = false;
 
-    locIds1 = GetZoneLocationIds(zx, zy, 1);
+    locs1 = GetZoneLocations(zx, zy, 1);
 
     for (uint i = 0; i < group.length(); i++) {
         Critter cr = group[i];
@@ -574,9 +574,9 @@ void ScanZone(Critter[] group, int zx, int zy)
 
         int lookLen = cr.PerkScout != 0 ? 2 : 1;
 
-        if (lookLen == 2 && !locIds2Founded) {
-            locIds2 = GetZoneLocationIds(zx, zy, 2);
-            locIds2Founded = true;
+        if (lookLen == 2 && !loc2Founded) {
+            locs2 = GetZoneLocations(zx, zy, 2);
+            loc2Founded = true;
         }
 
         // Open fog
@@ -595,13 +595,11 @@ void ScanZone(Critter[] group, int zx, int zy)
         }
 
         // Find new locations
-        uint[] locIds = lookLen == 1 ? locIds1 : locIds2;
-        for (uint j = 0; j < locIds.length(); j++) {
-            uint locId = locIds[j];
-            if (!Location::IsKnownLoc(cr, locId)) {
-                Location loc = GetLocation(locId);
-                if (valid(loc))
-                    Location::SetKnownLoc(cr, locId);
+        Location[] locs = lookLen == 1 ? locs1 : locs2;
+        for (uint j = 0; j < locs.length(); j++) {
+            Location loc = locs[j];
+            if (!Location::IsKnownLoc(cr, loc.Id)) {
+                Location::SetKnownLoc(cr, loc.Id);
             }
         }
     }
@@ -881,6 +879,7 @@ void GM_GlobalProcess(Critter cr, GlobalMapGroup group, int type) // 13 hits
 {
     if (!valid(group))
         return;
+
     // Catchers
     uint encounter_descriptor = 0;
     bool wait_for_answer = false;
@@ -893,7 +892,7 @@ void GM_GlobalProcess(Critter cr, GlobalMapGroup group, int type) // 13 hits
     float base_speed = group.Speed;
     bool callGlobalProcess = true;
 
-    if (!GameInstance.OnGlobalMapProcess.Fire(type, cr, group.GetCar(), cur_wx, cur_wy, to_wx, to_wy, speed, encounter_descriptor, wait_for_answer)) {
+    if (!cr.OnGlobalMapProcess.Fire(type, group.GetCar(), cur_wx, cur_wy, to_wx, to_wy, speed, encounter_descriptor, wait_for_answer)) {
         callGlobalProcess = false;
     }
     else {
@@ -911,8 +910,10 @@ void GM_GlobalProcess(Critter cr, GlobalMapGroup group, int type) // 13 hits
 
     if (callGlobalProcess)
         GlobalmapGroup::global_process(type, cr, group.GetCar(), cur_wx, cur_wy, to_wx, to_wy, speed, encounter_descriptor, wait_for_answer);
+
     if (!group.IsValid())
         return;
+
     // Check ranges
     float max_wx = float(GM_MAXX);
     float max_wy = float(GM_MAXY);
@@ -940,6 +941,7 @@ void GM_GlobalProcess(Critter cr, GlobalMapGroup group, int type) // 13 hits
         to_wx = cur_wx;
         to_wy = cur_wy;
     }
+
     // Current position
     if (cur_wx != group.CurX || cur_wy != group.CurY || speed != group.Speed) {
         group.CurX = cur_wx;
@@ -1028,7 +1030,7 @@ void GM_LeaveGroup(Critter critter) // 6 hits
         // Give rule to critter with highest charisma
         Critter newRule;
         int maxCharisma = 0;
-        for (int i = 0; i < group.CritMove.length(); i++) {
+        for (uint i = 0; i < group.CritMove.length(); i++) {
             Critter cr1 = group.CritMove[i];
             if (cr1.Id == group.Rule.Id)
                 continue;
@@ -1076,7 +1078,7 @@ void GM_StopGroup(Critter cr) // 3hits
     GM_GlobalProcess(cr, group, GLOBAL_PROCESS_STOPPED);
 }
 
-bool GM_GroupToMap(GlobalMapGroup group, Map map, uint entry, uint16 mx, uint16 my, uint8 mdir) // 6hits
+bool GM_GroupToMap(GlobalMapGroup group, Map map, hstring entry, uint16 mx, uint16 my, uint8 mdir) // 6hits
 {
     if (!valid(map) || map.Id == 0) {
         Log("Map null ptr or zero id, pointer '%p'.\n");
@@ -1258,13 +1260,12 @@ bool GM_GroupToLoc(Critter rule, uint locId, uint8 entrance, bool force = false)
        hstring entry = loc.MapEntrances[ entrance * 2 + 1 ];
 
        Map map = loc.GetMap( mapProto );*/
-    hstring entry = 0;
+
+    hstring entry;
     uint mapIndex = 0;
+    loc.GetEntrance(entrance, mapIndex, entry);
 
-    if (!loc.GetEntrance(entrance, mapIndex, entry))
-        return false;
     Map map = loc.GetMapByIndex(mapIndex);
-
     if (!valid(map)) {
         if (rule.IsPlayer())
             Location::UnsetKnownLoc(rule, locId);
@@ -1360,13 +1361,14 @@ void GM_GlobalInvite(GlobalMapGroup group, int combat_mode) // 5hits
 {
     uint encounter_descriptor = group.EncounterDescriptor;
     group.EncounterDescriptor = 0;
+
     uint map_id = 0;
     uint16 hx = 0, hy = 0;
     uint8 dir = 0;
     Critter rule = group.Rule;
     bool global_invite = true;
 
-    if (GameInstance.OnGlobalMapInvite.Fire(rule, group.GetCar(), encounter_descriptor, combat_mode, map_id, hx, hy, dir)) {
+    if (rule.OnGlobalMapInvite.Fire(group.GetCar(), encounter_descriptor, combat_mode, map_id, hx, hy, dir)) {
         global_invite = false;
     }
     else {
@@ -1386,7 +1388,7 @@ void GM_GlobalInvite(GlobalMapGroup group, int combat_mode) // 5hits
     if (map_id > 0) {
         Map map = GetMap(map_id);
         if (valid(map))
-            GM_GroupToMap(group, map, 0, hx, hy, dir < 6 ? dir : rule.Dir);
+            GM_GroupToMap(group, map, hstring("0"), hx, hy, dir < 6 ? dir : rule.Dir);
     }
     else {
         group.SendGlobalData(GM_INFO_GROUP_PARAM);
@@ -1483,7 +1485,7 @@ void ProcessGlobalMapCommand(Player player, uint8 command, uint param1, uint par
         // Check for follow
         if (!group.CheckForFollow(cl))
             break;
-        if (GetDistance(uint16(rule.LastMapHexX), uint16(rule.LastMapHexY), cl.HexX, cl.HexX) > (FOLLOW_DIST + rule.Multihex + cl.Multihex))
+        if (GetDistance(uint16(rule.LastMapHexX), uint16(rule.LastMapHexY), cl.HexX, cl.HexX) > int(FOLLOW_DIST + rule.Multihex + cl.Multihex))
             break;
 
         cl.TransitToGlobalGroup(rule);
@@ -1566,6 +1568,7 @@ void ProcessGlobalMapCommand(Player player, uint8 command, uint param1, uint par
         uint locId = param1;
         if (locId == 0)
             break;
+
         Location loc = GetLocation(locId);
         if (!valid(loc) || DistSqrt(int(group.CurX), int(group.CurY), loc.WorldX, loc.WorldY) > loc.Radius)
             break;
@@ -1577,18 +1580,15 @@ void ProcessGlobalMapCommand(Player player, uint8 command, uint param1, uint par
 
         if (!GM_CheckEntrance(loc, group.CritMove, entrance))
             break;
+
         // hstring mapProto = loc.MapEntrances[ entrance * 2 ];
         // hstring entry = loc.MapEntrances[ entrance * 2 + 1 ];
         // Map map = loc.GetMap( mapProto );
-        hstring entry = 0;
+        hstring entry;
         uint mapIndex = 0;
-        Map map;
+        loc.GetEntrance(entrance, mapIndex, entry);
 
-        if (!loc.GetEntrance(entrance, mapIndex, entry))
-            break;
-
-        map = loc.GetMapByIndex(mapIndex);
-
+        Map map = loc.GetMapByIndex(mapIndex);
         if (!valid(map))
             break;
 
@@ -1597,10 +1597,11 @@ void ProcessGlobalMapCommand(Player player, uint8 command, uint param1, uint par
         // if( !map->GetStartCoord( hx, hy, dir, loc->Proto->Entrance[ entrance ].second ) )
         if (!Entrance::GetEntryFreeHex(map, entry, hx, hy))
             break;
+
         uint look = 0; // 0? cr.LookDistance
 
         cl.ViewMap(map, 0, hx, hy, 0);
-        cl.GetOwner().ClientCall.ShowTownView(locId, entrance, 0);
+        cl.GetOwner().ClientCall.ShowTownView(locId, entrance);
 
     } break;
     default:

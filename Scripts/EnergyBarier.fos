@@ -81,13 +81,10 @@
 
 // clang-format off
 
-const hstring[][] EBHalfOnMode =
-                                  {
+const hstring[][] EBHalfOnMode = {
     { Content::Item::eb_long_hor, Content::Item::eb_long_vert, Content::Item::eb_short_hor1,     Content::Item::eb_short_vert1,     Content::Item::eb_short_hor2,     Content::Item::eb_short_vert2,     Content::Item::eb_short_hor3,     Content::Item::eb_short_vert3      },
-    { 0,                          0,                           Content::Item::eb_short_hor1_red, Content::Item::eb_short_vert1_red, Content::Item::eb_short_hor2_red, Content::Item::eb_short_vert2_red, Content::Item::eb_short_hor3_red, Content::Item::eb_short_vert3_red, }
+    { hstring(),                  hstring(),                   Content::Item::eb_short_hor1_red, Content::Item::eb_short_vert1_red, Content::Item::eb_short_hor2_red, Content::Item::eb_short_vert2_red, Content::Item::eb_short_hor3_red, Content::Item::eb_short_vert3_red, }
 };
-
-// clang-format on
 
 const uint8[][][] EBBlockers = {
     /* EB_LONG_HOR */
@@ -119,6 +116,8 @@ const uint8[][] EBEmitterCoords = {
     /* EB_EMITTER_VERT3 */
     {0, 2}};
 
+// clang-format on
+
 uint MakeTerminalKey(uint16 hx, uint16 hy, uint num = 0)
 {
     return ((hx << 16) | hy) + num;
@@ -133,7 +132,7 @@ void InitBariers(Item barier)
     uint16 trigDest;
     hstring proto = barier.ProtoId;
     bool guarded = true;
-    hstring haveHalfOnMode = 0;
+    hstring haveHalfOnMode;
 
     if (barier.MapId == 0) {
         DeferredCall(0, InitBarier, barier.Id);
@@ -212,7 +211,7 @@ void InitBariers(Item barier)
 void InitEmitter(Item emitter)
 {
     emitter.OnCritterUseSkill.Subscribe(_UseEmitter);
-    emitter.OnCritterUseItem.Subscribe(_UseOnEmitter);
+    emitter.OnCritterUseOnSelf.Subscribe(_UseOnEmitter);
 }
 
 uint16 GetFieldCoord(uint16 coord, hstring proto, uint8 type)
@@ -228,23 +227,26 @@ uint16 GetFieldCoord(uint16 coord, hstring proto, uint8 type)
 
 class CBarier
 {
-    Item Barier;           // Ссылка на итем, отображающий сам барьер
-    Item[] Blockers = {};  // Массив итемов блокираторов под основным итемом
-    Item[] Triggers = {};  // Массив триггеров
-    bool Guarded;          // Охраняемый ли барьер
-    uint8 BarierStat;      // Текущий режим работы барьера (Закрытый, открытый, снижена мощность)
-    uint16 HaveHalfOnMode; // Имеет ли барьер режим половины мощности (если имеет, то свойство имеет прототип итема хранящего изображение данного барьера в
-                           // данном режиме)
-    uint8 FieldMode;       // Текущий режим работы
-    CBarier(Item barier, uint8[][] blockers, uint8[] triggers, uint8 trigDir, uint16 trigDest, bool guarded, uint16 modeHalfOn)
+    Item Barier;            // Ссылка на итем, отображающий сам барьер
+    Item[] Blockers = {};   // Массив итемов блокираторов под основным итемом
+    Item[] Triggers = {};   // Массив триггеров
+    bool Guarded;           // Охраняемый ли барьер
+    uint8 BarierStat;       // Текущий режим работы барьера (Закрытый, открытый, снижена мощность)
+    hstring HaveHalfOnMode; // Имеет ли барьер режим половины мощности (если имеет, то свойство имеет прототип итема хранящего изображение данного барьера в
+                            // данном режиме)
+    uint8 FieldMode;        // Текущий режим работы
+
+    CBarier(Item barier, uint8[][] blockers, uint8[] triggers, uint8 trigDir, uint16 trigDest, bool guarded, hstring modeHalfOn)
     {
         DL("CBarier: barier.val1=" + barier.Val1 + ", blockers: [" + blockers[0].length() + "][" + blockers[1].length() + "], triggers: " + triggers.length() +
            ", trigDir: " + trigDir + ", trigDest: " + trigDest + ", medeHalfOn: " + modeHalfOn);
+
         uint16 baseX, baseY;
         uint16 newX, newY;
         Item temp;
         Map map;
         Location loc;
+
         HaveHalfOnMode = modeHalfOn;
         baseX = barier.HexX;
         baseY = barier.HexY;
@@ -254,10 +256,12 @@ class CBarier
         if (barier.MapId > 0) {
             map = GetMap(barier.MapId);
         }
+
         if (!valid(map)) {
             Log("Map not valid!");
             return;
         }
+
         for (uint k = 0; k < blockers.length(); k++) {
             newX = baseX;
             newY = baseY;
@@ -273,6 +277,7 @@ class CBarier
                 }
             }
         }
+
         newX = baseX;
         newY = baseY;
         map.MoveHexByDir(newX, newY, trigDir, trigDest);
@@ -290,13 +295,16 @@ class CBarier
                 }
             }
         }
+
         InitBlockers(this);
         InitTriggers(this);
+
         loc = map.GetLocation();
         if (!valid(loc)) {
             Log("Error: location not valid");
             return;
         }
+
         CBariersNet net = GetBariersNet(Barier.Val1, loc.Id);
         if (!valid(net)) {
             net = CBariersNet(Barier.Val1, loc.Id, Barier.Val2);
@@ -306,6 +314,7 @@ class CBarier
             }
             BariersNets.insertLast(net);
         }
+
         net.AddBarier(this);
     }
 
@@ -313,16 +322,16 @@ class CBarier
     {
         FieldMode = mode;
         if (mode == BM_HALF_ON) {
-            if (HaveHalfOnMode != 0) {
+            if (HaveHalfOnMode != hstring()) {
                 DL("Меняем прототип");
-                Blockers[0].ChangeProto(HaveHalfOnMode);
+                Blockers[0] = Item::ChangeProto(Blockers[0], HaveHalfOnMode);
             }
         }
         else {
             if (mode == BM_ON) {
                 hstring proto = GetMainProto();
-                if (proto != 0) {
-                    Blockers[0].ChangeProto(proto);
+                if (proto != hstring()) {
+                    Blockers[0] = Item::ChangeProto(Blockers[0], proto);
                 }
             }
         }
@@ -345,9 +354,10 @@ class CBarier
                     Blockers[i].OnWalk.Subscribe(_DamageCritter);
                 }
                 else {
-                    GameInstance.OnItemWalk.UnsubscribeFromItem(Blockers[i], _DamageCritter);
+                    Blockers[i].OnWalk.Unsubscribe(_DamageCritter);
                 }
-                if ((HaveHalfOnMode == 0) and (mode == BM_HALF_ON)) {
+
+                if (HaveHalfOnMode == hstring() && mode == BM_HALF_ON) {
                     Blockers[i].IsNoBlock = false;
                 }
                 else {
@@ -374,7 +384,7 @@ class CBarier
                 return EBHalfOnMode[0][i];
             }
         }
-        return 0;
+        return hstring();
     }
 
     uint8 GetFieldMode()
@@ -436,14 +446,13 @@ CBariersNet GetBariersNet(int netNum, uint locId)
     return null;
 }
 
-CBarier GetBarier(hstring mainItemId)
+CBarier GetBarier(uint mainItemId)
 {
-    CBarier barier;
     for (uint i = 0; i < BariersNets.length(); i++) {
         if (valid(BariersNets[i])) {
             for (uint k = 0; k < BariersNets[i].Bariers.length(); k++) {
                 if (valid(BariersNets[i].Bariers[k])) {
-                    barier = BariersNets[i].Bariers[k];
+                    CBarier barier = BariersNets[i].Bariers[k];
                     if (barier.Barier.Id == mainItemId) {
                         return barier;
                     }
@@ -493,15 +502,13 @@ void InitBlockers(CBarier barier)
 
 bool CheckInven(Critter master)
 {
-    bool res = false;
     Item[] items = master.GetItems(Content::Item::energy_barier_access_card);
     for (uint i = 0; i < items.length(); i++) {
         if (CheckCard(items[i], master)) {
-            res = true;
-            break;
+            return true;
         }
     }
-    return res;
+    return false;
 }
 
 bool CheckCard(Item card, Critter master)
@@ -588,7 +595,7 @@ void _WalkOnTrigg(Item item, Critter cr, bool entered, uint8 dir) // TODO
 
     Critter[] npcs = map.GetCritters(cr.HexX, cr.HexY, RADIUS, CritterFindType::AliveNpc);
     for (uint i = 0; i < npcs.length(); i++) {
-        if (npcs[i].NpcRole != uint(item.Val1)) {
+        if (npcs[i].NpcRole != item.Val1) {
             npcs.removeAt(i);
             i--;
         }
@@ -647,7 +654,7 @@ void _DamageCritter(Item item, Critter cr, bool entered, uint8 dir)
     }
 }
 
-bool _DamageCritterUse(Critter cr, CritterProperty skill, Critter onCritter, Item item, StaticItem onScenery)
+bool _DamageCritterUse(Item item, Critter cr, CritterProperty skill)
 {
     CBarier barier = GetBarier(item.Id);
     if (!valid(barier)) {
@@ -738,7 +745,7 @@ bool _UseEmitter(Item item, Critter cr, CritterProperty skill)
     return true;
 }
 
-bool _UseOnEmitter(Item item, Critter cr, Item usedItem)
+bool _UseOnEmitter(Item item, Critter cr, Item usedItem, uint param)
 {
     if (!valid(usedItem))
         return true;
@@ -993,7 +1000,7 @@ uint doHack(Critter master, int hexX, int hexY)
     Critter[] npcs = map.GetCritters(master.HexX, master.HexY, RADIUS, CritterFindType::AliveNpc);
     for (uint i = 0; i < npcs.length(); i++) {
         for (uint k = 0; k < net.Bariers.length(); k++) {
-            if (npcs[i].NpcRole == uint(net.Bariers[k].GetGuardNum()))
+            if (npcs[i].NpcRole == int(net.Bariers[k].GetGuardNum()))
                 guardNotFound = false;
         }
         if (guardNotFound) {
@@ -1014,7 +1021,7 @@ uint doHack(Critter master, int hexX, int hexY)
     }
 
     uint8 hRoll = HackRoll(master);
-    if (not Stdlib::IsSuccessRvS(hRoll)) {
+    if (!Stdlib::IsSuccessRvS(hRoll)) {
         if (Stdlib::IsCriticalRvS(hRoll)) {
             uint[] adTermInfo = {};
             adTermInfo.insertLast(0);

@@ -174,7 +174,7 @@ void ChosenProcess()
         }
 
         // Already here
-        if (!skipFind && GetDistance(chosen.HexX, chosen.HexY, hx, hy) <= cut)
+        if (!skipFind && GetDistance(chosen.HexX, chosen.HexY, hx, hy) <= int(cut))
             skipFind = true;
 
         // Next move hex is free
@@ -189,9 +189,9 @@ void ChosenProcess()
 
         // Find path
         if (!skipFind) {
-            uint8[] path = GetPathToHex(chosen.HexX, chosen.HexY, hx, hy, cut);
-            if (path is null && GetDistance(chosen.HexX, chosen.HexY, hx, hy) > cut + 1)
-                path = GetPathToHex(chosen.HexX, chosen.HexY, hx, hy, ++cut);
+            uint8[] path = GetPath(chosen.HexX, chosen.HexY, hx, hy, cut);
+            if (path is null && GetDistance(chosen.HexX, chosen.HexY, hx, hy) > int(cut) + 1)
+                path = GetPath(chosen.HexX, chosen.HexY, hx, hy, ++cut);
 
             if (path !is null)
                 MovePath = path;
@@ -413,7 +413,7 @@ void ChosenProcess()
             if (isAttack) {
                 AbstractItem weap = chosen.GetItem(ItemProperty::CritSlot, SLOT_HAND1);
                 // TODO: проверить, что работает для рукопашных ударов.
-                GameInstance.OnCritterGetAttackDistantion.Fire(chosen, weap, weap.Mode, maxDist);
+                GameInstance.OnCritterGetAttackDistantionEx.Fire(chosen, weap, weap.Mode, maxDist);
             }
             else {
                 maxDist = 1 + chosen.Multihex;
@@ -464,11 +464,11 @@ void ChosenProcess()
          */
 
         if (use >= USE_PRIMARY && use <= USE_THIRD)
-            GameInstance.OnCritterAction.Fire(true, chosen, ACTION_USE_WEAPON, rate, item);
+            GameInstance.OnCritterActionEx.Fire(true, chosen, ACTION_USE_WEAPON, rate, item);
         else if (use == USE_RELOAD)
-            GameInstance.OnCritterAction.Fire(true, chosen, ACTION_RELOAD_WEAPON, 0, item);
+            GameInstance.OnCritterActionEx.Fire(true, chosen, ACTION_RELOAD_WEAPON, 0, item);
         else
-            GameInstance.OnCritterAction.Fire(true, chosen, ACTION_USE_ITEM, 0, item);
+            GameInstance.OnCritterActionEx.Fire(true, chosen, ACTION_USE_ITEM, 0, item);
 
         chosen.CurrentAp -= apCost;
         if (isAttack && valid(targetCr)) {
@@ -499,7 +499,7 @@ void ChosenProcess()
         //    break;
 
         if (toSlot == SLOT_GROUND) {
-            if (!GameInstance.OnItemCheckMove.Fire(item, itemCount, chosen, CurMap))
+            if (!GameInstance.OnItemCheckMoveEx.Fire(item, itemCount, chosen, CurMap))
                 break;
         }
 
@@ -507,11 +507,12 @@ void ChosenProcess()
         if (toSlot != SLOT_INV && toSlot != SLOT_GROUND)
             itemSwap = chosen.GetItem(ItemProperty::CritSlot, toSlot);
 
-        if (!GameInstance.OnCritterCheckMoveItem.Fire(chosen, item, toSlot)) {
+        if (!GameInstance.OnCritterCheckMoveItemEx.Fire(chosen, item, toSlot)) {
             // Gameplay swap workaround
             if (itemSwap !is null && !isSecondTry) {
                 // Add actions
-                if (GameInstance.OnCritterCheckMoveItem.Fire(chosen, itemSwap, SLOT_INV) && GameInstance.OnCritterCheckMoveItem.Fire(chosen, item, toSlot)) {
+                if (GameInstance.OnCritterCheckMoveItemEx.Fire(chosen, itemSwap, SLOT_INV) &&
+                    GameInstance.OnCritterCheckMoveItemEx.Fire(chosen, item, toSlot)) {
                     ChosenActions.reverse();
                     ChosenActions.resize(ChosenActions.length() - 7);
                     ChosenActions.reverse();
@@ -579,7 +580,7 @@ void ChosenProcess()
         bool take = (colType == ClientItems::Collection::Loot);
         Entity from = (itemCont == ITEMS_PICKUP ? cast<Entity>(chosen) : contEntity);
         Entity to = (itemCont == ITEMS_PICKUP ? contEntity : cast<Entity>(chosen));
-        if (!GameInstance.OnItemCheckMove.Fire(item, count, from, to))
+        if (!GameInstance.OnItemCheckMoveEx.Fire(item, count, from, to))
             break;
 
         uint apCost = Settings.RtApCostMoveItemContainer;
@@ -596,7 +597,7 @@ void ChosenProcess()
         ClientItems::RemoveItem(colType, item, count);
         chosen.Wait(Settings.Breaktime);
 
-        GameInstance.OnCritterAction.Fire(true, chosen, ACTION_OPERATE_CONTAINER, transferType, item);
+        GameInstance.OnCritterActionEx.Fire(true, chosen, ACTION_OPERATE_CONTAINER, transferType, item);
 
         ServerCall.OperateContainer(take, false, item.Id, count);
     } break;
@@ -661,7 +662,7 @@ void ChosenProcess()
                 // TODO: запись и чтение голодисков. см CHOSEN_USE_SKL_ON_ITEM cr.cpp
                 break;
             }
-            ServerCall.UseSkill(skill, 0, item_action.Id, 0, 0, 0);
+            ServerCall.UseSkill(skill, 0, item_action.Id, hstring(), 0, 0);
         }
         else {
             Item item = GetItem(itemId);
@@ -685,7 +686,7 @@ void ChosenProcess()
             }
             uint apCost = Settings.RtApCostUseSkill;
             CHECK_NEED_AP(apCost);
-            ServerCall.UseSkill(skill, 0, item_action.Id, 0, 0, 0);
+            ServerCall.UseSkill(skill, 0, item_action.Id, hstring(), 0, 0);
         }
     } break;
     case Tla::ChosenUseSklOnCritter: {
@@ -721,7 +722,7 @@ void ChosenProcess()
 
         chosen.CurrentAp = chosen.CurrentAp - apCost * AP_DIVIDER;
 
-        ServerCall.UseSkill(skill, cr.Id, 0, 0, 0, 0);
+        ServerCall.UseSkill(skill, cr.Id, 0, hstring(), 0, 0);
     } break;
     case Tla::ChosenTalkNpc: {
         uint crId = ChosenActions[1];
@@ -761,7 +762,7 @@ void ChosenProcess()
         ServerCall.StartDialog(cr.Id);
     } break;
     case Tla::ChosenPickItem: {
-        hstring pid = ChosenActions[1];
+        hstring pid = hstring_fromHash(ChosenActions[1]);
         uint16 hx = ChosenActions[2];
         uint16 hy = ChosenActions[3];
         uint itemId = ChosenActions[4];
@@ -776,7 +777,7 @@ void ChosenProcess()
             SetAction(array<uint> = {Tla::ChosenMove, hx, hy, isRun ? 1 : 0, useDist, 0, 1}, false, false);
 
             if (GetPathLength(chosen, hx, hy, useDist) > 0)
-                SetAction(array<uint> = {Tla::ChosenPickItem, pid, hx, hy, 0, 0, 0}, true, false);
+                SetAction(array<uint> = {Tla::ChosenPickItem, pid.hash, hx, hy, 0, 0, 0}, true, false);
             return;
         }
         uint apCost = Settings.RtApCostPickItem;
@@ -794,7 +795,7 @@ void ChosenProcess()
         if (itemId > 0) {
             Item item = GetItem(itemId);
             if (item != null)
-                GameInstance.OnCritterAction.Fire(true, chosen, ACTION_PICK_ITEM, 0, item);
+                GameInstance.OnCritterActionEx.Fire(true, chosen, ACTION_PICK_ITEM, 0, item);
         }
     } break;
     case Tla::ChosenPickCrit: {
@@ -872,7 +873,7 @@ void PickItem(Player player, uint16 hx, uint16 hy, hstring pid)
 
     if (!cr.IsAlive())
         ThrowException("Critter is not alive", cr);
-    if (GetDistance(cr.HexX, cr.HexY, hx, hy) > 1 + cr.Multihex)
+    if (GetDistance(cr.HexX, cr.HexY, hx, hy) > int(1 + cr.Multihex))
         ThrowException("Target too far", cr, cr.HexX, cr.HexY, hx, hy);
 
     Map map = cr.GetMap();
@@ -968,7 +969,7 @@ void UseSkill(Player player, CritterProperty skill, uint targetCrId, uint target
                     ThrowException("Target critter not found", cr, targetCrId);
                 if (!cr.IsSee(targetCr))
                     ThrowException("Critter doesn't see target critter", cr, targetCr);
-                if (GetDistance(cr.HexX, cr.HexY, targetCr.HexX, targetCr.HexY) > useDist + targetCr.Multihex)
+                if (GetDistance(cr.HexX, cr.HexY, targetCr.HexX, targetCr.HexY) > int(useDist + targetCr.Multihex))
                     ThrowException("Target critter too far", cr, targetCr);
             }
             else {
@@ -979,18 +980,18 @@ void UseSkill(Player player, CritterProperty skill, uint targetCrId, uint target
         else
             targetCr = cr;
     }
-    else if (targetItemId != 0 || sceneryPid > 0) {
+    else if (targetItemId != 0 || sceneryPid != hstring()) {
         Map map = cr.GetMap();
         if (map == null)
             ThrowException("Critter on global map", cr);
 
-        if (sceneryPid == 0) {
+        if (sceneryPid == hstring()) {
             targetItem = map.GetItem(targetItemId);
             if (targetItem == null)
                 ThrowException("Target item not found on map", cr, map, targetItemId);
             if (targetItem.IsHidden)
                 ThrowException("Target item is hidden", cr, map, targetItem);
-            if (GetDistance(cr.HexX, cr.HexY, targetItem.HexX, targetItem.HexY) > useDist)
+            if (GetDistance(cr.HexX, cr.HexY, targetItem.HexX, targetItem.HexY) > int(useDist))
                 ThrowException("Target item too far", cr, targetItem);
         }
         else {
@@ -998,7 +999,7 @@ void UseSkill(Player player, CritterProperty skill, uint targetCrId, uint target
             if (proto == null)
                 ThrowException("Proto item not found", cr, sceneryPid);
 
-            if (GetDistance(cr.HexX, cr.HexY, hx, hy) > useDist)
+            if (GetDistance(cr.HexX, cr.HexY, hx, hy) > int(useDist))
                 ThrowException("Target scenery too far", cr, hx, hy, sceneryPid);
 
             targetScen = map.GetStaticItem(hx, hy, sceneryPid);
@@ -1073,7 +1074,7 @@ void OperateContainer(Player player, bool take, bool all, uint itemId, uint item
                 ThrowException("Hex container not on map", cr, itemCont);
             if (itemCont.MapId != cr.GetMap().Id)
                 ThrowException("Hex container not on cr map", cr, itemCont);
-            if (GetDistance(cr.HexX, cr.HexY, itemCont.HexX, itemCont.HexY) > 1 + cr.Multihex)
+            if (GetDistance(cr.HexX, cr.HexY, itemCont.HexX, itemCont.HexY) > int(1 + cr.Multihex))
                 ThrowException("Hex container too far", cr, itemCont);
         }
         else if (transferType == TransferTypes::FarCont) {
@@ -1098,7 +1099,7 @@ void OperateContainer(Player player, bool take, bool all, uint itemId, uint item
             ThrowException("Critter container not found", cr, cr.TransferContainerId);
         if (transferType != TransferTypes::FarCrit && !cr.IsSee(crCont))
             ThrowException("Critter container is not seen by cr", cr, crCont);
-        if (transferType != TransferTypes::FarCrit && GetDistance(cr.HexX, cr.HexY, crCont.HexX, crCont.HexY) > 1 + cr.Multihex + crCont.Multihex)
+        if (transferType != TransferTypes::FarCrit && GetDistance(cr.HexX, cr.HexY, crCont.HexX, crCont.HexY) > int(1 + cr.Multihex + crCont.Multihex))
             ThrowException("Critter container is too far", cr, crCont);
         if (cr.Id == cr.TransferContainerId)
             ThrowException("Critter container id is same as cr id", cr, crCont);
@@ -1296,7 +1297,7 @@ void ReloadWeapon(Player player, uint weaponId, uint ammoId)
 
     // Unload
     if (ammo == null || (weapon.AmmoCount > 0 && weapon.AmmoPid != ammo.ProtoId)) {
-        if (weapon.AmmoPid != 0) {
+        if (weapon.AmmoPid != hstring()) {
             Item existAmmo = cr.GetItem(weapon.AmmoPid);
             if (existAmmo == null)
                 cr.AddItem(weapon.AmmoPid, weapon.AmmoCount);
@@ -1376,7 +1377,7 @@ void Attack(Player player, uint targetId, uint8 mode)
     uint16 hy = cr.HexY;
 
     uint maxDist = 0;
-    GameInstance.OnCritterGetAttackDistantion.Fire(cr, weapon, mode, maxDist);
+    GameInstance.OnCritterGetAttackDistantionEx.Fire(cr, weapon, mode, maxDist);
     if (maxDist == 0)
         ThrowException("Invalid weapon range", cr, weapon, use, targetHexX, targetHexY);
 
@@ -1386,7 +1387,7 @@ void Attack(Player player, uint targetId, uint8 mode)
 
     uint16 tracedHexX = targetHexX;
     uint16 tracedHexY = targetHexY;
-    map.GetHexCoord(hx, hy, tracedHexX, tracedHexY, 0.0f, dist);
+    map.GetHexInPath(hx, hy, tracedHexX, tracedHexY, 0.0f, dist);
     if (targetHexX != tracedHexX || targetHexY != tracedHexY)
         ThrowException("Target blocked", cr, weapon, use, targetHexX, targetHexY);
 

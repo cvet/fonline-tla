@@ -12,7 +12,7 @@ void ModuleInit()
     GameInstance.OnCritterAttack.Subscribe(critter_attack);
     GameInstance.OnCritterAttacked.Subscribe(critter_attacked);
     GameInstance.OnCritterStealing.Subscribe(critter_stealing);
-    GameInstance.OnCritterUseItem.Subscribe(critter_use_item);
+    GameInstance.OnCritterUseItemOn.Subscribe(critter_use_item);
     GameInstance.OnCritterUseSkill.Subscribe(critter_use_skill);
     GameInstance.OnCritterReloadWeapon.Subscribe(critter_reload_weapon);
     GameInstance.OnCritterInit.Subscribe(critter_init);
@@ -58,24 +58,6 @@ void map_loop_ex(Map map, uint loopIndex)
 void init()
 {
     Config::InitializeGame();
-
-    string[] files = GetFolderFileNames("..\\TLA\\Server\\", "json", false);
-    for (int i = 0, l = files.length(); i < l; i++) {
-        Log("JSON: " + files[i]);
-        string path = "..\\TLA\\Server\\" + files[i];
-        file f = file();
-        if (f.open(path, "r") == 0) {
-            int size = f.getSize();
-
-            string text = f.readString(size);
-            f.close();
-            f = file();
-            if (f.open(files[i], "w") == 0) {
-                f.writeString(text);
-                Log("saved " + files[i]);
-            }
-        }
-    }
 }
 
 // //////////////////////////////////////////////////////////////////////////////////////////////////
@@ -349,7 +331,7 @@ bool critter_stealing(Critter cr, Critter thief, Item item, uint count)
     }
 
     // Доп. события
-    cr.OnStealing.Fire(thief, cr, item, count);
+    cr.OnStealing.Fire(thief, item, count);
 
     Critter[] other = thief.GetCritters(true, CritterFindType::Alive);
     for (uint i = 0; i < other.length(); i++) {
@@ -444,6 +426,10 @@ bool critter_use_item(Critter cr, Item item, Critter targetCr, Item targetItem, 
         return true;
 
     // Доп. события
+    if (useOnSelf) {
+        GameInstance.OnCritterUseItem.Fire(cr, item, param);
+    }
+
     Critter[] other = cr.GetCritters(true, CritterFindType::Alive);
     for (uint i = 0; i < other.length(); i++) {
         other[i].OnSomeCritterUseItem.Fire(cr, item, targetCr, targetItem, targetScen, param);
@@ -477,7 +463,7 @@ bool critter_use_skill(Critter cr, CritterProperty skill, Critter targetCr, Item
         // Scenery
         if (valid(targetScen)) {
             if (targetScen.InitScript != hstring())
-                targetScen.CallStaticItemFunction(cr, null, 0);
+                CallStaticItemFunction(cr, targetScen, 0);
             else
                 cr.SayMsg(SAY_NETMSG, TEXTMSG_GAME, MsgStr::StrUseNothing);
             return true;
@@ -798,8 +784,8 @@ void critter_init(Critter cr, bool firstTime)
                     cr.SetAsInt(CritterPropertyTraits[i], 0);
             }
 
-            if (cr.Gender < 0 || cr.Gender > 1)
-                cr.Gender = 0;
+            if (cr.Gender != GenderType::Male && cr.Gender != GenderType::Female)
+                cr.Gender = GenderType::Male;
             if (cr.Age < 14 || cr.Age > 80)
                 cr.Age = 25;
 
@@ -1089,9 +1075,8 @@ void critter_dead(Critter cr, Critter killer)
         other[i].OnSomeCritterDead.Fire(cr, killer);
     }
 
-    // R17
     if (valid(map))
-        GameInstance.OnMapCritterDead.Fire(map, cr, killer);
+        map.OnCritterDead.Fire(cr, killer);
 }
 
 // //////////////////////////////////////////////////////////////////////////////////////////////////
@@ -1205,13 +1190,13 @@ bool player_login(uint ip, string name, uint id, uint& textMsg, uint& strNum, st
 
 // Call on player try change access
 // Return true to allow, false to disallow
-bool player_getaccess(Critter player, int access, string& password)
+bool player_getaccess(Player player, int access, string& password)
 {
     Log("Access changed for player " + player.Name + ", from " + player.GetAccess() + " to " + access + ".");
     return true;
 }
 
-bool player_allowcommand(Critter player, string adminPanel, uint8 command)
+bool player_allowcommand(Player player, string adminPanel, uint8 command)
 {
     if (adminPanel.isEmpty())
         return true;
@@ -1266,10 +1251,10 @@ bool player_allowcommand(Critter player, string adminPanel, uint8 command)
         break;
     // Unknown command
     default:
-        player.Say(SAY_NETMSG, "Unknown command.");
+        player.GetOwnedCritter().Say(SAY_NETMSG, "Unknown command.");
         return false;
     }
 
-    player.Say(SAY_NETMSG, "Access denied.");
+    player.GetOwnedCritter().Say(SAY_NETMSG, "Access denied.");
     return false;
 }

@@ -185,7 +185,7 @@ bool npc_plane_run(Critter npc, int planeId, int reason, uint& r0, uint& r1, uin
         // Default weapons
         r0 = 0; // Use unarmed by default
         r1 = 0;
-        r2 = (Random(0, 4) == 0 ? Content::Item::default_weapon : Content::Item::unarmed_kick);
+        r2 = (Random(0, 4) == 0 ? Content::Item::default_weapon.hash : Content::Item::unarmed_kick.hash);
 
         // Damaged two arms
         if (npc.IsDamagedLeftArm && npc.IsDamagedRightArm)
@@ -310,7 +310,7 @@ bool npc_plane_run(Critter npc, int planeId, int reason, uint& r0, uint& r1, uin
     }
     else if (reason == REASON_ATTACK_DISTANTION) {
         Critter target = GetCritter(r0);
-        AbstractItem weapon = npc.GetItem(ItemProperty::CritSlot, , SLOT_HAND1);
+        AbstractItem weapon = npc.GetItem(ItemProperty::CritSlot, SLOT_HAND1);
         int use = _WeaponModeUse(weapon.Mode);
         ItemProto ammo = (weapon.Weapon_MaxAmmoCount > 0 && weapon.Weapon_Caliber != 0 ? GetItemProto(_CritGetItemHand(npc).AmmoPid) : null);
         int wpnDist = _WeaponMaxDist(weapon, use);
@@ -459,7 +459,7 @@ bool npc_plane_run(Critter npc, int planeId, int reason, uint& r0, uint& r1, uin
             r1 = (!npc.IsNoAim && Random(0, 5) == 0 ? Random(HitLocations::LocationHead, HitLocations::LocationGroin) : 0);
         }
 
-        AbstractItem weapon = npc.GetItem(ItemProperty::CritSlot, , SLOT_HAND1);
+        AbstractItem weapon = npc.GetItem(ItemProperty::CritSlot, SLOT_HAND1);
         int ap = valid(weapon) ? _WeaponApCost(weapon, r0) : 3;
         switch (r1) {
         case HitLocations::LocationEyes:
@@ -505,6 +505,7 @@ bool CogitateFiring(Critter cr, uint mode, uint aim) // in: targetId, 0; out: mo
     Critter target = GetCritter(mode);
     if (!valid(target))
         return false;
+
     Item weapon = cr.GetItem(ItemProperty::CritSlot, SLOT_HAND1);
 
     if (!valid(weapon)) // true unarmed
@@ -520,16 +521,16 @@ bool CogitateFiring(Critter cr, uint mode, uint aim) // in: targetId, 0; out: mo
 
     if (weapon.Type != ItemType::Weapon)
         return false;
-    ItemProto protoWeapon = GetItemProto(weapon.ProtoId);
+
     ItemProto protoAmmo = null;
-    if (weapon.AmmoPid != 0)
+    if (weapon.AmmoPid != hstring())
         protoAmmo = GetItemProto(weapon.AmmoPid);
-    if (protoWeapon.Weapon_Skill_0 == CritterProperty::SkillUnarmed ||
-        protoWeapon.Weapon_Skill_0 == CritterProperty::SkillMeleeWeapons) // assuming all modes melee
+
+    if (weapon.Weapon_Skill_0 == CritterProperty::SkillUnarmed || weapon.Weapon_Skill_0 == CritterProperty::SkillMeleeWeapons) // assuming all modes melee
     {
         mode = 0;
         if (!cr.IsNoAim)
-            aim = ChooseAim(cr, target, protoWeapon, mode, protoAmmo);
+            aim = ChooseAim(cr, target, weapon, mode, protoAmmo);
         else
             aim = 0;
 
@@ -538,19 +539,19 @@ bool CogitateFiring(Critter cr, uint mode, uint aim) // in: targetId, 0; out: mo
     else // assuming all modes ranged
     {
         bool forceBurst = false;
-        if (protoWeapon.Weapon_Round_0 > 1) {
+        if (weapon.Weapon_Round_0 > 1) {
             // cr.Say(SAY_NORM, "Burst is the only mode");
             forceBurst = true;
             mode = 0;
         }
         else {
-            if (protoWeapon.Weapon_DmgType_1 == -1) {
+            if (weapon.Weapon_DmgType_1 == -1) {
                 // cr.Say(SAY_NORM, "Single shot is the only mode");
                 mode = 0;
             }
             else {
                 // cr.Say(SAY_NORM, "Second mode available");
-                if (ValidateBurst(cr, target, protoWeapon, mode)) {
+                if (ValidateBurst(cr, target, weapon, mode)) {
                     // cr.Say(SAY_NORM, "Burst forced by check");
                     forceBurst = true;
                     mode = 1;
@@ -567,11 +568,12 @@ bool CogitateFiring(Critter cr, uint mode, uint aim) // in: targetId, 0; out: mo
             return true;
         }
 
-        if (cr.IsNoAim || !_WeaponAim(protoWeapon, mode)) {
+        if (cr.IsNoAim || !_WeaponAim(weapon, mode)) {
             aim = 0;
             return true;
         }
-        aim = ChooseAim(cr, target, protoWeapon, mode, protoAmmo);
+
+        aim = ChooseAim(cr, target, weapon, mode, protoAmmo);
         return true;
     }
 }
@@ -658,16 +660,16 @@ int ChooseAim(Critter cr, Critter target, Item weapon, uint8 mode, ItemProto amm
 class CTraceFirstCritter : LineTracer::ITraceContext
 {
     Critter Cr;
-    uint Mindist;
+    uint MinDist;
     uint16 Gx;
     uint16 Gy;
 
-    CTraceFirstCritter(uint16 gx, uint16 gy, uint16 mindist)
+    CTraceFirstCritter(uint16 gx, uint16 gy, uint16 minDist)
     {
         Gx = gx;
         Gy = gy;
         Cr = null;
-        Mindist = mindist;
+        MinDist = minDist;
     }
 
     bool Exec(Map map, uint16 hx, uint16 hy) override
@@ -679,7 +681,7 @@ class CTraceFirstCritter : LineTracer::ITraceContext
         if (valid(cr))
             Cr = GetCritter(cr.Id);
 
-        return valid(Cr) && Cr.Cond == CritterCondition::Alive && GetDistance(Gx, Gy, Cr.HexX, Cr.HexY) >= Mindist;
+        return valid(Cr) && Cr.Cond == CritterCondition::Alive && GetDistance(Gx, Gy, Cr.HexX, Cr.HexY) >= int(MinDist);
     }
 
     void StartExec(Map map, uint16 hx, uint16 hy, uint16 tx, uint16 ty, uint maxDist) override

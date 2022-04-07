@@ -33,19 +33,19 @@
 #define FORCE_DIALOG_PLAYER_ADDED    (7) // Номер строки диалога с главным компьютером города, в котором пишется, что игрок добавлен в списки жителей города
 #define FORCE_DIALOG_PLAYER_REMOVED  (8) // Номер строки диалога с главным компьютером города, в котором пишется, что игрок удален из списков жителей города
 #define FORCE_DIALOG_ERROR           (9) // Неизвестная ошибка
-#define ENTRY_CITYHALL               (17)    // Номер гекса на который перемещается житель при входе в город.
-#define ENTRY_DOCTOR                 (18)    // Номер гекса клиники, в которую можно привести доктора.
-#define ENTRY_TRADER                 (19)    // Номер гекса магазина, в него можно привести торговца.
-#define ENTRY_OUTER_TERMINAL         (20)    // Гекс рядом с внешним терминалом
-#define ENTRY_GUARD                  (21)    // Гекс для размещения наемных охранников
-#define ENTRY_BARMAN                 (22)    // Кафе. Гекс для  бармена
-#define ENTRY_BAR                    (23)    // Кафе. Гекс для посетителей
-#define ENTRY_CELLAR_ENTRANCE        (24)    // Штабквартира. Гекс перед входом
-#define ENTRY_CITIZEN_CAR            (100)   // Два гекса для машин жителей
-#define ENTANCE_CITYHALL             (1)     // Порядковый номер входа "штабквартира"
-#define ENTRY_CITIZEN_EXIT           (2)     // Специальный закрытый выход для жителей
-#define ENTRY_REPLICATOR_TANK        (30)    // Номер гекса, на котором устанавливается репликатор
-#define ENTRY_REPLICATOR_SPAWN       (31)    // Номер гекса, на котором появляется возрожденный игрок
+#define ENTRY_CITYHALL               (17)  // Номер гекса на который перемещается житель при входе в город.
+#define ENTRY_DOCTOR                 (18)  // Номер гекса клиники, в которую можно привести доктора.
+#define ENTRY_TRADER                 (19)  // Номер гекса магазина, в него можно привести торговца.
+#define ENTRY_OUTER_TERMINAL         (20)  // Гекс рядом с внешним терминалом
+#define ENTRY_GUARD                  (21)  // Гекс для размещения наемных охранников
+#define ENTRY_BARMAN                 (22)  // Кафе. Гекс для  бармена
+#define ENTRY_BAR                    (23)  // Кафе. Гекс для посетителей
+#define ENTRY_CELLAR_ENTRANCE        (24)  // Штабквартира. Гекс перед входом
+#define ENTRY_CITIZEN_CAR            (100) // Два гекса для машин жителей
+#define ENTANCE_CITYHALL             (1)   // Порядковый номер входа "штабквартира"
+#define ENTRY_CITIZEN_EXIT           (2)   // Специальный закрытый выход для жителей
+#define ENTRY_REPLICATOR_TANK        (30)  // Номер гекса, на котором устанавливается репликатор
+#define ENTRY_REPLICATOR_SPAWN       hstring("31") // Номер гекса, на котором появляется возрожденный игрок
 #define MAPLOOP_0                    (65000) // Период, на который тратится 1 батарейка в генераторе, при расчете: активен барьер на входе или нет
 #define _GetUptime                   #(charges)(uint(charges *(MAPLOOP_0 / 1000) / 3600)) // Время в часах игровое в зависимости от числа зарядов
 #define CHARGES_MFC                  (10) // Число зарядов генератора c одного реактора
@@ -89,14 +89,11 @@ void r_GiveGeck(Critter cr, Critter npc)
 void _GeckInit(Item geck, bool firstTime)
 {
     geck.IsCanUse = true;
-    geck.OnCritterUseItem.Subscribe(_GeckUse);
+    geck.OnCritterUse.Subscribe(_GeckUse);
 }
 
-bool _GeckUse(Critter cr, Item item, Critter onCritter, Item onItem, StaticItem onScenery, uint param)
+bool _GeckUse(Item geck, Critter cr, uint param)
 {
-    if (valid(onItem) || valid(onCritter) || valid(onScenery))
-        return false;
-
     Map map = cr.GetMap();
     if (!valid(map))
         return false;
@@ -108,13 +105,12 @@ bool _GeckUse(Critter cr, Item item, Critter onCritter, Item onItem, StaticItem 
     if (!loc.AutoGarbage)
         return false;
 
-    uint locPid = loc.ProtoId;
-    if (locPid < Content::Location::desert_1 || locPid > Content::Location::desert_12) {
+    if (PidsGroups::Pids_MapDeserts.find(loc.ProtoId) == -1) {
         cr.SayMsg(SAY_NETMSG, TEXTMSG_TEXT, STR_WRONG_LOC);
         return true;
     }
 
-    CreateCity(cr, item);
+    CreateCity(cr, geck);
     return true;
 }
 
@@ -292,26 +288,22 @@ uint dlg_RemoveCitizen(Critter player, Critter npc, string playerName)
     if (!IS_DIALOG_SAY_MODE(playerName))
         return 0;
 
-    Critter crConst = GetPlayer(playerName);
-    if (valid(crConst)) {
-        Critter cr = GetCritter(crConst.Id);
-        if (valid(cr)) {
-            if (cr.Id == player.Id) {
-                return FORCE_DIALOG_PLAYER_NOTFOUND;
-            }
-            if (RemoveCitizen(player, cr)) {
-                cr.SayMsg(SAY_NETMSG, TEXTMSG_TEXT, STR_CITIZEN_REMOVED, "$leadername" + Obsolete::GetPlayerName(player.Id));
-                return FORCE_DIALOG_PLAYER_REMOVED;
-            }
-            else {
-                return FORCE_DIALOG_ERROR;
-            }
-        }
+    Player playerOwner = GetPlayer(playerName);
+    if (playerOwner == null) {
+        return FORCE_DIALOG_PLAYER_NOTFOUND;
     }
-    else {
-        return FORCE_DIALOG_ERROR;
+
+    Critter cr = playerOwner.GetOwnedCritter();
+    if (cr.Id == player.Id) {
+        return FORCE_DIALOG_PLAYER_NOTFOUND;
     }
-    return FORCE_DIALOG_PLAYER_NOTFOUND;
+
+    if (RemoveCitizen(player, cr)) {
+        cr.SayMsg(SAY_NETMSG, TEXTMSG_TEXT, STR_CITIZEN_REMOVED, "$leadername" + Obsolete::GetPlayerName(player.Id));
+        return FORCE_DIALOG_PLAYER_REMOVED;
+    }
+
+    return FORCE_DIALOG_ERROR;
 }
 
 uint dlg_AddCitizen(Critter player, Critter npc, string playerName)
@@ -421,7 +413,7 @@ Location GetGeckLocation(Critter player)
 // npcPid - прототип НПЦ
 // maxNum - максимальное число НПЦ такого типа на карте
 // homeEntry - номер гекса с домашней позицией НПЦ
-bool d_CanHireNpc(Critter player, Critter npc, int npcPid, int maxNum, int homeEntry)
+bool d_CanHireNpc(Critter player, Critter npc, hstring npcPid, int maxNum, int homeEntry)
 {
     if (maxNum < 1)
         return false;
@@ -443,7 +435,7 @@ bool d_CanHireNpc(Critter player, Critter npc, int npcPid, int maxNum, int homeE
     return Entrance::MapCountEntry(map, uint8(homeEntry)) > count;
 }
 
-bool d_CanNotHireNpc(Critter player, Critter npc, int npcPid, int maxNum, int homeEntry)
+bool d_CanNotHireNpc(Critter player, Critter npc, hstring npcPid, int maxNum, int homeEntry)
 {
     return !d_CanHireNpc(player, npc, npcPid, maxNum, homeEntry);
 }
@@ -453,13 +445,12 @@ bool d_CanHireNpc(Critter player, Critter npc, int maxNum, int homeEntry)
     if (!valid(npc))
         return false;
 
-    auto npcPid = npc.ProtoId;
-    return d_CanHireNpc(player, npc, npcPid, maxNum, homeEntry);
+    return d_CanHireNpc(player, npc, npc.ProtoId, maxNum, homeEntry);
 }
 
 bool d_CanNotHireNpc(Critter player, Critter npc, int maxNum, int homeEntry)
 {
-    return (!d_CanHireNpc(player, npc, maxNum, homeEntry));
+    return !d_CanHireNpc(player, npc, maxNum, homeEntry);
 }
 
 // Проверка, найдена ли новая домашняя позиция в Городе из ГЕККа для НПЦ
@@ -577,12 +568,12 @@ void _GeckMapInCritter(Map map, Critter cr) // obsolete
 void TryMoveCar(Critter cr, Map map)
 {
     Item[] items = {}; // cr.GetItems(ItemProperty::Type, ItemType::Key);
-    for (int k = 0; k < items.length(); k++) {
+    for (uint k = 0; k < items.length(); k++) {
         Item key = items[k];
         Entrance::Entry[] entries = {};
         entries.insertLast(Entrance::ParseEntries(map, ENTRY_CAR));
         entries.insertLast(Entrance::ParseEntries(map, ENTRY_BIG_CAR));
-        for (int i = 0; i < entries.length(); i++) {
+        for (uint i = 0; i < entries.length(); i++) {
             Item car = Obsolete::GetMapCar(map, entries[i].HexX, entries[i].HexY);
             if (valid(car) && car.LockerId == key.LockerId) {
                 Entrance::Entry[] entries2 = Entrance::ParseEntries(map, ENTRY_CITIZEN_CAR);

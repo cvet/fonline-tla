@@ -6,6 +6,8 @@
 #define STR_TEAR_REPAIR        (202) // Вы рвете мешок и песок рассыпается на землю.
 #define MIN_ENTRY_DIST         (5) // Минимальное расстояние до ближайшего ентайр гекса, на котором можно расположить мешок
 
+hstring[] SandbagPids = {Content::Item::sandbag_1, Content::Item::sandbag_2, Content::Item::sandbag_3, Content::Item::sandbag_4, Content::Item::sandbag_5};
+
 // Кладет мешок на карту в указанных координатах
 // - проверяется возможность положить мешок
 // - проверяется, что в координатах нет двери или контейнера - на них мешки класть нельзя. Новый мешок в таком случае удаляется
@@ -79,19 +81,18 @@ bool AddSandBag(Map map, Critter player, uint16 x, uint16 y, Item sandBag)
             player.SayMsg(SAY_NETMSG, TEXTMSG_TEXT, STR_TEAR_SANDBAG);
             return false;
         }
-        if (!ChangeSandBagProto(sandBag, pidCur))
-            return false;
+
+        sandBag = ChangeSandBagProto(sandBag, pidCur);
     }
     MoveItem(sandBag, 1, map, x, y);
     return true;
 }
 
-bool ChangeSandBagProto(Item sb, int16 pidNew)
+Item ChangeSandBagProto(Item sb, hstring pidNew)
 {
-    if (!sb.ChangeProto(pidNew))
-        return false;
+    sb = Item::ChangeProto(sb, pidNew);
     sb.IsGag = true;
-    return true;
+    return sb;
 }
 
 // Попытка забрать верхний мешок из стопки
@@ -99,7 +100,7 @@ bool TakeSandBag(Map map, Critter player, Item takeFrom)
 {
     hstring pid = takeFrom.ProtoId;
     bool lastSB = false;
-    hstring newPid = 0;
+    hstring newPid;
     if (pid == Content::Item::sandbag_1)
         lastSB = true;
     else if (pid == Content::Item::sandbag_2)
@@ -130,27 +131,26 @@ bool TakeSandBag(Map map, Critter player, Item takeFrom)
         return true;
     }
     else {
-        if (!ChangeSandBagProto(takeFrom, newPid))
-            return false;
-
+        takeFrom = ChangeSandBagProto(takeFrom, newPid);
         player.AddItem(Content::Item::sandbag_1, 1);
         return true;
     }
 }
+
 // Признак - этот протитип - относится к мешкам
-bool IsSandBag(uint pid)
+bool IsSandBag(hstring pid)
 {
-    return (pid == Content::Item::sandbag_1 || pid == Content::Item::sandbag_2 || pid == Content::Item::sandbag_3 || pid == Content::Item::sandbag_4 ||
-            pid == Content::Item::sandbag_5);
+    return SandbagPids.find(pid) != -1;
 }
+
 // При использовании итема на итем. При false вызывается обработчик криттера, потом глобальный on_use_item. При true выход.
-bool _SandBagUseOnMe(Critter cr, Item usedItem, Critter onCritter, Item item, StaticItem onScenery, uint param)
+bool _SandBagUseOnMe(Item item, Critter cr, Item usedItem, uint param)
 {
     if (!valid(usedItem))
         return false;
-
     if (!IsSandBag(usedItem.ProtoId))
         return false;
+
     uint16 x = 0, y = 0;
     Map map = item.GetMapPosition(x, y);
     if (valid(map)) {
@@ -158,20 +158,34 @@ bool _SandBagUseOnMe(Critter cr, Item usedItem, Critter onCritter, Item item, St
     }
     return true;
 }
+
 // При использовнии навыка на итеме. При false вызывается обработчик криттера, потом глобальный on_use_skill. При true выход.
 bool _SandBagSkill(Item item, Critter cr, CritterProperty skill)
 {
-    uint pid = item.ProtoId;
+    hstring pid = item.ProtoId;
     if (!IsSandBag(pid))
         return false;
+
     if (cr.IsNpc()) {
         if (pid == Content::Item::sandbag_1) {
             DeleteItem(item);
+            return true;
         }
-        else {
-            pid--;
-            ChangeSandBagProto(item, pid);
+
+        if (pid == Content::Item::sandbag_2) {
+            pid = Content::Item::sandbag_1;
         }
+        else if (pid == Content::Item::sandbag_3) {
+            pid = Content::Item::sandbag_2;
+        }
+        else if (pid == Content::Item::sandbag_4) {
+            pid = Content::Item::sandbag_3;
+        }
+        else if (pid == Content::Item::sandbag_5) {
+            pid = Content::Item::sandbag_4;
+        }
+
+        item = ChangeSandBagProto(item, pid);
         return true;
     }
     switch (skill) {
@@ -187,17 +201,31 @@ bool _SandBagSkill(Item item, Critter cr, CritterProperty skill)
             cr.SayMsg(SAY_NETMSG, TEXTMSG_GAME, MsgStr::StrSkillWeariness);
             return true;
         }
+
         cr.TimeoutSkRepair = REPAIR_TIMEOUT(cr);
+
+        cr.AddItem(Content::Item::sandbag_empty, 1);
+        cr.SayMsg(SAY_NETMSG, TEXTMSG_TEXT, STR_TEAR_REPAIR);
+
         if (pid == Content::Item::sandbag_1) {
             DeleteItem(item);
-            cr.AddItem(Content::Item::sandbag_empty, 1);
+            return true;
         }
-        else {
-            pid--;
-            cr.AddItem(Content::Item::sandbag_empty, 1);
-            ChangeSandBagProto(item, pid);
+
+        if (pid == Content::Item::sandbag_2) {
+            pid = Content::Item::sandbag_1;
         }
-        cr.SayMsg(SAY_NETMSG, TEXTMSG_TEXT, STR_TEAR_REPAIR);
+        else if (pid == Content::Item::sandbag_3) {
+            pid = Content::Item::sandbag_2;
+        }
+        else if (pid == Content::Item::sandbag_4) {
+            pid = Content::Item::sandbag_3;
+        }
+        else if (pid == Content::Item::sandbag_5) {
+            pid = Content::Item::sandbag_4;
+        }
+
+        item = ChangeSandBagProto(item, pid);
         return true;
     case SKILL_TAKE_CONT:
         return false;
@@ -208,11 +236,13 @@ bool _SandBagSkill(Item item, Critter cr, CritterProperty skill)
     }
     return false;
 }
+
 // При выбросе итема.
-void _SandBagDrop(Critter cr, Item item)
+void _SandBagDrop(Item item, Critter cr)
 {
     if (!IsSandBag(item.ProtoId))
         return;
+
     uint16 x = 0, y = 0;
     Map map = item.GetMapPosition(x, y);
     if (valid(map)) {
@@ -255,13 +285,14 @@ void _SandBagInit(Item sb, bool firstTime)
         DeleteItem(sb);
         return;
     }
+
     sb.IsGag = true;
-    sb.OnCritterDropItem.Subscribe(_SandBagDrop);
+    sb.OnCritterDrop.Subscribe(_SandBagDrop);
     sb.OnCritterUseSkill.Subscribe(_SandBagSkill);
-    sb.OnCritterUseItem.Subscribe(_SandBagUseOnMe);
+    sb.OnCritterUseOnSelf.Subscribe(_SandBagUseOnMe);
 }
 
-// / DEBUG
+// DEBUG
 void SandContour(Critter cr, int len, int num, int)
 {
     Map map = cr.GetMap();
@@ -272,7 +303,7 @@ void SandContour(Critter cr, int len, int num, int)
     uint16 y = cr.HexY;
     for (int dir = 0; dir < 6; dir++) {
         for (int i = 0; i < len; i++) {
-            map.AddItem(x, y, Content::Item::sandbag_1 + num, 1);
+            map.AddItem(x, y, SandbagPids[num], 1);
             map.MoveHexByDir(x, y, dir, 1);
         }
     }

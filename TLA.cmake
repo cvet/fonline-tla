@@ -28,12 +28,19 @@ AddAngelScriptSource( Scripts/*.fos )
 AddAngelScriptSource( Scripts/Json/*.fos )
 
 # Resources
-AddResources( Base Resources/FOnline )
+AddResources( FOnline Resources/FOnline )
+AddResources( FOArt Resources/DataPacks/fo_art.zip Resources/DataPacks/fo_art_critters_h.zip )
+AddResources( FOArt Resources/DataPacks/fo_art_critters_m.zip Resources/DataPacks/fo_art_critters_n.zip )
+AddResources( BlackCombatArmor Resources/DataPacks/cablack.dat )
+AddResources( Lieutenant Resources/DataPacks/lieutenant.dat )
+AddResources( LongHairDude Resources/DataPacks/longhairdude.dat )
+AddResources( FTRobots Resources/DataPacks/ftrobots.bos )
+AddResources( FOSound Resources/DataPacks/fo_sound.zip )
 AddResources( Music Resources/FOnlineMusic )
 AddResources( Video Resources/FOnlineVideo )
 AddResources( Mapper Resources/Mapper )
 AddResources( VanBuren Resources/VanBuren )
-AddRawResources( Resources/Mapper )
+# AddRawResources( Resources/Mapper )
 
 # Configs
 CreateConfig( Default "" )

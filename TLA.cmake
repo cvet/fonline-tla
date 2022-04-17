@@ -1,21 +1,17 @@
 # Project info
 SetupGame( DEV_NAME "TLA"
     NICE_NAME "FOnline: The Life After"
-    COMPANY_NAME "MyCorpLtd"
+    AUTHOR_NAME "MyCorpLtd"
     GAME_VERSION "0.1.0"
-    MULTIPLAYER_SCRIPTING YES
-    SINGLEPLAYER_SCRIPTING NO
-    ANGELSCRIPT_SCRIPTING YES 
-	NATIVE_SCRIPTING NO 
+    SINGLEPLAYER NO
+    ANGELSCRIPT_SCRIPTING YES
+	NATIVE_SCRIPTING NO
 	MONO_SCRIPTING NO )
 
 # Content
 AddContent( Maps )
-AddContent( Critters )
-AddContent( Critters/Types )
-AddContent( Items )
-AddContent( Items/Static )
-AddContent( Items/Custom )
+AddContent( Critters Critters/Types )
+AddContent( Items Items/Static Items/Custom )
 AddContent( Dialogs )
 AddContent( Texts )
 
@@ -38,13 +34,12 @@ AddResources( FTRobots Resources/DataPacks/ftrobots.bos )
 AddResources( FOSound Resources/DataPacks/fo_sound.zip )
 AddResources( Music Resources/FOnlineMusic )
 AddResources( Video Resources/FOnlineVideo )
-AddResources( Mapper Resources/Mapper )
-AddResources( VanBuren Resources/VanBuren )
+# AddResources( Mapper Resources/Mapper )
+# AddResources( VanBuren Resources/VanBuren )
 # AddRawResources( Resources/Mapper )
 
 # Configs
 CreateConfig( Default "" )
-
 TweakConfig( Enable3dRendering False )
 TweakConfig( WindowName "The Life After" )
 TweakConfig( ListenPort 4008 )
@@ -96,6 +91,19 @@ TweakConfig( MapCameraAngle 25.7f )
 TweakConfig( MapSmoothPath True )
 TweakConfig( MapDataPrefix "art/geometry/fallout_" )
 
+CreateConfig( LocalTest Default )
+TweakConfig( ServerHost localhost )
+TweakConfig( ServerPort 4008 )
+CreateConfig( LocalTest1 LocalTest )
+CreateConfig( LocalTest2 LocalTest )
+CreateConfig( LocalTest3 LocalTest )
+CreateConfig( LocalTest4 LocalTest )
+CreateConfig( LocalTest5 LocalTest )
+
+CreateConfig( PublicGame Default )
+TweakConfig( ServerHost 111.222.111.222 )
+TweakConfig( ServerPort 9999 )
+
 CreateConfig( Mapper Default )
 TweakConfig( RoofAlpha 200 )
 TweakConfig( SpritesZoomMax 10.0f )
@@ -106,32 +114,27 @@ TweakConfig( Anim2CombatEnd Anim2Actions::EndCombat )
 TweakConfig( SplitTilesCollection True )
 TweakConfig( ConsoleHistorySize 100 )
 
-CreateConfig( Multiplayer Default )
-CreateConfig( Singleplayer Default )
-
 # Test builds
-CreatePackage( "Test" "LocalTest" YES )
-AddToPackage( "Test" "Client" "Windows" "win32" "Raw" )
-AddToPackage( "Test" "Client" "Web" "wasm" "Raw" "LocalWebTest" )
-AddToPackage( "Test" "Server" "Windows" "win64" "Raw" )
-CreatePackage( "ProductionTest" "LocalTest" NO )
-AddToPackage( "ProductionTest" "Client" "Windows" "win32" "Raw" )
-AddToPackage( "ProductionTest" "Client" "Web" "wasm" "Raw" "LocalWebTest" )
-AddToPackage( "ProductionTest" "Server" "Windows" "win64" "Raw" )
-AddToPackage( "Test" "Single" "Windows" "win32" "Raw" )
+CreatePackage( Tests LocalTest YES )
+AddToPackage( Tests Client Windows win32 Raw )
+AddToPackage( Tests Server Windows win64 Raw LocalTest1 )
+AddToPackage( Tests Server Windows win64 Raw LocalTest2 )
+AddToPackage( Tests Server Windows win64 Raw LocalTest3 )
+AddToPackage( Tests Server Windows win64 Raw LocalTest4 )
+AddToPackage( Tests Server Windows win64 Raw LocalTest5 )
 
 # Production builds
-CreatePackage( "Production" Default NO )
-AddToPackage( "Production" "Client" "Windows" "win32+win64" "Raw" )
-AddToPackage( "Production" "Client" "Windows" "win32+win64" "Wix" )
-AddToPackage( "Production" "Client" "Windows" "win32" "Zip" )
-AddToPackage( "Production" "Client" "Android" "arm+arm64+x86" "Apk" )
-AddToPackage( "Production" "Client" "Web" "wasm" "Raw" )
-AddToPackage( "Production" "Client" "macOS" "x64" "Bundle" )
-AddToPackage( "Production" "Client" "iOS" "arm64" "Bundle" )
-AddToPackage( "Production" "Client" "Linux" "x64" "AppImage" )
-AddToPackage( "Production" "Server" "Windows" "win64" "Raw" )
-AddToPackage( "Production" "Server" "Windows" "win64" "Zip" )
-AddToPackage( "Production" "Server" "Linux" "x64" "Raw" )
-AddToPackage( "Production" "Server" "Linux" "x64" "Tar" )
-AddToPackage( "Production" "Server" "Linux" "x64" "AppImage" )
+CreatePackage( Production PublicGame NO )
+AddToPackage( Production Client Windows win32+win64 Raw )
+AddToPackage( Production Client Windows win32+win64 Wix )
+AddToPackage( Production Client Windows win32 Zip )
+AddToPackage( Production Client Android arm+arm64+x86 Apk )
+AddToPackage( Production Client Web wasm Raw )
+AddToPackage( Production Client macOS x64 Bundle )
+AddToPackage( Production Client iOS arm64 Bundle )
+AddToPackage( Production Client Linux x64 AppImage )
+AddToPackage( Production Server Windows win64 Raw )
+AddToPackage( Production Server Windows win64 Zip )
+AddToPackage( Production Server Linux x64 Raw )
+AddToPackage( Production Server Linux x64 Tar )
+AddToPackage( Production Server Linux x64 AppImage )

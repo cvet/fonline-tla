@@ -39,102 +39,113 @@ AddResources( Video Resources/FOnlineVideo )
 # AddRawResources( Resources/Mapper )
 
 # Configs
-CreateConfig( Default "" )
-TweakConfig( Enable3dRendering False )
-TweakConfig( WindowName "The Life After" )
-TweakConfig( ListenPort 4008 )
-TweakConfig( AdminPanelPort 0 )
-TweakConfig( GameSleep 10 )
-TweakConfig( MemoryDebugLevel 1 )
-TweakConfig( Logging True )
-TweakConfig( LoggingDebugOutput False )
-TweakConfig( LoggingTime True )
-TweakConfig( LoggingThread False )
-TweakConfig( ProfilerMode 0 )
-TweakConfig( ProfilerSampleInterval 50 )
-TweakConfig( Language_0 engl )
-TweakConfig( Language_1 russ )
-TweakConfig( Access_client "000000 00000000" )
-TweakConfig( Access_tester "" )
-TweakConfig( Access_moder "" )
-TweakConfig( Access_admin "admin admin" )
-TweakConfig( AccessNames_admin "" )
-TweakConfig( Language engl )
-TweakConfig( ServerHost localhost )
-TweakConfig( ServerPort 4008 )
-TweakConfig( UpdateServerHost "" )
-TweakConfig( UpdateServerPort "" )
-TweakConfig( ProxyType 0 )
-TweakConfig( ProxyHost localhost )
-TweakConfig( ProxyPort 1080 )
-TweakConfig( ProxyUser "" )
-TweakConfig( ProxyPass "" )
-TweakConfig( MusicVolume 100 )
-TweakConfig( SoundVolume 100 )
-TweakConfig( ScreenWidth 1024 )
-TweakConfig( ScreenHeight 768 )
-TweakConfig( FullScreen False )
-TweakConfig( AlwaysOnTop False )
-TweakConfig( FixedFPS 100 )
-TweakConfig( VSync False )
-TweakConfig( MapHexagonal true )
-TweakConfig( MapHexWidth 32 )
-TweakConfig( MapHexHeight 16 )
-TweakConfig( MapHexLineHeight 12 )
-TweakConfig( MapTileOffsX -8 )
-TweakConfig( MapTileOffsY 34 )
-TweakConfig( MapTileStep 2 )
-TweakConfig( MapRoofOffsX -8 )
-TweakConfig( MapRoofOffsY -64 )
-TweakConfig( MapRoofSkipSize 2 )
-TweakConfig( MapCameraAngle 25.7f )
-TweakConfig( MapSmoothPath True )
-TweakConfig( MapDataPrefix "art/geometry/fallout_" )
+CreateConfig( Default ""
+    Enable3dRendering False
+    WindowName "The Life After"
+    ListenPort 4008
+    AdminPanelPort 0
+    GameSleep 10
+    MemoryDebugLevel 1
+    Logging True
+    LoggingDebugOutput False
+    LoggingTime True
+    LoggingThread False
+    ProfilerMode 0
+    ProfilerSampleInterval 50
+    Language_0 engl
+    Language_1 russ
+    Access_client "000000 00000000"
+    Access_tester ""
+    Access_moder ""
+    Access_admin "admin admin"
+    AccessNames_admin ""
+    Language engl
+    ServerHost localhost
+    ServerPort 4008
+    UpdateServerHost ""
+    UpdateServerPort ""
+    ProxyType 0
+    ProxyHost localhost
+    ProxyPort 1080
+    ProxyUser ""
+    ProxyPass ""
+    MusicVolume 100
+    SoundVolume 100
+    ScreenWidth 1024
+    ScreenHeight 768
+    FullScreen False
+    AlwaysOnTop False
+    FixedFPS 100
+    VSync False
+    MapHexagonal True
+    MapHexWidth 32
+    MapHexHeight 16
+    MapHexLineHeight 12
+    MapTileOffsX -8
+    MapTileOffsY 34
+    MapTileStep 2
+    MapRoofOffsX -8
+    MapRoofOffsY -64
+    MapRoofSkipSize 2
+    MapCameraAngle 25.7f
+    MapSmoothPath True
+    MapDataPrefix "art/geometry/fallout_" )
 
-CreateConfig( LocalTest Default )
-TweakConfig( ServerHost localhost )
-TweakConfig( ServerPort 4008 )
-CreateConfig( LocalTest1 LocalTest )
-CreateConfig( LocalTest2 LocalTest )
-CreateConfig( LocalTest3 LocalTest )
-CreateConfig( LocalTest4 LocalTest )
-CreateConfig( LocalTest5 LocalTest )
+CreateConfig( LocalTest Default
+    ServerHost localhost
+    ServerPort 4008 )
+CreateConfig( LocalTest1 LocalTest
+    TestCase Test1 )
+CreateConfig( LocalTest2 LocalTest
+    TestCase Test2 )
+CreateConfig( LocalTest3 LocalTest
+    TestCase Test3 )
+CreateConfig( LocalTest4 LocalTest
+    TestCase Test4 )
+CreateConfig( LocalTest5 LocalTest
+    TestCase Test5 )
 
-CreateConfig( PublicGame Default )
-TweakConfig( ServerHost 111.222.111.222 )
-TweakConfig( ServerPort 9999 )
+CreateConfig( PublicGame Default
+    ServerHost 111.222.111.222
+    ServerPort 9999 )
 
-CreateConfig( Mapper Default )
-TweakConfig( RoofAlpha 200 )
-TweakConfig( SpritesZoomMax 10.0f )
-TweakConfig( SpritesZoomMin 0.2f )
-TweakConfig( Anim2CombatBegin Anim2Actions::BeginCombat )
-TweakConfig( Anim2CombatIdle Anim2Actions::IdleCombat )
-TweakConfig( Anim2CombatEnd Anim2Actions::EndCombat )
-TweakConfig( SplitTilesCollection True )
-TweakConfig( ConsoleHistorySize 100 )
+CreateConfig( Mapper Default
+    RoofAlpha 200
+    SpritesZoomMax 10.0f
+    SpritesZoomMin 0.2f
+    Anim2CombatBegin Anim2Actions::BeginCombat
+    Anim2CombatIdle Anim2Actions::IdleCombat
+    Anim2CombatEnd Anim2Actions::EndCombat
+    SplitTilesCollection True
+    ConsoleHistorySize 100 )
+
+CreateConfig( Debugging LocalTest
+    ResourcesDir ${FO_RESOURCES_OUTPUT} )
+SetConfigForDebugging( Debugging )
 
 # Test builds
-CreatePackage( Tests LocalTest YES )
-AddToPackage( Tests Client Windows win32 Raw )
-AddToPackage( Tests Server Windows win64 Raw LocalTest1 )
-AddToPackage( Tests Server Windows win64 Raw LocalTest2 )
-AddToPackage( Tests Server Windows win64 Raw LocalTest3 )
-AddToPackage( Tests Server Windows win64 Raw LocalTest4 )
-AddToPackage( Tests Server Windows win64 Raw LocalTest5 )
+CreatePackage( Testing LocalTest YES )
+AddToPackage( Testing Client Windows win64 Raw )
+AddToPackage( Testing Server Windows win64 Raw LocalTest1 )
+AddToPackage( Testing Server Windows win64 Raw LocalTest2 )
+AddToPackage( Testing Server Windows win64 Raw LocalTest3 )
+AddToPackage( Testing Server Windows win64 Raw LocalTest4 )
+AddToPackage( Testing Server Windows win64 Raw LocalTest5 )
 
 # Production builds
 CreatePackage( Production PublicGame NO )
-AddToPackage( Production Client Windows win32+win64 Raw )
-AddToPackage( Production Client Windows win32+win64 Wix )
-AddToPackage( Production Client Windows win32 Zip )
-AddToPackage( Production Client Android arm+arm64+x86 Apk )
-AddToPackage( Production Client Web wasm Raw )
-AddToPackage( Production Client macOS x64 Bundle )
-AddToPackage( Production Client iOS arm64 Bundle )
-AddToPackage( Production Client Linux x64 AppImage )
+AddToPackage( Production Client Windows win64 Raw )
 AddToPackage( Production Server Windows win64 Raw )
-AddToPackage( Production Server Windows win64 Zip )
-AddToPackage( Production Server Linux x64 Raw )
-AddToPackage( Production Server Linux x64 Tar )
-AddToPackage( Production Server Linux x64 AppImage )
+#AddToPackage( Production Client Windows win32+win64 Raw )
+#AddToPackage( Production Client Windows win32+win64 Wix )
+#AddToPackage( Production Client Windows win32 Zip )
+#AddToPackage( Production Client Android arm+arm64+x86 Apk )
+#AddToPackage( Production Client Web wasm Raw )
+#AddToPackage( Production Client macOS x64 Bundle )
+#AddToPackage( Production Client iOS arm64 Bundle )
+#AddToPackage( Production Client Linux x64 AppImage )
+#AddToPackage( Production Server Windows win64 Raw )
+#AddToPackage( Production Server Windows win64 Zip )
+#AddToPackage( Production Server Linux x64 Raw )
+#AddToPackage( Production Server Linux x64 Tar )
+#AddToPackage( Production Server Linux x64 AppImage )

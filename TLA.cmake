@@ -40,6 +40,7 @@ AddResources( Video Resources/FOnlineVideo )
 
 # Configs
 CreateConfig( Default ""
+    ForceOpenGL True
     Enable3dRendering False
     WindowName "The Life After"
     ListenPort 4008
@@ -55,20 +56,20 @@ CreateConfig( Default ""
     Language_0 engl
     Language_1 russ
     Access_client "000000 00000000"
-    Access_tester ""
-    Access_moder ""
+    Access_tester " "
+    Access_moder " "
     Access_admin "admin admin"
-    AccessNames_admin ""
+    AccessNames_admin " "
     Language engl
     ServerHost localhost
     ServerPort 4008
-    UpdateServerHost ""
-    UpdateServerPort ""
+    UpdateServerHost " "
+    UpdateServerPort " "
     ProxyType 0
     ProxyHost localhost
     ProxyPort 1080
-    ProxyUser ""
-    ProxyPass ""
+    ProxyUser " "
+    ProxyPass " "
     MusicVolume 100
     SoundVolume 100
     ScreenWidth 1024

@@ -56,6 +56,7 @@ CreateConfig( Default ""
     ProfilerMode 0
     ProfilerSampleInterval 50
     Languages "engl russ"
+    Language engl
     Access_client "000000 00000000"
     Access_tester " "
     Access_moder " "

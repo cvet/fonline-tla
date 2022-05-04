@@ -40,6 +40,8 @@ AddResources( Video Resources/FOnlineVideo )
 
 # Configs
 CreateConfig( Default ""
+    ResourcesDir Resources
+    ResourceEntries ${FO_RESOURCE_ENTRIES}
     ForceOpenGL True
     Enable3dRendering False
     WindowName "The Life After"
@@ -53,14 +55,12 @@ CreateConfig( Default ""
     LoggingThread False
     ProfilerMode 0
     ProfilerSampleInterval 50
-    Language_0 engl
-    Language_1 russ
+    Languages "engl russ"
     Access_client "000000 00000000"
     Access_tester " "
     Access_moder " "
     Access_admin "admin admin"
     AccessNames_admin " "
-    Language engl
     ServerHost localhost
     ServerPort 4008
     UpdateServerHost " "

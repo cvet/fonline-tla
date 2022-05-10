@@ -91,7 +91,12 @@ CreateConfig( Default ""
     MapRoofSkipSize 2
     MapCameraAngle 25.7f
     MapSmoothPath True
-    MapDataPrefix "art/geometry/fallout_" )
+    MapDataPrefix "art/geometry/fallout_"
+    LookDir "0 20 40 60 60"
+    LookSneakDir "90 60 30 0 0"
+    EffectValues "0 0 0 0 0 0 0 0 0 0"
+    CritterSlotEnabled "True True True"
+    CritterSlotSendData "True False True" )
 
 CreateConfig( LocalTest Default
     ServerHost localhost

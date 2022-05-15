@@ -42,6 +42,7 @@ AddResources( Video Resources/FOnlineVideo )
 CreateConfig( Default ""
     ResourcesDir Resources
     ResourceEntries ${FO_RESOURCE_ENTRIES}
+    EmbeddedResources $Embedded
     ForceOpenGL True
     Enable3dRendering False
     WindowName "The Life After"
@@ -127,7 +128,9 @@ CreateConfig( Mapper Default
     ConsoleHistorySize 100 )
 
 CreateConfig( Debugging LocalTest
-    ResourcesDir ${FO_RESOURCES_OUTPUT} )
+    ResourcesDir ${FO_RESOURCES_OUTPUT}
+    EmbeddedResources ${FO_RESOURCES_OUTPUT}/Embedded
+    RenderDebug True )
 SetConfigForDebugging( Debugging )
 
 # Test builds

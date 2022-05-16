@@ -4,6 +4,7 @@ SetupGame( DEV_NAME "TLA"
     AUTHOR_NAME "MyCorpLtd"
     GAME_VERSION "0.1.0"
     SINGLEPLAYER NO
+    ENABLE_3D YES # Todo: disable 3D for TLA
     ANGELSCRIPT_SCRIPTING YES
 	NATIVE_SCRIPTING NO
 	MONO_SCRIPTING NO )
@@ -44,7 +45,6 @@ CreateConfig( Default ""
     ResourceEntries ${FO_RESOURCE_ENTRIES}
     EmbeddedResources $Embedded
     ForceOpenGL True
-    Enable3dRendering False
     WindowName "The Life After"
     ListenPort 4008
     AdminPanelPort 0

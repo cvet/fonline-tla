@@ -34,7 +34,7 @@ const hstring[] Pids = {Content::Item::human_brain, Content::Item::gold_tooth, C
 #define STR_RADIO_MESSAGE (70070)
 
 // debug log
-// #define DL #(s) (Log("android: " + s))
+// #define DL #(s) (Game.Log("android: " + s))
 #define DL #(s)
 
 void _DeadInit(Critter cr, bool firstTime)
@@ -56,7 +56,7 @@ void _RadioInit(Item item, bool firstTime)
 {
     DL("RadioInit");
     if (firstTime) {
-        item.RadioChannel = Random(1000, 9999);
+        item.RadioChannel = Game.Random(1000, 9999);
         DL("Channel: " + item.RadioChannel);
     }
     item.OnCritterUseSkill.Subscribe(_RadioSkill);
@@ -68,7 +68,7 @@ bool _RadioSkill(Item item, Critter cr, CritterProperty skill)
     if (skill == SKILL_PICK_ON_GROUND) {
         if (!item.SeAndroidRadioListened) {
             uint[] values = {item.Id, 0, cr.Id, item.RadioChannel};
-            DeferredCall(0, AndroidRadio, values);
+            Game.DeferredCall(0, AndroidRadio, values);
             item.SeAndroidRadioListened = true;
         }
     }
@@ -78,18 +78,18 @@ bool _RadioSkill(Item item, Critter cr, CritterProperty skill)
 void AndroidRadio(uint[] values)
 {
     DL("AndroidRadio. ItemId:" + values[0] + "; MsgCount:" + values[1] + "; " + "radioChannel: " + values[2]);
-    Item item = GetItem(values[0]);
+    Item item = Game.GetItem(values[0]);
     if (valid(item)) {
         if (item.SeAndroidRadioListened) {
-            RadioMessageMsg(values[3], TEXTMSG_TEXT, STR_RADIO_MESSAGE);
+            Game.RadioMessageMsg(values[3], TEXTMSG_TEXT, STR_RADIO_MESSAGE);
             values[1]++;
             DL("count radio messages:" + values[1]);
-            Critter cr = GetCritter(item.CritId);
+            Critter cr = Game.GetCritter(item.CritId);
             if (cr.SpecialAndroid < 2 && item.RadioChannel == values[3]) // Про локацию пока не известно, радио на нужной волне
                 cr.SpecialAndroid = 2;
             DL("seAndroidValue: " + cr.SpecialAndroid);
             if (values[1] < 5) // Максимум 5 повторов раз в 20 секунд на нужной радиоволне
-                DeferredCall(20000, AndroidRadio, values);
+                Game.DeferredCall(20000, AndroidRadio, values);
         }
     }
 }
@@ -149,12 +149,12 @@ void t_TransitPlayer(Critter player, StaticItem trigger, bool entered, uint8)
                 if (Entrance::MapGetEntryCoords(basement, ENTRY_CONTAINER, 0, x, y)) {
                     Item cont = basement.GetItem(x, y, Content::Item::locker_rusty_right);
                     if (valid(cont)) {
-                        MoveItems(items, cont, 0);
+                        Game.MoveItems(items, cont, 0);
                         items = cont.GetItems(0);
                         for (uint i = 0; i < items.length(); i++) {
                             auto pid = items[i].ProtoId;
                             if (Pids.exists(pid) || pid == Content::Item::pot)
-                                DeleteItem(items[i]);
+                                Game.DeleteItem(items[i]);
                         }
                         Item item = cont.AddItem(Content::Item::pot, 1, 0);
                         item.Lexems = "$text" + Obsolete::GetPlayerName(player.Id);
@@ -186,7 +186,7 @@ uint cte_CheckPlayerKnockOut(Critter cr, int identifier, uint& rate)
         if (valid(map)) {
             Location loc = map.GetLocation();
             if (loc.ProtoId == Content::Location::android) {
-                Log("Warning: player character can't stand up knockout.");
+                Game.Log("Warning: player character can't stand up knockout.");
                 CritterState::ToAlive(cr);
             }
         }
@@ -233,7 +233,7 @@ void _DoctorIdle(Critter cr)
             Map map = cr.GetMap();
             Location loc = map.GetLocation();
             if (loc.SeAndroidPlayerId != 0) {
-                Critter player = GetCritter(loc.SeAndroidPlayerId);
+                Critter player = Game.GetCritter(loc.SeAndroidPlayerId);
                 if (valid(player))
                     TransformPlayer(map, player, cr);
             }
@@ -277,20 +277,20 @@ void TransformPlayer(Map map, Critter player, Critter doctor)
         Obsolete::CritterTransitToMapCoords(player, map.Id, hX, hY, 3);
     }
     uint[] values = {player.Id, doctor.Id, map.Id};
-    SavedDeferredCall(6000, AwakePlayer, values);
+    Game.SavedDeferredCall(6000, AwakePlayer, values);
 }
 
 void AwakePlayer(uint[] values)
 {
-    Critter player = GetCritter(values[0]);
-    Critter doctor = GetCritter(values[1]);
+    Critter player = Game.GetCritter(values[0]);
+    Critter doctor = Game.GetCritter(values[1]);
     if (valid(player) && valid(doctor)) {
         player.Experience += 4000;
         player.SayMsg(SAY_NETMSG, TEXTMSG_TEXT, STR_AWAKE);
         CritterState::ToDead(player, Anim2Actions::DeadBack, null); // TODO: убрать
         player.CurrentAp = 0;
         CritterState::ToAlive(player);
-        RunDialog(player, doctor, true);
+        Game.RunDialog(player, doctor, true);
     }
 }
 
@@ -322,14 +322,14 @@ void t_Warn(Critter player, StaticItem trigger, bool entered, uint8 dir)
         player.Wait(0);
         player.SayMsg(SAY_NETMSG, TEXTMSG_TEXT, STR_OUT);
         loc.SeAndroidMinesTriggered = true;
-        SavedDeferredCall(1000, DeferredExplode, map.Id);
-        SavedDeferredCall(20000, DeferredDeleteMap, map.Id);
+        Game.SavedDeferredCall(1000, DeferredExplode, map.Id);
+        Game.SavedDeferredCall(20000, DeferredDeleteMap, map.Id);
     }
 }
 
 void DeferredExplode(uint value)
 {
-    Map map = GetMap(value);
+    Map map = Game.GetMap(value);
     if (!valid(map))
         return;
 
@@ -337,20 +337,20 @@ void DeferredExplode(uint value)
     Entrance::Entry[] entries = Entrance::ParseEntries(map, ENTRY_EXPLODE);
     if (entries.length() > 0) {
         for (uint i = 0; i < 3; i++) {
-            Entrance::Entry entry = entries[Random(0, entries.length() - 1)];
+            Entrance::Entry entry = entries[Game.Random(0, entries.length() - 1)];
             if (valid(entry))
                 Explode::ExplodeEx(map, entry.HexX, entry.HexY, Content::Item::explode_rocket, 3, 666, DamageTypes::Explode, 3, 0);
         }
     }
 
-    SavedDeferredCall(1000, DeferredExplode, value);
+    Game.SavedDeferredCall(1000, DeferredExplode, value);
 }
 
 void DeferredDeleteMap(uint value)
 {
-    Map map = GetMap(value);
+    Map map = Game.GetMap(value);
     if (valid(map))
-        DeleteLocation(map.GetLocation().Id);
+        Game.DeleteLocation(map.GetLocation().Id);
 }
 
 // Части тела в банках с биогелем
@@ -381,21 +381,21 @@ void _PotInit(Item item, bool firstTime)
 
     item.Lexems = lexems;
     item.IsCanUse = true;
-    SavedDeferredCall(HOUR_TICKS(2), DefferedDeleteItem, item.Id);
+    Game.SavedDeferredCall(HOUR_TICKS(2), DefferedDeleteItem, item.Id);
     item.OnCritterUse.Subscribe(_PotUse);
 }
 
 void DefferedDeleteItem(uint value)
 {
-    Item item = GetItem(value);
+    Item item = Game.GetItem(value);
     if (valid(item))
-        DeleteItem(item);
+        Game.DeleteItem(item);
 }
 
 bool _PotUse(Item item, Critter cr, uint param)
 {
-    DeleteItem(item);
-    Item newItem = cr.AddItem(Pids[Random(0, Pids.length() - 1)], 1);
+    Game.DeleteItem(item);
+    Item newItem = cr.AddItem(Pids[Game.Random(0, Pids.length() - 1)], 1);
     if (valid(newItem))
         newItem.Info = 2;
     cr.SayMsg(SAY_NETMSG, TEXTMSG_TEXT, STR_OPEN_POT);
@@ -425,7 +425,7 @@ bool s_Boxes(Critter player, StaticItem scenery, Item itemUse, int skill)
     }
     player.Wait(1000);
     chance = chance - SeAndroidFoundeds.find(varNum) * 10; // Каждый последующий предмет найти сложнее
-    if (Random(5, 95) > chance || Random(1, 2) == 1) {
+    if (Game.Random(5, 95) > chance || Game.Random(1, 2) == 1) {
         player.SayMsg(SAY_NETMSG, TEXTMSG_TEXT, STR_UNLUCK);
         return true;
     }

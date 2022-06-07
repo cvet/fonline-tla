@@ -20,3 +20,26 @@
 {
     return 0;
 }
+
+///# ...
+///# return ...
+///@ ExportMethod
+[[maybe_unused]] bool Server_Critter_IsFree(Critter* self)
+{
+    return false;
+}
+
+///# ...
+///# return ...
+///@ ExportMethod
+[[maybe_unused]] bool Server_Critter_IsBusy(Critter* self)
+{
+    return false;
+}
+
+///# ...
+///# param ms ...
+///@ ExportMethod
+[[maybe_unused]] void Server_Critter_Wait(Critter* self, uint ms)
+{
+}

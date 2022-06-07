@@ -19,6 +19,7 @@ AddContent( Texts )
 # Scripts
 AddEngineSource( SERVER Scripts/Extension/ServerExtension.cpp )
 AddEngineSource( SERVER Scripts/Extension/CritterTimeEvents.cpp )
+AddEngineSource( CLIENT Scripts/Extension/ClientExtension.cpp )
 # AddAngelScriptExtensionSource( Scripts/AngelScriptExtension.cpp )
 # AddAngelScriptExtensionEntry( InitAngelScriptExtension )
 AddAngelScriptSource( Scripts/*.fos )
@@ -76,6 +77,7 @@ CreateConfig( Default ""
     SoundVolume 100
     ScreenWidth 1024
     ScreenHeight 768
+    ScreenHudHeight 0
     FullScreen False
     AlwaysOnTop False
     FixedFPS 100
@@ -90,7 +92,8 @@ CreateConfig( Default ""
     MapRoofOffsX -8
     MapRoofOffsY -64
     MapRoofSkipSize 2
-    MapCameraAngle 25.7f
+    MapCameraAngle 25.6589
+    MapFreeMovement False
     MapSmoothPath True
     MapDataPrefix "art/geometry/fallout_"
     LookDir "0 20 40 60 60"

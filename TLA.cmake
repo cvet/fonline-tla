@@ -100,7 +100,8 @@ CreateConfig( Default ""
     LookSneakDir "90 60 30 0 0"
     EffectValues "0 0 0 0 0 0 0 0 0 0"
     CritterSlotEnabled "True True True"
-    CritterSlotSendData "True False True" )
+    CritterSlotSendData "True False True"
+    StartYear 2240 )
 
 CreateConfig( LocalTest Default
     ServerHost localhost

@@ -36,6 +36,8 @@ AddResources( FTRobots Resources/DataPacks/ftrobots.bos )
 AddResources( FOSound Resources/DataPacks/fo_sound.zip )
 AddResources( Music Resources/FOnlineMusic )
 AddResources( Video Resources/FOnlineVideo )
+AddResources( CommonData Resources/CommonData )
+AddResources( ServerData Resources/ServerData )
 # AddResources( Mapper Resources/Mapper )
 # AddResources( VanBuren Resources/VanBuren )
 # AddRawResources( Resources/Mapper )
@@ -43,7 +45,10 @@ AddResources( Video Resources/FOnlineVideo )
 # Configs
 CreateConfig( Default ""
     ResourcesDir Resources
-    ResourceEntries ${FO_RESOURCE_ENTRIES}
+    ClientResourceEntries "Core FOnline FOArt BlackCombatArmor Lieutenant LongHairDude FTRobots Music Video CommonData"
+    ServerResourceEntries "Protos Maps Dialogs CommonData ServerData"
+    DataSynchronization True
+    BakeExtraFileExtensions +json
     EmbeddedResources $Embedded
     ForceOpenGL True
     WindowName "The Life After"
@@ -134,7 +139,8 @@ CreateConfig( Mapper Default
 CreateConfig( Debugging LocalTest
     ResourcesDir ${FO_RESOURCES_OUTPUT}
     EmbeddedResources ${FO_RESOURCES_OUTPUT}/Embedded
-    RenderDebug True )
+    RenderDebug True
+    DataSynchronization False )
 SetConfigForDebugging( Debugging )
 
 # Test builds

@@ -45,10 +45,10 @@ AddResources( ServerData Resources/ServerData )
 # Configs
 CreateConfig( Default ""
     ResourcesDir Resources
-    ClientResourceEntries "Core FOnline FOArt BlackCombatArmor Lieutenant LongHairDude FTRobots Music Video CommonData"
+    ClientResourceEntries "Core Protos Texts FOnline FOArt BlackCombatArmor Lieutenant LongHairDude FTRobots Music Video CommonData"
     ServerResourceEntries "Protos Maps Dialogs CommonData ServerData"
+    BakeExtraFileExtensions "fofnt bmfc fnt acm ogg wav ogv json"
     DataSynchronization True
-    BakeExtraFileExtensions +json
     EmbeddedResources $Embedded
     ForceOpenGL True
     WindowName "The Life After"

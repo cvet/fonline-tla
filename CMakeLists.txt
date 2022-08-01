@@ -11,6 +11,7 @@ set( FONLINE_BUILD_ASCOMPILER ON CACHE BOOL "Build AngelScript compiler" FORCE )
 set( FONLINE_BUILD_BAKER ON CACHE BOOL "Build Baker binaries" FORCE )
 set( FONLINE_UNIT_TESTS ON CACHE BOOL "Build only binaries for Unit Testing" FORCE )
 set( FONLINE_CODE_COVERAGE OFF CACHE BOOL "Build only binaries for Code Coverage reports" FORCE )
+set( FONLINE_MAKE_EXTERNAL_COMMANDS ON CACHE BOOL "Create shortcuts for working outside CMake runner" FORCE )
 set( FONLINE_CMAKE_CONTRIBUTION "../TLA.cmake" CACHE FILEPATH "CMake contribution file" FORCE )
 set( FONLINE_INFO_MARKDOWN_OUTPUT "${CMAKE_CURRENT_SOURCE_DIR}" CACHE PATH "Path where information markdown files will be stored" FORCE )
 

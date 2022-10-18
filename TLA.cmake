@@ -14,7 +14,6 @@ SetupGame( DEV_NAME "TLA"
 
 # Native code
 AddEngineSource( SERVER Scripts/Extension/ServerExtension.cpp )
-AddEngineSource( SERVER Scripts/Extension/CritterTimeEvents.cpp )
 AddEngineSource( CLIENT Scripts/Extension/ClientExtension.cpp )
 
 # Content

@@ -10,7 +10,8 @@ SetupGame( DEV_NAME "TLA"
     MONO_SCRIPTING NO
     DEBUGGING_CONFIG Debugging
     MAPPER_CONFIG Mapper
-    GENERATE_ANGELSCRIPT_CONTENT Scripts )
+    GENERATE_ANGELSCRIPT_CONTENT Scripts
+    GEOMETRY HEXAGONAL )
 
 # Native code
 AddEngineSource( SERVER Scripts/Extension/ServerExtension.cpp )
@@ -46,6 +47,7 @@ AddResources( Mapper Resources/Mapper )
 CreatePackage( Dev LocalTest )
 AddToPackage( Dev Client Windows win64 Raw )
 AddToPackage( Dev Server Windows win64 Raw )
+AddToPackage( Dev Editor Windows win64 Raw )
 AddToPackage( Dev Mapper Windows win64 Raw Mapper )
 
 # Production builds

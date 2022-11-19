@@ -7,7 +7,7 @@
 ///@ ExportMethod
 [[maybe_unused]] bool Client_Critter_IsFree(CritterView* self)
 {
-    return false;
+    return true;
 }
 
 ///# ...

@@ -26,7 +26,7 @@
 ///@ ExportMethod
 [[maybe_unused]] bool Server_Critter_IsFree(Critter* self)
 {
-    return false;
+    return true;
 }
 
 ///# ...

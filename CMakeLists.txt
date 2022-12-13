@@ -6,6 +6,7 @@ set( FONLINE_OUTPUT_PATH "${CMAKE_CURRENT_SOURCE_DIR}" CACHE PATH "Common output
 set( FONLINE_BUILD_CLIENT ON CACHE BOOL "Build Multiplayer client binaries" FORCE )
 set( FONLINE_BUILD_SERVER ON CACHE BOOL "Build Multiplayer server binaries" FORCE )
 set( FONLINE_BUILD_SINGLE OFF CACHE BOOL "Build Singleplayer binaries" FORCE )
+set( FONLINE_BUILD_EDITOR ON CACHE BOOL "Build Editor binaries" FORCE )
 set( FONLINE_BUILD_MAPPER ON CACHE BOOL "Build Mapper binaries" FORCE )
 set( FONLINE_BUILD_ASCOMPILER ON CACHE BOOL "Build AngelScript compiler" FORCE )
 set( FONLINE_BUILD_BAKER ON CACHE BOOL "Build Baker binaries" FORCE )

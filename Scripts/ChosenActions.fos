@@ -17,7 +17,6 @@
 
 #ifdef __CLIENT
 uint[] ChosenActions = {};
-uint8[] MovePath = {};
 
 void ModuleInit()
 {
@@ -79,7 +78,7 @@ void ChosenProcess()
         Game.CustomCall("ChosenAlpha " + (chosen.IsHide ? 130 : 255));
 
         // Shoot borders
-        Game.CustomCall("SetShootBorders " + (Settings.Cursor == CursorType::UseWeapon ? "true" : "false"));
+        Game.SetShootBorders(Settings.Cursor == CursorType::UseWeapon);
     }
 
     // Actions
@@ -121,10 +120,10 @@ void ChosenProcess()
     uint[] curAction = ChosenActions.clone();
     curAction.resize(7);
     int actionType = curAction[0];
+
     // Force end move
-    if (actionType != Tla::ChosenMove && actionType != Tla::ChosenMoveToCrit && MovePath.length() > 0) {
-        MovePath.resize(0);
-        Game.CustomCall("SendMove");
+    if (actionType != Tla::ChosenMove && actionType != Tla::ChosenMoveToCrit) {
+        chosen.StopMove();
     }
 
     switch (actionType) {
@@ -136,10 +135,9 @@ void ChosenProcess()
         uint cut = ChosenActions[4];
         uint startTick = ChosenActions[6];
 
-        bool skipFind = false;
-
-        if (CurMap is null)
+        if (CurMap is null) {
             break;
+        }
 
         // Move to critter
         if (actionType == Tla::ChosenMoveToCrit) {
@@ -148,12 +146,20 @@ void ChosenProcess()
                 hx = cr.HexX;
                 hy = cr.HexY;
             }
-            else {
-                skipFind = true;
-            }
         }
 
-        // Check move
+        // Already here
+        if (Game.GetDistance(chosen.HexX, chosen.HexY, hx, hy) <= cut) {
+            break;
+        }
+
+        // Can't move
+        if (chosen.IsNoMove) {
+            Game.Message(TEXTMSG_GAME, MsgStr::StrCritterCantMove);
+            break;
+        }
+
+        // Check running
         if (isRun) {
             if (!Settings.RunOnCombat && IS_TIMEOUT(chosen.TimeoutBattle))
                 isRun = false;
@@ -165,64 +171,26 @@ void ChosenProcess()
                 isRun = false;
         }
 
-        // Todo: chosen.IsRunning = isRun;
-
-        // Can't move
-        if (!chosen.IsNoMove) {
-            Game.Message(TEXTMSG_GAME, MsgStr::StrCritterCantMove);
-            skipFind = true;
-        }
-
-        // Already here
-        if (!skipFind && Game.GetDistance(chosen.HexX, chosen.HexY, hx, hy) <= cut)
-            skipFind = true;
-
-        // Next move hex is free
-        // if( !skipFind && MovePath.length() > 0 )
-        // {
-        //	uint16 nextHx = chosen.HexX;
-        //	uint16 nextHy = chosen.HexY;
-        //	Game.MoveHexByDir( nextHx, nextHy, MovePath[ 0 ], 1 );
-        //	if( Game.IsMapHexPassed( nextHx, nextHy ) )
-        //		skipFind = true;
-        // }
-
         // Find path
-        if (!skipFind) {
-            uint8[] path = Game.GetPath(chosen.HexX, chosen.HexY, hx, hy, cut);
-            if (path is null && Game.GetDistance(chosen.HexX, chosen.HexY, hx, hy) > cut + 1)
-                path = Game.GetPath(chosen.HexX, chosen.HexY, hx, hy, ++cut);
+        uint8[] path = Game.GetPath(chosen.HexX, chosen.HexY, hx, hy, cut);
+        if (path.isEmpty() && Game.GetDistance(chosen.HexX, chosen.HexY, hx, hy) > cut + 1)
+            path = Game.GetPath(chosen.HexX, chosen.HexY, hx, hy, ++cut);
 
-            if (path !is null)
-                MovePath = path;
-            else
-                MovePath.resize(0);
-        }
+        // Move to
+        if (!path.isEmpty()) {
+            uint16 hexX = chosen.HexX;
+            uint16 hexY = chosen.HexY;
+            for (uint i = 0; i < path.length(); i++)
+                Game.MoveHexByDir(hexX, hexY, path[i], 1);
 
-        // Transit
-        if (MovePath.length() > 0) {
-            uint16 nextHx = chosen.HexX;
-            uint16 nextHy = chosen.HexY;
-            Game.MoveHexByDir(nextHx, nextHy, MovePath[0], 1);
-            // Game.CustomCall("TransitCritter " + nextHx + " " + nextHy + " true false");
+            chosen.MoveToHex(hexX, hexY, 0, 0, isRun ? chosen.WalkSpeed * 2 : chosen.WalkSpeed);
 
             // chosen.ApRegenerationTick = 0;
-            Game.CustomCall("SetCursorPos");
-            Game.CustomCall("RebuildLookBorders");
         }
 
-        // Send about move
-        string moveStr = "";
-        for (uint i = 0; i < MovePath.length(); i++)
-            moveStr += " " + MovePath[i];
-        Game.CustomCall("SendMove" + moveStr);
-
-        if (MovePath.length() > 0)
-            MovePath.removeAt(0);
-
-        // Continue move
-        if (MovePath.length() > 0)
+        if (chosen.IsMoving()) {
             return;
+        }
     } break;
     case Tla::ChosenDir: {
         bool cw = (ChosenActions[1] == 0);
@@ -242,7 +210,7 @@ void ChosenProcess()
                 dir = 5;
         }
 
-        Game.CustomCall("ChangeDir " + dir);
+        chosen.ChangeDir(dir);
     } break;
     case Tla::ChosenUseItem: {
         uint itemId = ChosenActions[1];
@@ -254,7 +222,7 @@ void ChosenProcess()
         uint8 aim = (rate >> 4);
 
         // Find item
-        AbstractItem item = (itemId != 0 ? cast<AbstractItem>(chosen.GetItem(itemId)) : chosen.GetItem(ItemProperty::CritterSlot, SLOT_HAND1));
+        AbstractItem item = (itemId != 0 ? cast<AbstractItem>(chosen.GetItem(itemId)) : CritterItem::GetActive(chosen));
         if (item is null)
             break;
 
@@ -412,7 +380,7 @@ void ChosenProcess()
 
             uint maxDist = 0;
             if (isAttack) {
-                AbstractItem weap = chosen.GetItem(ItemProperty::CritterSlot, SLOT_HAND1);
+                AbstractItem weap = CritterItem::GetActive(chosen);
                 // TODO: проверить, что работает для рукопашных ударов.
                 Game.OnCritterGetAttackDistantionEx.Fire(chosen, weap, weap.Mode, maxDist);
             }
@@ -452,7 +420,7 @@ void ChosenProcess()
             CHECK_NEED_AP(apCost);
             uint8 dir = Game.GetDirection(chosen.HexX, chosen.HexY, hx, hy);
             if (Game.GetDistance(chosen.HexX, chosen.HexY, hx, hy) >= 1 && chosen.Dir != dir)
-                Game.CustomCall("ChangeDir " + dir);
+                chosen.ChangeDir(dir);
         }
 
         // Use
@@ -717,7 +685,7 @@ void ChosenProcess()
         // Refresh orientation
         uint8 dir = Game.GetDirection(chosen.HexX, chosen.HexY, cr.HexX, cr.HexY);
         if (Game.GetDistance(chosen.HexX, chosen.HexY, cr.HexX, cr.HexY) >= 1 && chosen.Dir != dir)
-            Game.CustomCall("ChangeDir " + dir);
+            chosen.ChangeDir(dir);
 
         chosen.CurrentAp = chosen.CurrentAp - apCost * AP_DIVIDER;
 
@@ -756,7 +724,7 @@ void ChosenProcess()
         // Refresh orientation
         uint8 dir = Game.GetDirection(chosen.HexX, chosen.HexY, cr.HexX, cr.HexY);
         if (Game.GetDistance(chosen.HexX, chosen.HexY, cr.HexX, cr.HexY) >= 1 && chosen.Dir != dir)
-            Game.CustomCall("ChangeDir " + dir);
+            chosen.ChangeDir(dir);
 
         CurPlayer.ServerCall.StartDialog(cr.Id);
     } break;
@@ -785,7 +753,7 @@ void ChosenProcess()
         // Refresh orientation
         uint8 dir = Game.GetDirection(chosen.HexX, chosen.HexY, hx, hy);
         if (Game.GetDistance(chosen.HexX, chosen.HexY, hx, hy) >= 1 && chosen.Dir != dir)
-            Game.CustomCall("ChangeDir " + dir);
+            chosen.ChangeDir(dir);
 
         chosen.CurrentAp = chosen.CurrentAp - apCost * AP_DIVIDER;
         // Game.CustomCall( "PickItem " + apCost + " " + pid + " " + hx + " " + hy );
@@ -829,7 +797,7 @@ void ChosenProcess()
         // Refresh orientation
         uint8 dir = Game.GetDirection(chosen.HexX, chosen.HexY, cr.HexX, cr.HexY);
         if (Game.GetDistance(chosen.HexX, chosen.HexY, cr.HexX, cr.HexY) >= 1 && chosen.Dir != dir)
-            Game.CustomCall("ChangeDir " + dir);
+            chosen.ChangeDir(dir);
 
         Game.CustomCall("PickCritter " + apCost + " " + crId + " " + isLoot);
     } break;

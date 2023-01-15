@@ -1,8 +1,8 @@
 # Project info
 SetupGame( DEV_NAME "TLA"
-    NICE_NAME "FOnline: The Life After"
-    AUTHOR_NAME "MyCorpLtd"
-    GAME_VERSION "0.2.0"
+    NICE_NAME "FOnlineTLA"
+    AUTHOR_NAME "FODev"
+    GAME_VERSION "0.0.4"
     SINGLEPLAYER NO
     ENABLE_3D NO
     ANGELSCRIPT_SCRIPTING YES

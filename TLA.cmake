@@ -2,7 +2,7 @@
 SetupGame( DEV_NAME "TLA"
     NICE_NAME "FOnlineTLA"
     AUTHOR_NAME "FODev"
-    GAME_VERSION "0.0.4"
+    GAME_VERSION "0.0.5"
     SINGLEPLAYER NO
     ENABLE_3D NO
     ANGELSCRIPT_SCRIPTING YES
@@ -49,6 +49,12 @@ AddToPackage( Dev Client Windows win64 Raw )
 AddToPackage( Dev Server Windows win64 Raw )
 AddToPackage( Dev Editor Windows win64 Raw )
 AddToPackage( Dev Mapper Windows win64 Raw Mapper )
+
+CreatePackage( LinuxDev LocalTest )
+AddToPackage( LinuxDev Client Linux x64 Raw )
+AddToPackage( LinuxDev Server Linux x64 Raw )
+AddToPackage( LinuxDev Editor Linux x64 Raw )
+AddToPackage( LinuxDev Mapper Linux x64 Raw Mapper )
 
 # Production builds
 #CreatePackage( Production PublicGame )

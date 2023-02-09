@@ -2,12 +2,13 @@
 SetupGame( DEV_NAME "TLA"
     NICE_NAME "FOnlineTLA"
     AUTHOR_NAME "FODev"
-    GAME_VERSION "0.0.5"
+    GAME_VERSION "0.0.6"
     SINGLEPLAYER NO
     ENABLE_3D NO
     ANGELSCRIPT_SCRIPTING YES
     NATIVE_SCRIPTING NO
     MONO_SCRIPTING NO
+    DEFAULT_CONFIG LocalTest
     DEBUGGING_CONFIG Debugging
     MAPPER_CONFIG Mapper
     GENERATE_ANGELSCRIPT_CONTENT Scripts
@@ -45,7 +46,7 @@ AddResources( Mapper Resources/Mapper )
 
 # Test builds
 CreatePackage( Dev LocalTest )
-AddToPackage( Dev Client Windows win64 Raw )
+AddToPackage( Dev Client Windows win64 OGL+Raw )
 AddToPackage( Dev Server Windows win64 Raw )
 AddToPackage( Dev Editor Windows win64 Raw )
 AddToPackage( Dev Mapper Windows win64 Raw Mapper )

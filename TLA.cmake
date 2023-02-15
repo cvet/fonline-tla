@@ -2,7 +2,7 @@
 SetupGame( DEV_NAME "TLA"
     NICE_NAME "FOnlineTLA"
     AUTHOR_NAME "FODev"
-    GAME_VERSION "0.0.6"
+    GAME_VERSION "0.1.0"
     SINGLEPLAYER NO
     ENABLE_3D NO
     ANGELSCRIPT_SCRIPTING YES
@@ -12,7 +12,8 @@ SetupGame( DEV_NAME "TLA"
     DEBUGGING_CONFIG Debugging
     MAPPER_CONFIG Mapper
     GENERATE_ANGELSCRIPT_CONTENT Scripts
-    GEOMETRY HEXAGONAL )
+    GEOMETRY HEXAGONAL
+    APP_ICON Resources/TLA.ico )
 
 # Native code
 AddEngineSource( SERVER Scripts/Extension/ServerExtension.cpp )

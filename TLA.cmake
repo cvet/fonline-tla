@@ -2,7 +2,7 @@
 SetupGame( DEV_NAME "TLA"
     NICE_NAME "FOnlineTLA"
     AUTHOR_NAME "FODev"
-    GAME_VERSION "0.1.2"
+    GAME_VERSION "0.1.3"
     SINGLEPLAYER NO
     ENABLE_3D NO
     ANGELSCRIPT_SCRIPTING YES
@@ -16,6 +16,7 @@ SetupGame( DEV_NAME "TLA"
     APP_ICON Resources/TLA.ico )
 
 # Native code
+AddEngineSource( COMMON Scripts/Extension/ContentMigration.cpp )
 AddEngineSource( SERVER Scripts/Extension/ServerExtension.cpp )
 AddEngineSource( CLIENT Scripts/Extension/ClientExtension.cpp )
 
@@ -47,8 +48,8 @@ AddResources( Mapper Resources/Mapper )
 
 # Test builds
 CreatePackage( Dev LocalTest )
-AddToPackage( Dev Client Windows win64 OGL+Raw )
-AddToPackage( Dev Server Windows win64 Raw )
+AddToPackage( Dev Client Windows win64 Profiling+OGL+Raw )
+AddToPackage( Dev Server Windows win64 Profiling+Raw )
 AddToPackage( Dev Editor Windows win64 Raw )
 AddToPackage( Dev Mapper Windows win64 Raw Mapper )
 

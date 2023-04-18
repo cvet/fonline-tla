@@ -53,8 +53,6 @@ AddResources(FOArt Resources/DataPacks/fo_art_critters_m.zip Resources/DataPacks
 AddResources(BlackCombatArmor Resources/DataPacks/cablack.dat)
 AddResources(Lieutenant Resources/DataPacks/lieutenant.dat)
 AddResources(LongHairDude Resources/DataPacks/longhairdude.dat)
-
-# AddResources( FTRobots Resources/DataPacks/ftrobots.bos )
 AddResources(FOSound Resources/DataPacks/fo_sound.zip)
 AddResources(Music Resources/FOnlineMusic)
 AddResources(Video Resources/FOnlineVideo)
@@ -62,6 +60,7 @@ AddResources(CommonData Resources/CommonData)
 AddResources(ServerData Resources/ServerData)
 AddResources(Mapper Resources/Mapper)
 
+# AddResources( FTRobots Resources/DataPacks/ftrobots.bos )
 # AddResources( VanBuren Resources/VanBuren )
 # AddRawResources( Resources/Mapper )
 
@@ -95,4 +94,6 @@ AddToPackage(LinuxDev Mapper Linux x64 Raw Mapper)
 # AddToPackage( Production Server Linux x64 Raw )
 # AddToPackage( Production Server Linux x64 Tar )
 # AddToPackage( Production Server Linux x64 AppImage )
+
+# Finalization
 include(Engine/BuildTools/FinalizeGeneration.cmake)

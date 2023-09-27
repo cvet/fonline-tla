@@ -1,7 +1,7 @@
 // FOS Server Sort 2
 // Author: rifleman17
 
-///@ Property Item PrivateServer uint SmokeGrenadeOwnerId
+///@ Property Item PrivateServer ident SmokeGrenadeOwnerId
 
 #define MAX_STEP            (5)
 #define SMOKE_TOHIT_PENALTY #(attacker)(attacker.IsOwnedByPlayer() ? 80 : 40)
@@ -27,22 +27,22 @@ uint GetSmokePenalty(Map map, Critter attacker, Critter target)
     return 0;
 }
 
-void SmokeBlast(Map map, uint16 hexX, uint16 hexY, hstring smokePid, uint ownerId)
+void SmokeBlast(Map map, uint16 hexX, uint16 hexY, hstring smokePid, ident ownerId)
 {
-    uint[] values = {map.Id, hexX, hexY, 0, smokePid.hash, ownerId};
+    any[] values = {map.Id, hexX, hexY, 0, smokePid.hash, ownerId};
     Game.DeferredCall(0, DoSmokeBlast, values);
 }
 
-void DoSmokeBlast(uint[] values)
+void DoSmokeBlast(any[] values)
 {
     Map map = Game.GetMap(values[0]);
     uint16 hexX = values[1];
     uint16 hexY = values[2];
     uint8 step = values[3];
     hstring pid = hstring_fromHash(values[4]);
-    uint ownerId = values[5];
+    ident ownerId = values[5];
     uint penaltyLowSkill = 0;
-    if (ownerId > 0) {
+    if (ownerId != ZERO_IDENT) {
         Critter cr = Game.GetCritter(ownerId);
         if (valid(cr)) {
             penaltyLowSkill = 4 - uint(CLAMP(cr.SkillThrowing, 0, 100) / 25);
@@ -52,7 +52,7 @@ void DoSmokeBlast(uint[] values)
         return;
     }
 
-    uint[] smokeIds = {};
+    ident[] smokeIds = {};
     map.PlaySound("gas.wav", hexX, hexY, 25);
     AddSmoke(map, hexX, hexY, (step == 0 || (step < 2 && RND(1, 2))), pid, ownerId, smokeIds);
 
@@ -67,15 +67,22 @@ void DoSmokeBlast(uint[] values)
             }
         }
     }
+
     if (smokeIds.length() > 0) {
-        Game.SavedDeferredCall(GAME_SECOND_TO_TICK(REAL_SECOND(Game.Random(4, 6)) * (12 - step) * (5 - penaltyLowSkill) / 5), DeleteSmokes, smokeIds);
+        any[] smokeIdsToDel = {};
+        for (uint i = 0; i < smokeIds.length(); i++) {
+            smokeIdsToDel.insertLast(smokeIds[i]);
+        }
+
+        Game.SavedDeferredCall(GAME_SECOND_TO_TICK(REAL_SECOND(Game.Random(4, 6)) * (12 - step) * (5 - penaltyLowSkill) / 5), DeleteSmokes, smokeIdsToDel);
     }
-    values[3]++;
+
+    values[3] = int(values[3]) + 1;
 
     Game.DeferredCall(1000, DoSmokeBlast, values);
 }
 
-void DeleteSmokes(uint[] values)
+void DeleteSmokes(any[] values)
 {
     for (uint i = 0, l = values.length(); i < l; i++) {
         if (values[i] == 0) {
@@ -117,7 +124,7 @@ void _MustardGasWalk(Item mine, Critter cr, bool entered, uint8 dir)
     }
 }
 
-void AddSmoke(Map map, uint16 hexX, uint16 hexY, bool place, hstring pid, int ownerId, uint[] ids)
+void AddSmoke(Map map, uint16 hexX, uint16 hexY, bool place, hstring pid, ident ownerId, ident[] ids)
 {
     if (valid(map) && place && (map.IsHexPassed(hexX, hexY) || valid(map.GetCritter(hexX, hexY)))) {
         Item item = map.AddItem(hexX, hexY, pid, 1);

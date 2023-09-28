@@ -3,9 +3,9 @@
 // Метательные крысы
 
 ///@ Property Critter PrivateServer hstring RatGrenadeProtoId
-///@ Property Critter PrivateServer uint RatGrenadeOwnerId
+///@ Property Critter PrivateServer ident RatGrenadeOwnerId
 
-///@ Property Item PrivateServer uint RatGrenadeInvokeId
+///@ Property Item PrivateServer ident RatGrenadeInvokeId
 
 #define STR_AWAKE_GLOBAL (30) // Одна из ваших оглушенных крыс пришла в себя и удрала из рюкзака! Черт. Чем это так пахнет, и что это за жидкость?
 #define STR_AWAKE_MAP    (31) // Одна оглушенная крыса, по всей видимости очнулась, и выскочила из рюкзака. Прикончите эту тварь немедленно.
@@ -51,13 +51,13 @@ bool _RatGrenadeUseOnMe(Item item, Critter cr, Item usedItem, uint param)
     return false;
 }
 
-void AwakeRat(uint value)
+void AwakeRat(any value)
 {
     DL("Rat awaken");
     Item item = Game.GetItem(value);
     if (valid(item)) {
-        item.RatGrenadeInvokeId = 0;
-        if (item.CritterId > 0) {
+        item.RatGrenadeInvokeId = ZERO_IDENT;
+        if (item.CritterId != ZERO_IDENT) {
             Critter cr = Game.GetCritter(item.CritterId);
             if (valid(cr)) {
                 Map map = cr.GetMap();
@@ -67,8 +67,9 @@ void AwakeRat(uint value)
                     uint16 y = cr.HexY;
                     if (Caravan::GetFreeHex(map, 2, x, y)) {
                         uint8 dir = Game.GetDirection(x, y, cr.HexX, cr.HexY);
-                        int[] ratVars = {CritterProperty::RatGrenadeProtoId, item.ProtoId.hash, CritterProperty::RatGrenadeOwnerId, item.CritterId};
-                        Critter rat = map.AddNpc(Content::Critter::RegularRat, x, y, dir, Tla::GetCritPropsDict(ratVars));
+                        dict<CritterProperty, any> ratVars = {{CritterProperty::RatGrenadeProtoId, item.ProtoId},
+                                                              {CritterProperty::RatGrenadeOwnerId, item.CritterId}};
+                        Critter rat = map.AddNpc(Content::Critter::RegularRat, x, y, dir, ratVars);
                         rat.SetupScript(_RatInit);
                         if (valid(rat)) {
                             NpcPlanes::AddAttackPlane(rat, 0, cr);
@@ -88,7 +89,7 @@ bool _RatGrenadeAttack(Item item, Critter cr, Critter target, uint8 weaponMode, 
 {
     DL("Rat attack");
     if (!target.IsNoPvp) {
-        uint[] values = {cr.Id, target.Id, item.Id, 1};
+        any[] values = {cr.Id, target.Id, item.Id, 1};
         Game.SavedDeferredCall(1, RatAttack, values);
     }
     if (target.BodyType == BodyTypes::Floater) {
@@ -104,20 +105,21 @@ bool _RatGrenadeAttack(Item item, Critter cr, Critter target, uint8 weaponMode, 
     return false;
 }
 
-void RatAttack(uint[] values)
+void RatAttack(any[] values)
 {
     Critter target = Game.GetCritter(values[1]);
     Item item = Game.GetItem(values[2]);
     if (valid(item) && valid(target)) {
         uint16 hX = target.HexX;
         uint16 hY = target.HexY;
-        if (item.MapId > 0) {
+        if (item.MapId != ZERO_IDENT) {
             Map map = item.GetMapPosition(hX, hY);
             if (valid(map)) {
                 if (Caravan::GetFreeHex(map, 2, hX, hY)) {
                     uint8 dir = Game.GetDirection(hX, hY, target.HexX, target.HexY);
-                    int[] ratVars = {CritterProperty::RatGrenadeProtoId, item.ProtoId.hash, CritterProperty::RatGrenadeOwnerId, item.CritterId};
-                    Critter rat = map.AddNpc(Content::Critter::RegularRat, hX, hY, dir, Tla::GetCritPropsDict(ratVars));
+                    dict<CritterProperty, any> ratVars = {{CritterProperty::RatGrenadeProtoId, item.ProtoId},
+                                                          {CritterProperty::RatGrenadeOwnerId, item.CritterId}};
+                    Critter rat = map.AddNpc(Content::Critter::RegularRat, hX, hY, dir, ratVars);
                     rat.SetupScript(_RatInit);
                     if (valid(rat)) {
                         NpcPlanes::AddAttackPlane(rat, 0, target);
@@ -139,7 +141,7 @@ void RatAttack(uint[] values)
 void _RatGrenadeFinish(Item item)
 {
     DL("Rat grenade finish");
-    if (item.RatGrenadeInvokeId != 0) {
+    if (item.RatGrenadeInvokeId != ZERO_IDENT) {
         Game.CancelDeferredCall(item.RatGrenadeInvokeId);
     }
 }
@@ -162,7 +164,7 @@ void _RatInit(Critter cr, bool firstTime)
     cr.AddTimeEvent(cte_DeleteRat, REAL_MINUTE(Game.Random(5, 10)), 0);
 }
 
-uint cte_ExplodeRat(Critter cr, int identifier, uint& rate)
+uint cte_ExplodeRat(Critter cr, any identifier, uint& rate)
 {
     DL("Exploded");
     Map map = cr.GetMap();
@@ -181,7 +183,7 @@ void _RatDead(Critter cr, Critter killer)
     cr.AddTimeEvent(cte_DeleteRat, REAL_MINUTE(5), 0);
 }
 
-uint cte_DeleteRat(Critter cr, int identifier, uint& rate)
+uint cte_DeleteRat(Critter cr, any identifier, uint& rate)
 {
     DL("Delete Rat");
     if (cr.IsNpc()) {

@@ -49,11 +49,11 @@ class BattleTeam
 {
     uint8 Index;        // Условный индекс команды, начинается с 0
     hstring StartEntry; // Спецгекс, на котором появляются игроки команды во время этапа STAGE_BEGIN
-    uint StartMapIndex; // Индекс карты среди карт локаций, на котором размещается команда
-    uint[] Requests = {}; // Id персонажей, подавших заявку на участие в поединке в составе данной команды
-    uint[] Players = {};      // Id персонажей, подтвердивших свое участие в поединке
-    uint TeamKills;           // Счетчик убийств, произведенных персонажами в составе группы
-    uint LastPeekedRequestId; // Код персонажа для последней заявки в команде, по которой было отправлено приглашение, получен ответ.
+    ident StartMap;     // Индекс карты среди карт локаций, на котором размещается команда
+    ident[] Requests = {}; // Id персонажей, подавших заявку на участие в поединке в составе данной команды
+    ident[] Players = {};      // Id персонажей, подтвердивших свое участие в поединке
+    uint TeamKills;            // Счетчик убийств, произведенных персонажами в составе группы
+    ident LastPeekedRequestId; // Код персонажа для последней заявки в команде, по которой было отправлено приглашение, получен ответ.
     bool LastRequestAccepted;
     int BattlePoints; // Игровые очки, исходя из количества очков команды формируется призовой фонд
     bool Winner;
@@ -71,12 +71,12 @@ class BattleTeam
         CallBackInvite = callback;
     }
 
-    bool HasRequest(uint crId)
+    bool HasRequest(ident crId)
     {
         return (LastPeekedRequestId == crId || UtilsForArray::FindInArray(Requests, crId) >= 0);
     }
 
-    bool HasPlayer(uint crId)
+    bool HasPlayer(ident crId)
     {
         return (UtilsForArray::FindInArray(Players, crId) >= 0);
     }
@@ -96,19 +96,19 @@ class BattleTeam
 
     // Достает Id персонажа, подавшего заявку по порядку
     // Одновременно удаляет его из массива
-    int PeekRequest()
+    ident PeekRequest()
     {
         DL("Peek request");
-        int crId = 0;
-        while (crId == 0) {
+        ident crId;
+        while (crId == ZERO_IDENT) {
             if (Requests.length() == 0) {
-                crId = -1;
+                crId = ZERO_IDENT;
                 break;
             }
             crId = Requests[0];
             Requests.removeFirst();
             if (!valid(Game.GetCritter(crId))) {
-                crId = 0;
+                crId = ZERO_IDENT;
             }
         }
         LastPeekedRequestId = crId;
@@ -119,12 +119,12 @@ class BattleTeam
     bool SendTeamInvite()
     {
         LastRequestAccepted = false;
-        int crId = PeekRequest();
-        if (crId > -1) {
+        ident crId = PeekRequest();
+        if (crId != ZERO_IDENT) {
             Critter cr = Game.GetCritter(crId);
             if (valid(cr)) {
                 if (cr.IsOwnedByPlayer()) {
-                    uint[] data = {Index, cr.Id};
+                    any[] data = {Index, cr.Id};
                     Game.DeferredCall(SECOND_TICKS(10), CheckInvite, data);
                     SayExtended::ShowDialogBox(cr, Tla::DialogboxPurgatoryInvite);
                     /*
@@ -156,7 +156,8 @@ class BattleTeam
         if (!valid(loc)) {
             return;
         }
-        Map map = Game.GetMap(StartMapIndex); // loc.GetMapByIndex(StartMapIndex);
+
+        Map map = Game.GetMap(StartMap);
         bool transit = true;
         if (valid(map)) {
             Critter cr = Game.GetCritter(LastPeekedRequestId);
@@ -181,7 +182,7 @@ class BattleTeam
 
 class BattleInfo
 {
-    uint LocId;  // Id локации, на которой идет поединок
+    ident LocId; // Id локации, на которой идет поединок
     uint8 Stage; // Текущая стадия события
     uint8 MaxPlayers;
     BattleTeam[] Teams = {};
@@ -199,10 +200,10 @@ class BattleInfo
         Callback = callback;
     }
 
-    void AddTeam(hstring entry, uint mapId, uint color, IBattleTeamInviteCallback callback)
+    void AddTeam(hstring entry, ident mapId, uint color, IBattleTeamInviteCallback callback)
     {
         BattleTeam t = BattleTeam();
-        t.StartMapIndex = mapId;
+        t.StartMap = mapId;
         t.StartEntry = entry;
         t.Index = Teams.length();
         t.SetInviteCallback(callback);
@@ -210,7 +211,7 @@ class BattleInfo
         Teams.insertLast(t);
     }
 
-    bool HasRequest(uint crId)
+    bool HasRequest(ident crId)
     {
         for (uint i = 0, l = Teams.length(); i < l; i++) {
             if (Teams[i].HasRequest(crId)) {
@@ -220,20 +221,17 @@ class BattleInfo
         return false;
     }
 
-    void AddRequest(uint8 team, uint crId) // Индексация с нуля
+    void AddRequest(uint8 team, ident crId) // Индексация с нуля
     {
         if (!HasRequest(crId) && Teams.length() > 0 && (team + 1 <= Teams.length())) {
             DL("Adding Request. Team#" + team + "; crId = " + crId);
             if (!Teams[team].HasRequest(crId)) {
                 Teams[team].Requests.insertLast(crId);
             }
-            DL("1->" + (Teams[team].HasRequest(crId) ? "has request" + crId : "no request" + crId));
-            crId = 1;
-            DL("2->" + (Teams[team].HasRequest(crId) ? "has request" + crId : "no request" + crId));
         }
     }
 
-    BattleTeam GetCritterTeam(uint crId)
+    BattleTeam GetCritterTeam(ident crId)
     {
         DL("get cr team: " + crId);
         for (uint i = 0, l = Teams.length(); i < l; i++) {
@@ -274,7 +272,7 @@ class BattleInfo
             if (!Teams[i].LastRequestAccepted) { // Найдена команда, не подтвердившая последний запрос
                 return;
             }
-            if (Teams[i].LastPeekedRequestId < 0) { // В одной из команд кончились персонажи, подавшие заявку
+            if (Teams[i].LastPeekedRequestId != ZERO_IDENT) { // В одной из команд кончились персонажи, подавшие заявку
                 return;
             }
         }
@@ -303,7 +301,7 @@ class BattleInfo
             Teams[i].Requests.clear();
             Teams[i].Players.clear();
             Teams[i].TeamKills = 0;
-            Teams[i].LastPeekedRequestId = 0;
+            Teams[i].LastPeekedRequestId = ZERO_IDENT;
             Teams[i].LastRequestAccepted = false;
             Teams[i].BattlePoints = 0;
         }
@@ -439,10 +437,10 @@ void answer_BattleInvite(Critter player, uint answerI, string answerS)
 }
 
 // Если по каким то причинам последняя заявка не получила ответа, или игрок слишком долго думает
-void CheckInvite(uint[] values)
+void CheckInvite(any[] values)
 {
     BattleTeam bt = bInfo.Teams[values[0]];
-    uint crId = values[1];
+    ident crId = values[1];
     if (crId == bt.LastPeekedRequestId) {
         bt.SendTeamInvite();
     }
@@ -478,7 +476,7 @@ bool d_IsEnemy(Critter player, Critter npc)
     BattleTeam tPlayer = bInfo.GetCritterTeam(player.Id);
     BattleTeam tNpc = bInfo.GetCritterTeam(npc.Id);
 
-    return (bInfo.Stage >= STAGE_BEGIN && bInfo.Stage <= STAGE_FIGHT && valid(tPlayer) && valid(tNpc) && tPlayer.StartMapIndex == tNpc.StartMapIndex &&
+    return (bInfo.Stage >= STAGE_BEGIN && bInfo.Stage <= STAGE_FIGHT && valid(tPlayer) && valid(tNpc) && tPlayer.StartMap == tNpc.StartMap &&
             tPlayer.Index != tNpc.Index);
 }
 
@@ -487,7 +485,7 @@ bool d_IsFriend(Critter player, Critter npc)
     BattleTeam tPlayer = bInfo.GetCritterTeam(player.Id);
     BattleTeam tNpc = bInfo.GetCritterTeam(npc.Id);
 
-    return (bInfo.Stage >= STAGE_BEGIN && bInfo.Stage <= STAGE_FIGHT && valid(tPlayer) && valid(tNpc) && tPlayer.StartMapIndex == tNpc.StartMapIndex &&
+    return (bInfo.Stage >= STAGE_BEGIN && bInfo.Stage <= STAGE_FIGHT && valid(tPlayer) && valid(tNpc) && tPlayer.StartMap == tNpc.StartMap &&
             tPlayer.Index == tNpc.Index);
 }
 
@@ -515,10 +513,10 @@ void dlg_TeamCount(Critter player, Critter npc, string& lexems)
     lexems = lexems + "$total" + total;
 }
 
-uint cte_RemoveNpc(Critter cr, int identifier, uint& rate)
+uint cte_RemoveNpc(Critter cr, any identifier, uint& rate)
 {
     if (cr.IsNpc()) {
-        if (cr.HomeMapId != 0 && Game.GetMap(cr.HomeMapId) !is null) {
+        if (cr.HomeMapId != ZERO_IDENT && Game.GetMap(cr.HomeMapId) !is null) {
             Obsolete::CritterTransitToMapCoords(cr, cr.HomeMapId, cr.HomeHexX, cr.HomeHexY, cr.HomeDir);
             return 0;
         }
@@ -528,7 +526,7 @@ uint cte_RemoveNpc(Critter cr, int identifier, uint& rate)
     return 0;
 }
 
-uint cte_BattleNpcSearchForTarget(Critter cr, int identifier, uint& rate)
+uint cte_BattleNpcSearchForTarget(Critter cr, any identifier, uint& rate)
 {
     if (cr.IsAlive() && NpcPlanes::IsNoPlanes(cr) && valid(bInfo)) {
         BattleTeam team = bInfo.GetCritterTeam(cr.Id);
@@ -726,7 +724,7 @@ int GetPoints(Critter cr, Critter killer)
     return (teamCr.Index == teamKiller.Index ? (-1) * points : points);
 }
 
-void test(Critter crp, int id, int, int)
+void test(Critter crp, any id)
 {
     Critter crDead = Game.GetCritter(id);
     string lexems = "$baseColor" + COLOR_TEXT;
@@ -762,7 +760,7 @@ void test(Critter crp, int id, int, int)
 
 BattleInfo bInfo;
 
-uint TeamContainerId; // код контейнера для игроков в составе команды
+ident TeamContainerId; // код контейнера для игроков в составе команды
 
 // Обработчики смены состояний и инвайта
 
@@ -906,10 +904,10 @@ bool
 NeedReplicateCritterToBattle(Critter cr)
 {
     DL("replication called");
-    if (valid(bInfo) && cr.NextReplicationMap != 0 && cr.NextReplicationEntry != hstring()) {
+    if (valid(bInfo) && cr.NextReplicationMap != ZERO_IDENT && cr.NextReplicationEntry != EMPTY_HSTRING) {
         BattleTeam team = bInfo.GetCritterTeam(cr.Id);
         if (valid(team) && bInfo.Stage == STAGE_BEGIN) {
-            if (team.StartMapIndex == cr.NextReplicationMap && team.StartEntry == cr.NextReplicationEntry) {
+            if (team.StartMap == cr.NextReplicationMap && team.StartEntry == cr.NextReplicationEntry) {
                 cr.ReplicationMoney += cr.ReplicationCost;
                 cr.ReplicationCount -= 1;
                 return true;
@@ -929,7 +927,7 @@ class PurgatoryInviteCallback : IBattleTeamInviteCallback
         }
 
         Item container;
-        if (TeamContainerId > 0) {
+        if (TeamContainerId != ZERO_IDENT) {
             container = Game.GetItem(TeamContainerId);
         }
 
@@ -939,14 +937,14 @@ class PurgatoryInviteCallback : IBattleTeamInviteCallback
 
         if (valid(container)) {
             Item[] items = cr.GetItems();
-            Game.MoveItems(items, container, cr.Id);
+            Game.MoveItems(items, container, cr.Id.value);
         }
 
         CritterState::ToDead(cr, Anim2Actions::DeadPulseDust, null);
         cr.SayMsg(SAY_NETMSG, TEXTMSG_TEXT, STR_KILL);
         cr.SayMsg(SAY_NETMSG, TEXTMSG_TEXT, STR_ITEMS);
         if (valid(team)) {
-            cr.NextReplicationMap = team.StartMapIndex;
+            cr.NextReplicationMap = team.StartMap;
             cr.NextReplicationEntry = team.StartEntry;
         }
 
@@ -1085,7 +1083,7 @@ void _RiperInit(Critter cr, bool firstTime)
     cr.OnIdle.Subscribe(_RiperIdle);
 }
 
-uint cte_RipperShout(Critter cr, int identifier, uint& rate)
+uint cte_RipperShout(Critter cr, any identifier, uint& rate)
 {
     if (valid(bInfo) && bInfo.Stage == STAGE_PREPARE) {
         cr.SayMsg(SAY_SHOUT, TEXTMSG_DLG, DLGSTR(cr.DialogId, 1));
@@ -1187,7 +1185,7 @@ void _PurgatoryMapOut(Map map, Critter cr)
     _BattleMapCritterIn(map, cr);
 }
 
-uint cte_NoPvpOff(Critter cr, int identifier, uint& rate)
+uint cte_NoPvpOff(Critter cr, any identifier, uint& rate)
 {
     if (!cr.IsNoPvp) {
         return 0;
@@ -1287,7 +1285,7 @@ void _PurgatoryLoop(Map map)
 }
 
 // Удаление локации после того, как время истекло
-void DeletePurgatory(uint value)
+void DeletePurgatory(any value)
 {
     Location loc = Game.GetLocation(value);
     if (valid(loc)) {

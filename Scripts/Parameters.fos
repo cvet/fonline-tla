@@ -83,7 +83,7 @@ void CritterSetExperience(Critter cr, CritterProperty prop, int& newValue)
     }
 }
 
-void UpdateExperienceLevel(uint crId)
+void UpdateExperienceLevel(any crId)
 {
     Critter cr = Game.GetCritter(crId);
     if (cr is null) {
@@ -124,18 +124,18 @@ void UpdateExperienceLevel(uint crId)
 void CritterSetPerks(Critter cr, CritterProperty perk, uint8& newValue)
 {
     uint8 curValue = cr.GetAsInt(perk);
-    uint[] values = {cr.Id, perk, MAX(newValue, curValue) - MIN(newValue, curValue), newValue > curValue ? 1 : 0};
+    any[] values = {cr.Id, perk, MAX(newValue, curValue) - MIN(newValue, curValue), newValue > curValue ? 1 : 0};
     DoPerkUpDown(values);
     // Game.DeferredCall( 0, DoPerkUpDown, array< uint > = { cr.Id, perk, MAX( newValue, curValue ) - MIN( newValue, curValue ), newValue > curValue ? 1 : 0 } );
 }
 
-void DoPerkUpDown(uint[] values)
+void DoPerkUpDown(any[] values)
 {
     Critter cr = Game.GetCritter(values[0]);
     if (cr is null) {
         return;
     }
-    CritterProperty perk = CritterProperty(values[1]);
+    CritterProperty perk = CritterProperty(int(values[1]));
     // target.GetAsInt( CritterProperty( stat ) )
     uint count = values[2];
     bool up = values[3] != 0;
@@ -161,7 +161,7 @@ void CritterSetFastShot(Critter cr)
 
 void CritterSetKnownLocations(Critter cr)
 {
-    uint[] knownLoc = cr.KnownLocations.clone();
+    ident[] knownLoc = cr.KnownLocations.clone();
     hstring[] knownLocPid = {};
     for (uint i = 0; i < knownLoc.length(); i++) {
         Location loc = Game.GetLocation(knownLoc[i]);
@@ -496,7 +496,7 @@ uint CheckPlayerName(string name)
 }
 
 hstring[] UnarmedWeapons = {
-    hstring(), // Content::Item::default_weapon,
+    EMPTY_HSTRING, // Content::Item::default_weapon,
     Content::Item::unarmed_strong_punch,
     Content::Item::unarmed_hammer_punch,
     Content::Item::unarmed_haymaker,
@@ -514,7 +514,7 @@ hstring[] UnarmedWeapons = {
 
 bool VerifyUnarmedItem(Critter cr, hstring pid)
 {
-    if (pid == hstring()) {
+    if (pid == EMPTY_HSTRING) {
         return true;
     }
     if (!UnarmedWeapons.exists(pid)) {
@@ -534,7 +534,7 @@ bool VerifyUnarmedItem(Critter cr, hstring pid)
 void SwitchUnarmedWeapon(Critter cr, bool next)
 {
     hstring curPid = cr.HandsProtoItemId;
-    ProtoItem proto = Game.GetProtoItem(curPid != hstring() ? curPid : Content::Item::default_weapon);
+    ProtoItem proto = Game.GetProtoItem(curPid != EMPTY_HSTRING ? curPid : Content::Item::default_weapon);
     uint8 mode = cr.HandsItemMode;
     uint8 use = mode & 0xF;
     uint8 aim = mode >> 4;
@@ -579,7 +579,7 @@ void SwitchUnarmedWeapon(Critter cr, bool next)
         cr.HandsItemMode = 0;
         cr.HandsProtoItemId = pid;
 
-        proto = Game.GetProtoItem(pid != hstring() ? pid : Content::Item::default_weapon);
+        proto = Game.GetProtoItem(pid != EMPTY_HSTRING ? pid : Content::Item::default_weapon);
         if (!next && !cr.IsNoAim && _WeaponAim(proto, 0)) {
             aim = HitLocations::LocationTorso;
             cr.HandsItemMode = aim << 4;
@@ -594,34 +594,35 @@ void UseMainItem()
         return;
     }
 
-    AbstractItem item = CritterItem::GetActive(chosen);
     if (Settings.Cursor == CursorType::UseWeapon) {
         Settings.Cursor = CursorType::Default;
         return;
     }
-    if (item is null) {
+
+    AbstractItem item = CritterItem::GetActive(chosen);
+    if (item == null) {
+        Settings.Cursor = CursorType::UseWeapon;
+        return;
+    }
+
+    uint8 mode = item.Mode;
+    uint8 use = _WeaponModeUse(mode);
+    uint8 aim = _WeaponModeAim(mode);
+    ident itemId = cast<Item>(item) != null ? cast<Item>(item).Id : ZERO_IDENT;
+    if (mode == USE_RELOAD) {
+        ChosenActions::SetChosenActions(array<any> = {Tla::ChosenUseItem, itemId, 0, TARGET_SELF_ITEM, 0, USE_RELOAD, 0});
+    }
+    else if (mode < MAX_USES && item.Type == ItemType::Weapon) {
         Settings.Cursor = CursorType::UseWeapon;
     }
-    else {
-        uint8 mode = item.Mode;
-        uint8 use = _WeaponModeUse(mode);
-        uint8 aim = _WeaponModeAim(mode);
-        uint itemId = cast<Item>(item) != null ? cast<Item>(item).Id : 0;
-        if (mode == USE_RELOAD) {
-            ChosenActions::SetChosenActions(array<uint> = {Tla::ChosenUseItem, itemId, 0, TARGET_SELF_ITEM, 0, USE_RELOAD, 0});
-        }
-        else if (mode < MAX_USES && item.Type == ItemType::Weapon) {
-            Settings.Cursor = CursorType::UseWeapon;
-        }
-        else if (mode == USE_USE && item.IsCanUseOnSmth) {
-            // Self->CurUseItem = 0;
-            // Self->SetCurMode( CUR_USE_ITEM );
-            Settings.Cursor = CursorType::UseItem;
-        }
-        else if (mode == USE_USE && item.IsCanUse) {
-            // Отдельная ветка на юз с таймером
-            Game.ShowScreen(CLIENT_SCREEN_TIMER, UtilsForArray::DictionaryToDict(dictionary = {{"TargetItemId", itemId}}));
-        }
+    else if (mode == USE_USE && item.IsCanUseOnSmth) {
+        // Self->CurUseItem = 0;
+        // Self->SetCurMode( CUR_USE_ITEM );
+        Settings.Cursor = CursorType::UseItem;
+    }
+    else if (mode == USE_USE && item.IsCanUse) {
+        // Отдельная ветка на юз с таймером
+        Game.ShowScreen(CLIENT_SCREEN_TIMER, dict<string, any> = {{"TargetItemId", itemId}});
     }
 }
 

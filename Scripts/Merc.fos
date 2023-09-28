@@ -14,9 +14,6 @@ const int MercGuardDefault = 4; // Охранник по умолчанию. П�
 const int MMDistMedium = 8;        // Средняя дистанция - 8 гексов
 #define MMDistFar             (20) // Дальняя дистанция - 20 гексов
 
-#define MasterId              MercMasterId
-#define LoseDist              MercLoseDist
-
 #define _CancelOnMasterAttack #(cr)(cr.MercCancelOnAttack)
 #define _CanLose              #(cr)(cr.MercLoseDist> 0)
 #define _AlwaysRun            #(cr)(cr.MercAlwaysRun)
@@ -105,14 +102,14 @@ void e_MercSmthAttacked(Critter merc, Critter fromCr, Critter attacker)
     if (attacker.Id == merc.Id) {
         return;
     }
-    if (merc.MasterId == fromCr.Id) // Атакован хозяин мерка
+    if (merc.MercMasterId == fromCr.Id) // Атакован хозяин мерка
     {
         if (merc.MercDefendMaster) {
             NpcPlanes::AddAttackPlane(merc, 0, attacker);
         }
         return;
     }
-    if (merc.MasterId == attacker.Id) // Атакующий - хозяин мерка
+    if (merc.MercMasterId == attacker.Id) // Атакующий - хозяин мерка
     {
         if (merc.MercDefendMaster) {
             NpcPlanes::AddAttackPlane(merc, 0, fromCr);
@@ -129,7 +126,7 @@ void e_MercDead(Critter merc, Critter killer)
 
 bool e_MercAttacked(Critter merc, Critter attacker)
 {
-    if (attacker.Id == merc.MasterId && _CancelOnMasterAttack(merc)) {
+    if (attacker.Id == merc.MercMasterId && _CancelOnMasterAttack(merc)) {
         CancelMerc(merc); // хозяин атаковал мерка
     }
     return false;
@@ -137,7 +134,7 @@ bool e_MercAttacked(Critter merc, Critter attacker)
 
 void e_MercSmthDead(Critter merc, Critter fromCr, Critter killer)
 {
-    if (fromCr.Id == merc.MasterId) {
+    if (fromCr.Id == merc.MercMasterId) {
         // пока - однозначаная отмена мерка при гибели хозяина
         CancelMerc(merc);
     }
@@ -145,7 +142,7 @@ void e_MercSmthDead(Critter merc, Critter fromCr, Critter killer)
 
 void e_MercIdle(Critter merc)
 {
-    if (merc.MasterId == 0) {
+    if (merc.MercMasterId == ZERO_IDENT) {
         return;
     }
 
@@ -154,7 +151,7 @@ void e_MercIdle(Critter merc)
         return;
     }
 
-    Critter master = Game.GetCritter(merc.MasterId);
+    Critter master = Game.GetCritter(merc.MercMasterId);
     if (!valid(master)) {
         return;
     }
@@ -174,9 +171,9 @@ void e_MercIdle(Critter merc)
             if (map_master.Id == map_merc.Id) {
                 uint dist = Game.GetDistance(merc, master);
                 if (_CanLose(merc)) {
-                    if (dist > merc.LoseDist) {
+                    if (dist > merc.MercLoseDist) {
                         CancelMerc(merc);
-                        DL("lost master.Dist=" + dist + " losedist" + merc.LoseDist);
+                        DL("lost master.Dist=" + dist + " losedist" + merc.MercLoseDist);
                         return; // потеряли
                     }
                 }
@@ -316,14 +313,14 @@ void CancelMerc(Critter merc)
     Game.SavedDeferredCall(GAME_SECOND_TO_TICK(RELEASE_TIME), ReleaseMerc, merc.Id);
 }
 
-void ReleaseMerc(uint value)
+void ReleaseMerc(any value)
 {
     Critter merc = Game.GetCritter(value);
     if (valid(merc)) {
         merc.IsGeck = false;
         merc.IsNoHome = false;
         // Если домашняя позиция нпц найдена, перемещаем его домой.
-        if (merc.HomeMapId != 0 && Game.GetMap(merc.HomeMapId) !is null) {
+        if (merc.HomeMapId != ZERO_IDENT && Game.GetMap(merc.HomeMapId) !is null) {
             merc.ReplicationTime = 0;
             if (merc.IsDead()) {
                 CritterState::ToAlive(merc);
@@ -352,7 +349,7 @@ uint GetPlayerMercs(Critter player, Critter[] mercs)
         Critter[] globalGrp = GlobalmapGroupExtended::GetGlobalGroup(player);
         if (valid(globalGrp)) {
             for (uint i = 0; i < globalGrp.length(); i++) {
-                if (globalGrp[i].MasterId == player.Id) {
+                if (globalGrp[i].MercMasterId == player.Id) {
                     mercs.insertLast(globalGrp[i]);
                 }
             }
@@ -361,7 +358,7 @@ uint GetPlayerMercs(Critter player, Critter[] mercs)
     else {
         Critter[] critters = map.GetCritters(CritterFindType::AliveNpc);
         for (uint i = 0; i < critters.length(); i++) {
-            if (critters[i].MasterId == player.Id) {
+            if (critters[i].MercMasterId == player.Id) {
                 mercs.insertLast(critters[i]);
             }
         }
@@ -418,29 +415,29 @@ Critter GetPlayerMerc(Critter player, int mercRole)
 // Хозяин мерка
 Critter GetMaster(Critter merc)
 {
-    return Game.GetCritter(merc.MasterId);
+    return Game.GetCritter(merc.MercMasterId);
 }
 
 // Признак, является ли криттер чьим-то мерком
 bool IsMerc(Critter merc)
 {
-    return merc.MasterId > 0;
+    return merc.MercMasterId != ZERO_IDENT;
 }
 
 /* **************************************** DEBUG *************************************** */
-void Merc(Critter cr, int mercId, int ld, int)
+void Merc(Critter cr, any mercId, any ld)
 {
     Critter merc = Game.GetCritter(mercId);
     Merc2Player(cr, merc);
 }
 
-void MercParam(Critter cr, int mercId, int param, int value)
+void MercParam(Critter cr, any mercId, any param, any value)
 {
     Critter merc = Game.GetCritter(mercId);
     if (!valid(merc)) {
         return;
     }
-    merc.SetAsInt(CritterProperty(param), value);
+    merc.SetAsInt(CritterProperty(int(param)), value);
 }
 
 // Функции для использования в диалогах
@@ -469,7 +466,7 @@ bool d_NpcIsPlayerMerc(Critter player, Critter npc)
     if (!IsMerc(npc)) {
         return false;
     }
-    return npc.MasterId == player.Id;
+    return npc.MercMasterId == player.Id;
 }
 
 // НПЦ - не мерк данного игрока
@@ -523,8 +520,8 @@ bool d_CheckMercNear(Critter player, Critter npc, int varNum, int radius)
         return false;
     }
 
-    uint id = player.GetAsInt(CritterProperty(varNum));
-    if (id == 0) {
+    ident id = player.GetAsAny(CritterProperty(varNum));
+    if (id == ZERO_IDENT) {
         return false;
     }
 
@@ -532,7 +529,7 @@ bool d_CheckMercNear(Critter player, Critter npc, int varNum, int radius)
     if (!valid(merc)) {
         return false;
     }
-    if (merc.MasterId != player.Id) {
+    if (merc.MercMasterId != player.Id) {
         return false;
     }
 
@@ -603,7 +600,7 @@ void r_CancelPlayerMerc(Critter player, Critter npc)
     if (!IsMerc(npc)) {
         return;
     }
-    if (uint(npc.MasterId) != player.Id) {
+    if (npc.MercMasterId != player.Id) {
         return;
     }
 
@@ -631,13 +628,13 @@ void r_SaveMercId(Critter player, Critter npc, int varNum)
     if (!valid(npc)) {
         return;
     }
-    player.SetAsInt(CritterProperty(varNum), npc.Id);
+    player.SetAsAny(CritterProperty(varNum), npc.Id);
 }
 
 // Отмена мерка через Id, в переменной
 void r_CancelMerc(Critter player, Critter npc, int varNum)
 {
-    Critter merc = Game.GetCritter(player.GetAsInt(CritterProperty(varNum)));
+    Critter merc = Game.GetCritter(player.GetAsAny(CritterProperty(varNum)));
     if (valid(merc)) {
         CancelMerc(merc);
     }
@@ -671,5 +668,5 @@ void dlg_Master(Critter player, Critter npc, string& masterName)
         return;
     }
     masterName = "$mastername";
-    masterName += Obsolete::GetPlayerName(npc.MasterId);
+    masterName += Obsolete::GetPlayerName(npc.MercMasterId);
 }

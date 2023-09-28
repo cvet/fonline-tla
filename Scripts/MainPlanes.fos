@@ -158,7 +158,7 @@ bool npc_plane_end(Critter npc, int planeId, int reason, Critter someCr, Item so
 // REASON_ATTACK_USE_AIM
 //  In: r0 target id, r1 0, r2 0
 //  Out: r0 use, r1 aim, r2 disable attack and wait this time (in ms)
-bool npc_plane_run(Critter npc, int planeId, int reason, uint& r0, uint& r1, uint& r2)
+bool npc_plane_run(Critter npc, int planeId, int reason, any& r0, any& r1, any& r2)
 {
     NpcPlanes::NpcPlane plane = NpcPlanes::GetCritterPlane(npc, planeId);
 
@@ -204,7 +204,7 @@ bool npc_plane_run(Critter npc, int planeId, int reason, uint& r0, uint& r1, uin
         }
 
         // Get last battle weapon
-        if (npc.LastWeaponId == uint(-1)) // Previous seek not give result
+        if (npc.LastWeaponId == ZERO_IDENT && npc.LastWeaponNotFound) // Previous seek not give result
         {
             r0 = 0;
             return true;
@@ -214,14 +214,15 @@ bool npc_plane_run(Critter npc, int planeId, int reason, uint& r0, uint& r1, uin
         r1 = npc.LastWeaponUse;
         Item weapon = null;
         if (r0 != 0) {
-            weapon = npc.GetItem(uint(r0));
+            weapon = npc.GetItem(ident(r0));
         }
         if (valid(weapon) && CheckBattleWeapon(npc, weapon)) {
             return true;
         }
 
         // Find new battle weapon
-        npc.LastWeaponId = uint(-1);
+        npc.LastWeaponId = ZERO_IDENT;
+        npc.LastWeaponNotFound = true;
         npc.LastWeaponUse = 0;
         r0 = 0;
         r1 = 0;
@@ -456,44 +457,50 @@ bool npc_plane_run(Critter npc, int planeId, int reason, uint& r0, uint& r1, uin
 
             if (!npc.IsNoAim) {
                 if (weapon.Weapon_Aim_0) {
-                    uint reduction = (r0 * 3 * npc.Intellect) / 100;
+                    uint reduction = (int(r0) * 3 * npc.Intellect) / 100;
                     reduction = MIN(15, reduction);
-                    r0 -= reduction;
+                    r0 = int(r0) - reduction;
                 }
             }
 
             // left clamp:
-            if (r0 < r1) {
+            if (int(r0) < int(r1)) {
                 r0 = r1;
             }
-            if (r2 < r0) {
+            if (int(r2) < int(r0)) {
                 r2 = r0; // this can be deleted under assumption that ai_min is always <= 95, which should be true
             }
 
             // right clamp
             if (wpnDist < int(r2)) {
                 r2 = _WeaponMaxDist(weapon, use);
-                if (r0 > r2) {
+                if (int(r0) > int(r2)) {
                     r0 = r2;
                 }
             }
 
             // Multihex
-            r0 += multihex;
-            r1 += multihex;
-            r2 += multihex;
+            r0 = int(r0) + multihex;
+            r1 = int(r1) + multihex;
+            r2 = int(r2) + multihex;
             return true;
         }
     }
     else if (reason == REASON_ATTACK_USE_AIM) {
-        if (!CogitateFiring(npc, r0, r1)) {
+        uint mode = 0;
+        uint aim = 0;
+        if (CogitateFiring(npc, ident(r0), mode, aim)) {
+            r0 = mode;
+            r1 = aim;
+        }
+        else {
             r0 = 0; // Primary attack
             r1 = (!npc.IsNoAim && Game.Random(0, 5) == 0 ? Game.Random(HitLocations::LocationHead, HitLocations::LocationGroin) : 0);
         }
 
         AbstractItem weapon = CritterItem::GetActive(npc);
         int ap = valid(weapon) ? _WeaponApCost(weapon, r0) : 3;
-        switch (r1) {
+        switch (HitLocations(int(r1))) {
         case HitLocations::LocationEyes:
             ap += Settings.ApCostAimEyes;
             break;
@@ -530,13 +537,13 @@ bool npc_plane_run(Critter npc, int planeId, int reason, uint& r0, uint& r1, uin
     return false;
 }
 
-bool CogitateFiring(Critter cr, uint mode, uint aim) // in: targetId, 0; out: mode, aim
+bool CogitateFiring(Critter cr, ident targetId, uint& mode, uint& aim) // in: targetId, 0; out: mode, aim
 {
     if (Game.Random(1, 10) > cr.Intellect) {
         return false; // too stupid to think about this
     }
 
-    Critter target = Game.GetCritter(mode);
+    Critter target = Game.GetCritter(targetId);
     if (!valid(target)) {
         return false;
     }
@@ -561,7 +568,7 @@ bool CogitateFiring(Critter cr, uint mode, uint aim) // in: targetId, 0; out: mo
     }
 
     ProtoItem protoAmmo = null;
-    if (weapon.AmmoPid != hstring()) {
+    if (weapon.AmmoPid != EMPTY_HSTRING) {
         protoAmmo = Game.GetProtoItem(weapon.AmmoPid);
     }
 
@@ -755,7 +762,7 @@ Critter TraceFirstCritter(uint16 hx, uint16 hy, uint16 tx, uint16 ty, Map map, i
     return Tracer.Cr;
 }
 
-bool IsCurrentEnemy(Critter crit, uint targetId)
+bool IsCurrentEnemy(Critter crit, ident targetId)
 {
     Critter cr = Game.GetCritter(crit.Id);
     if (EnemyStack::CheckEnemyInStack(cr, targetId)) {

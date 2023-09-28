@@ -33,7 +33,7 @@
 // timeWaitLoc - время ожидания на локации до следующего путешествия
 // timeWaitEnc - время ожидания на энкаунтере после завершения боя до продолжения путешествия
 // locPids - массив кодов протоипов локаций, на которые может зайти НПЦ
-void SetTraveller(uint crId, bool isTransit, uint entryNum, uint timeWaitLoc, uint timeWaitEnc, hstring[] locPids, bool visibleEncounters)
+void SetTraveller(ident crId, bool isTransit, uint entryNum, uint timeWaitLoc, uint timeWaitEnc, hstring[] locPids, bool visibleEncounters)
 {
     Critter cr = Game.GetCritter(crId);
     if (!valid(cr)) {
@@ -66,7 +66,7 @@ void SetTraveller(uint crId, bool isTransit, uint entryNum, uint timeWaitLoc, ui
     }
 }
 
-void CancelTraveller(uint crId)
+void CancelTraveller(ident crId)
 {
     Traveller ti = Traveller(crId);
     ti.Erase();
@@ -84,14 +84,14 @@ void CancelTraveller(uint crId)
 
 class Traveller
 {
-    Traveller(uint crId)
+    Traveller(ident crId)
     {
         CritterId = crId;
     }
 
-    uint CritterId;   // Id нпц-путешественника
+    ident CritterId;  // Id нпц-путешественника
     uint8 TravelType; // Тип перемещений.(Телепорт или путешествие через глобал)
-    uint MapIdTo;     // Id карты на которую направляется НПЦ
+    ident MapIdTo;    // Id карты на которую направляется НПЦ
     uint EntryTo;     // Номер гекса, на котором будет стоять НПЦ
     uint TimeWaitLocation; // Время ожидания в игровых секундах на локации перед следующим путешествием
     uint TimeWaitEncounter; // Время ожидания в игровых секундах на энкаунтере во время путешествия
@@ -99,11 +99,11 @@ class Traveller
     uint TimeLastStart;     // Время последнего отправления НПЦ из локации
     uint TimeNextRoute;     // Время следующего отправления НПЦ из локации
     hstring[] LocationPids = {}; // Массив кодов прототипов локаций, на которые может отправиться НПЦ
-    uint[] Followers = {};       // Массив Id спутников путешественника, может быть как игроки, так и нпц
+    ident[] Followers = {};      // Массив Id спутников путешественника, может быть как игроки, так и нпц
 
     void AddLocPid(hstring locPid)
     {
-        for (uint i = 0, l = LocationPids.length(); i < l; i++) {
+        for (uint i = 0; i < LocationPids.length(); i++) {
             if (locPid == LocationPids[i]) {
                 return;
             }
@@ -111,9 +111,9 @@ class Traveller
         LocationPids.insertLast(locPid);
     }
 
-    void AddFollower(uint crId)
+    void AddFollower(ident crId)
     {
-        for (uint i = 0, l = Followers.length(); i < l; i++) {
+        for (uint i = 0; i < Followers.length(); i++) {
             if (crId == Followers[i]) {
                 return;
             }
@@ -167,9 +167,10 @@ class Traveller
 
     Critter GetTraveller()
     {
-        if (CritterId == 0) {
+        if (CritterId == ZERO_IDENT) {
             return null;
         }
+
         return Game.GetCritter(CritterId);
     }
 
@@ -183,15 +184,18 @@ class Traveller
         if (len == 0) {
             return false;
         }
+
         Critter cr = GetTraveller();
         if (!valid(cr)) {
             return false;
         }
-        uint mapId = 0;
+
+        ident mapId;
         Map mapCr = cr.GetMap();
         if (valid(mapCr)) {
             mapId = mapCr.Id;
         }
+
         while (tries > 0) {
             idx = Game.Random(0, len - 1);
             Location[] locations = {};
@@ -221,7 +225,7 @@ class Traveller
     bool TransitToLocation()
     {
         Critter cr = GetTraveller();
-        if (!valid(cr) || MapIdTo == 0) {
+        if (!valid(cr) || MapIdTo == ZERO_IDENT) {
             return false;
         }
         Map map = Game.GetMap(MapIdTo);
@@ -249,12 +253,14 @@ class Traveller
         if (!valid(cr)) {
             return false;
         }
+
         Map map = cr.GetMap();
         if (!valid(map)) {
             return false;
         }
+
         Critter[] grp = {};
-        uint[] confirmedIds = {};
+        ident[] confirmedIds = {};
         grp.insertLast(cr);
         uint ch = cr.Charisma;
         for (uint i = 0, l = Followers.length(); i < l && confirmedIds.length() < ch; i++) {
@@ -265,10 +271,12 @@ class Traveller
                 confirmedIds.insertLast(follower.Id);
             }
         }
+
         Followers.clear();
         for (uint i = 0, l = confirmedIds.length(); i < l; i++) {
             Followers.insertLast(confirmedIds[i]);
         }
+
         cr.TransitToGlobal();
         TimeLastStart = Game.GetFullSecond();
         Save();
@@ -307,7 +315,7 @@ class Traveller
     // Актуально только для TYPE_TRAVEL
     bool ValidateRoute(float worldX, float worldY)
     {
-        if (MapIdTo == 0) {
+        if (MapIdTo == ZERO_IDENT) {
             return false;
         }
         Map map = Game.GetMap(MapIdTo);
@@ -343,25 +351,26 @@ class Traveller
             // cr.ChangeTimeEvent(indexes[0], TIME_CHECK, 0);
         }
     }
-}
+};
 
-Traveller
-TravellerFromCritter(uint crId)
+Traveller TravellerFromCritter(ident crId)
 {
     if (Game.GetCritter(crId).TravellerRoute.length() == 0) {
         return null;
     }
+
     Traveller t = Traveller(crId);
     t.Load();
     return t;
 }
 
 // Начало путешествия. Либо телепорт, либо переход по глобалу
-uint cte_Travel(Critter cr, int identifier, uint& rate)
+uint cte_Travel(Critter cr, any identifier, uint& rate)
 {
     if (!NpcPlanes::IsNoPlanes(cr) || !valid(cr.GetMap())) {
         return NEXT_TRY;
     }
+
     Traveller t = TravellerFromCritter(cr.Id);
     DL("travel started!" + "time next: " + t.TimeNextRoute + ":" + Time::DateTimeToString(Game.GetFullSecond()));
     if (valid(t)) {
@@ -390,7 +399,7 @@ uint cte_Travel(Critter cr, int identifier, uint& rate)
 
 // Проверка, достиг ли НПЦ последней точки назначения в отведенное время
 // если нет, переносится c  помощью TransitToMap
-uint cte_Check(Critter cr, int identifier, uint& rate)
+uint cte_Check(Critter cr, any identifier, uint& rate)
 {
     Map map = cr.GetMap();
     if (valid(map) && valid(map.GetLocation()) && !map.GetLocation().AutoGarbage) {
@@ -413,7 +422,7 @@ uint cte_Check(Critter cr, int identifier, uint& rate)
 }
 
 // Поиск новой точки маршрута нпц, производится при заходе в локацию
-uint cte_ChooseTravelPoint(Critter cr, int identifier, uint& rate)
+uint cte_ChooseTravelPoint(Critter cr, any identifier, uint& rate)
 {
     DL("Sheduled");
     Traveller t = TravellerFromCritter(cr.Id);
@@ -426,7 +435,7 @@ uint cte_ChooseTravelPoint(Critter cr, int identifier, uint& rate)
     return 0;
 }
 
-uint cte_ShowLoc(Critter cr, int identifier, uint& rate)
+uint cte_ShowLoc(Critter cr, any identifier, uint& rate)
 {
     Map map = cr.GetMap();
     if (valid(map)) {
@@ -484,7 +493,7 @@ bool _GlobalProcess(Critter cr, int type, Item car, float x, float y, float toX,
     return false;
 }
 
-bool _GlobalInvite(Critter cr, Item car, uint encounterDescriptor, int combatMode, uint mapId, uint16 hexX, uint16 hexY, uint8 dir)
+bool _GlobalInvite(Critter cr, Item car, uint encounterDescriptor, int combatMode, ident mapId, uint16 hexX, uint16 hexY, uint8 dir)
 {
     DL("global invite");
     Traveller t = TravellerFromCritter(cr.Id);
@@ -580,7 +589,7 @@ void dlg_WhereAndWhen(Critter player, Critter npc, string& lexems)
         return;
     }
     lexems = "";
-    if (t.MapIdTo != 0) {
+    if (t.MapIdTo != ZERO_IDENT) {
         Map map = Game.GetMap(t.MapIdTo);
         if (valid(map)) {
             Location loc = map.GetLocation();

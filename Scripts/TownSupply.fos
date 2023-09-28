@@ -2,8 +2,8 @@
 // Town supply
 // Author: cvet
 
-///@ Property Critter PrivateServer uint TownSupplyVictimId
-///@ Property Critter PrivateServer uint TownSupplyHostileId
+///@ Property Critter PrivateServer ident TownSupplyVictimId
+///@ Property Critter PrivateServer ident TownSupplyHostileId
 
 #define ENTER_ENTRY         (0)
 #define EXIT_ENTRY          (0)
@@ -14,22 +14,25 @@
 void CallTownSupply(Critter victim, Critter hostile)
 {
     if (IsValidForSupply(victim, hostile)) {
-        uint[] values = {victim.Id, hostile.Id, 0};
+        any[] values = {victim.Id, hostile.Id, 0};
         Game.SavedDeferredCall(GAME_MINUTE_TO_TICK(SUPPLY_GAME_MINUTES), CallTownSupplyNext, values);
     }
 }
 
-void CallTownSupplyNext(uint[] values)
+void CallTownSupplyNext(any[] values)
 {
-    uint victimId = values[0];
+    ident victimId = values[0];
     Critter hostile = Game.GetCritter(values[1]);
-    uint rate = ++values[2];
 
-    if (valid(hostile) && hostile.MapId != 0 && not hostile.IsDead()) {
+    values[2] = uint(values[2]) + 1;
+    uint rate = values[2];
+
+    if (valid(hostile) && hostile.MapId != ZERO_IDENT && not hostile.IsDead()) {
         uint count = hostile.Level / 10 + 1;
         if (count > 10) {
             count = 10;
         }
+
         CallSupply(victimId, hostile, count);
         return;
     }
@@ -59,7 +62,7 @@ bool IsValidForSupply(Critter victim, Critter hostile)
     return false;
 }
 
-void CallSupply(uint victimId, Critter target, int supplyCount)
+void CallSupply(ident victimId, Critter target, int supplyCount)
 {
     Map map = target.GetMap();
     if (map == null) {
@@ -84,26 +87,17 @@ void CallSupply(uint victimId, Critter target, int supplyCount)
                          Content::Critter::BountyHunter_9,
                          Content::Critter::BountyHunter_10};
 
-    int[] props = {CritterProperty::BagId,
-                   Bags::AllBountyHunters1 + rnd,
-                   CritterProperty::TeamId,
-                   Teams::Guard,
-                   CritterProperty::KillExperience,
-                   0,
-                   CritterProperty::PerkTerminator,
-                   1,
-                   CritterProperty::IsNoSteal,
-                   1,
-                   CritterProperty::IsNoLoot,
-                   1,
-                   CritterProperty::IsNoSupply,
-                   1,
-                   CritterProperty::TownSupplyVictimId,
-                   victimId,
-                   CritterProperty::TownSupplyHostileId,
-                   target.Id};
+    dict<CritterProperty, any> props = {{CritterProperty::BagId, Bags::AllBountyHunters1 + rnd},
+                                        {CritterProperty::TeamId, Teams::Guard},
+                                        {CritterProperty::KillExperience, 0},
+                                        {CritterProperty::PerkTerminator, 1},
+                                        {CritterProperty::IsNoSteal, 1},
+                                        {CritterProperty::IsNoLoot, 1},
+                                        {CritterProperty::IsNoSupply, 1},
+                                        {CritterProperty::TownSupplyVictimId, victimId},
+                                        {CritterProperty::TownSupplyHostileId, target.Id}};
 
-    Critter bountyHunter = map.AddNpc(hunters[rnd], hx, hy, Game.Random(0, 5), Tla::GetCritPropsDict(props));
+    Critter bountyHunter = map.AddNpc(hunters[rnd], hx, hy, Game.Random(0, 5), props);
     if (not valid(bountyHunter)) {
         return;
     }
@@ -157,7 +151,9 @@ void _GuardIdle(Critter bountyHunter)
 
 void _GuardDead(Critter bountyHunter, Critter killer)
 {
-    // if(valid(killer) && IsValidForSupply(bountyHunter,killer)) CallSupply(killer,1);
+    /*if (valid(killer) && IsValidForSupply(bountyHunter,killer)) {
+        CallSupply(killer, 1);
+    }*/
     Game.DeleteCritter(bountyHunter);
 }
 
@@ -170,9 +166,9 @@ void _GuardSmthDead(Critter bountyHunter, Critter fromCrit, Critter killer)
     }
 
     // Erase id from victim enemy stack
-    uint victimId = bountyHunter.TownSupplyVictimId;
-    uint hostileId = bountyHunter.TownSupplyHostileId;
-    if (victimId != 0 && hostileId == fromCrit.Id) {
+    ident victimId = bountyHunter.TownSupplyVictimId;
+    ident hostileId = bountyHunter.TownSupplyHostileId;
+    if (victimId != ZERO_IDENT && hostileId == fromCrit.Id) {
         Critter victim = Game.GetCritter(victimId);
         if (valid(victim)) {
             EnemyStack::EraseEnemyFromStack(victim, hostileId);
@@ -192,5 +188,6 @@ bool _GuardPlaneEnd(Critter bountyHunter, int planeId, int reason, Critter someC
     if (plane.Identifier == PLANE_GOTO_EXIT) {
         Game.DeleteCritter(bountyHunter);
     }
+
     return true;
 }

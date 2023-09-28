@@ -60,8 +60,8 @@ class CBank
     uint PassedTime;                     // Время пропуска.
     bool PlayerNotify;                   // Предупрежден ли игрок о том, что задерживается.
     bool PlayerEntered;                  // Вошел ли игрок в помещение.
-    uint PassedPlayerId;                 // Id пропущенного к контейнерам игрока.
-    uint ThrowOutPlayerId;               // Id игрока, которого банкир просил выкинуть.
+    ident PassedPlayerId;                // Id пропущенного к контейнерам игрока.
+    ident ThrowOutPlayerId;              // Id игрока, которого банкир просил выкинуть.
     bool DoorGuardSayWarning;            // Указывает предупредил ли кто-нибудь из охранников игрока.
     bool PlayerPassed;                   // Id пропущенного к контейнерам игрока.
     hstring DoorPid;
@@ -71,30 +71,32 @@ class CBank
         PassedTime = 0;
         PlayerNotify = false;
         PlayerEntered = false;
-        PassedPlayerId = 0;
-        ThrowOutPlayerId = 0;
+        PassedPlayerId = ZERO_IDENT;
+        ThrowOutPlayerId = ZERO_IDENT;
         DoorGuardSayWarning = false;
         HideContPos = Entrance::ParseEntries(map, ENT_HIDE_CONT);
         ShowContPos = Entrance::ParseEntries(map, ENT_SHOW_CONT);
         DoorGuardPos = Entrance::ParseEntries(map, ENT_DOOR_GUARD);
         DoorHexPos = Entrance::ParseEntries(map, ENT_DOOR_HEX);
     }
-}
+};
 
-uint[] BanksMapId = {};
+ident[] BanksMapId = {};
 CBank[] Banks = {};
 
 CBank GetBank(Critter cr)
 {
-    uint id = cr.MapId;
-    if (id == 0) {
+    ident id = cr.MapId;
+    if (id == ZERO_IDENT) {
         return null;
     }
-    for (uint i = 0, j = BanksMapId.length(); i < j; i++) {
+
+    for (uint i = 0; i < BanksMapId.length(); i++) {
         if (id == BanksMapId[i]) {
             return Banks[i];
         }
     }
+
     return null;
 }
 
@@ -125,7 +127,7 @@ void _BankerInit(Critter banker, bool firstTime)
 void _BankerFinish(Critter banker)
 {
     CBank bank = GetBank(banker);
-    if (valid(bank) && bank.PassedPlayerId != 0) {
+    if (valid(bank) && bank.PassedPlayerId != ZERO_IDENT) {
         TransferItems(banker, bank.PassedPlayerId, true);
     }
 }
@@ -138,7 +140,7 @@ void _BankerIdle(Critter banker)
     }
 
     // Никого нет.
-    if (bank.PassedPlayerId == 0) {
+    if (bank.PassedPlayerId == ZERO_IDENT) {
         return;
     }
 
@@ -165,7 +167,7 @@ void _BankerIdle(Critter banker)
     }
 }
 
-void _BankerOnMessage(Critter banker, Critter player, int num, int val)
+void _BankerOnMessage(Critter banker, Critter player, int num, any val)
 {
     // Обработка сообщений игрока.
     // Убедимся пропущенный игрок ли это послал сообщение и банкир ли принял.
@@ -202,13 +204,16 @@ bool IsCanEnter(Critter player, Critter banker)
     if (not valid(bank)) {
         return false;
     }
+
     // Зашел ли другой игрок.
-    if (bank.PassedPlayerId != 0) {
+    if (bank.PassedPlayerId != ZERO_IDENT) {
         return false;
     }
+
     // Если нет, то спросим охрану, все ли в порядке.
     banker.ReplBankIsCanEnter = true;
-    SendMessage::ToAllOnMap(banker, MESSAGE_TRY_PASS_PLAYER, int(player.Id));
+    SendMessage::ToAllOnMap(banker, MESSAGE_TRY_PASS_PLAYER, player.Id);
+
     // Охрана одобрила.
     return banker.ReplBankIsCanEnter;
 }
@@ -241,7 +246,7 @@ uint r_TryEnter(Critter player, Critter banker)
     bank.PassedTime = Game.GetFullSecond();
     bank.PlayerNotify = false;
     bank.PlayerEntered = false;
-    SendMessage::ToAllOnMap(banker, MESSAGE_BEGIN_PASS_PLAYER, int(player.Id));
+    SendMessage::ToAllOnMap(banker, MESSAGE_BEGIN_PASS_PLAYER, player.Id);
 
     return 0;
 }
@@ -272,28 +277,30 @@ void r_EndEnter(Critter player, Critter banker)
 }
 
 // Завершаем сеанс.
-void EndEnter(Critter banker, uint playerId)
+void EndEnter(Critter banker, ident playerId)
 {
     CBank bank = GetBank(banker);
     if (not valid(bank)) {
         return;
     }
+
     // Завершаем работу с игроком.
-    bank.PassedPlayerId = 0;
+    bank.PassedPlayerId = ZERO_IDENT;
+
     // Перемещаем итемы игрока в невидимый контейнер.
     TransferItems(banker, playerId, true);
     SendMessage::ToAllOnMap(banker, MESSAGE_END_PASS_PLAYER, playerId);
 }
 
 // Перемещение итемов между видимым и невидимым контейнером.
-bool TransferItems(Critter banker, uint playerId, bool hide)
+bool TransferItems(Critter banker, ident playerId, bool hide)
 {
     CBank bank = GetBank(banker);
     if (not valid(bank)) {
         return false;
     }
     // Находим контейнеры.
-    uint num = playerId % 10;
+    uint num = playerId.value % 10;
     if (num >= bank.ShowContPos.length()) {
         num = 0;
     }
@@ -327,10 +334,10 @@ bool TransferItems(Critter banker, uint playerId, bool hide)
     // Перемещаем итемы.
     if (hide) {
         Item[] items = contShow.GetItems(0);
-        Game.MoveItems(items, contHide, playerId);
+        Game.MoveItems(items, contHide, playerId.value);
     }
     else {
-        Item[] items = contHide.GetItems(playerId);
+        Item[] items = contHide.GetItems(playerId.value);
         Game.MoveItems(items, contShow, 0);
     }
     return true;
@@ -363,11 +370,11 @@ void _GuardIdle(Critter guard)
     if (not valid(bank)) {
         return;
     }
-    bank.ThrowOutPlayerId = 0;
+    bank.ThrowOutPlayerId = ZERO_IDENT;
 }
 
 // Сообщения от банкира или игрока.
-void _GuardOnMessage(Critter guard, Critter crit, int num, int val)
+void _GuardOnMessage(Critter guard, Critter crit, int num, any val)
 {
     // Проверяем, охрана ли приняла.
     if (guard.NpcRole != ROLE_GUARD) {
@@ -438,10 +445,10 @@ void _GuardOnMessage(Critter guard, Critter crit, int num, int val)
         if (not valid(map)) {
             return;
         }
-        Critter player = map.GetCritter(uint(val));
+        Critter player = map.GetCritter(val);
         if (valid(player)) {
             NpcPlanes::AddAttackPlane(guard, 0, player);
-            bank.ThrowOutPlayerId = uint(val);
+            bank.ThrowOutPlayerId = val;
         }
     }
 }
@@ -543,7 +550,7 @@ void _KeeperIdle(Critter keeper)
     }
 }
 
-void _KeeperOnMessage(Critter keeper, Critter banker, int num, int val)
+void _KeeperOnMessage(Critter keeper, Critter banker, int num, any val)
 {
     // Проверяем, что передал банкир кладовщику.
     if (keeper.NpcRole != ROLE_KEEPER || banker.NpcRole != ROLE_BANKER) {
@@ -581,7 +588,7 @@ void _KeeperOnMessage(Critter keeper, Critter banker, int num, int val)
         if (bank.DoorHexPos.length() > 0) {
             Item door = Obsolete::MapGetDoor(map, bank.DoorHexPos[0].HexX, bank.DoorHexPos[0].HexY);
             if (valid(door) && door.Opened) {
-                NpcPlanes::AddPickPlane(keeper, 0, door, 0, false);
+                NpcPlanes::AddPickPlane(keeper, 0, door, ZERO_IDENT, false);
             }
         }
 
@@ -591,7 +598,7 @@ void _KeeperOnMessage(Critter keeper, Critter banker, int num, int val)
             if (not valid(cont) || cont.Opened) {
                 continue;
             }
-            NpcPlanes::AddPickPlane(keeper, 0, cont, 0, false);
+            NpcPlanes::AddPickPlane(keeper, 0, cont, ZERO_IDENT, false);
         }
     }
 }
@@ -628,14 +635,14 @@ bool AddCheckPlayerPosition(Critter guard, Critter player)
         return false;
     }
 
-    uint[] values = {guard.Id, player.Id, player.HexX, player.HexY};
+    any[] values = {guard.Id, player.Id, player.HexX, player.HexY};
     Game.DeferredCall(GAME_SECOND_TO_TICK(WARN_TIME), WarnGagPlayer, values);
     Game.DeferredCall(GAME_SECOND_TO_TICK(ATTACK_TIME), AttackGagPlayer, values);
     guard.ReplBankeIsAttackGagPlayer = true;
     return true;
 }
 
-void WarnGagPlayer(uint[] values)
+void WarnGagPlayer(any[] values)
 {
     Critter guard = Game.GetCritter(values[0]);
     if (!valid(guard)) {
@@ -654,7 +661,7 @@ void WarnGagPlayer(uint[] values)
     guard.SayMsg(SAY_SHOUT, TEXTMSG_DLG, DLGSTR(guard.DialogId, STR_WARN_PLAYER), "$pname " + Obsolete::GetPlayerName(player.Id));
 }
 
-void AttackGagPlayer(uint[] values)
+void AttackGagPlayer(any[] values)
 {
     Critter guard = Game.GetCritter(values[0]);
     if (valid(guard)) {

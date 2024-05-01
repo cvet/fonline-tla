@@ -4727,7 +4727,7 @@
 
   ...
 
-* `Public Anim1 Weapon_Anim1 Group = WeaponProperties`
+* `Public CritterStateAnim Weapon_StateAnim Group = WeaponProperties`
 
   ...
 
@@ -4843,15 +4843,15 @@
 
   ...
 
-* `Public Anim2 Weapon_Anim2_0 Group = WeaponModes`
+* `Public CritterActionAnim Weapon_ActionAnim_0 Group = WeaponModes`
 
   ...
 
-* `Public Anim2 Weapon_Anim2_1 Group = WeaponModes`
+* `Public CritterActionAnim Weapon_ActionAnim_1 Group = WeaponModes`
 
   ...
 
-* `Public Anim2 Weapon_Anim2_2 Group = WeaponModes`
+* `Public CritterActionAnim Weapon_ActionAnim_2 Group = WeaponModes`
 
   ...
 
@@ -5850,7 +5850,7 @@
 
   ...
 
-* `PrivateServer uint Anim2KnockoutEnd`
+* `PrivateServer uint ActionAnimKnockoutEnd`
 
   ...
 
@@ -11873,6 +11873,38 @@
 
   - `Unarmed = 1`
 
+  - `Knife = 4`
+
+  - `Club = 5`
+
+  - `Hammer = 6`
+
+  - `Spear = 7`
+
+  - `Pistol = 8`
+
+  - `SMG = 9`
+
+  - `Shootgun = 10`
+
+  - `HeavyRifle = 11`
+
+  - `Minigun = 12`
+
+  - `RocketLauncher = 13`
+
+  - `Flamer = 14`
+
+  - `Rifle = 15`
+
+  - `Sword = 16`
+
+  - `LongSword = 17`
+
+  - `Axe = 18`
+
+  - `Bow = 19`
+
 * `CritterActionAnim`
 
   ...
@@ -11904,6 +11936,160 @@
   - `IdleProneFront = 86`
 
   - `DeadFront = 102`
+
+  - `IdleStunned = 2`
+
+  - `Stand = 10`
+
+  - `Crouch = 11`
+
+  - `Prone = 12`
+
+  - `ShowWeapon = 20`
+
+  - `HideWeapon = 21`
+
+  - `PrepareWeapon = 22`
+
+  - `TurnOffWeapon = 23`
+
+  - `Fidget = 24`
+
+  - `Climbing = 26`
+
+  - `PickUp = 27`
+
+  - `Use = 28`
+
+  - `SwitchItems = 29`
+
+  - `Reload = 30`
+
+  - `Repair = 31`
+
+  - `Loot = 35`
+
+  - `Steal = 36`
+
+  - `Push = 37`
+
+  - `BeginCombat = 40`
+
+  - `IdleCombat = 41`
+
+  - `EndCombat = 42`
+
+  - `PunchRight = 43`
+
+  - `PunchLeft = 44`
+
+  - `PunchCombo = 45`
+
+  - `KickHi = 46`
+
+  - `KickLo = 47`
+
+  - `KickCombo = 48`
+
+  - `Thrust1H = 49`
+
+  - `Thrust2H = 50`
+
+  - `Swing1H = 51`
+
+  - `Swing2H = 52`
+
+  - `Throw = 53`
+
+  - `Single = 54`
+
+  - `Burst = 55`
+
+  - `Sweep = 56`
+
+  - `Butt = 57`
+
+  - `Flame = 58`
+
+  - `NoRecoil = 59`
+
+  - `DodgeFront = 70`
+
+  - `DodgeBack = 71`
+
+  - `DamageFront = 72`
+
+  - `DamageBack = 73`
+
+  - `DamageMulFront = 74`
+
+  - `DamageMulBack = 75`
+
+  - `WalkDamageFront = 76`
+
+  - `WalkDamageBack = 77`
+
+  - `LimpDamageFront = 78`
+
+  - `LimpDamageBack = 79`
+
+  - `RunDamageFront = 80`
+
+  - `RunDamageBack = 81`
+
+  - `KnockFront = 82`
+
+  - `KnockBack = 83`
+
+  - `LaydownFront = 84`
+
+  - `LaydownBack = 85`
+
+  - `IdleProneBack = 87`
+
+  - `StandupFront = 88`
+
+  - `StandupBack = 89`
+
+  - `DamageProneFront = 90`
+
+  - `DamageProneBack = 91`
+
+  - `DamageMulProneFront = 92`
+
+  - `DamageMulProneBack = 93`
+
+  - `TwitchProneFront = 94`
+
+  - `TwitchProneBack = 95`
+
+  - `DeadProneFront = 100`
+
+  - `DeadProneBack = 101`
+
+  - `DeadBack = 103`
+
+  - `DeadBloodySingle = 110`
+
+  - `DeadBloodyBurst = 111`
+
+  - `DeadBurst = 112`
+
+  - `DeadPulse = 113`
+
+  - `DeadPulseDust = 114`
+
+  - `DeadLaser = 115`
+
+  - `DeadFused = 116`
+
+  - `DeadExplode = 117`
+
+  - `DeadBurn = 118`
+
+  - `DeadBurnRun = 119`
+
+  - `Dance = 150`
 
 * `CritterFindType`
 
@@ -13257,222 +13443,6 @@
 
   - `HitRandomly = 13`
 
-* `Anim1`
-
-  ...
-
-  - `None = 0`
-
-  - `Unarmed = 1`
-
-  - `Knife = 4`
-
-  - `Club = 5`
-
-  - `Hammer = 6`
-
-  - `Spear = 7`
-
-  - `Pistol = 8`
-
-  - `SMG = 9`
-
-  - `Shootgun = 10`
-
-  - `HeavyRifle = 11`
-
-  - `Minigun = 12`
-
-  - `RocketLauncher = 13`
-
-  - `Flamer = 14`
-
-  - `Rifle = 15`
-
-  - `Sword = 16`
-
-  - `LongSword = 17`
-
-  - `Axe = 18`
-
-  - `Bow = 19`
-
-* `Anim2Actions`
-
-  ...
-
-  - `None = 0`
-
-  - `Idle = 1`
-
-  - `IdleStunned = 2`
-
-  - `Walk = 3`
-
-  - `Limp = 4`
-
-  - `Run = 5`
-
-  - `PanicRun = 6`
-
-  - `SneakWalk = 7`
-
-  - `SneakRun = 8`
-
-  - `Stand = 10`
-
-  - `Crouch = 11`
-
-  - `Prone = 12`
-
-  - `ShowWeapon = 20`
-
-  - `HideWeapon = 21`
-
-  - `PrepareWeapon = 22`
-
-  - `TurnoffWeapon = 23`
-
-  - `Fidget = 24`
-
-  - `Climbing = 26`
-
-  - `Pickup = 27`
-
-  - `Use = 28`
-
-  - `SwitchItems = 29`
-
-  - `Reload = 30`
-
-  - `Repair = 31`
-
-  - `Loot = 35`
-
-  - `Steal = 36`
-
-  - `Push = 37`
-
-  - `BeginCombat = 40`
-
-  - `IdleCombat = 41`
-
-  - `EndCombat = 42`
-
-  - `PunchRight = 43`
-
-  - `PunchLeft = 44`
-
-  - `PunchCombo = 45`
-
-  - `KickHi = 46`
-
-  - `KickLo = 47`
-
-  - `KickCombo = 48`
-
-  - `Thrust1h = 49`
-
-  - `Thrust2h = 50`
-
-  - `Swing1h = 51`
-
-  - `Swing2h = 52`
-
-  - `Throw = 53`
-
-  - `Single = 54`
-
-  - `Burst = 55`
-
-  - `Sweep = 56`
-
-  - `Butt = 57`
-
-  - `Flame = 58`
-
-  - `NoRecoil = 59`
-
-  - `DodgeFront = 70`
-
-  - `DodgeBack = 71`
-
-  - `DamageFront = 72`
-
-  - `DamageBack = 73`
-
-  - `DamageMulFront = 74`
-
-  - `DamageMulBack = 75`
-
-  - `WalkDamageFront = 76`
-
-  - `WalkDamageBack = 77`
-
-  - `LimpDamageFront = 78`
-
-  - `LimpDamageBack = 79`
-
-  - `RunDamageFront = 80`
-
-  - `RunDamageBack = 81`
-
-  - `KnockFront = 82`
-
-  - `KnockBack = 83`
-
-  - `LaydownFront = 84`
-
-  - `LaydownBack = 85`
-
-  - `IdleProneFront = 86`
-
-  - `IdleProneBack = 87`
-
-  - `StandupFront = 88`
-
-  - `StandupBack = 89`
-
-  - `DamageProneFront = 90`
-
-  - `DamageProneBack = 91`
-
-  - `DamageMulProneFront = 92`
-
-  - `DamageMulProneBack = 93`
-
-  - `TwitchProneFront = 94`
-
-  - `TwitchProneBack = 95`
-
-  - `DeadProneFront = 100`
-
-  - `DeadProneBack = 101`
-
-  - `DeadFront = 102`
-
-  - `DeadBack = 103`
-
-  - `DeadBloodySingle = 110`
-
-  - `DeadBloodyBurst = 111`
-
-  - `DeadBurst = 112`
-
-  - `DeadPulse = 113`
-
-  - `DeadPulseDust = 114`
-
-  - `DeadLaser = 115`
-
-  - `DeadFused = 116`
-
-  - `DeadExplode = 117`
-
-  - `DeadBurn = 118`
-
-  - `DeadBurnRun = 119`
-
 * `FalloutAnims1`
 
   ...
@@ -13888,192 +13858,6 @@
   - `SermonBehavior = 104`
 
   - `MythNeutral = 105`
-
-* `Anim2`
-
-  ...
-
-  - `None = 0`
-
-  - `Idle = 1`
-
-  - `IdleStunned = 2`
-
-  - `Walk = 3`
-
-  - `WalkBack = 15`
-
-  - `Limp = 4`
-
-  - `Run = 5`
-
-  - `RunBack = 16`
-
-  - `PanicRun = 6`
-
-  - `SneakWalk = 7`
-
-  - `SneakRun = 8`
-
-  - `Stand = 10`
-
-  - `Crouch = 11`
-
-  - `Prone = 12`
-
-  - `TurnLeft = 17`
-
-  - `TurnRight = 18`
-
-  - `ShowWeapon = 20`
-
-  - `HideWeapon = 21`
-
-  - `PrepareWeapon = 22`
-
-  - `TurnOffWeapon = 23`
-
-  - `Fidget = 24`
-
-  - `Climbing = 26`
-
-  - `PickUp = 27`
-
-  - `Use = 28`
-
-  - `SwitchItems = 29`
-
-  - `Reload = 30`
-
-  - `Repair = 31`
-
-  - `Loot = 35`
-
-  - `Steal = 36`
-
-  - `Push = 37`
-
-  - `BeginCombat = 40`
-
-  - `IdleCombat = 41`
-
-  - `EndCombat = 42`
-
-  - `PunchRight = 43`
-
-  - `PunchLeft = 44`
-
-  - `PunchCombo = 45`
-
-  - `KickHi = 46`
-
-  - `KickLo = 47`
-
-  - `KickCombo = 48`
-
-  - `Thrust1H = 49`
-
-  - `Thrust2H = 50`
-
-  - `Swing1H = 51`
-
-  - `Swing2H = 52`
-
-  - `Throw = 53`
-
-  - `Single = 54`
-
-  - `Burst = 55`
-
-  - `Sweep = 56`
-
-  - `Butt = 57`
-
-  - `Flame = 58`
-
-  - `NoRecoil = 59`
-
-  - `DodgeFront = 70`
-
-  - `DodgeBack = 71`
-
-  - `DamageFront = 72`
-
-  - `DamageBack = 73`
-
-  - `DamageMulFront = 74`
-
-  - `DamageMulBack = 75`
-
-  - `WalkDamageFront = 76`
-
-  - `WalkDamageBack = 77`
-
-  - `LimpDamageFront = 78`
-
-  - `LimpDamageBack = 79`
-
-  - `RunDamageFront = 80`
-
-  - `RunDamageBack = 81`
-
-  - `KnockFront = 82`
-
-  - `KnockBack = 83`
-
-  - `LaydownFront = 84`
-
-  - `LaydownBack = 85`
-
-  - `IdleProneFront = 86`
-
-  - `IdleProneBack = 87`
-
-  - `StandupFront = 88`
-
-  - `StandupBack = 89`
-
-  - `DamageProneFront = 90`
-
-  - `DamageProneBack = 91`
-
-  - `DamageMulProneFront = 92`
-
-  - `DamageMulProneBack = 93`
-
-  - `TwitchProneFront = 94`
-
-  - `TwitchProneBack = 95`
-
-  - `DeadProneFront = 100`
-
-  - `DeadProneBack = 101`
-
-  - `DeadFront = 102`
-
-  - `DeadBack = 103`
-
-  - `DeadBloodySingle = 110`
-
-  - `DeadBloodyBurst = 111`
-
-  - `DeadBurst = 112`
-
-  - `DeadPulse = 113`
-
-  - `DeadPulseDust = 114`
-
-  - `DeadLaser = 115`
-
-  - `DeadFused = 116`
-
-  - `DeadExplode = 117`
-
-  - `DeadBurn = 118`
-
-  - `DeadBurnRun = 119`
-
-  - `Dance = 150`
 
 * `TransferTypes`
 
@@ -14701,7 +14485,7 @@
 
   - `Weapon_DefaultAmmoPid = 158`
 
-  - `Weapon_Anim1 = 159`
+  - `Weapon_StateAnim = 159`
 
   - `Weapon_MinStrength = 160`
 
@@ -14759,11 +14543,11 @@
 
   - `Weapon_DmgType_2 = 187`
 
-  - `Weapon_Anim2_0 = 188`
+  - `Weapon_ActionAnim_0 = 188`
 
-  - `Weapon_Anim2_1 = 189`
+  - `Weapon_ActionAnim_1 = 189`
 
-  - `Weapon_Anim2_2 = 190`
+  - `Weapon_ActionAnim_2 = 190`
 
   - `Weapon_DmgMin_0 = 191`
 
@@ -15207,7 +14991,7 @@
 
   - `KnockoutAp = 116`
 
-  - `Anim2KnockoutEnd = 117`
+  - `ActionAnimKnockoutEnd = 117`
 
   - `NcrBusterLostCStatus = 118`
 

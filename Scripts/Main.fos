@@ -147,7 +147,7 @@ bool generate_world()
 // Call on something critter attack another.
 void critter_attack(Critter cr, Critter target, Item weapon, uint8 weaponMode, ProtoItem ammo)
 {
-    if (cr.IsOwnedByPlayer() && valid(ammo) && ammo.ProtoId == Content::Item::emp_rocket && target.BodyType == BodyTypes::Robot) {
+    if (cr.IsControlledByPlayer && valid(ammo) && ammo.ProtoId == Content::Item::emp_rocket && target.BodyType == BodyTypes::Robot) {
         Navarro::CountEmpRocketTests(cr, target);
     }
     cr.TimeoutAggressor = Game.GetFullSecond() + REAL_MINUTE(1);
@@ -170,7 +170,7 @@ void critter_attacked(Critter cr, Critter attacker)
         other[i].OnSomeCritterAttacked.Fire(cr, attacker);
     }
 
-    if (cr.IsOwnedByPlayer()) {
+    if (cr.IsControlledByPlayer) {
         return; // Diable player helping
     }
     else {
@@ -239,7 +239,7 @@ void critter_attacked(Critter cr, Critter attacker)
             }
             break;
         case TeamsTable::GoodPerson:
-            if (attacker.IsNpc() || cr.Charisma < 5 || cr.Karma < 0) {
+            if (!attacker.IsControlledByPlayer || cr.Charisma < 5 || cr.Karma < 0) {
                 continue;
             }
             break;
@@ -329,7 +329,7 @@ bool critter_stealing(Critter cr, Critter thief, Item item, uint count)
         }
 
         thief.TimeoutStealing = STEAL_TIMEOUT(thief);
-        if (cr.IsNpc()) {
+        if (!cr.IsControlledByPlayer) {
             auto stealExpCount = cr.StealExpCount.clone();
             stealExpCount.setIfNotExist(thief.Id, 0);
             if (stealExpCount[thief.Id] < 12) {
@@ -344,7 +344,7 @@ bool critter_stealing(Critter cr, Critter thief, Item item, uint count)
         thief.LastStealCrId = ZERO_IDENT;
         thief.StealCount = 0;
 
-        if (cr.IsNpc()) {
+        if (!cr.IsControlledByPlayer) {
             int thiefHp = thief.CurrentHp;
             NpcPlanes::AddAttackPlane(cr,
                                       0,
@@ -373,7 +373,7 @@ bool critter_stealing(Critter cr, Critter thief, Item item, uint count)
 // Call on something critter use item.
 bool critter_use_item(Critter cr, Item item, Critter targetCr, Item targetItem, StaticItem targetScen, uint param)
 {
-    bool isPlayer = cr.IsOwnedByPlayer();
+    bool isPlayer = cr.IsControlledByPlayer;
     hstring pid = item.ProtoId;
     bool useOnSelf = (not valid(targetCr) && not valid(targetItem) && not valid(targetScen));
 
@@ -475,7 +475,7 @@ bool critter_use_item(Critter cr, Item item, Critter targetCr, Item targetItem, 
 // Call on something critter use skill.
 bool critter_use_skill(Critter cr, CritterProperty skill, Critter targetCr, Item targetItem, StaticItem targetScen)
 {
-    bool isPlayer = cr.IsOwnedByPlayer();
+    bool isPlayer = cr.IsControlledByPlayer;
 
     // Cars
     if (valid(targetItem) && targetItem.Type == ItemType::Car && Car::UseSkillOnCar(cr, targetItem, skill)) {
@@ -553,7 +553,7 @@ bool critter_use_skill(Critter cr, CritterProperty skill, Critter targetCr, Item
     case SKILL_PUSH_CRITTER: // Push critter, only targetCr is valid
         cr.Action(CritterAction::PickCritter, 2, null);
         if ((!IS_TIMEOUT(cr.TimeoutBattle) && !IS_TIMEOUT(targetCr.TimeoutBattle)) &&
-            (targetCr.IsOwnedByPlayer() || (NpcPlanes::IsNoPlanes(targetCr) && targetCr.GetTalkingCritters().length() == 0))) {
+            (targetCr.IsControlledByPlayer || (NpcPlanes::IsNoPlanes(targetCr) && targetCr.GetTalkingCritters().length() == 0))) {
             MoveRandom::CritterMoveRandom(targetCr);
         }
         return true;
@@ -845,7 +845,7 @@ void critter_reload_weapon(Critter cr, Item weapon, Item ammo)
 void critter_init(Critter cr, bool firstTime)
 {
     if (firstTime) {
-        if (cr.IsOwnedByPlayer()) {
+        if (cr.IsControlledByPlayer) {
             // Input: 7 special, 3 tag skills, 2 traits, age, gender
             uint traitsCount = 0;
             for (uint i = 0; i < CritterPropertyGroup::Traits.length(); i++) {
@@ -914,7 +914,7 @@ void critter_init(Critter cr, bool firstTime)
         cr.CurrentHp = cr.MaxLife;
         cr.CurrentAp = cr.ActionPoints * AP_DIVIDER;
 
-        if (cr.IsOwnedByPlayer()) {
+        if (cr.IsControlledByPlayer) {
             cr.ReplicationCost = 100;
             cr.ReplicationMoney = 0;
             cr.ReplicationCount = 0;
@@ -943,7 +943,7 @@ void critter_init(Critter cr, bool firstTime)
     }
     else {
         // Main quest
-        if (cr.IsOwnedByPlayer() && Settings.MainStoryLineActive) {
+        if (cr.IsControlledByPlayer && Settings.MainStoryLineActive) {
             MainIntro::SetPlayerStoryLineLocation(cr);
         }
         else {
@@ -979,7 +979,7 @@ void critter_init(Critter cr, bool firstTime)
         }
     }
 
-    if (cr.IsOwnedByPlayer()) {
+    if (cr.IsControlledByPlayer) {
         if (cr.Kills.length() != Tla::MaxBodyTypes) {
             uint[] kills = cr.Kills.clone();
             kills.resize(Tla::MaxBodyTypes);
@@ -1127,7 +1127,7 @@ void critter_dead(Critter cr, Critter killer)
     }
 
     // Karma, temporary
-    if (valid(killer) && killer.IsOwnedByPlayer()) {
+    if (valid(killer) && killer.IsControlledByPlayer) {
         int karmaBefore = killer.Karma;
         uint team = cr.TeamId;
         if (team == Teams::Poorman) {
@@ -1181,7 +1181,7 @@ void critter_dead(Critter cr, Critter killer)
     }
 
     Replication::SetReplicationTime(cr);
-    if (cr.IsNpc()) {
+    if (!cr.IsControlledByPlayer) {
         NpcPlanes::DropPlanes(cr); // Delete all planes
     }
     if (valid(map) && cr.IsNoFlatten) {
@@ -1226,7 +1226,7 @@ void map_critter_in(Map map, Critter cr)
 
     NoPvpMaps::OnCitterMapIn(cr, map);
 
-    if (cr.IsOwnedByPlayer()) {
+    if (cr.IsControlledByPlayer) {
         GameEventCaches::PlaceLoot2Container(map, cr);
     }
 }
@@ -1399,7 +1399,7 @@ bool player_allowcommand(Player player, string adminPanel, uint8 command)
 
 bool OnPlayerCheckMove(Player player, Critter cr, uint& speed)
 {
-    Player crOwner = cr.GetOwner();
+    Player crOwner = cr.GetPlayer();
     if (crOwner == null || crOwner.Id != player.Id) {
         return false;
     }
@@ -1445,7 +1445,7 @@ bool OnPlayerCheckMove(Player player, Critter cr, uint& speed)
 
 bool OnPlayerCheckDir(Player player, Critter cr, int16& dirAngle)
 {
-    Player crOwner = cr.GetOwner();
+    Player crOwner = cr.GetPlayer();
     if (crOwner == null || crOwner.Id != player.Id) {
         return false;
     }

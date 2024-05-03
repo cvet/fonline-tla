@@ -11827,6 +11827,10 @@
 
   - `Outside = 255`
 
+  - `Secondary = 2`
+
+  - `Armor = 3`
+
 * `CritterCondition`
 
   ...
@@ -11864,6 +11868,34 @@
   - `Respawn = 22`
 
   - `Refresh = 23`
+
+  - `UseItem = 4`
+
+  - `UseWeapon = 6`
+
+  - `ReloadWeapon = 7`
+
+  - `UseSkill = 8`
+
+  - `PickItem = 9`
+
+  - `PickCritter = 10`
+
+  - `OperateContainer = 11`
+
+  - `Barter = 12`
+
+  - `Dodge = 13`
+
+  - `Damage = 14`
+
+  - `DamageForce = 15`
+
+  - `UnloadWeapon = 24`
+
+  - `PrepareWeapon = 25`
+
+  - `FinishAttack = 26`
 
 * `CritterStateAnim`
 
@@ -12188,6 +12220,16 @@
   - `Items = 3`
 
   - `Locations = 4`
+
+  - `Text = 10`
+
+  - `Combat = 11`
+
+  - `Quest = 12`
+
+  - `GlobalMap = 13`
+
+  - `Holo = 14`
 
 * `KeyCode`
 

@@ -30,6 +30,7 @@
 ///@ Setting Client int GmapGroupToY
 ///@ Setting Client float GmapGroupSpeed // текущая скорость передвижения
 ///@ Setting Client bool ShowGroups
+///@ Setting Server uint MinimumOfflineTime
 
 ///@ Event Server Map OnCritterIn(Critter cr)
 ///@ Event Server Map OnCritterOut(Critter cr)
@@ -44,7 +45,7 @@
 ///@ Event Client Game OnPreRenderIface()
 ///@ Event Client Game OnPostRenderIface()
 
-///@ Event Client Game OnCritterActionEx(bool localCall, Critter cr, int action, int actionExt, AbstractItem actionItem)
+///@ Event Client Game OnCritterActionEx(bool localCall, Critter cr, CritterAction action, int actionExt, AbstractItem actionItem)
 
 ///@ Event Server Game OnCritterUseItemOn(Critter cr, Item item, Critter onCritter, Item onItem, StaticItem onScenery, uint param)
 ///@ Event Server Game OnCritterUseItem(Critter cr, Item item, uint param)
@@ -81,8 +82,8 @@
 ///@ Event Server Game OnItemsBarter(Item[] saleItems, uint[] saleItemsCount, Item[] buyItems, uint[] buyItemsCount, Critter player, Critter npc)
 ///@ Event Client Game OnContainerChanged()
 
-///@ Event Client Game OnCritterCheckMoveItemEx(Critter cr, Item item, uint8 toSlot)
-///@ Event Server Game OnCritterCheckMoveItemEx(Critter cr, Item item, uint8 toSlot)
+///@ Event Client Game OnCritterCheckMoveItemEx(Critter cr, Item item, CritterItemSlot toSlot)
+///@ Event Server Game OnCritterCheckMoveItemEx(Critter cr, Item item, CritterItemSlot toSlot)
 ///@ Event Client Game OnItemCheckMoveEx(Item cr, uint count, Entity from, Entity to)
 ///@ Event Server Game OnItemCheckMoveEx(Item cr, uint count, Entity from, Entity to)
 
@@ -113,6 +114,8 @@
 ///@ Event Server Critter OnGlobalMapInvite(Item car, uint encounterDescriptor, int combatMode, ident mapId, uint16 hexX, uint16 hexY, uint8 dir)
 
 ///@ Property Game Public string[] BestEScores
+
+///@ Property Item ProtectedModifiable uint8 Mode
 
 ///@ Property Item Public uint8 AnimHide0
 ///@ Property Item Public uint8 AnimHide1
@@ -185,18 +188,18 @@
 #define MF_WAS_KILLED           (0x10000000)
 
 // Animation macro
-#define _CritAnimate          #(cr, anim) cr.Animate(0, anim, null, true, true)
-#define _CritAnimateUse       #(cr) cr.Animate(0, CritterActionAnim::Use, null, true, true)
-#define _CritAnimatePickup    #(cr) cr.Animate(0, CritterActionAnim::Pickup, null, true, true)
-#define _CritAnimatePunch     #(cr) cr.Animate(0, CritterActionAnim::PunchRight, null, true, true)
-#define _CritAnimateKick      #(cr) cr.Animate(0, CritterActionAnim::KickHi, null, true, true)
-#define _CritAnimateThrow     #(cr) cr.Animate(0, CritterActionAnim::Throw, null, true, true)
-#define _CritAnimateThrust    #(cr) cr.Animate(0, CritterActionAnim::Thrust1h, null, true, true)
-#define _CritAnimateSwing     #(cr) cr.Animate(0, CritterActionAnim::Swing1h, null, true, true)
-#define _CritAnimateThrowWeap #(cr) cr.Animate(0, CritterActionAnim::Throw, null, true, true)
-#define _CritAnimateSingle    #(cr) cr.Animate(0, CritterActionAnim::Single, null, true, true)
-#define _CritAnimateBrust     #(cr) cr.Animate(0, CritterActionAnim::Burst, null, true, true)
-#define _CritAnimateFidget    #(cr) cr.Animate(0, CritterActionAnim::Fidget, null, true, true)
+#define _CritAnimate          #(cr, anim) cr.Animate(CritterStateAnim::None, anim, null, true, true)
+#define _CritAnimateUse       #(cr) cr.Animate(CritterStateAnim::None, CritterActionAnim::Use, null, true, true)
+#define _CritAnimatePickUp    #(cr) cr.Animate(CritterStateAnim::None, CritterActionAnim::PickUp, null, true, true)
+#define _CritAnimatePunch     #(cr) cr.Animate(CritterStateAnim::None, CritterActionAnim::PunchRight, null, true, true)
+#define _CritAnimateKick      #(cr) cr.Animate(CritterStateAnim::None, CritterActionAnim::KickHi, null, true, true)
+#define _CritAnimateThrow     #(cr) cr.Animate(CritterStateAnim::None, CritterActionAnim::Throw, null, true, true)
+#define _CritAnimateThrust    #(cr) cr.Animate(CritterStateAnim::None, CritterActionAnim::Thrust1h, null, true, true)
+#define _CritAnimateSwing     #(cr) cr.Animate(CritterStateAnim::None, CritterActionAnim::Swing1h, null, true, true)
+#define _CritAnimateThrowWeap #(cr) cr.Animate(CritterStateAnim::None, CritterActionAnim::Throw, null, true, true)
+#define _CritAnimateSingle    #(cr) cr.Animate(CritterStateAnim::None, CritterActionAnim::Single, null, true, true)
+#define _CritAnimateBrust     #(cr) cr.Animate(CritterStateAnim::None, CritterActionAnim::Burst, null, true, true)
+#define _CritAnimateFidget    #(cr) cr.Animate(CritterStateAnim::None, CritterActionAnim::Fidget, null, true, true)
 
 // Anim loading flags
 #define ANIM_FLAG_FIRST_FRAME (0x01)
@@ -439,7 +442,7 @@
 #(f)((f) ? CritterActionAnim::DamageFront : CritterActionAnim::DamageBack), CritterActionAnim::IdleStunned, CritterActionAnim::IdleStunned
 
 // Damage types
-///@ Enum DamageTypes Reserved = 0
+///@ Enum DamageTypes None = 0
 ///@ Enum DamageTypes Normal = 1
 ///@ Enum DamageTypes Laser = 2
 ///@ Enum DamageTypes Fire = 3
@@ -496,15 +499,16 @@ const int CteAutokill = 5;
 #define DOCTOR_TIMEOUT \
 #(cr)(Game.GetFullSecond() +(Settings.TimeMultiplier * 100 /(((cr.SkillDoctor)> 3 ? \
                                                                    cr.SkillDoctor : 3) * 100 / MAX_SKILL_VAL) * 3) * 60) // Orig 1 time on day, 20 min - sk
-#define REPAIR_TIMEOUT   #(cr)(Game.GetFullSecond() + REAL_MINUTE(1))                                                    // Orig 4 time on day, 1 min
-#define SCIENCE_TIMEOUT  #(cr)(Game.GetFullSecond() + REAL_MINUTE(1))                                                    // Orig 6 time on day, 1 min
-#define LOCKPICK_TIMEOUT #(cr)(Game.GetFullSecond() + REAL_MINUTE(2))                                                    // Orig 15 minutes, 2 min
-#define STEAL_TIMEOUT    #(cr)(Game.GetFullSecond() + REAL_MINUTE(2))                                                    // 2 minutes
-#define TRANSFER_TIMEOUT #(cr)(Game.GetFullSecond() + REAL_SECOND(Settings.TimeoutTransfer))
-#define BATTLE_TIMEOUT   #(cr)(Game.GetFullSecond() + MAX(uint(REAL_SECOND(Settings.TimeoutBattle) - REAL_SECOND(cr.ArmorClass)), uint(REAL_SECOND(12))))
-#define TRAPS_TIMEOUT    #(cr)(Game.GetFullSecond() + REAL_MINUTE(1))
-#define SNEAK_TIMEOUT    #(cr)(Game.GetFullSecond() + REAL_SECOND(MAX(34 - cr.Sequence, 3))) // 34 second - sequence
-#define HEALING_TIMEOUT  #(cr)(Game.GetFullSecond() + REAL_MINUTE(2))                        // 2 minutes
+#define REPAIR_TIMEOUT   #(cr)(Game.GetFullSecond() + Time::RealMinute(1))                                               // Orig 4 time on day, 1 min
+#define SCIENCE_TIMEOUT  #(cr)(Game.GetFullSecond() + Time::RealMinute(1))                                               // Orig 6 time on day, 1 min
+#define LOCKPICK_TIMEOUT #(cr)(Game.GetFullSecond() + Time::RealMinute(2))                                               // Orig 15 minutes, 2 min
+#define STEAL_TIMEOUT    #(cr)(Game.GetFullSecond() + Time::RealMinute(2))                                               // 2 minutes
+#define TRANSFER_TIMEOUT #(cr)(Game.GetFullSecond() + Time::RealSecond(Settings.TimeoutTransfer))
+#define BATTLE_TIMEOUT \
+#(cr)(Game.GetFullSecond() + MAX(uint(Time::RealSecond(Settings.TimeoutBattle) - Time::RealSecond(cr.ArmorClass)), uint(Time::RealSecond(12))))
+#define TRAPS_TIMEOUT   #(cr)(Game.GetFullSecond() + Time::RealMinute(1))
+#define SNEAK_TIMEOUT   #(cr)(Game.GetFullSecond() + Time::RealSecond(MAX(34 - cr.Sequence, 3))) // 34 second - sequence
+#define HEALING_TIMEOUT #(cr)(Game.GetFullSecond() + Time::RealMinute(2))                        // 2 minutes
 
 const int MaxDeterioration = 10000;
 const int MaxBrokens = 10;
@@ -776,9 +780,9 @@ const int MaxAddictions = 7;
 ///@ Property Item Public uint8 Weapon_SoundId_0 Group = WeaponModes
 ///@ Property Item Public uint8 Weapon_SoundId_1 Group = WeaponModes
 ///@ Property Item Public uint8 Weapon_SoundId_2 Group = WeaponModes
-///@ Property Item Public int   Weapon_DmgType_0 Group = WeaponModes
-///@ Property Item Public int   Weapon_DmgType_1 Group = WeaponModes
-///@ Property Item Public int   Weapon_DmgType_2 Group = WeaponModes
+///@ Property Item Public DamageTypes Weapon_DmgType_0 Group = WeaponModes
+///@ Property Item Public DamageTypes Weapon_DmgType_1 Group = WeaponModes
+///@ Property Item Public DamageTypes Weapon_DmgType_2 Group = WeaponModes
 ///@ Property Item Public CritterActionAnim Weapon_ActionAnim_0 Group = WeaponModes
 ///@ Property Item Public CritterActionAnim Weapon_ActionAnim_1 Group = WeaponModes
 ///@ Property Item Public CritterActionAnim Weapon_ActionAnim_2 Group = WeaponModes
@@ -1186,6 +1190,7 @@ const int MaxAddictions = 7;
 ///@ Property Critter Protected uint TimeoutSkLockpick Group = Timeouts
 ///@ Property Critter Protected uint TimeoutSkSteal Group = Timeouts
 ///@ Property Critter Protected uint TimeoutSkOutdoorsman Group = Timeouts
+///@ Property Critter Protected uint TimeoutRemoveFromGame Group = Timeouts
 ///@ Property Critter Protected uint TimeoutReplication Group = Timeouts
 ///@ Property Critter Protected uint TimeoutKarmaVoting Group = Timeouts
 ///@ Property Critter Protected uint TimeoutSneak Group = Timeouts
@@ -1508,12 +1513,13 @@ const int MaxAddictions = 7;
 #(item, use)(_WeaponSkill(item, use) == CritterProperty::SkillSmallGuns || _WeaponSkill(item, use) == CritterProperty::SkillBigGuns || \
                                                                                             _WeaponSkill(item, use) == CritterProperty::SkillEnergyWeapons)
 #define _WeaponIsRangedAttack       #(item, use)(_WeaponIsGunAttack(weap, use) || _WeaponSkill(item, use) == CritterProperty::SkillThrowing)
-#define _WeaponIsPrimaryAvailable   #(item)((item.Weapon_ActiveUses & 1) != 0)
-#define _WeaponIsSecondaryAvailable #(item)((item.Weapon_ActiveUses & 2) != 0)
-#define _WeaponIsThirdAvailable     #(item)((item.Weapon_ActiveUses & 4) != 0)
+#define _WeaponIsPrimaryAvailable   #(item)(item.Weapon_ActiveUses >= 1)
+#define _WeaponIsSecondaryAvailable #(item)(item.Weapon_ActiveUses >= 2)
+#define _WeaponIsThirdAvailable     #(item)(item.Weapon_ActiveUses >= 3)
 #define _WeaponSkill \
 #(item, use)((use) == 0 ? item.Weapon_Skill_0 : ((use) == 1 ? item.Weapon_Skill_1 : ((use) == 2 ? item.Weapon_Skill_2 : CritterProperty::Invalid)))
-#define _WeaponDmgType #(item, use)((use) == 0 ? item.Weapon_DmgType_0 : ((use) == 1 ? item.Weapon_DmgType_1 : ((use) == 2 ? item.Weapon_DmgType_2 : 0)))
+#define _WeaponDmgType \
+#(item, use)((use) == 0 ? item.Weapon_DmgType_0 : ((use) == 1 ? item.Weapon_DmgType_1 : ((use) == 2 ? item.Weapon_DmgType_2 : DamageTypes::None)))
 #define _WeaponActionAnim \
 #(item, use)((use) == 0 ? item.Weapon_ActionAnim_0 : ((use) == 1 ? item.Weapon_ActionAnim_1 : ((use) == 2 ? \
                                                                                                     item.Weapon_ActionAnim_2 : CritterActionAnim::None)))
@@ -1730,6 +1736,7 @@ const int MaxAddictions = 7;
 #define DISTANCE         #(x1, y1, x2, y2)(math::sqrt(POW2((x1) -(x2)) + POW2((y1) -(y2))))
 #define POW2             #(a)((a) *(a))
 
+///@ Property Item Public int8 Info
 ///@ Property Critter ProtectedModifiable hstring HandsProtoItemId
 ///@ Property Critter ProtectedModifiable uint8 HandsItemMode
 ///@ Property Item Public bool IsCanUseOnSmth
@@ -1776,8 +1783,8 @@ const int MaxAddictions = 7;
 ///@ Enum ItemType Car = 13
 
 // Slots
-///E  Enum CritterItemSlot Inventory = 0
-///E  Enum CritterItemSlot Main = 1
+///E Enum CritterItemSlot Inventory = 0
+///E Enum CritterItemSlot Main = 1
 ///@ Enum CritterItemSlot Secondary = 2
 ///@ Enum CritterItemSlot Armor = 3
 ///E Enum CritterItemSlot Outside = 255
@@ -1882,19 +1889,11 @@ dict<CritterProperty, int> GetCritPropsDict(int[] props)
     return propsDict;
 }
 
-#define REAL_MS     #(x)(Time::RealMs(x))
-#define REAL_SECOND #(x)(Time::RealSecond(x))
-#define REAL_MINUTE #(x)(Time::RealMinute(x))
-#define REAL_HOUR   #(x)(Time::RealHour(x))
-#define REAL_DAY    #(x)(Time::RealDay(x))
-#define REAL_MONTH  #(x)(Time::RealMonth(x))
-#define REAL_YEAR   #(x)(Time::RealYear(x))
-
 #ifdef __SERVER
 
 void Animate(Critter cr, int stateAnim, int actionAnim, int)
 {
-    cr.Animate(stateAnim, actionAnim, null, true, true);
+    cr.Animate(CritterStateAnim(stateAnim), CritterActionAnim(actionAnim), null, true, true);
 }
 
 #endif

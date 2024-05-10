@@ -1,6 +1,8 @@
 // FOS Server Sort 2
 // Author: cvet
 
+///@ Property Player PrivateServer ident MainCritterId
+
 ///@ Property Critter PrivateServer ident=>uint StealExpCount
 ///@ Property Critter PrivateServer ident=>uint FirstAidCount
 
@@ -27,6 +29,7 @@ void ModuleInit()
     Game.OnItemsBarter.Subscribe(items_barter);
     Game.OnPlayerRegistration.Subscribe(player_registration);
     Game.OnPlayerLogin.Subscribe(player_login);
+    Game.OnPlayerEnter.Subscribe(OnPlayerEnter);
     Game.OnPlayerGetAccess.Subscribe(player_getaccess);
     Game.OnPlayerAllowCommand.Subscribe(player_allowcommand);
     Game.OnMapLoopEx.Subscribe(map_loop_ex);
@@ -150,7 +153,7 @@ void critter_attack(Critter cr, Critter target, Item weapon, uint8 weaponMode, P
     if (cr.IsControlledByPlayer && valid(ammo) && ammo.ProtoId == Content::Item::emp_rocket && target.BodyType == BodyTypes::Robot) {
         Navarro::CountEmpRocketTests(cr, target);
     }
-    cr.TimeoutAggressor = Game.GetFullSecond() + REAL_MINUTE(1);
+    cr.TimeoutAggressor = Game.GetFullSecond() + Time::RealMinute(1);
     Combat::CombatAttack(cr, target, weapon, weaponMode, ammo);
 
     Critter[] other = cr.GetCritters(true, CritterFindType::Alive);
@@ -259,7 +262,7 @@ void critter_attacked(Critter cr, Critter attacker)
 // Call on something critter steal another.
 bool critter_stealing(Critter cr, Critter thief, Item item, uint count)
 {
-    thief.TimeoutAggressor = Game.GetFullSecond() + REAL_MINUTE(1);
+    thief.TimeoutAggressor = Game.GetFullSecond() + Time::RealMinute(1);
 
     if (cr.IsDead() || IS_TIMEOUT(cr.TimeoutBattle) || IS_TIMEOUT(thief.TimeoutBattle)) {
         thief.LastStealCrId = ZERO_IDENT;
@@ -1050,6 +1053,12 @@ void critter_idle(Critter cr)
             }
         }
     }
+
+    // Auto unload player critter
+    if (cr.IsControlledByPlayer && cr.GetPlayer() == null && cr.GetPlayerOfflineTime() >= Settings.MinimumOfflineTime &&
+        !IS_TIMEOUT(cr.TimeoutRemoveFromGame)) {
+        Game.UnloadCritter(cr);
+    }
 }
 
 // //////////////////////////////////////////////////////////////////////////////////////////////////
@@ -1069,7 +1078,7 @@ void critter_dead(Critter cr, Critter killer)
 
     // Move inventory items to ground
     Map map = cr.GetMap();
-    if ((cr.ActionAnimDead == CritterActionAnim::DeadPulseDust || cr.ActionAnimDead == CritterActionAnim::DeadExplode) && _CritCanDropItemsOnDead(cr)) {
+    if ((cr.DeadActionAnim == CritterActionAnim::DeadPulseDust || cr.DeadActionAnim == CritterActionAnim::DeadExplode) && _CritCanDropItemsOnDead(cr)) {
         // Drop all, exclude armor
         Item[] items = {};
         items.insertLast(cr.GetItems(ItemProperty::CritterSlot, CritterItemSlot::Inventory));
@@ -1249,7 +1258,7 @@ void karma_voting(Critter crFrom, Critter crTo, bool valUp)
 {
     // Players karma system (not used)
     crTo.PlayerKarma += (valUp ? int(5) : -10);
-    crFrom.TimeoutKarmaVoting = Game.GetFullSecond() + REAL_HOUR(4); // 4 hours
+    crFrom.TimeoutKarmaVoting = Game.GetFullSecond() + Time::RealHour(4); // 4 hours
 }
 
 // //////////////////////////////////////////////////////////////////////////////////////////////////
@@ -1297,7 +1306,7 @@ bool items_barter(Item[] saleItems, uint[] saleItemsCount, Item[] buyItems, uint
 // Call on player try register
 // Return true to allow, false to disallow
 
-bool player_registration(Player player, string name, uint& textMsg, uint& strNum, string& lexems)
+bool player_registration(Player player, string name, TextPackName& textMsg, uint& strNum, string& lexems)
 {
     Game.Log("player register. Name: " + name);
     uint nameError = Parameters::CheckPlayerName(name);
@@ -1313,7 +1322,7 @@ bool player_registration(Player player, string name, uint& textMsg, uint& strNum
 
 // Call on player try login
 // Return true to allow, false to disallow
-bool player_login(Player player, string name, ident id, uint& textMsg, uint& strNum, string& lexems)
+bool player_login(Player player, string name, ident id, TextPackName& textMsg, uint& strNum, string& lexems)
 {
     if (Settings.PermanentDeath > 0 && Replication::IsPermanentDeath(id)) {
         textMsg = TextPackName::Game;
@@ -1321,6 +1330,28 @@ bool player_login(Player player, string name, ident id, uint& textMsg, uint& str
         return false;
     }
     return true;
+}
+
+void OnPlayerEnter(Player player)
+{
+    Critter cr = player.GetControlledCritter();
+
+    if (cr == null) {
+        if (player.MainCritterId == ZERO_IDENT) {
+            cr = Game.CreateCritter(Content::Critter::Player, true);
+
+            player.MainCritterId = cr.Id;
+        }
+        else {
+            cr = Game.GetCritter(player.MainCritterId);
+
+            if (cr == null) {
+                cr = Game.LoadCritter(player.MainCritterId, true);
+            }
+        }
+
+        player.SwitchCritter(cr);
+    }
 }
 
 // Call on player try change access

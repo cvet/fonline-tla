@@ -64,6 +64,7 @@
   - [SpritePattern reference object](#spritepattern-reference-object)
   - [ident value object](#ident-value-object)
   - [tick_t value object](#tick_t-value-object)
+  - [ucolor value object](#ucolor-value-object)
 * [Enums](#enums)
 
 ## Settings
@@ -211,6 +212,10 @@
   текущая скорость передвижения
 
 * `bool ShowGroups (client only)`
+
+  ...
+
+* `uint MinimumOfflineTime (server only)`
 
   ...
 
@@ -479,10 +484,6 @@
 
   ...
 
-* `bool Quit = false`
-
-  Todo: rework global Quit setting
-
 * `const int[] DummyIntVec = `
 
   ...
@@ -573,12 +574,12 @@
 
   ...
 
-
-### ServerGameplay
+* `const bool CritterBlockHex = false`
 
   ...
 
-* `const uint MinimumOfflineTime = 180000`
+
+### ServerGameplay
 
   ...
 
@@ -929,9 +930,13 @@
 
   ...
 
+* `int Sleep = -1`
+
+  -1 to disable, Sleep has priority over FixedFPS if both enabled
+
 * `int FixedFPS = 100`
 
-  ...
+  0 to disable, Sleep has priority over FixedFPS if both enabled
 
 * `const int FogExtraLength = 0`
 
@@ -986,6 +991,10 @@
   ...
 
 * `const int DefaultParticleDrawHeight = 128`
+
+  ...
+
+* `const bool RecreateClientOnError = false`
 
   ...
 
@@ -1053,15 +1062,15 @@
 
   ...
 
-* `const uint Anim2CombatBegin = 0`
+* `const CritterActionAnim CombatAnimBegin = CritterActionAnim::None`
 
   ...
 
-* `const uint Anim2CombatIdle = 0`
+* `const CritterActionAnim CombatAnimIdle = CritterActionAnim::None`
 
   ...
 
-* `const uint Anim2CombatEnd = 0`
+* `const CritterActionAnim CombatAnimEnd = CritterActionAnim::None`
 
   ...
 
@@ -1126,7 +1135,7 @@
 
   ...
 
-* `const uint ChosenLightColor = 0`
+* `const ucolor ChosenLightColor = ucolor::clear`
 
   ...
 
@@ -1391,7 +1400,31 @@
 
   ...
 
-* `const int ServerSleep = 0`
+* `const int ServerSleep = -1`
+
+  ...
+
+* `const int LoopsPerSecondCap = 1000`
+
+  ...
+
+* `const uint LockMaxWaitTime = 100`
+
+  ...
+
+* `const uint DataBaseCommitPeriod = 10`
+
+  ...
+
+* `const uint DataBaseMaxCommitJobs = 100`
+
+  ...
+
+* `const uint LoopAverageTimeInterval = 1000`
+
+  ...
+
+* `const bool WriteHealthFile = false`
 
   ...
 
@@ -1446,6 +1479,10 @@
   ...
 
 * `PrivateCommon ident HistoryRecordsId ReadOnly`
+
+  ...
+
+* `PrivateServer uint LastGlobalMapTripId ReadOnly`
 
   ...
 
@@ -1811,11 +1848,11 @@
 
   ...
 
-* `OnPlayerRegistration(Player player, string name, uint& disallowMsgNum, uint& disallowStrNum, string& disallowLex)`
+* `OnPlayerRegistration(Player player, string name, TextPackName& disallowTextPack, uint& disallowStrNum, string& disallowLex)`
 
   ...
 
-* `OnPlayerLogin(Player player, string name, ident id, uint& disallowMsgNum, uint& disallowStrNum, string& disallowLex)`
+* `OnPlayerLogin(Player player, string name, ident id, TextPackName& disallowTextPack, uint& disallowStrNum, string& disallowLex)`
 
   ...
 
@@ -1832,6 +1869,14 @@
   ...
 
 * `OnPlayerInit(Player player)`
+
+  ...
+
+* `OnPlayerEnter(Player player)`
+
+  ...
+
+* `OnPlayerCritterSwitched(Player player, Critter cr, Critter prevCr)`
 
   ...
 
@@ -1899,15 +1944,23 @@
 
   ...
 
+* `OnCritterLoad(Critter cr)`
+
+  ...
+
+* `OnCritterUnload(Critter cr)`
+
+  ...
+
 * `OnCritterIdle(Critter cr)`
 
   ...
 
-* `OnCritterCheckMoveItem(Critter cr, Item item, uint8 toSlot)`
+* `OnCritterCheckMoveItem(Critter cr, Item item, CritterItemSlot toSlot)`
 
   ...
 
-* `OnCritterMoveItem(Critter cr, Item item, uint8 fromSlot)`
+* `OnCritterMoveItem(Critter cr, Item item, CritterItemSlot fromSlot)`
 
   ...
 
@@ -2003,7 +2056,7 @@
 
   ...
 
-* `OnCritterCheckMoveItemEx(Critter cr, Item item, uint8 toSlot)`
+* `OnCritterCheckMoveItemEx(Critter cr, Item item, CritterItemSlot toSlot)`
 
   ...
 
@@ -2145,7 +2198,7 @@
 
   ...
 
-* `OnMapMessage(string& text, uint16& hexX, uint16& hexY, uint& color, uint& delay)`
+* `OnMapMessage(string& text, uint16& hexX, uint16& hexY, ucolor& color, uint& delay)`
 
   ...
 
@@ -2165,27 +2218,27 @@
 
   ...
 
-* `OnCritterAction(bool localCall, Critter cr, int action, int actionExt, AbstractItem actionItem)`
+* `OnCritterAction(bool localCall, Critter cr, CritterAction action, int actionData, AbstractItem contextItem)`
 
   ...
 
-* `OnCritterAnimationProcess(bool animateStay, Critter cr, uint anim1, uint anim2, AbstractItem item)`
+* `OnCritterAnimationProcess(bool animateStay, Critter cr, CritterStateAnim stateAnim, CritterActionAnim actionAnim, AbstractItem contextItem)`
 
   ...
 
-* `OnCritterAnimation(hstring arg1, uint arg2, uint arg3, uint& arg4, uint& arg5, int& arg6, int& arg7, string& arg8)`
+* `OnCritterAnimation(hstring modelName, CritterStateAnim stateAnim, CritterActionAnim actionAnim, uint& pass, uint& flags, int& ox, int& oy, string& animName)`
 
   ...
 
-* `OnCritterAnimationSubstitute(hstring arg1, uint arg2, uint arg3, hstring& arg4, uint& arg5, uint& arg6)`
+* `OnCritterAnimationSubstitute(hstring baseModelName, CritterStateAnim baseStateAnim, CritterActionAnim baseActionAnim, hstring& modelName, CritterStateAnim& stateAnim, CritterActionAnim& actionAnim)`
 
   ...
 
-* `OnCritterAnimationFallout(hstring arg1, uint& arg2, uint& arg3, uint& arg4, uint& arg5, uint& arg6)`
+* `OnCritterAnimationFallout(hstring modelName, CritterStateAnim stateAnim, CritterActionAnim actionAnim, uint& fStateAnim, uint& fActionAnim, uint& fStateAnimEx, uint& fActionAnimEx, uint& flags)`
 
   ...
 
-* `OnCritterCheckMoveItem(Critter cr, Item item, uint8 toSlot)`
+* `OnCritterCheckMoveItem(Critter cr, Item item, CritterItemSlot toSlot)`
 
   ...
 
@@ -2205,7 +2258,7 @@
 
   ...
 
-* `OnCritterActionEx(bool localCall, Critter cr, int action, int actionExt, AbstractItem actionItem)`
+* `OnCritterActionEx(bool localCall, Critter cr, CritterAction action, int actionExt, AbstractItem actionItem)`
 
   ...
 
@@ -2217,7 +2270,7 @@
 
   ...
 
-* `OnCritterCheckMoveItemEx(Critter cr, Item item, uint8 toSlot)`
+* `OnCritterCheckMoveItemEx(Critter cr, Item item, CritterItemSlot toSlot)`
 
   ...
 
@@ -2243,10 +2296,19 @@
 
   ...
 
+* `void BreakIntoDebugger(string message)`
+
+  ...  
+  param message ...
+
 * `void Log(string text)`
 
   ...  
   param text ...
+
+* `void RequestQuit()`
+
+  ...
 
 * `bool IsResourcePresent(string resourcePath)`
 
@@ -2508,6 +2570,22 @@
 
   ...
 
+* `Critter CreateCritter(hstring protoId, bool forPlayer)`
+
+  ...
+
+* `Critter LoadCritter(ident crId, bool forPlayer)`
+
+  ...
+
+* `void UnloadCritter(Critter cr)`
+
+  ...
+
+* `void DestroyUnloadedCritter(ident crId)`
+
+  ...
+
 * `ident DeferredCall(uint delay, ScriptFunc-void func)`
 
   ...
@@ -2604,7 +2682,7 @@
   param toHy ...  
   param skipChecks ...
 
-* `void MoveItem(Item item, uint count, Item toCont, uint stackId)`
+* `void MoveItem(Item item, uint count, Item toCont, ContainerItemStack stackId)`
 
   ...  
   param item ...  
@@ -2612,7 +2690,7 @@
   param toCont ...  
   param stackId ...
 
-* `void MoveItem(Item item, uint count, Item toCont, uint stackId, bool skipChecks)`
+* `void MoveItem(Item item, uint count, Item toCont, ContainerItemStack stackId, bool skipChecks)`
 
   ...  
   param item ...  
@@ -2651,14 +2729,14 @@
   param toHy ...  
   param skipChecks ...
 
-* `void MoveItems(Item[] items, Item toCont, uint stackId)`
+* `void MoveItems(Item[] items, Item toCont, ContainerItemStack stackId)`
 
   ...  
   param items ...  
   param toCont ...  
   param stackId ...
 
-* `void MoveItems(Item[] items, Item toCont, uint stackId, bool skipChecks)`
+* `void MoveItems(Item[] items, Item toCont, ContainerItemStack stackId, bool skipChecks)`
 
   ...  
   param items ...  
@@ -2724,14 +2802,14 @@
   param channel ...  
   param text ...
 
-* `void RadioMessageMsg(uint16 channel, uint16 textMsg, uint numStr)`
+* `void RadioMessageMsg(uint16 channel, TextPackName textPack, uint numStr)`
 
   ...  
   param channel ...  
   param textMsg ...  
   param numStr ...
 
-* `void RadioMessageMsg(uint16 channel, uint16 textMsg, uint numStr, string lexems)`
+* `void RadioMessageMsg(uint16 channel, TextPackName textPack, uint numStr, string lexems)`
 
   ...  
   param channel ...  
@@ -2821,11 +2899,26 @@
   param mapId ...  
   return ...
 
-* `Map GetMapByPid(hstring mapPid, uint skipCount)`
+* `Map GetMap(hstring mapPid)`
+
+  ...
+
+* `Map GetMap(hstring mapPid, uint skipCount)`
 
   ...  
   param mapPid ...  
   param skipCount ...  
+  return ...
+
+* `Map[] GetMaps()`
+
+  ...  
+  return ...
+
+* `Map[] GetMaps(hstring pid)`
+
+  ...  
+  param pid ...  
   return ...
 
 * `Location GetLocation(ident locId)`
@@ -2834,17 +2927,28 @@
   param locId ...  
   return ...
 
-* `Location GetLocationByPid(hstring locPid)`
+* `Location GetLocation(hstring locPid)`
 
   ...  
   param locPid ...  
   return ...
 
-* `Location GetLocationByPid(hstring locPid, uint skipCount)`
+* `Location GetLocation(hstring locPid, uint skipCount)`
 
   ...  
   param locPid ...  
   param skipCount ...  
+  return ...
+
+* `Location[] GetLocations()`
+
+  ...  
+  return ...
+
+* `Location[] GetLocations(hstring pid)`
+
+  ...  
+  param pid ...  
   return ...
 
 * `Location[] GetLocations(uint16 wx, uint16 wy, uint radius)`
@@ -2948,23 +3052,6 @@
   param pid ...  
   return ...
 
-* `Map[] GetAllMaps()`
-
-  ...  
-  return ...
-
-* `Map[] GetAllMaps(hstring pid)`
-
-  ...  
-  param pid ...  
-  return ...
-
-* `Location[] GetAllLocations(hstring pid)`
-
-  ...  
-  param pid ...  
-  return ...
-
 * `void GetTime(uint16& year, uint16& month, uint16& day, uint16& dayOfWeek, uint16& hour, uint16& minute, uint16& second, uint16& milliseconds)`
 
   ...  
@@ -3000,6 +3087,12 @@
 * `hstring[] GetDialogs()`
 
   ...  
+  return ...
+
+* `StaticItem[] GetStaticItemsForProtoMap(ProtoMap proto)`
+
+  ...  
+  param proto ...  
   return ...
 
 * `void LoadImage(int imageSlot, string imageName)`
@@ -3129,7 +3222,7 @@
   param findType ...  
   return ...
 
-* `void FlushScreen(uint fromColor, uint toColor, tick_t duration)`
+* `void FlushScreen(ucolor fromColor, ucolor toColor, tick_t duration)`
 
   ...  
   param fromColor ...  
@@ -3199,59 +3292,59 @@
   param type ...  
   param msg ...
 
-* `void Message(int textMsg, uint strNum)`
+* `void Message(TextPackName textPack, uint strNum)`
 
   ...  
-  param textMsg ...  
+  param textPack ...  
   param strNum ...
 
-* `void Message(int type, int textMsg, uint strNum)`
+* `void Message(int type, TextPackName textPack, uint strNum)`
 
   ...  
   param type ...  
-  param textMsg ...  
+  param textPack ...  
   param strNum ...
 
-* `string GetMsgStr(int textMsg, uint strNum)`
+* `string GetText(TextPackName textPack, uint strNum)`
 
   ...  
-  param textMsg ...  
+  param textPack ...  
   param strNum ...  
   return ...
 
-* `string GetMsgStr(int textMsg, uint strNum, uint skipCount)`
+* `string GetText(TextPackName textPack, uint strNum, uint skipCount)`
 
   ...  
-  param textMsg ...  
+  param textPack ...  
   param strNum ...  
   param skipCount ...  
   return ...
 
-* `uint GetMsgStrNumUpper(int textMsg, uint strNum)`
+* `uint GetTextNumUpper(TextPackName textPack, uint strNum)`
 
   ...  
-  param textMsg ...  
+  param textPack ...  
   param strNum ...  
   return ...
 
-* `uint GetMsgStrNumLower(int textMsg, uint strNum)`
+* `uint GetTextNumLower(TextPackName textPack, uint strNum)`
 
   ...  
-  param textMsg ...  
+  param textPack ...  
   param strNum ...  
   return ...
 
-* `uint GetMsgStrCount(int textMsg, uint strNum)`
+* `uint GetTextCount(TextPackName textPack, uint strNum)`
 
   ...  
-  param textMsg ...  
+  param textPack ...  
   param strNum ...  
   return ...
 
-* `bool IsMsgStr(int textMsg, uint strNum)`
+* `bool IsTextPresent(TextPackName textPack, uint strNum)`
 
   ...  
-  param textMsg ...  
+  param textPack ...  
   param strNum ...  
   return ...
 
@@ -3317,11 +3410,10 @@
   param fontFname ...  
   return ...
 
-* `void SetDefaultFont(int font, uint color)`
+* `void SetDefaultFont(int font)`
 
   ...  
-  param font ...  
-  param color ...
+  param font ...
 
 * `void SetEffect(EffectType effectType, int64 effectSubtype, string effectPath)`
 
@@ -3438,7 +3530,7 @@
   param x ...  
   param y ...
 
-* `void DrawSprite(uint sprId, int x, int y, uint color)`
+* `void DrawSprite(uint sprId, int x, int y, ucolor color)`
 
   ...  
   param sprId ...  
@@ -3446,7 +3538,7 @@
   param y ...  
   param color ...
 
-* `void DrawSprite(uint sprId, int x, int y, uint color, bool offs)`
+* `void DrawSprite(uint sprId, int x, int y, ucolor color, bool offs)`
 
   ...  
   param sprId ...  
@@ -3464,7 +3556,7 @@
   param w ...  
   param h ...
 
-* `void DrawSprite(uint sprId, int x, int y, int w, int h, uint color)`
+* `void DrawSprite(uint sprId, int x, int y, int w, int h, ucolor color)`
 
   ...  
   param sprId ...  
@@ -3474,7 +3566,7 @@
   param h ...  
   param color ...
 
-* `void DrawSprite(uint sprId, int x, int y, int w, int h, uint color, bool zoom, bool offs)`
+* `void DrawSprite(uint sprId, int x, int y, int w, int h, ucolor color, bool zoom, bool offs)`
 
   ...  
   param sprId ...  
@@ -3486,7 +3578,7 @@
   param zoom ...  
   param offs ...
 
-* `void DrawSpritePattern(uint sprId, int x, int y, int w, int h, int sprWidth, int sprHeight, uint color)`
+* `void DrawSpritePattern(uint sprId, int x, int y, int w, int h, int sprWidth, int sprHeight, ucolor color)`
 
   ...  
   param sprId ...  
@@ -3498,7 +3590,7 @@
   param sprHeight ...  
   param color ...
 
-* `void DrawText(string text, int x, int y, int w, int h, uint color, int font, int flags)`
+* `void DrawText(string text, int x, int y, int w, int h, ucolor color, int font, int flags)`
 
   ...  
   param text ...  
@@ -3516,12 +3608,12 @@
   param primitiveType ...  
   param data ...
 
-* `void DrawCritter2d(hstring modelName, uint anim1, uint anim2, uint8 dir, int l, int t, int r, int b, bool scratch, bool center, uint color)`
+* `void DrawCritter2d(hstring modelName, CritterStateAnim stateAnim, CritterActionAnim actionAnim, uint8 dir, int l, int t, int r, int b, bool scratch, bool center, ucolor color)`
 
   ...  
   param modelName ...  
-  param anim1 ...  
-  param anim2 ...  
+  param stateAnim ...  
+  param actionAnim ...  
   param dir ...  
   param l ...  
   param t ...  
@@ -3531,13 +3623,13 @@
   param center ...  
   param color ...
 
-* `void DrawCritter3d(uint instance, hstring modelName, uint anim1, uint anim2, int[] layers, float[] position, uint color)`
+* `void DrawCritter3d(uint instance, hstring modelName, CritterStateAnim stateAnim, CritterActionAnim actionAnim, int[] layers, float[] position, ucolor color)`
 
   ...  
   param instance ...  
   param modelName ...  
-  param anim1 ...  
-  param anim2 ...  
+  param stateAnim ...  
+  param actionAnim ...  
   param layers ...  
   param position ...  
   param color ...
@@ -3677,10 +3769,18 @@
   param x ...  
   param y ...
 
-* `string GetCurLang()`
+* `void MoveItemLocally(uint itemCount, ident itemId, ident swapItemId, CritterItemSlot toSlot)`
 
   ...  
+  param itemCount ...  
+  param itemId ...  
+  param swapItemId ...  
+  param toSlot ...  
   return ...
+
+* `void ChangeLanguage(string langName)`
+
+  ...
 
 ### Game mapper events
 
@@ -3903,7 +4003,11 @@
 
 ### Player properties
 
-* `PrivateServer ident[] OwnedCritterIds`
+* `PrivateServer ident ControlledCritterId ReadOnly Temporary`
+
+  ...
+
+* `PrivateServer ident LastControlledCritterId ReadOnly`
 
   ...
 
@@ -3916,6 +4020,10 @@
   ...
 
 * `PrivateServer uint16[] ConnectionPort`
+
+  ...
+
+* `PrivateServer ident MainCritterId`
 
   ...
 
@@ -3935,7 +4043,11 @@
 
 ### Player server methods
 
-* `Critter GetOwnedCritter() ExcludeInSingleplayer`
+* `void SwitchCritter(Critter cr) ExcludeInSingleplayer`
+
+  ...
+
+* `Critter GetControlledCritter() ExcludeInSingleplayer`
 
   ...  
   return ...
@@ -3956,13 +4068,13 @@
   ...  
   param text ...
 
-* `void Message(uint16 textMsg, uint numStr)`
+* `void Message(TextPackName textPack, uint numStr)`
 
   ...  
   param textMsg ...  
   param numStr ...
 
-* `void Message(uint16 textMsg, uint numStr, string lexems)`
+* `void Message(TextPackName textPack, uint numStr, string lexems)`
 
   ...  
   param textMsg ...  
@@ -3987,7 +4099,7 @@
 
 ### Item properties
 
-* `PrivateServer hstring InitScript ScriptFuncType = ItemInit Alias = ScriptId`
+* `PrivateServer hstring InitScript ScriptFuncType = ItemInit`
 
   ...
 
@@ -3999,7 +4111,7 @@
 
   ...
 
-* `PrivateCommon ItemOwnership Ownership ReadOnly Alias = Accessory`
+* `PrivateCommon ItemOwnership Ownership ReadOnly`
 
   ...
 
@@ -4015,11 +4127,11 @@
 
   ...
 
-* `PrivateCommon ident CritterId ReadOnly Alias = CritId`
+* `PrivateCommon ident CritterId ReadOnly`
 
   ...
 
-* `PrivateCommon uint8 CritterSlot ReadOnly Alias = CritSlot Alias = Slot`
+* `PrivateCommon CritterItemSlot CritterSlot ReadOnly`
 
   ...
 
@@ -4027,11 +4139,11 @@
 
   ...
 
-* `PrivateCommon uint ContainerStack ReadOnly`
+* `PrivateCommon ContainerItemStack ContainerStack ReadOnly`
 
   ...
 
-* `PrivateServer ident[] InnerItemIds ReadOnly Alias = SubItemIds`
+* `PrivateServer ident[] InnerItemIds ReadOnly`
 
   ...
 
@@ -4123,11 +4235,15 @@
 
   ...
 
-* `Public bool IsHidden`
+* `PrivateServer bool IsHidden`
 
   ...
 
-* `PrivateCommon bool IsHiddenPicture ReadOnly`
+* `PrivateClient bool HideSprite`
+
+  ...
+
+* `PrivateCommon bool AlwaysHideSprite ReadOnly`
 
   ...
 
@@ -4175,7 +4291,7 @@
 
   ...
 
-* `Public bool IsGeck`
+* `Public bool IsGeck ReadOnly`
 
   ...
 
@@ -4219,14 +4335,6 @@
 
   ...
 
-* `Public uint8 Info`
-
-  ...
-
-* `PublicModifiable uint8 Mode`
-
-  ...
-
 * `Public int8 LightIntensity`
 
   ...
@@ -4239,7 +4347,7 @@
 
   ...
 
-* `Public uint LightColor`
+* `Public ucolor LightColor`
 
   ...
 
@@ -4483,6 +4591,10 @@
 
   ...
 
+* `ProtectedModifiable uint8 Mode`
+
+  ...
+
 * `Public uint8 AnimHide0`
 
   ...
@@ -4627,7 +4739,7 @@
 
   ...
 
-* `Public Anim1 Weapon_Anim1 Group = WeaponProperties`
+* `Public CritterStateAnim Weapon_StateAnim Group = WeaponProperties`
 
   ...
 
@@ -4731,27 +4843,27 @@
 
   ...
 
-* `Public int Weapon_DmgType_0 Group = WeaponModes`
+* `Public DamageTypes Weapon_DmgType_0 Group = WeaponModes`
 
   ...
 
-* `Public int Weapon_DmgType_1 Group = WeaponModes`
+* `Public DamageTypes Weapon_DmgType_1 Group = WeaponModes`
 
   ...
 
-* `Public int Weapon_DmgType_2 Group = WeaponModes`
+* `Public DamageTypes Weapon_DmgType_2 Group = WeaponModes`
 
   ...
 
-* `Public Anim2 Weapon_Anim2_0 Group = WeaponModes`
+* `Public CritterActionAnim Weapon_ActionAnim_0 Group = WeaponModes`
 
   ...
 
-* `Public Anim2 Weapon_Anim2_1 Group = WeaponModes`
+* `Public CritterActionAnim Weapon_ActionAnim_1 Group = WeaponModes`
 
   ...
 
-* `Public Anim2 Weapon_Anim2_2 Group = WeaponModes`
+* `Public CritterActionAnim Weapon_ActionAnim_2 Group = WeaponModes`
 
   ...
 
@@ -5023,6 +5135,10 @@
 
   ...
 
+* `Public int8 Info`
+
+  ...
+
 * `Public bool IsCanUseOnSmth`
 
   ...
@@ -5205,7 +5321,7 @@
   ...  
   param initFunc ...
 
-* `Item AddItem(hstring pid, uint count, uint stackId)`
+* `Item AddItem(hstring pid, uint count, ContainerItemStack stackId)`
 
   ...  
   param pid ...  
@@ -5213,7 +5329,7 @@
   param stackId ...  
   return ...
 
-* `Item[] GetItems(uint stackId)`
+* `Item[] GetItems(ContainerItemStack stackId)`
 
   ...  
   param stackId ...  
@@ -5282,7 +5398,7 @@
 
 ### Critter properties
 
-* `PrivateServer hstring InitScript ScriptFuncType = CritterInit Alias = ScriptId`
+* `PrivateServer hstring InitScript ScriptFuncType = CritterInit`
 
   ...
 
@@ -5310,11 +5426,7 @@
 
   ...
 
-* `Protected ident GlobalMapLeaderId ReadOnly`
-
-  ...
-
-* `PrivateServer uint GlobalMapTripId ReadOnly`
+* `PrivateServer uint GlobalMapTripId ReadOnly Temporary`
 
   ...
 
@@ -5331,10 +5443,6 @@
   ...
 
 * `PrivateServer hstring LastLocationPid ReadOnly`
-
-  ...
-
-* `PrivateServer ident LastGlobalMapLeaderId ReadOnly`
 
   ...
 
@@ -5374,31 +5482,31 @@
 
   ...
 
-* `PrivateCommon CritterCondition Cond ReadOnly`
+* `PrivateCommon CritterCondition Condition ReadOnly`
 
   ...
 
-* `PrivateCommon uint Anim1Alive ReadOnly Alias = Anim1Life`
+* `PrivateCommon CritterStateAnim AliveStateAnim ReadOnly`
 
   ...
 
-* `PrivateCommon uint Anim1Knockout ReadOnly`
+* `PrivateCommon CritterStateAnim KnockoutStateAnim ReadOnly`
 
   ...
 
-* `PrivateCommon uint Anim1Dead ReadOnly`
+* `PrivateCommon CritterStateAnim DeadStateAnim ReadOnly`
 
   ...
 
-* `PrivateCommon uint Anim2Alive ReadOnly Alias = Anim2Life`
+* `PrivateCommon CritterActionAnim AliveActionAnim ReadOnly`
 
   ...
 
-* `PrivateCommon uint Anim2Knockout ReadOnly`
+* `PrivateCommon CritterActionAnim KnockoutActionAnim ReadOnly`
 
   ...
 
-* `PrivateCommon uint Anim2Dead ReadOnly`
+* `PrivateCommon CritterActionAnim DeadActionAnim ReadOnly`
 
   ...
 
@@ -5514,31 +5622,27 @@
 
   ...
 
-* `Protected uint TimeoutRemoveFromGame Temporary`
+* `PrivateClient ucolor NameColor`
 
   ...
 
-* `PrivateClient uint NameColor`
+* `PrivateClient ucolor ContourColor`
 
   ...
 
-* `PrivateClient uint ContourColor`
+* `PrivateServer any[] TE_Identifier ReadOnly`
 
   ...
 
-* `PrivateServer any[] TE_Identifier`
+* `PrivateServer tick_t[] TE_FireTime ReadOnly`
 
   ...
 
-* `PrivateServer tick_t[] TE_FireTime`
+* `PrivateServer hstring[] TE_FuncName ReadOnly`
 
   ...
 
-* `PrivateServer hstring[] TE_FuncName`
-
-  ...
-
-* `PrivateServer uint[] TE_Rate`
+* `PrivateServer uint[] TE_Rate ReadOnly`
 
   ...
 
@@ -5551,6 +5655,30 @@
   ...
 
 * `PrivateServer uint IdlePeriod Temporary`
+
+  ...
+
+* `PrivateCommon bool IsControlledByPlayer ReadOnly Temporary`
+
+  ...
+
+* `PrivateClient bool IsChosen ReadOnly Temporary`
+
+  ...
+
+* `PrivateClient bool IsPlayerOffline ReadOnly Temporary`
+
+  ...
+
+* `PrivateCommon bool IsAttached ReadOnly Temporary`
+
+  ...
+
+* `PrivateCommon ident AttachMaster ReadOnly Temporary`
+
+  ...
+
+* `PrivateClient bool HideSprite`
 
   ...
 
@@ -5734,7 +5862,7 @@
 
   ...
 
-* `PrivateServer uint Anim2KnockoutEnd`
+* `PrivateServer CritterActionAnim ActionAnimKnockoutEnd`
 
   ...
 
@@ -7986,6 +8114,10 @@
 
   ...
 
+* `Protected uint TimeoutRemoveFromGame Group = Timeouts`
+
+  ...
+
 * `Protected uint TimeoutReplication Group = Timeouts`
 
   ...
@@ -9320,11 +9452,11 @@
 
   ...
 
-* `OnItemOnMapAppeared(Item item, bool added, Critter fromCr)`
+* `OnItemOnMapAppeared(Item item, Critter dropper)`
 
   ...
 
-* `OnItemOnMapDisappeared(Item item, bool removed, Critter toCr)`
+* `OnItemOnMapDisappeared(Item item, Critter picker)`
 
   ...
 
@@ -9465,17 +9597,7 @@
   ...  
   return ...
 
-* `bool IsOwnedByPlayer() ExcludeInSingleplayer`
-
-  ...  
-  return ...
-
-* `bool IsNpc()`
-
-  ...  
-  return ...
-
-* `Player GetOwner() ExcludeInSingleplayer`
+* `Player GetPlayer() ExcludeInSingleplayer`
 
   ...  
   return ...
@@ -9500,6 +9622,10 @@
   param hy ...  
   param dir ...
 
+* `void TransitToMap(Map map, uint16 hx, uint16 hy, uint8 dir, bool force_hex)`
+
+  ...
+
 * `void TransitToGlobal()`
 
   ...
@@ -9509,10 +9635,10 @@
   ...  
   param group ...
 
-* `void TransitToGlobalGroup(Critter leader)`
+* `void TransitToGlobalGroup(Critter globalCr)`
 
   ...  
-  param leader ...
+  param globalCr ...
 
 * `bool IsAlive()`
 
@@ -9548,14 +9674,14 @@
   param howSay ...  
   param text ...
 
-* `void SayMsg(uint8 howSay, uint16 textMsg, uint numStr)`
+* `void SayMsg(uint8 howSay, TextPackName textPack, uint numStr)`
 
   ...  
   param howSay ...  
   param textMsg ...  
   param numStr ...
 
-* `void SayMsg(uint8 howSay, uint16 textMsg, uint numStr, string lexems)`
+* `void SayMsg(uint8 howSay, TextPackName textPack, uint numStr, string lexems)`
 
   ...  
   param howSay ...  
@@ -9584,6 +9710,10 @@
 
   ...  
   return ...
+
+* `Critter[] GetGlobalMapGroupCritters()`
+
+  ...
 
 * `bool IsSee(Critter cr)`
 
@@ -9676,43 +9806,45 @@
   param protoId ...  
   return ...
 
-* `void ChangeItemSlot(ident itemId, uint8 slot)`
+* `void ChangeItemSlot(ident itemId, CritterItemSlot slot)`
 
   ...  
   param itemId ...  
   param slot ...
 
-* `void SetCondition(CritterCondition cond)`
+* `void SetCondition(CritterCondition cond, CritterActionAnim actionAnim, AbstractItem contextItem)`
 
   ...  
-  param cond ...
+  param cond ...  
+  param actionAnim ...  
+  param contextItem ...
 
 * `void CloseDialog()`
 
   ...
 
-* `void Action(int action, int actionExt, AbstractItem item)`
+* `void Action(CritterAction action, int actionData, AbstractItem contextItem)`
 
   ...  
   param action ...  
-  param actionExt ...  
-  param item ...
+  param actionData ...  
+  param contextItem ...
 
-* `void Animate(uint anim1, uint anim2, AbstractItem item, bool clearSequence, bool delayPlay) ExcludeInSingleplayer`
+* `void Animate(CritterStateAnim stateAnim, CritterActionAnim actionAnim, AbstractItem contextItem, bool clearSequence, bool delayPlay) ExcludeInSingleplayer`
 
   ...  
-  param anim1 ...  
-  param anim2 ...  
-  param item ...  
+  param stateAnim ...  
+  param actionAnim ...  
+  param contextItem ...  
   param clearSequence ...  
   param delayPlay ...
 
-* `void SetConditionAnims(CritterCondition cond, uint anim1, uint anim2)`
+* `void SetConditionAnims(CritterCondition cond, CritterStateAnim stateAnim, CritterActionAnim actionAnim)`
 
   ...  
   param cond ...  
-  param anim1 ...  
-  param anim2 ...
+  param stateAnim ...  
+  param actionAnim ...
 
 * `void PlaySound(string soundName, bool sendSelf)`
 
@@ -9801,6 +9933,22 @@
   ...  
   param gagId ...
 
+* `void AttachToCritter(Critter cr)`
+
+  ...
+
+* `void DetachFromCritter()`
+
+  ...
+
+* `void DetachAllCritters()`
+
+  ...
+
+* `Critter[] GetAttachedCritters()`
+
+  ...
+
 * `void AddTimeEvent(ScriptFunc-uint, Critter, any, uint& func, tick_t duration, any identifier)`
 
   ...  
@@ -9865,6 +10013,10 @@
   param identifiers ...  
   return ...
 
+* `tick_t GetPlayerOfflineTime()`
+
+  ...
+
 * `bool IsFree()`
 
   ...  
@@ -9886,21 +10038,6 @@
 
   ...  
   param name ...
-
-* `bool IsChosen()`
-
-  ...  
-  return ...
-
-* `bool IsOwnedByPlayer() ExcludeInSingleplayer`
-
-  ...  
-  return ...
-
-* `bool IsNpc()`
-
-  ...  
-  return ...
 
 * `bool IsOffline() ExcludeInSingleplayer`
 
@@ -9937,11 +10074,11 @@
   ...  
   return ...
 
-* `bool IsAnimAvailable(uint anim1, uint anim2)`
+* `bool IsAnimAvailable(CritterStateAnim stateAnim, CritterActionAnim actionAnim)`
 
   ...  
-  param anim1 ...  
-  param anim2 ...  
+  param stateAnim ...  
+  param actionAnim ...  
   return ...
 
 * `bool IsAnimPlaying()`
@@ -9949,23 +10086,23 @@
   ...  
   return ...
 
-* `uint GetAnim1()`
+* `CritterStateAnim GetStateAnim()`
 
   ...  
   return ...
 
-* `void Animate(uint anim1, uint anim2)`
+* `void Animate(CritterStateAnim stateAnim, CritterActionAnim actionAnim)`
 
   ...  
-  param anim1 ...  
-  param anim2 ...
+  param stateAnim ...  
+  param actionAnim ...
 
-* `void Animate(uint anim1, uint anim2, AbstractItem actionItem)`
+* `void Animate(CritterStateAnim stateAnim, CritterActionAnim actionAnim, AbstractItem contextItem)`
 
   ...  
-  param anim1 ...  
-  param anim2 ...  
-  param actionItem ...
+  param stateAnim ...  
+  param actionAnim ...  
+  param contextItem ...
 
 * `void StopAnim()`
 
@@ -10020,16 +10157,6 @@
   param propertyValue ...  
   return ...
 
-* `void SetVisibility(bool visible)`
-
-  ...  
-  param visible ...
-
-* `bool GetVisibility()`
-
-  ...  
-  return ...
-
 * `void GetNameTextInfo(bool& nameVisible, int& x, int& y, int& w, int& h, int& lines)`
 
   ...  
@@ -10055,11 +10182,11 @@
   param moveY ...  
   param moveZ ...
 
-* `void AddAnimCallback(uint anim1, uint anim2, float normalizedTime, callback-Critter animCallback)`
+* `void AddAnimCallback(CritterStateAnim stateAnim, CritterActionAnim actionAnim, float normalizedTime, callback-Critter animCallback)`
 
   ...  
-  param anim1 ...  
-  param anim2 ...  
+  param stateAnim ...  
+  param actionAnim ...  
   param normalizedTime ...  
   param animCallback ...
 
@@ -10124,7 +10251,7 @@
 
 ### Map properties
 
-* `PrivateServer hstring InitScript ScriptFuncType = MapInit Alias = ScriptId`
+* `PrivateServer hstring InitScript ScriptFuncType = MapInit`
 
   ...
 
@@ -10781,14 +10908,14 @@
   param props ...  
   return ...
 
-* `bool IsHexPassed(uint16 hexX, uint16 hexY)`
+* `bool IsHexMovable(uint16 hexX, uint16 hexY)`
 
   ...  
   param hexX ...  
   param hexY ...  
   return ...
 
-* `bool IsHexesPassed(uint16 hexX, uint16 hexY, uint radius)`
+* `bool IsHexesMovable(uint16 hexX, uint16 hexY, uint radius)`
 
   ...  
   param hexX ...  
@@ -10796,14 +10923,14 @@
   param radius ...  
   return ...
 
-* `bool IsHexRaked(uint16 hexX, uint16 hexY)`
+* `bool IsHexShootable(uint16 hexX, uint16 hexY)`
 
   ...  
   param hexX ...  
   param hexY ...  
   return ...
 
-* `void SetText(uint16 hexX, uint16 hexY, uint color, string text)`
+* `void SetText(uint16 hexX, uint16 hexY, ucolor color, string text)`
 
   ...  
   param hexX ...  
@@ -10811,7 +10938,7 @@
   param color ...  
   param text ...
 
-* `void SetTextMsg(uint16 hexX, uint16 hexY, uint color, uint16 textMsg, uint strNum)`
+* `void SetTextMsg(uint16 hexX, uint16 hexY, ucolor color, TextPackName textPack, uint strNum)`
 
   ...  
   param hexX ...  
@@ -10820,7 +10947,7 @@
   param textMsg ...  
   param strNum ...
 
-* `void SetTextMsg(uint16 hexX, uint16 hexY, uint color, uint16 textMsg, uint strNum, string lexems)`
+* `void SetTextMsg(uint16 hexX, uint16 hexY, ucolor color, TextPackName textPack, uint strNum, string lexems)`
 
   ...  
   param hexX ...  
@@ -10915,7 +11042,7 @@
 
   ...
 
-* `void Message(string text, uint16 hx, uint16 hy, tick_t showTime, uint color, bool fade, int endOx, int endOy)`
+* `void Message(string text, uint16 hx, uint16 hy, tick_t showTime, ucolor color, bool fade, int endOx, int endOy)`
 
   ...  
   param text ...  
@@ -11222,7 +11349,7 @@
 
 ### Location properties
 
-* `PrivateServer hstring InitScript ScriptFuncType = LocationInit Alias = ScriptId`
+* `PrivateServer hstring InitScript ScriptFuncType = LocationInit`
 
   ...
 
@@ -11239,10 +11366,6 @@
   ...
 
 * `PrivateServer hstring[] Automaps ReadOnly`
-
-  ...
-
-* `PrivateServer uint MaxPlayers`
 
   ...
 
@@ -11278,7 +11401,7 @@
 
   ...
 
-* `PrivateServer uint Color`
+* `PrivateServer ucolor Color`
 
   ...
 
@@ -11295,6 +11418,10 @@
   ...
 
 * `PrivateServer ident StorehouseContId`
+
+  ...
+
+* `PrivateServer uint MaxPlayers`
 
   ...
 
@@ -11492,11 +11619,11 @@
 
   ...
 
-* `uint Color`
+* `ucolor Color`
 
   ...
 
-* `uint ContourColor`
+* `ucolor ContourColor`
 
   ...
 
@@ -11580,7 +11707,59 @@
 * `Type: RelaxedStrong`
 * `Flags: RelaxedStrong`
 
+### ucolor value object
+
+  ...
+
+* `Alias to: uint`
+* `Type: HardStrong`
+* `Flags: HardStrong`
+
 ## Enums
+
+* `EffectType`
+
+  ...
+
+  - `None = 0`
+
+  - `GenericSprite = 0x00000001`
+
+  - `CritterSprite = 0x00000002`
+
+  - `TileSprite = 0x00000004`
+
+  - `RoofSprite = 0x00000008`
+
+  - `RainSprite = 0x00000010`
+
+  - `SkinnedMesh = 0x00000400`
+
+  - `Interface = 0x00001000`
+
+  - `ContourStrict = 0x00002000`
+
+  - `ContourDynamic = 0x00004000`
+
+  - `Font = 0x00010000`
+
+  - `Primitive = 0x00100000`
+
+  - `Light = 0x00200000`
+
+  - `Fog = 0x00400000`
+
+  - `FlushRenderTarget = 0x01000000`
+
+  - `FlushPrimitive = 0x04000000`
+
+  - `FlushMap = 0x08000000`
+
+  - `FlushLight = 0x10000000`
+
+  - `FlushFog = 0x20000000`
+
+  - `Offscreen = 0x40000000`
 
 * `DrawOrderType`
 
@@ -11662,6 +11841,312 @@
 
   - `ByXOrY = 5`
 
+* `CritterItemSlot`
+
+  ...
+
+  - `Inventory = 0`
+
+  - `Main = 1`
+
+  - `Outside = 255`
+
+  - `Secondary = 2`
+
+  - `Armor = 3`
+
+* `CritterCondition`
+
+  ...
+
+  - `Alive = 0`
+
+  - `Knockout = 1`
+
+  - `Dead = 2`
+
+* `CritterAction`
+
+  ...
+
+  - `None = 0`
+
+  - `MoveItem = 2`
+
+  - `SwapItems = 3`
+
+  - `DropItem = 5`
+
+  - `Knockout = 16`
+
+  - `StandUp = 17`
+
+  - `Fidget = 18`
+
+  - `Dead = 19`
+
+  - `Connect = 20`
+
+  - `Disconnect = 21`
+
+  - `Respawn = 22`
+
+  - `Refresh = 23`
+
+  - `UseItem = 4`
+
+  - `UseWeapon = 6`
+
+  - `ReloadWeapon = 7`
+
+  - `UseSkill = 8`
+
+  - `PickItem = 9`
+
+  - `PickCritter = 10`
+
+  - `OperateContainer = 11`
+
+  - `Barter = 12`
+
+  - `Dodge = 13`
+
+  - `Damage = 14`
+
+  - `DamageForce = 15`
+
+  - `UnloadWeapon = 24`
+
+  - `PrepareWeapon = 25`
+
+  - `FinishAttack = 26`
+
+* `CritterStateAnim`
+
+  ...
+
+  - `None = 0`
+
+  - `Unarmed = 1`
+
+  - `Knife = 4`
+
+  - `Club = 5`
+
+  - `Hammer = 6`
+
+  - `Spear = 7`
+
+  - `Pistol = 8`
+
+  - `SMG = 9`
+
+  - `Shootgun = 10`
+
+  - `HeavyRifle = 11`
+
+  - `Minigun = 12`
+
+  - `RocketLauncher = 13`
+
+  - `Flamer = 14`
+
+  - `Rifle = 15`
+
+  - `Sword = 16`
+
+  - `LongSword = 17`
+
+  - `Axe = 18`
+
+  - `Bow = 19`
+
+* `CritterActionAnim`
+
+  ...
+
+  - `None = 0`
+
+  - `Idle = 1`
+
+  - `Walk = 3`
+
+  - `WalkBack = 15`
+
+  - `Limp = 4`
+
+  - `Run = 5`
+
+  - `RunBack = 16`
+
+  - `TurnRight = 17`
+
+  - `TurnLeft = 18`
+
+  - `PanicRun = 6`
+
+  - `SneakWalk = 7`
+
+  - `SneakRun = 8`
+
+  - `IdleProneFront = 86`
+
+  - `DeadFront = 102`
+
+  - `IdleStunned = 2`
+
+  - `Stand = 10`
+
+  - `Crouch = 11`
+
+  - `Prone = 12`
+
+  - `ShowWeapon = 20`
+
+  - `HideWeapon = 21`
+
+  - `PrepareWeapon = 22`
+
+  - `TurnOffWeapon = 23`
+
+  - `Fidget = 24`
+
+  - `Climbing = 26`
+
+  - `PickUp = 27`
+
+  - `Use = 28`
+
+  - `SwitchItems = 29`
+
+  - `Reload = 30`
+
+  - `Repair = 31`
+
+  - `Loot = 35`
+
+  - `Steal = 36`
+
+  - `Push = 37`
+
+  - `BeginCombat = 40`
+
+  - `IdleCombat = 41`
+
+  - `EndCombat = 42`
+
+  - `PunchRight = 43`
+
+  - `PunchLeft = 44`
+
+  - `PunchCombo = 45`
+
+  - `KickHi = 46`
+
+  - `KickLo = 47`
+
+  - `KickCombo = 48`
+
+  - `Thrust1H = 49`
+
+  - `Thrust2H = 50`
+
+  - `Swing1H = 51`
+
+  - `Swing2H = 52`
+
+  - `Throw = 53`
+
+  - `Single = 54`
+
+  - `Burst = 55`
+
+  - `Sweep = 56`
+
+  - `Butt = 57`
+
+  - `Flame = 58`
+
+  - `NoRecoil = 59`
+
+  - `DodgeFront = 70`
+
+  - `DodgeBack = 71`
+
+  - `DamageFront = 72`
+
+  - `DamageBack = 73`
+
+  - `DamageMulFront = 74`
+
+  - `DamageMulBack = 75`
+
+  - `WalkDamageFront = 76`
+
+  - `WalkDamageBack = 77`
+
+  - `LimpDamageFront = 78`
+
+  - `LimpDamageBack = 79`
+
+  - `RunDamageFront = 80`
+
+  - `RunDamageBack = 81`
+
+  - `KnockFront = 82`
+
+  - `KnockBack = 83`
+
+  - `LaydownFront = 84`
+
+  - `LaydownBack = 85`
+
+  - `IdleProneBack = 87`
+
+  - `StandupFront = 88`
+
+  - `StandupBack = 89`
+
+  - `DamageProneFront = 90`
+
+  - `DamageProneBack = 91`
+
+  - `DamageMulProneFront = 92`
+
+  - `DamageMulProneBack = 93`
+
+  - `TwitchProneFront = 94`
+
+  - `TwitchProneBack = 95`
+
+  - `DeadProneFront = 100`
+
+  - `DeadProneBack = 101`
+
+  - `DeadBack = 103`
+
+  - `DeadBloodySingle = 110`
+
+  - `DeadBloodyBurst = 111`
+
+  - `DeadBurst = 112`
+
+  - `DeadPulse = 113`
+
+  - `DeadPulseDust = 114`
+
+  - `DeadLaser = 115`
+
+  - `DeadFused = 116`
+
+  - `DeadExplode = 117`
+
+  - `DeadBurn = 118`
+
+  - `DeadBurnRun = 119`
+
+  - `Dance = 150`
+
 * `CritterFindType`
 
   ...
@@ -11684,50 +12169,6 @@
 
   - `DeadNpc = 0x22`
 
-* `EffectType`
-
-  ...
-
-  - `None = 0`
-
-  - `GenericSprite = 0x00000001`
-
-  - `CritterSprite = 0x00000002`
-
-  - `TileSprite = 0x00000004`
-
-  - `RoofSprite = 0x00000008`
-
-  - `RainSprite = 0x00000010`
-
-  - `SkinnedMesh = 0x00000400`
-
-  - `Interface = 0x00001000`
-
-  - `ContourStrict = 0x00002000`
-
-  - `ContourDynamic = 0x00004000`
-
-  - `Font = 0x00010000`
-
-  - `Primitive = 0x00100000`
-
-  - `Light = 0x00200000`
-
-  - `Fog = 0x00400000`
-
-  - `FlushRenderTarget = 0x01000000`
-
-  - `FlushPrimitive = 0x04000000`
-
-  - `FlushMap = 0x08000000`
-
-  - `FlushLight = 0x10000000`
-
-  - `FlushFog = 0x20000000`
-
-  - `Offscreen = 0x40000000`
-
 * `ItemOwnership`
 
   ...
@@ -11739,6 +12180,14 @@
   - `ItemContainer = 2`
 
   - `Nowhere = 3`
+
+* `ContainerItemStack`
+
+  ...
+
+  - `Root = 0`
+
+  - `Any = 0xFFFFFFFF`
 
 * `CornerType`
 
@@ -11755,44 +12204,6 @@
   - `North = 4`
 
   - `EastWest = 5`
-
-* `CritterCondition`
-
-  ...
-
-  - `Alive = 0`
-
-  - `Knockout = 1`
-
-  - `Dead = 2`
-
-* `MovingState`
-
-  ...
-
-  - `InProgress = 0`
-
-  - `Success = 1`
-
-  - `TargetNotFound = 2`
-
-  - `CantMove = 3`
-
-  - `GagCritter = 4`
-
-  - `GagItem = 5`
-
-  - `InternalError = 6`
-
-  - `HexTooFar = 7`
-
-  - `HexBusy = 8`
-
-  - `HexBusyRing = 9`
-
-  - `Deadlock = 10`
-
-  - `TraceFailed = 11`
 
 * `EventExceptionPolicy`
 
@@ -11812,13 +12223,37 @@
 
   - `Lowest = 0`
 
-  - `Low = 1`
+  - `Low = 1000000`
 
-  - `Normal = 2`
+  - `Normal = 2000000`
 
-  - `High = 3`
+  - `High = 3000000`
 
-  - `Highest = 4`
+  - `Highest = 4000000`
+
+* `TextPackName`
+
+  ...
+
+  - `None = 0`
+
+  - `Game = 1`
+
+  - `Dialogs = 2`
+
+  - `Items = 3`
+
+  - `Locations = 4`
+
+  - `Text = 10`
+
+  - `Combat = 11`
+
+  - `Quest = 12`
+
+  - `GlobalMap = 13`
+
+  - `Holo = 14`
 
 * `KeyCode`
 
@@ -12058,6 +12493,38 @@
 
   - `Ext4 = 9`
 
+* `MovingState`
+
+  ...
+
+  - `InProgress = 0`
+
+  - `Success = 1`
+
+  - `TargetNotFound = 2`
+
+  - `CantMove = 3`
+
+  - `GagCritter = 4`
+
+  - `GagItem = 5`
+
+  - `InternalError = 6`
+
+  - `HexTooFar = 7`
+
+  - `HexBusy = 8`
+
+  - `HexBusyRing = 9`
+
+  - `Deadlock = 10`
+
+  - `TraceFailed = 11`
+
+  - `NotAlive = 12`
+
+  - `Attached = 13`
+
 * `CursorType`
 
   ...
@@ -12073,6 +12540,50 @@
   - `UseSkill = 4`
 
   - `Hand = 5`
+
+* `AnchorStyle`
+
+  ...
+
+  - `None = 0`
+
+  - `Left = 1`
+
+  - `Right = 2`
+
+  - `Top = 4`
+
+  - `Bottom = 8`
+
+* `DockStyle`
+
+  ...
+
+  - `None = 0`
+
+  - `Left = 1`
+
+  - `Right = 2`
+
+  - `Top = 3`
+
+  - `Bottom = 4`
+
+  - `Fill = 5`
+
+* `SpriteLayout`
+
+  ...
+
+  - `None = 0`
+
+  - `Tile = 1`
+
+  - `Center = 2`
+
+  - `Stretch = 3`
+
+  - `Zoom = 4`
 
 * `CombatText`
 
@@ -12998,222 +13509,6 @@
 
   - `HitRandomly = 13`
 
-* `Anim1`
-
-  ...
-
-  - `None = 0`
-
-  - `Unarmed = 1`
-
-  - `Knife = 4`
-
-  - `Club = 5`
-
-  - `Hammer = 6`
-
-  - `Spear = 7`
-
-  - `Pistol = 8`
-
-  - `SMG = 9`
-
-  - `Shootgun = 10`
-
-  - `HeavyRifle = 11`
-
-  - `Minigun = 12`
-
-  - `RocketLauncher = 13`
-
-  - `Flamer = 14`
-
-  - `Rifle = 15`
-
-  - `Sword = 16`
-
-  - `LongSword = 17`
-
-  - `Axe = 18`
-
-  - `Bow = 19`
-
-* `Anim2Actions`
-
-  ...
-
-  - `None = 0`
-
-  - `Idle = 1`
-
-  - `IdleStunned = 2`
-
-  - `Walk = 3`
-
-  - `Limp = 4`
-
-  - `Run = 5`
-
-  - `PanicRun = 6`
-
-  - `SneakWalk = 7`
-
-  - `SneakRun = 8`
-
-  - `Stand = 10`
-
-  - `Crouch = 11`
-
-  - `Prone = 12`
-
-  - `ShowWeapon = 20`
-
-  - `HideWeapon = 21`
-
-  - `PrepareWeapon = 22`
-
-  - `TurnoffWeapon = 23`
-
-  - `Fidget = 24`
-
-  - `Climbing = 26`
-
-  - `Pickup = 27`
-
-  - `Use = 28`
-
-  - `SwitchItems = 29`
-
-  - `Reload = 30`
-
-  - `Repair = 31`
-
-  - `Loot = 35`
-
-  - `Steal = 36`
-
-  - `Push = 37`
-
-  - `BeginCombat = 40`
-
-  - `IdleCombat = 41`
-
-  - `EndCombat = 42`
-
-  - `PunchRight = 43`
-
-  - `PunchLeft = 44`
-
-  - `PunchCombo = 45`
-
-  - `KickHi = 46`
-
-  - `KickLo = 47`
-
-  - `KickCombo = 48`
-
-  - `Thrust1h = 49`
-
-  - `Thrust2h = 50`
-
-  - `Swing1h = 51`
-
-  - `Swing2h = 52`
-
-  - `Throw = 53`
-
-  - `Single = 54`
-
-  - `Burst = 55`
-
-  - `Sweep = 56`
-
-  - `Butt = 57`
-
-  - `Flame = 58`
-
-  - `NoRecoil = 59`
-
-  - `DodgeFront = 70`
-
-  - `DodgeBack = 71`
-
-  - `DamageFront = 72`
-
-  - `DamageBack = 73`
-
-  - `DamageMulFront = 74`
-
-  - `DamageMulBack = 75`
-
-  - `WalkDamageFront = 76`
-
-  - `WalkDamageBack = 77`
-
-  - `LimpDamageFront = 78`
-
-  - `LimpDamageBack = 79`
-
-  - `RunDamageFront = 80`
-
-  - `RunDamageBack = 81`
-
-  - `KnockFront = 82`
-
-  - `KnockBack = 83`
-
-  - `LaydownFront = 84`
-
-  - `LaydownBack = 85`
-
-  - `IdleProneFront = 86`
-
-  - `IdleProneBack = 87`
-
-  - `StandupFront = 88`
-
-  - `StandupBack = 89`
-
-  - `DamageProneFront = 90`
-
-  - `DamageProneBack = 91`
-
-  - `DamageMulProneFront = 92`
-
-  - `DamageMulProneBack = 93`
-
-  - `TwitchProneFront = 94`
-
-  - `TwitchProneBack = 95`
-
-  - `DeadProneFront = 100`
-
-  - `DeadProneBack = 101`
-
-  - `DeadFront = 102`
-
-  - `DeadBack = 103`
-
-  - `DeadBloodySingle = 110`
-
-  - `DeadBloodyBurst = 111`
-
-  - `DeadBurst = 112`
-
-  - `DeadPulse = 113`
-
-  - `DeadPulseDust = 114`
-
-  - `DeadLaser = 115`
-
-  - `DeadFused = 116`
-
-  - `DeadExplode = 117`
-
-  - `DeadBurn = 118`
-
-  - `DeadBurnRun = 119`
-
 * `FalloutAnims1`
 
   ...
@@ -13340,7 +13635,7 @@
 
   ...
 
-  - `Reserved = 0`
+  - `None = 0`
 
   - `Normal = 1`
 
@@ -13630,192 +13925,6 @@
 
   - `MythNeutral = 105`
 
-* `Anim2`
-
-  ...
-
-  - `None = 0`
-
-  - `Idle = 1`
-
-  - `IdleStunned = 2`
-
-  - `Walk = 3`
-
-  - `WalkBack = 15`
-
-  - `Limp = 4`
-
-  - `Run = 5`
-
-  - `RunBack = 16`
-
-  - `PanicRun = 6`
-
-  - `SneakWalk = 7`
-
-  - `SneakRun = 8`
-
-  - `Stand = 10`
-
-  - `Crouch = 11`
-
-  - `Prone = 12`
-
-  - `TurnLeft = 17`
-
-  - `TurnRight = 18`
-
-  - `ShowWeapon = 20`
-
-  - `HideWeapon = 21`
-
-  - `PrepareWeapon = 22`
-
-  - `TurnOffWeapon = 23`
-
-  - `Fidget = 24`
-
-  - `Climbing = 26`
-
-  - `PickUp = 27`
-
-  - `Use = 28`
-
-  - `SwitchItems = 29`
-
-  - `Reload = 30`
-
-  - `Repair = 31`
-
-  - `Loot = 35`
-
-  - `Steal = 36`
-
-  - `Push = 37`
-
-  - `BeginCombat = 40`
-
-  - `IdleCombat = 41`
-
-  - `EndCombat = 42`
-
-  - `PunchRight = 43`
-
-  - `PunchLeft = 44`
-
-  - `PunchCombo = 45`
-
-  - `KickHi = 46`
-
-  - `KickLo = 47`
-
-  - `KickCombo = 48`
-
-  - `Thrust1H = 49`
-
-  - `Thrust2H = 50`
-
-  - `Swing1H = 51`
-
-  - `Swing2H = 52`
-
-  - `Throw = 53`
-
-  - `Single = 54`
-
-  - `Burst = 55`
-
-  - `Sweep = 56`
-
-  - `Butt = 57`
-
-  - `Flame = 58`
-
-  - `NoRecoil = 59`
-
-  - `DodgeFront = 70`
-
-  - `DodgeBack = 71`
-
-  - `DamageFront = 72`
-
-  - `DamageBack = 73`
-
-  - `DamageMulFront = 74`
-
-  - `DamageMulBack = 75`
-
-  - `WalkDamageFront = 76`
-
-  - `WalkDamageBack = 77`
-
-  - `LimpDamageFront = 78`
-
-  - `LimpDamageBack = 79`
-
-  - `RunDamageFront = 80`
-
-  - `RunDamageBack = 81`
-
-  - `KnockFront = 82`
-
-  - `KnockBack = 83`
-
-  - `LaydownFront = 84`
-
-  - `LaydownBack = 85`
-
-  - `IdleProneFront = 86`
-
-  - `IdleProneBack = 87`
-
-  - `StandupFront = 88`
-
-  - `StandupBack = 89`
-
-  - `DamageProneFront = 90`
-
-  - `DamageProneBack = 91`
-
-  - `DamageMulProneFront = 92`
-
-  - `DamageMulProneBack = 93`
-
-  - `TwitchProneFront = 94`
-
-  - `TwitchProneBack = 95`
-
-  - `DeadProneFront = 100`
-
-  - `DeadProneBack = 101`
-
-  - `DeadFront = 102`
-
-  - `DeadBack = 103`
-
-  - `DeadBloodySingle = 110`
-
-  - `DeadBloodyBurst = 111`
-
-  - `DeadBurst = 112`
-
-  - `DeadPulse = 113`
-
-  - `DeadPulseDust = 114`
-
-  - `DeadLaser = 115`
-
-  - `DeadFused = 116`
-
-  - `DeadExplode = 117`
-
-  - `DeadBurn = 118`
-
-  - `DeadBurnRun = 119`
-
-  - `Dance = 150`
-
 * `TransferTypes`
 
   ...
@@ -13930,175 +14039,177 @@
 
   - `HistoryRecordsId = 9`
 
-  - `ArroyoMynocTimeout = 10`
+  - `LastGlobalMapTripId = 10`
 
-  - `BaseSierraRule = 11`
+  - `ArroyoMynocTimeout = 11`
 
-  - `BaseMariposaRule = 12`
+  - `BaseSierraRule = 12`
 
-  - `BaseCathedralRule = 13`
+  - `BaseMariposaRule = 13`
 
-  - `BaseSierraOrg = 14`
+  - `BaseCathedralRule = 14`
 
-  - `BaseMariposaOrg = 15`
+  - `BaseSierraOrg = 15`
 
-  - `BaseCathedralOrg = 16`
+  - `BaseMariposaOrg = 16`
 
-  - `BaseSierraTimeEventId = 17`
+  - `BaseCathedralOrg = 17`
 
-  - `BaseMariposaTimeEventId = 18`
+  - `BaseSierraTimeEventId = 18`
 
-  - `BaseCathedralTimeEventId = 19`
+  - `BaseMariposaTimeEventId = 19`
 
-  - `BaseEnclaveScore = 20`
+  - `BaseCathedralTimeEventId = 20`
 
-  - `BaseBosScore = 21`
+  - `BaseEnclaveScore = 21`
 
-  - `BulletinBoard = 22`
+  - `BaseBosScore = 22`
 
-  - `DenGhostIsDead = 23`
+  - `BulletinBoard = 23`
 
-  - `DenVirginIsAway = 24`
+  - `DenGhostIsDead = 24`
 
-  - `GameEventManagerData = 25`
+  - `DenVirginIsAway = 25`
 
-  - `GameEventData = 26`
+  - `GameEventManagerData = 26`
 
-  - `RacingWinnersFound = 27`
+  - `GameEventData = 27`
 
-  - `RacingWinner = 28`
+  - `RacingWinnersFound = 28`
 
-  - `LastGlobalMapTrip = 29`
+  - `RacingWinner = 29`
 
-  - `EndingV13DclawGenocide = 30`
+  - `LastGlobalMapTrip = 30`
 
-  - `KlamCowboy = 31`
+  - `EndingV13DclawGenocide = 31`
 
-  - `KlamCowboyLevel = 32`
+  - `KlamCowboy = 32`
 
-  - `KlamSmilyGeckoLocation = 33`
+  - `KlamCowboyLevel = 33`
 
-  - `KlamSmilyGeckoTimeout = 34`
+  - `KlamSmilyGeckoLocation = 34`
 
-  - `TribRaid = 35`
+  - `KlamSmilyGeckoTimeout = 35`
 
-  - `PrimalTribeQuestPlayers = 36`
+  - `TribRaid = 36`
 
-  - `MobWaveData = 37`
+  - `PrimalTribeQuestPlayers = 37`
 
-  - `NCRRanchBrahminIll = 38`
+  - `MobWaveData = 38`
 
-  - `NcrDustyOneHourInvokeId = 39`
+  - `NCRRanchBrahminIll = 39`
 
-  - `NcrDustyOneWeekInvokeId = 40`
+  - `NcrDustyOneHourInvokeId = 40`
 
-  - `NCRDustyPartyStatusGlobal = 41`
+  - `NcrDustyOneWeekInvokeId = 41`
 
-  - `NCRDustyRotgutCounter = 42`
+  - `NCRDustyPartyStatusGlobal = 42`
 
-  - `NCRDustyBeerGammaCounter = 43`
+  - `NCRDustyRotgutCounter = 43`
 
-  - `NCRInvasion = 44`
+  - `NCRDustyBeerGammaCounter = 44`
 
-  - `NCRKessStageGlobal = 45`
+  - `NCRInvasion = 45`
 
-  - `NcrSmitPosition = 46`
+  - `NCRKessStageGlobal = 46`
 
-  - `NcrSmitGateGuardAccessGranted = 47`
+  - `NcrSmitPosition = 47`
 
-  - `NcrWestinPositionGlobal = 48`
+  - `NcrSmitGateGuardAccessGranted = 48`
 
-  - `RegProperties = 49`
+  - `NcrWestinPositionGlobal = 49`
 
-  - `ReddMarionWanLocation = 50`
+  - `RegProperties = 50`
 
-  - `ReddMarionWanTimeout = 51`
+  - `ReddMarionWanLocation = 51`
 
-  - `ReddJohnsonBroadcast = 52`
+  - `ReddMarionWanTimeout = 52`
 
-  - `PermanentDeath = 53`
+  - `ReddJohnsonBroadcast = 53`
 
-  - `BestScores = 54`
+  - `PermanentDeath = 54`
 
-  - `BestScoreCritterIds = 55`
+  - `BestScores = 55`
 
-  - `BestScoreValues = 56`
+  - `BestScoreCritterIds = 56`
 
-  - `SFZax366StatusGlobal = 57`
+  - `BestScoreValues = 57`
 
-  - `SFDevinHired = 58`
+  - `SFZax366StatusGlobal = 58`
 
-  - `MissilesCanada = 59`
+  - `SFDevinHired = 59`
 
-  - `MissilesKishinev = 60`
+  - `MissilesCanada = 60`
 
-  - `MissilesBaku = 61`
+  - `MissilesKishinev = 61`
 
-  - `MissilesTokio = 62`
+  - `MissilesBaku = 62`
 
-  - `MissilesEburg = 63`
+  - `MissilesTokio = 63`
 
-  - `MissilesVladik = 64`
+  - `MissilesEburg = 64`
 
-  - `MissilesRay = 65`
+  - `MissilesVladik = 65`
 
-  - `MissilesFukusima = 66`
+  - `MissilesRay = 66`
 
-  - `BestEScores = 67`
+  - `MissilesFukusima = 67`
 
-  - `ArroyoRaidersCount = 68`
+  - `BestEScores = 68`
 
-  - `ArroyoLastDefenceGroup = 69`
+  - `ArroyoRaidersCount = 69`
 
-  - `ArroyoMynocMap = 70`
+  - `ArroyoLastDefenceGroup = 70`
 
-  - `EncOceanTraderAlive = 71`
+  - `ArroyoMynocMap = 71`
 
-  - `GameEventCaches = 72`
+  - `EncOceanTraderAlive = 72`
 
-  - `RacingEvent = 73`
+  - `GameEventCaches = 73`
 
-  - `GEReplStationStatus = 74`
+  - `RacingEvent = 74`
 
-  - `NCRSiegeCampsNum = 75`
+  - `GEReplStationStatus = 75`
 
-  - `SFBosArmourCounter = 76`
+  - `NCRSiegeCampsNum = 76`
 
-  - `SFInvasionStatus = 77`
+  - `SFBosArmourCounter = 77`
 
-  - `DenLeannaThief = 78`
+  - `SFInvasionStatus = 78`
 
-  - `DenCliffDealer = 79`
+  - `DenLeannaThief = 79`
 
-  - `DenAnanDollUse = 80`
+  - `DenCliffDealer = 80`
 
-  - `KlamSmilyGeckoCounter = 81`
+  - `DenAnanDollUse = 81`
 
-  - `KlamTrappersRadaway = 82`
+  - `KlamSmilyGeckoCounter = 82`
 
-  - `EndingArroyoTodd = 83`
+  - `KlamTrappersRadaway = 83`
 
-  - `EndingV13DclawRevival = 84`
+  - `EndingArroyoTodd = 84`
 
-  - `GeckSkitrHired = 85`
+  - `EndingV13DclawRevival = 85`
 
-  - `NRBbarmenHired = 86`
+  - `GeckSkitrHired = 86`
 
-  - `NcrIsCurfewActive = 87`
+  - `NRBbarmenHired = 87`
 
-  - `NcrMicGuaranteeCounter = 88`
+  - `NcrIsCurfewActive = 88`
 
-  - `SFImperatorMemory = 89`
+  - `NcrMicGuaranteeCounter = 89`
 
-  - `GCityGeckSold = 90`
+  - `SFImperatorMemory = 90`
 
-  - `VCBlackHired = 91`
+  - `GCityGeckSold = 91`
 
-  - `EndingV13DclawSaved = 92`
+  - `VCBlackHired = 92`
 
-  - `VCHartmanMarchStatus = 93`
+  - `EndingV13DclawSaved = 93`
 
-  - `RaidersDead = 94`
+  - `VCHartmanMarchStatus = 94`
+
+  - `RaidersDead = 95`
 
 * `PlayerProperty`
 
@@ -14106,13 +14217,17 @@
 
   - `Invalid = 0xFFFF`
 
-  - `OwnedCritterIds = 0`
+  - `ControlledCritterId = 0`
 
-  - `Password = 1`
+  - `LastControlledCritterId = 1`
 
-  - `ConnectionIp = 2`
+  - `Password = 2`
 
-  - `ConnectionPort = 3`
+  - `ConnectionIp = 3`
+
+  - `ConnectionPort = 4`
+
+  - `MainCritterId = 5`
 
 * `ItemProperty`
 
@@ -14190,183 +14305,183 @@
 
   - `IsHidden = 34`
 
-  - `IsHiddenPicture = 35`
+  - `HideSprite = 35`
 
-  - `IsHiddenInStatic = 36`
+  - `AlwaysHideSprite = 36`
 
-  - `IsFlat = 37`
+  - `IsHiddenInStatic = 37`
 
-  - `IsNoBlock = 38`
+  - `IsFlat = 38`
 
-  - `IsShootThru = 39`
+  - `IsNoBlock = 39`
 
-  - `IsLightThru = 40`
+  - `IsShootThru = 40`
 
-  - `IsAlwaysView = 41`
+  - `IsLightThru = 41`
 
-  - `IsBadItem = 42`
+  - `IsAlwaysView = 42`
 
-  - `IsNoHighlight = 43`
+  - `IsBadItem = 43`
 
-  - `IsShowAnim = 44`
+  - `IsNoHighlight = 44`
 
-  - `IsShowAnimExt = 45`
+  - `IsShowAnim = 45`
 
-  - `IsLight = 46`
+  - `IsShowAnimExt = 46`
 
-  - `IsGeck = 47`
+  - `IsLight = 47`
 
-  - `IsTrap = 48`
+  - `IsGeck = 48`
 
-  - `IsTrigger = 49`
+  - `IsTrap = 49`
 
-  - `IsNoLightInfluence = 50`
+  - `IsTrigger = 50`
 
-  - `IsGag = 51`
+  - `IsNoLightInfluence = 51`
 
-  - `IsColorize = 52`
+  - `IsGag = 52`
 
-  - `IsColorizeInv = 53`
+  - `IsColorize = 53`
 
-  - `IsCanTalk = 54`
+  - `IsColorizeInv = 54`
 
-  - `IsRadio = 55`
+  - `IsCanTalk = 55`
 
-  - `Lexems = 56`
+  - `IsRadio = 56`
 
-  - `SortValue = 57`
+  - `Lexems = 57`
 
-  - `Info = 58`
+  - `SortValue = 58`
 
-  - `Mode = 59`
+  - `LightIntensity = 59`
 
-  - `LightIntensity = 60`
+  - `LightDistance = 60`
 
-  - `LightDistance = 61`
+  - `LightFlags = 61`
 
-  - `LightFlags = 62`
+  - `LightColor = 62`
 
-  - `LightColor = 63`
+  - `Count = 63`
 
-  - `Count = 64`
+  - `TrapValue = 64`
 
-  - `TrapValue = 65`
+  - `RadioChannel = 65`
 
-  - `RadioChannel = 66`
+  - `RadioFlags = 66`
 
-  - `RadioFlags = 67`
+  - `RadioBroadcastSend = 67`
 
-  - `RadioBroadcastSend = 68`
+  - `RadioBroadcastRecv = 68`
 
-  - `RadioBroadcastRecv = 69`
+  - `CarIsBioEngine = 69`
 
-  - `CarIsBioEngine = 70`
+  - `CarIsNoLockpick = 70`
 
-  - `CarIsNoLockpick = 71`
+  - `CaravanCabLeaderId = 71`
 
-  - `CaravanCabLeaderId = 72`
+  - `ELockCloseAtSeconds = 72`
 
-  - `ELockCloseAtSeconds = 73`
+  - `ELockCode = 73`
 
-  - `ELockCode = 74`
+  - `ExplodeInvokeId = 74`
 
-  - `ExplodeInvokeId = 75`
+  - `ExplodeSwitcherExplodeId = 75`
 
-  - `ExplodeSwitcherExplodeId = 76`
+  - `ExplodeOwnerId = 76`
 
-  - `ExplodeOwnerId = 77`
+  - `ExplodeBonusDamage = 77`
 
-  - `ExplodeBonusDamage = 78`
+  - `ExplodeBonusRadius = 78`
 
-  - `ExplodeBonusRadius = 79`
+  - `ExplodeTimeRespawnMine = 79`
 
-  - `ExplodeTimeRespawnMine = 80`
+  - `GECachesNumParameters = 80`
 
-  - `GECachesNumParameters = 81`
+  - `GeigerEnabled = 81`
 
-  - `GeigerEnabled = 82`
+  - `GeigerCapacity = 82`
 
-  - `GeigerCapacity = 83`
+  - `GeigerTimeEvent = 83`
 
-  - `GeigerTimeEvent = 84`
+  - `QHunterCountFluteUse = 84`
 
-  - `QHunterCountFluteUse = 85`
+  - `DoorAutoCloseTime = 85`
 
-  - `DoorAutoCloseTime = 86`
+  - `DoorAutoDialog = 86`
 
-  - `DoorAutoDialog = 87`
+  - `LockerId = 87`
 
-  - `LockerId = 88`
+  - `LockerComplexity = 88`
 
-  - `LockerComplexity = 89`
+  - `Locker_Locked = 89`
 
-  - `Locker_Locked = 90`
+  - `Locker_Jammed = 90`
 
-  - `Locker_Jammed = 91`
+  - `Locker_Broken = 91`
 
-  - `Locker_Broken = 92`
+  - `Locker_NoOpen = 92`
 
-  - `Locker_NoOpen = 93`
+  - `Locker_IsElectro = 93`
 
-  - `Locker_IsElectro = 94`
+  - `Door_NoBlockMove = 94`
 
-  - `Door_NoBlockMove = 95`
+  - `Door_NoBlockShoot = 95`
 
-  - `Door_NoBlockShoot = 96`
+  - `Door_NoBlockLight = 96`
 
-  - `Door_NoBlockLight = 97`
+  - `Container_Volume = 97`
 
-  - `Container_Volume = 98`
+  - `Container_Changeble = 98`
 
-  - `Container_Changeble = 99`
+  - `Container_CannotPickUp = 99`
 
-  - `Container_CannotPickUp = 100`
+  - `Door_IsMultyHex = 100`
 
-  - `Door_IsMultyHex = 101`
+  - `Door_MultyHexLine1 = 101`
 
-  - `Door_MultyHexLine1 = 102`
+  - `Door_MultyHexLine2 = 102`
 
-  - `Door_MultyHexLine2 = 103`
+  - `Door_BlockerIds = 103`
 
-  - `Door_BlockerIds = 104`
+  - `NavarroCountUseScaner = 104`
 
-  - `NavarroCountUseScaner = 105`
+  - `NCRPostmanLocPidStart = 105`
 
-  - `NCRPostmanLocPidStart = 106`
+  - `NCRPostmanLocPidRec = 106`
 
-  - `NCRPostmanLocPidRec = 107`
+  - `NCRPostmanMapPidRec = 107`
 
-  - `NCRPostmanMapPidRec = 108`
+  - `NCRPostmanNpcDidRec = 108`
 
-  - `NCRPostmanNpcDidRec = 109`
+  - `NCRPostmanPlayerID = 109`
 
-  - `NCRPostmanPlayerID = 110`
+  - `PetId = 110`
 
-  - `PetId = 111`
+  - `PetProto = 111`
 
-  - `PetProto = 112`
+  - `PosterSNWall = 112`
 
-  - `PosterSNWall = 113`
+  - `PosterEWWall = 113`
 
-  - `PosterEWWall = 114`
+  - `RatGrenadeInvokeId = 114`
 
-  - `RatGrenadeInvokeId = 115`
+  - `ReddGatesGoodList = 115`
 
-  - `ReddGatesGoodList = 116`
+  - `ReddGatesBadList = 116`
 
-  - `ReddGatesBadList = 117`
+  - `RespawnItemMode = 117`
 
-  - `RespawnItemMode = 118`
+  - `RespawnItemRespTime = 118`
 
-  - `RespawnItemRespTime = 119`
+  - `RespawnItemVarNum = 119`
 
-  - `RespawnItemVarNum = 120`
+  - `SeAndroidRadioListened = 120`
 
-  - `SeAndroidRadioListened = 121`
+  - `SeAndroidVarNum = 121`
 
-  - `SeAndroidVarNum = 122`
+  - `SmokeGrenadeOwnerId = 122`
 
-  - `SmokeGrenadeOwnerId = 123`
+  - `Mode = 123`
 
   - `AnimHide0 = 124`
 
@@ -14440,7 +14555,7 @@
 
   - `Weapon_DefaultAmmoPid = 159`
 
-  - `Weapon_Anim1 = 160`
+  - `Weapon_StateAnim = 160`
 
   - `Weapon_MinStrength = 161`
 
@@ -14498,11 +14613,11 @@
 
   - `Weapon_DmgType_2 = 188`
 
-  - `Weapon_Anim2_0 = 189`
+  - `Weapon_ActionAnim_0 = 189`
 
-  - `Weapon_Anim2_1 = 190`
+  - `Weapon_ActionAnim_1 = 190`
 
-  - `Weapon_Anim2_2 = 191`
+  - `Weapon_ActionAnim_2 = 191`
 
   - `Weapon_DmgMin_0 = 192`
 
@@ -14638,73 +14753,75 @@
 
   - `AmmoCount = 258`
 
-  - `IsCanUseOnSmth = 259`
+  - `Info = 259`
 
-  - `IsCanUse = 260`
+  - `IsCanUseOnSmth = 260`
 
-  - `IsCanPickUp = 261`
+  - `IsCanUse = 261`
 
-  - `LastUsedTime = 262`
+  - `IsCanPickUp = 262`
 
-  - `IsQuestItem = 263`
+  - `LastUsedTime = 263`
 
-  - `Indicator = 264`
+  - `IsQuestItem = 264`
 
-  - `IndicatorMax = 265`
+  - `Indicator = 265`
 
-  - `Charge = 266`
+  - `IndicatorMax = 266`
 
-  - `IsCanLook = 267`
+  - `Charge = 267`
 
-  - `IsWallTransEnd = 268`
+  - `IsCanLook = 268`
 
-  - `IsHasTimer = 269`
+  - `IsWallTransEnd = 269`
 
-  - `IsBigGun = 270`
+  - `IsHasTimer = 270`
 
-  - `IsMultiHex = 271`
+  - `IsBigGun = 271`
 
-  - `ChildPid_0 = 272`
+  - `IsMultiHex = 272`
 
-  - `ChildPid_1 = 273`
+  - `ChildPid_0 = 273`
 
-  - `ChildPid_2 = 274`
+  - `ChildPid_1 = 274`
 
-  - `ChildPid_3 = 275`
+  - `ChildPid_2 = 275`
 
-  - `ChildPid_4 = 276`
+  - `ChildPid_3 = 276`
 
-  - `ChildLines_0 = 277`
+  - `ChildPid_4 = 277`
 
-  - `ChildLines_1 = 278`
+  - `ChildLines_0 = 278`
 
-  - `ChildLines_2 = 279`
+  - `ChildLines_1 = 279`
 
-  - `ChildLines_3 = 280`
+  - `ChildLines_2 = 280`
 
-  - `ChildLines_4 = 281`
+  - `ChildLines_3 = 281`
 
-  - `Type = 282`
+  - `ChildLines_4 = 282`
 
-  - `TriggerNum = 283`
+  - `Type = 283`
 
-  - `Container_MagicHandsGrnd = 284`
+  - `TriggerNum = 284`
 
-  - `Grid_Type = 285`
+  - `Container_MagicHandsGrnd = 285`
 
-  - `Grid_ToMap = 286`
+  - `Grid_Type = 286`
 
-  - `Grid_ToMapEntry = 287`
+  - `Grid_ToMap = 287`
 
-  - `Grid_ToMapDir = 288`
+  - `Grid_ToMapEntry = 288`
 
-  - `SceneryParams = 289`
+  - `Grid_ToMapDir = 289`
 
-  - `V13GorisEggPlayerId = 290`
+  - `SceneryParams = 290`
 
-  - `VCityCommonIsMail = 291`
+  - `V13GorisEggPlayerId = 291`
 
-  - `VCityCommonMailOwnerId = 292`
+  - `VCityCommonIsMail = 292`
+
+  - `VCityCommonMailOwnerId = 293`
 
 * `CritterProperty`
 
@@ -14726,1989 +14843,1997 @@
 
   - `WorldY = 6`
 
-  - `GlobalMapLeaderId = 7`
+  - `GlobalMapTripId = 7`
 
-  - `GlobalMapTripId = 8`
+  - `LastMapId = 8`
 
-  - `LastMapId = 9`
+  - `LastMapPid = 9`
 
-  - `LastMapPid = 10`
+  - `LastLocationId = 10`
 
-  - `LastLocationId = 11`
+  - `LastLocationPid = 11`
 
-  - `LastLocationPid = 12`
+  - `MapLeaveHexX = 12`
 
-  - `LastGlobalMapLeaderId = 13`
+  - `MapLeaveHexY = 13`
 
-  - `MapLeaveHexX = 14`
+  - `HexX = 14`
 
-  - `MapLeaveHexY = 15`
+  - `HexY = 15`
 
-  - `HexX = 16`
+  - `HexOffsX = 16`
 
-  - `HexY = 17`
+  - `HexOffsY = 17`
 
-  - `HexOffsX = 18`
+  - `Dir = 18`
 
-  - `HexOffsY = 19`
+  - `DirAngle = 19`
 
-  - `Dir = 20`
+  - `ItemIds = 20`
 
-  - `DirAngle = 21`
+  - `Condition = 21`
 
-  - `ItemIds = 22`
+  - `AliveStateAnim = 22`
 
-  - `Cond = 23`
+  - `KnockoutStateAnim = 23`
 
-  - `Anim1Alive = 24`
+  - `DeadStateAnim = 24`
 
-  - `Anim1Knockout = 25`
+  - `AliveActionAnim = 25`
 
-  - `Anim1Dead = 26`
+  - `KnockoutActionAnim = 26`
 
-  - `Anim2Alive = 27`
+  - `DeadActionAnim = 27`
 
-  - `Anim2Knockout = 28`
+  - `NameOffset = 28`
 
-  - `Anim2Dead = 29`
+  - `GlobalMapFog = 29`
 
-  - `NameOffset = 30`
+  - `SneakCoefficient = 30`
 
-  - `GlobalMapFog = 31`
+  - `LookDistance = 31`
 
-  - `SneakCoefficient = 32`
+  - `ReplicationTime = 32`
 
-  - `LookDistance = 33`
+  - `TalkDistance = 33`
 
-  - `ReplicationTime = 34`
+  - `ScaleFactor = 34`
 
-  - `TalkDistance = 35`
+  - `CurrentHp = 35`
 
-  - `ScaleFactor = 36`
+  - `MaxTalkers = 36`
 
-  - `CurrentHp = 37`
+  - `DialogId = 37`
 
-  - `MaxTalkers = 38`
+  - `Lexems = 38`
 
-  - `DialogId = 39`
+  - `HomeMapId = 39`
 
-  - `Lexems = 40`
+  - `HomeMapPid = 40`
 
-  - `HomeMapId = 41`
+  - `HomeHexX = 41`
 
-  - `HomeMapPid = 42`
+  - `HomeHexY = 42`
 
-  - `HomeHexX = 43`
+  - `HomeDir = 43`
 
-  - `HomeHexY = 44`
+  - `KnownLocations = 44`
 
-  - `HomeDir = 45`
+  - `ShowCritterDist1 = 45`
 
-  - `KnownLocations = 46`
+  - `ShowCritterDist2 = 46`
 
-  - `ShowCritterDist1 = 47`
+  - `ShowCritterDist3 = 47`
 
-  - `ShowCritterDist2 = 48`
+  - `KnownLocProtoId = 48`
 
-  - `ShowCritterDist3 = 49`
+  - `ModelLayers = 49`
 
-  - `KnownLocProtoId = 50`
+  - `IsHide = 50`
 
-  - `ModelLayers = 51`
+  - `IsNoHome = 51`
 
-  - `IsHide = 52`
+  - `IsGeck = 52`
 
-  - `IsNoHome = 53`
+  - `IsNoUnarmed = 53`
 
-  - `IsGeck = 54`
+  - `IsNoTalk = 54`
 
-  - `IsNoUnarmed = 55`
+  - `IsNoFlatten = 55`
 
-  - `IsNoTalk = 56`
+  - `NameColor = 56`
 
-  - `IsNoFlatten = 57`
+  - `ContourColor = 57`
 
-  - `TimeoutRemoveFromGame = 58`
+  - `TE_Identifier = 58`
 
-  - `NameColor = 59`
+  - `TE_FireTime = 59`
 
-  - `ContourColor = 60`
+  - `TE_FuncName = 60`
 
-  - `TE_Identifier = 61`
+  - `TE_Rate = 61`
 
-  - `TE_FireTime = 62`
+  - `IsSexTagFemale = 62`
 
-  - `TE_FuncName = 63`
+  - `IsModelInCombatMode = 63`
 
-  - `TE_Rate = 64`
+  - `IdlePeriod = 64`
 
-  - `IsSexTagFemale = 65`
+  - `IsControlledByPlayer = 65`
 
-  - `IsModelInCombatMode = 66`
+  - `IsChosen = 66`
 
-  - `IdlePeriod = 67`
+  - `IsPlayerOffline = 67`
 
-  - `ArroyoRaydersAttackedId = 68`
+  - `IsAttached = 68`
 
-  - `BehemothOwner = 69`
+  - `AttachMaster = 69`
 
-  - `BehemothRadio = 70`
+  - `HideSprite = 70`
 
-  - `BehemothLastComand = 71`
+  - `ArroyoRaydersAttackedId = 71`
 
-  - `BehemothOrderType = 72`
+  - `BehemothOwner = 72`
 
-  - `BehemothLastOrder = 73`
+  - `BehemothRadio = 73`
 
-  - `BehemothParam_1 = 74`
+  - `BehemothLastComand = 74`
 
-  - `BehemothParam_2 = 75`
+  - `BehemothOrderType = 75`
 
-  - `BehemothLastReport = 76`
+  - `BehemothLastOrder = 76`
 
-  - `BHHubHoloRemembered = 77`
+  - `BehemothParam_1 = 77`
 
-  - `BHUranDiscount = 78`
+  - `BehemothParam_2 = 78`
 
-  - `BBMsgPage = 79`
+  - `BehemothLastReport = 79`
 
-  - `BBSelectedMsg = 80`
+  - `BHHubHoloRemembered = 80`
 
-  - `KlamAldoBusy = 81`
+  - `BHUranDiscount = 81`
 
-  - `KlamAldoListenId = 82`
+  - `BBMsgPage = 82`
 
-  - `KlamAldoReaderId = 83`
+  - `BBSelectedMsg = 83`
 
-  - `BBMsgCount = 84`
+  - `KlamAldoBusy = 84`
 
-  - `CaravanCrvId = 85`
+  - `KlamAldoListenId = 85`
 
-  - `VCDeadPatrollers = 86`
+  - `KlamAldoReaderId = 86`
 
-  - `ReddWadeCaravanEscort = 87`
+  - `BBMsgCount = 87`
 
-  - `ReddSavinelCaravanEscort = 88`
+  - `CaravanCrvId = 88`
 
-  - `ReddStanCaravanEscort = 89`
+  - `VCDeadPatrollers = 89`
 
-  - `NcrReddingCaravanEscort = 90`
+  - `ReddWadeCaravanEscort = 90`
 
-  - `BHKitCaravanEscort = 91`
+  - `ReddSavinelCaravanEscort = 91`
 
-  - `VCShrimPatrol = 92`
+  - `ReddStanCaravanEscort = 92`
 
-  - `ArroyoSelmaCaravanEscort = 93`
+  - `NcrReddingCaravanEscort = 93`
 
-  - `ArroyoGayzumCaravanEscort = 94`
+  - `BHKitCaravanEscort = 94`
 
-  - `ArroyoLaumerCaravanEscort = 95`
+  - `VCShrimPatrol = 95`
 
-  - `ModAurelianoCaravanEscort = 96`
+  - `ArroyoSelmaCaravanEscort = 96`
 
-  - `CommonCrvResetCounter = 97`
+  - `ArroyoGayzumCaravanEscort = 97`
 
-  - `ReddCrvResetCounter = 98`
+  - `ArroyoLaumerCaravanEscort = 98`
 
-  - `NcrCrvResetCounter = 99`
+  - `ModAurelianoCaravanEscort = 99`
 
-  - `BHCrvResetCounter = 100`
+  - `CommonCrvResetCounter = 100`
 
-  - `ArroyoCrvResetCounter = 101`
+  - `ReddCrvResetCounter = 101`
 
-  - `CaravanReaction = 102`
+  - `NcrCrvResetCounter = 102`
 
-  - `CaravanNervosityLvl = 103`
+  - `BHCrvResetCounter = 103`
 
-  - `CaravanIdleCount = 104`
+  - `ArroyoCrvResetCounter = 104`
 
-  - `LastSelectedCaravan = 105`
+  - `CaravanReaction = 105`
 
-  - `ApRegenerationTick = 106`
+  - `CaravanNervosityLvl = 106`
 
-  - `ApRegenerationTime = 107`
+  - `CaravanIdleCount = 107`
 
-  - `CollectorTimeNextSearch = 108`
+  - `LastSelectedCaravan = 108`
 
-  - `CompRiddleMapId = 109`
+  - `ApRegenerationTick = 109`
 
-  - `CompRiddleHexX = 110`
+  - `ApRegenerationTime = 110`
 
-  - `CompRiddleHexY = 111`
+  - `CollectorTimeNextSearch = 111`
 
-  - `KnockoutAp = 112`
+  - `CompRiddleMapId = 112`
 
-  - `Anim2KnockoutEnd = 113`
+  - `CompRiddleHexX = 113`
 
-  - `NcrBusterLostCStatus = 114`
+  - `CompRiddleHexY = 114`
 
-  - `QDappoLostRobotHexNum = 115`
+  - `KnockoutAp = 115`
 
-  - `BankMoney = 116`
+  - `ActionAnimKnockoutEnd = 116`
 
-  - `DenHubBank5 = 117`
+  - `NcrBusterLostCStatus = 117`
 
-  - `DenHubGuard5 = 118`
+  - `QDappoLostRobotHexNum = 118`
 
-  - `DenPoormanItemId = 119`
+  - `BankMoney = 119`
 
-  - `DenVirginCount = 120`
+  - `DenHubBank5 = 120`
 
-  - `DenVirginIsHome = 121`
+  - `DenHubGuard5 = 121`
 
-  - `UniqTimeout = 122`
+  - `DenPoormanItemId = 122`
 
-  - `Loyality = 123`
+  - `DenVirginCount = 123`
 
-  - `NpcStory = 124`
+  - `DenVirginIsHome = 124`
 
-  - `NameMemNpcPlayer = 125`
+  - `UniqTimeout = 125`
 
-  - `NameMemPlayerNpc = 126`
+  - `Loyality = 126`
 
-  - `TradeWas = 127`
+  - `NpcStory = 127`
 
-  - `DenKliffBlessWas = 128`
+  - `NameMemNpcPlayer = 128`
 
-  - `DenVirginiaSexWas = 129`
+  - `NameMemPlayerNpc = 129`
 
-  - `NcrPlayerTalkPoliceman = 130`
+  - `TradeWas = 130`
 
-  - `SFLoPanPayed = 131`
+  - `DenKliffBlessWas = 131`
 
-  - `ChanceOneFromTwo = 132`
+  - `DenVirginiaSexWas = 132`
 
-  - `ChanceOneFromThree = 133`
+  - `NcrPlayerTalkPoliceman = 133`
 
-  - `ChanceOneFromFive = 134`
+  - `SFLoPanPayed = 134`
 
-  - `DrugEffects = 135`
+  - `ChanceOneFromTwo = 135`
 
-  - `DoughnutsCounter = 136`
+  - `ChanceOneFromThree = 136`
 
-  - `LastElectronicLocked = 137`
+  - `ChanceOneFromFive = 137`
 
-  - `EliTimeNextSing = 138`
+  - `DrugEffects = 138`
 
-  - `EnemyStack = 139`
+  - `DoughnutsCounter = 139`
 
-  - `IsNoEnemyStack = 140`
+  - `LastElectronicLocked = 140`
 
-  - `EnergyBarierTerminalHx = 141`
+  - `EliTimeNextSing = 141`
 
-  - `EnergyBarierTerminalHy = 142`
+  - `EnemyStack = 142`
 
-  - `EnergyBarierNetNum = 143`
+  - `IsNoEnemyStack = 143`
 
-  - `EnergyBarierHackBonus = 144`
+  - `EnergyBarierTerminalHx = 144`
 
-  - `EnergyBarierHitBonus = 145`
+  - `EnergyBarierTerminalHy = 145`
 
-  - `FighterPatternCanGenStim = 146`
+  - `EnergyBarierNetNum = 146`
 
-  - `FighterPatternAllyAssistRadius = 147`
+  - `EnergyBarierHackBonus = 147`
 
-  - `FighterPatternAssistAlliesNum = 148`
+  - `EnergyBarierHitBonus = 148`
 
-  - `FighterPatternMustHealLvl = 149`
+  - `FighterPatternCanGenStim = 149`
 
-  - `FighterPatternLocalAlarmDeads = 150`
+  - `FighterPatternAllyAssistRadius = 150`
 
-  - `FighterPatternGlobalAlarmDeads = 151`
+  - `FighterPatternAssistAlliesNum = 151`
 
-  - `FighterQuestMinHp = 152`
+  - `FighterPatternMustHealLvl = 152`
 
-  - `FighterQuestOnlyHandCombat = 153`
+  - `FighterPatternLocalAlarmDeads = 153`
 
-  - `FighterQuestTeamIdOld = 154`
+  - `FighterPatternGlobalAlarmDeads = 154`
 
-  - `FighterQuestTeamIdFight = 155`
+  - `FighterQuestMinHp = 155`
 
-  - `FighterQuestPlayerId = 156`
+  - `FighterQuestOnlyHandCombat = 156`
 
-  - `FighterQuestFightPriority = 157`
+  - `FighterQuestTeamIdOld = 157`
 
-  - `FighterQuestVarNum = 158`
+  - `FighterQuestTeamIdFight = 158`
 
-  - `FixboyPowerArmor = 159`
+  - `FighterQuestPlayerId = 159`
 
-  - `ModLourenceVenomedratRecipe = 160`
+  - `FighterQuestFightPriority = 160`
 
-  - `ModLourenceTNTRatRecipe = 161`
+  - `FighterQuestVarNum = 161`
 
-  - `NavEmpRocketRecipe = 162`
+  - `FixboyPowerArmor = 162`
 
-  - `FixboyDefault = 163`
+  - `ModLourenceVenomedratRecipe = 163`
 
-  - `SFRecipeSsupersledge = 164`
+  - `ModLourenceTNTRatRecipe = 164`
 
-  - `SFRecipePlasmagrenades = 165`
+  - `NavEmpRocketRecipe = 165`
 
-  - `Fixboy700NitroExpress = 166`
+  - `FixboyDefault = 166`
 
-  - `FixboyAmmoPressOperator = 167`
+  - `SFRecipeSsupersledge = 167`
 
-  - `RacingCheckPoints = 168`
+  - `SFRecipePlasmagrenades = 168`
 
-  - `RacingCheckpointLocId = 169`
+  - `Fixboy700NitroExpress = 169`
 
-  - `GERacingCritterHx = 170`
+  - `FixboyAmmoPressOperator = 170`
 
-  - `GERacingCritterHy = 171`
+  - `RacingCheckPoints = 171`
 
-  - `GERacingCritterDir = 172`
+  - `RacingCheckpointLocId = 172`
 
-  - `GERacingNpcRole = 173`
+  - `GERacingCritterHx = 173`
 
-  - `GERacingOpeningPhrases = 174`
+  - `GERacingCritterHy = 174`
 
-  - `GEReplExplodeTank = 175`
+  - `GERacingCritterDir = 175`
 
-  - `GEReplNopasaran = 176`
+  - `GERacingNpcRole = 176`
 
-  - `GEReplFindstation = 177`
+  - `GERacingOpeningPhrases = 177`
 
-  - `GEReplNotifictions = 178`
+  - `GEReplExplodeTank = 178`
 
-  - `GEReplEntryZombie = 179`
+  - `GEReplNopasaran = 179`
 
-  - `GEReplLastOrder = 180`
+  - `GEReplFindstation = 180`
 
-  - `GEReplIsAddedAttackPlane = 181`
+  - `GEReplNotifictions = 181`
 
-  - `HellMineTimeoutEnd = 182`
+  - `GEReplEntryZombie = 182`
 
-  - `HostileLQIsStoped = 183`
+  - `GEReplLastOrder = 183`
 
-  - `HostileLQData = 184`
+  - `GEReplIsAddedAttackPlane = 184`
 
-  - `SFAhs7Escort = 185`
+  - `HellMineTimeoutEnd = 185`
 
-  - `SFHonomerPlayerId = 186`
+  - `HostileLQIsStoped = 186`
 
-  - `SFEscortLocation = 187`
+  - `HostileLQData = 187`
 
-  - `SFLabFailed = 188`
+  - `SFAhs7Escort = 188`
 
-  - `QHubLabIsDialogRun = 189`
+  - `SFHonomerPlayerId = 189`
 
-  - `BarterLourensRats1 = 190`
+  - `SFEscortLocation = 190`
 
-  - `ModLourenceRatsFlute = 191`
+  - `SFLabFailed = 191`
 
-  - `BarterLourensRatBodycount = 192`
+  - `QHubLabIsDialogRun = 192`
 
-  - `ModHoughRatsFluteTimeout = 193`
+  - `BarterLourensRats1 = 193`
 
-  - `ModLourenceToxinTimeout = 194`
+  - `ModLourenceRatsFlute = 194`
 
-  - `ModLourenceRatsFluteCounter = 195`
+  - `BarterLourensRatBodycount = 195`
 
-  - `ModLourenceLureActive = 196`
+  - `ModHoughRatsFluteTimeout = 196`
 
-  - `GuardedItemSkill = 197`
+  - `ModLourenceToxinTimeout = 197`
 
-  - `V13DclawEggs = 198`
+  - `ModLourenceRatsFluteCounter = 198`
 
-  - `KlamTorrCowboy = 199`
+  - `ModLourenceLureActive = 199`
 
-  - `KlamCowboyCountGav = 200`
+  - `GuardedItemSkill = 200`
 
-  - `KlamCowboyMobHx = 201`
+  - `V13DclawEggs = 201`
 
-  - `KlamCowboyMobHy = 202`
+  - `KlamTorrCowboy = 202`
 
-  - `KlamDantonBramin = 203`
+  - `KlamCowboyCountGav = 203`
 
-  - `KlamJosallDanton = 204`
+  - `KlamCowboyMobHx = 204`
 
-  - `KlamKuklachev = 205`
+  - `KlamCowboyMobHy = 205`
 
-  - `KlamSmilyGecko = 206`
+  - `KlamDantonBramin = 206`
 
-  - `KlamSmilyCurrentHp = 207`
+  - `KlamJosallDanton = 207`
 
-  - `KlamSmilyCountKills = 208`
+  - `KlamKuklachev = 208`
 
-  - `KlamSmilyHealing = 209`
+  - `KlamSmilyGecko = 209`
 
-  - `LimitedBarterData = 210`
+  - `KlamSmilyCurrentHp = 210`
 
-  - `StealExpCount = 211`
+  - `KlamSmilyCountKills = 211`
 
-  - `FirstAidCount = 212`
+  - `KlamSmilyHealing = 212`
 
-  - `MainQuest = 213`
+  - `LimitedBarterData = 213`
 
-  - `GCityCitizen = 214`
+  - `StealExpCount = 214`
 
-  - `MapGeckCityTraderSkillBarter = 215`
+  - `FirstAidCount = 215`
 
-  - `MapKlamathRobotTimeNextSay = 216`
+  - `MainQuest = 216`
 
-  - `ModJoeGiantWasp = 217`
+  - `GCityCitizen = 217`
 
-  - `TribSulikRaid = 218`
+  - `MapGeckCityTraderSkillBarter = 218`
 
-  - `TribRaiderKillCount = 219`
+  - `MapKlamathRobotTimeNextSay = 219`
 
-  - `NCRElizeSlavers = 220`
+  - `ModJoeGiantWasp = 220`
 
-  - `MapPrimalTribeRaiderHx = 221`
+  - `TribSulikRaid = 221`
 
-  - `MapPrimalTribeRaiderHy = 222`
+  - `TribRaiderKillCount = 222`
 
-  - `SFRonKillBeasts = 223`
+  - `NCRElizeSlavers = 223`
 
-  - `SFRonFindbodies = 224`
+  - `MapPrimalTribeRaiderHx = 224`
 
-  - `SFTankerCentaurNoticed = 225`
+  - `MapPrimalTribeRaiderHy = 225`
 
-  - `SFTankerFloaterNoticed = 226`
+  - `SFRonKillBeasts = 226`
 
-  - `MapSFTankerBicycleId = 227`
+  - `SFRonFindbodies = 227`
 
-  - `MirelurkCombatCurStage = 228`
+  - `SFTankerCentaurNoticed = 228`
 
-  - `MirelurkCombatTimeNextStage = 229`
+  - `SFTankerFloaterNoticed = 229`
 
-  - `MirelurkCombatLastBrokenBag = 230`
+  - `MapSFTankerBicycleId = 230`
 
-  - `MirelurkCombatDestroyingItem = 231`
+  - `MirelurkCombatCurStage = 231`
 
-  - `MobAttackedId = 232`
+  - `MirelurkCombatTimeNextStage = 232`
 
-  - `MobFury = 233`
+  - `MirelurkCombatLastBrokenBag = 233`
 
-  - `MobFear = 234`
+  - `MirelurkCombatDestroyingItem = 234`
 
-  - `MobMaxFear = 235`
+  - `MobAttackedId = 235`
 
-  - `ModVampireFarmLocation = 236`
+  - `MobFury = 236`
 
-  - `MonologueData = 237`
+  - `MobFear = 237`
 
-  - `NavHenryEmpTest = 238`
+  - `MobMaxFear = 238`
 
-  - `NavEmpTestedCritter = 239`
+  - `ModVampireFarmLocation = 239`
 
-  - `NavarroTimeOutScan = 240`
+  - `MonologueData = 240`
 
-  - `NavarroChipUsedId = 241`
+  - `NavHenryEmpTest = 241`
 
-  - `NcrAlexHoloFindStatus = 242`
+  - `NavEmpTestedCritter = 242`
 
-  - `NCRFelixFindBrahmin = 243`
+  - `NavarroTimeOutScan = 243`
 
-  - `NCRHubBook = 244`
+  - `NavarroChipUsedId = 244`
 
-  - `NCRFelixSaveBrahmin = 245`
+  - `NcrAlexHoloFindStatus = 245`
 
-  - `NCRHubBookAccess1 = 246`
+  - `NCRFelixFindBrahmin = 246`
 
-  - `NCRHubBookAccess2 = 247`
+  - `NCRHubBook = 247`
 
-  - `NCRHubBookAccess3 = 248`
+  - `NCRFelixSaveBrahmin = 248`
 
-  - `NCRHubBookAccess4 = 249`
+  - `NCRHubBookAccess1 = 249`
 
-  - `NCRHubBookAccess5 = 250`
+  - `NCRHubBookAccess2 = 250`
 
-  - `NCRHubBookAccess6 = 251`
+  - `NCRHubBookAccess3 = 251`
 
-  - `NCRHubBookAccess7 = 252`
+  - `NCRHubBookAccess4 = 252`
 
-  - `NCRHubBookQuestTimeout = 253`
+  - `NCRHubBookAccess5 = 253`
 
-  - `NcrCommonBeggarInvokeId = 254`
+  - `NCRHubBookAccess6 = 254`
 
-  - `NcrCommonBeggarPhraseNum = 255`
+  - `NCRHubBookAccess7 = 255`
 
-  - `NcrCommonBeggarHideMoneyInvocation = 256`
+  - `NCRHubBookQuestTimeout = 256`
 
-  - `NcrCommonBrahminId = 257`
+  - `NcrCommonBeggarInvokeId = 257`
 
-  - `QNcrElizeInvasion = 258`
+  - `NcrCommonBeggarPhraseNum = 258`
 
-  - `NCRKarlsonSon = 259`
+  - `NcrCommonBeggarHideMoneyInvocation = 259`
 
-  - `NcrSonCatcherId = 260`
+  - `NcrCommonBrahminId = 260`
 
-  - `NcrSonMovesCounter = 261`
+  - `QNcrElizeInvasion = 261`
 
-  - `NcrMichealMessageNum = 262`
+  - `NCRKarlsonSon = 262`
 
-  - `MailDelivery = 263`
+  - `NcrSonCatcherId = 263`
 
-  - `NcrMailRecieverId = 264`
+  - `NcrSonMovesCounter = 264`
 
-  - `NcrMailTimeout = 265`
+  - `NcrMichealMessageNum = 265`
 
-  - `NcrRatchBuggy = 266`
+  - `MailDelivery = 266`
 
-  - `NcrShaimanProtest = 267`
+  - `NcrMailRecieverId = 267`
 
-  - `NcrShaimanStringNum = 268`
+  - `NcrMailTimeout = 268`
 
-  - `NcrSiegeTerminate = 269`
+  - `NcrRatchBuggy = 269`
 
-  - `NcrSiegeKillsCounter = 270`
+  - `NcrShaimanProtest = 270`
 
-  - `NcrSmitVsVestinStatus = 271`
+  - `NcrShaimanStringNum = 271`
 
-  - `NcrSmitStringNum = 272`
+  - `NcrSiegeTerminate = 272`
 
-  - `NcrSmitGateStringNum = 273`
+  - `NcrSiegeKillsCounter = 273`
 
-  - `NcrSmitPlayerId = 274`
+  - `NcrSmitVsVestinStatus = 274`
 
-  - `NcrSmitIdleCount = 275`
+  - `NcrSmitStringNum = 275`
 
-  - `NcrWestinMapPidTo = 276`
+  - `NcrSmitGateStringNum = 276`
 
-  - `NcrWestinHexNumTo = 277`
+  - `NcrSmitPlayerId = 277`
 
-  - `NcrWestinEveryEveningInvokeId = 278`
+  - `NcrSmitIdleCount = 278`
 
-  - `NcrWestinEveryMorningInvokeId = 279`
+  - `NcrWestinMapPidTo = 279`
 
-  - `LastBagRefreshedTime = 280`
+  - `NcrWestinHexNumTo = 280`
 
-  - `LastNpcDialog = 281`
+  - `NcrWestinEveryEveningInvokeId = 281`
 
-  - `NpcDialogStringNum = 282`
+  - `NcrWestinEveryMorningInvokeId = 282`
 
-  - `Planes = 283`
+  - `LastBagRefreshedTime = 283`
 
-  - `NpcRevengeNpcHxHy = 284`
+  - `LastNpcDialog = 284`
 
-  - `NpcRevengeCountWait = 285`
+  - `NpcDialogStringNum = 285`
 
-  - `NRWriKidnap = 286`
+  - `Planes = 286`
 
-  - `NRSalvatoreKill = 287`
+  - `NpcRevengeNpcHxHy = 287`
 
-  - `NRWriKidnapNotifyTime = 288`
+  - `NpcRevengeCountWait = 288`
 
-  - `NRKidnapKillsCounter = 289`
+  - `NRWriKidnap = 289`
 
-  - `QNrWriKidnapInvokeId = 290`
+  - `NRSalvatoreKill = 290`
 
-  - `NukeStock = 291`
+  - `NRWriKidnapNotifyTime = 291`
 
-  - `NukeRestockTime = 292`
+  - `NRKidnapKillsCounter = 292`
 
-  - `PatternSniperCountRunning = 293`
+  - `QNrWriKidnapInvokeId = 293`
 
-  - `PetOwnerId = 294`
+  - `NukeStock = 294`
 
-  - `PetLifeTime = 295`
+  - `NukeRestockTime = 295`
 
-  - `IsGenerated = 296`
+  - `PatternSniperCountRunning = 296`
 
-  - `PokerWins = 297`
+  - `PetOwnerId = 297`
 
-  - `PokerNumOfNpc = 298`
+  - `PetLifeTime = 298`
 
-  - `PokerWincash = 299`
+  - `IsGenerated = 299`
 
-  - `PokerFraud = 300`
+  - `PokerWins = 300`
 
-  - `PokerManywins = 301`
+  - `PokerNumOfNpc = 301`
 
-  - `PokerData = 302`
+  - `PokerWincash = 302`
 
-  - `QWarehouse = 303`
+  - `PokerFraud = 303`
 
-  - `QWarehouseSub1 = 304`
+  - `PokerManywins = 304`
 
-  - `QWarehouseSub2 = 305`
+  - `PokerData = 305`
 
-  - `WarehouseDataId = 306`
+  - `QWarehouse = 306`
 
-  - `WarehouseQuestData = 307`
+  - `QWarehouseSub1 = 307`
 
-  - `WarehouseOther = 308`
+  - `QWarehouseSub2 = 308`
 
-  - `RatGrenadeProtoId = 309`
+  - `WarehouseDataId = 309`
 
-  - `RatGrenadeOwnerId = 310`
+  - `WarehouseQuestData = 310`
 
-  - `ReddMineNuggets = 311`
+  - `WarehouseOther = 311`
 
-  - `ReddMarionWan = 312`
+  - `RatGrenadeProtoId = 312`
 
-  - `ReddQWinamingoKills = 313`
+  - `RatGrenadeOwnerId = 313`
 
-  - `ReddQWinamingoHealing = 314`
+  - `ReddMineNuggets = 314`
 
-  - `ReddDoctorPoisoned = 315`
+  - `ReddMarionWan = 315`
 
-  - `ReddRooneyCemetery = 316`
+  - `ReddQWinamingoKills = 316`
 
-  - `CanRepairWeapons = 317`
+  - `ReddQWinamingoHealing = 317`
 
-  - `CanRepairWeaponsSpecial = 318`
+  - `ReddDoctorPoisoned = 318`
 
-  - `CanRepairArmor = 319`
+  - `ReddRooneyCemetery = 319`
 
-  - `CanRepairArmorSpecial = 320`
+  - `CanRepairWeapons = 320`
 
-  - `RepairCompleteTime = 321`
+  - `CanRepairWeaponsSpecial = 321`
 
-  - `RepairItemPid = 322`
+  - `CanRepairArmor = 322`
 
-  - `HellVisits = 323`
+  - `CanRepairArmorSpecial = 323`
 
-  - `ReplBankIsCanEnter = 324`
+  - `RepairCompleteTime = 324`
 
-  - `ReplBankeIsAttackGagPlayer = 325`
+  - `RepairItemPid = 325`
 
-  - `ReplHellTurretHack = 326`
+  - `HellVisits = 326`
 
-  - `TerminalPlayerId = 327`
+  - `ReplBankIsCanEnter = 327`
 
-  - `TerminalDialogId = 328`
+  - `ReplBankeIsAttackGagPlayer = 328`
 
-  - `ModFarrelAmmiak = 329`
+  - `ReplHellTurretHack = 329`
 
-  - `RouletteCroupierNum = 330`
+  - `TerminalPlayerId = 330`
 
-  - `RouletteBetCoord1 = 331`
+  - `TerminalDialogId = 331`
 
-  - `RouletteBetCoord2 = 332`
+  - `ModFarrelAmmiak = 332`
 
-  - `RouletteBetCoord3 = 333`
+  - `RouletteCroupierNum = 333`
 
-  - `RouletteBetSize = 334`
+  - `RouletteBetCoord1 = 334`
 
-  - `RouletteBetType = 335`
+  - `RouletteBetCoord2 = 335`
 
-  - `RouletteData = 336`
+  - `RouletteBetCoord3 = 336`
 
-  - `CanSendSay = 337`
+  - `RouletteBetSize = 337`
 
-  - `Scores = 338`
+  - `RouletteBetType = 338`
 
-  - `SEAndroidMonologEnd = 339`
+  - `RouletteData = 339`
 
-  - `SETalkingHeadStringNum = 340`
+  - `CanSendSay = 340`
 
-  - `SETeleportEatId = 341`
+  - `Scores = 341`
 
-  - `SFAhs7HubJudgement = 342`
+  - `SEAndroidMonologEnd = 342`
 
-  - `SFLoPanBlackmailSum = 343`
+  - `SETalkingHeadStringNum = 343`
 
-  - `SFHububJudgementLocId = 344`
+  - `SETeleportEatId = 344`
 
-  - `SFHubJudgementKills = 345`
+  - `SFAhs7HubJudgement = 345`
 
-  - `SfMercMaster = 346`
+  - `SFLoPanBlackmailSum = 346`
 
-  - `SFCommonOneWeekInvokeId = 347`
+  - `SFHububJudgementLocId = 347`
 
-  - `SFCommonFightPlayerId = 348`
+  - `SFHubJudgementKills = 348`
 
-  - `ClickCounter = 349`
+  - `SfMercMaster = 349`
 
-  - `SFInvasionMirelurkKills = 350`
+  - `SFCommonOneWeekInvokeId = 350`
 
-  - `BHRocketBase = 351`
+  - `SFCommonFightPlayerId = 351`
 
-  - `NcrElizeSlvrsHunting = 352`
+  - `ClickCounter = 352`
 
-  - `NcrElizeSlvrsHuntingStatus = 353`
+  - `SFInvasionMirelurkKills = 353`
 
-  - `NcrSantiagoSpyMission = 354`
+  - `BHRocketBase = 354`
 
-  - `QSpyMissonStringNum = 355`
+  - `NcrElizeSlvrsHunting = 355`
 
-  - `TimeoutBattle = 356`
+  - `NcrElizeSlvrsHuntingStatus = 356`
 
-  - `TimeoutTransfer = 357`
+  - `NcrSantiagoSpyMission = 357`
 
-  - `WalkSpeedBase = 358`
+  - `QSpyMissonStringNum = 358`
 
-  - `WalkSpeed = 359`
+  - `TimeoutBattle = 359`
 
-  - `IsNoMove = 360`
+  - `TimeoutTransfer = 360`
 
-  - `IsNoMoveBase = 361`
+  - `WalkSpeedBase = 361`
 
-  - `IsNoRun = 362`
+  - `WalkSpeed = 362`
 
-  - `IsNoRunBase = 363`
+  - `IsNoMove = 363`
 
-  - `Strength = 364`
+  - `IsNoMoveBase = 364`
 
-  - `StrengthBase = 365`
+  - `IsNoRun = 365`
 
-  - `Perception = 366`
+  - `IsNoRunBase = 366`
 
-  - `PerceptionBase = 367`
+  - `Strength = 367`
 
-  - `Endurance = 368`
+  - `StrengthBase = 368`
 
-  - `EnduranceBase = 369`
+  - `Perception = 369`
 
-  - `Charisma = 370`
+  - `PerceptionBase = 370`
 
-  - `CharismaBase = 371`
+  - `Endurance = 371`
 
-  - `Intellect = 372`
+  - `EnduranceBase = 372`
 
-  - `IntellectBase = 373`
+  - `Charisma = 373`
 
-  - `Agility = 374`
+  - `CharismaBase = 374`
 
-  - `AgilityBase = 375`
+  - `Intellect = 375`
 
-  - `Luck = 376`
+  - `IntellectBase = 376`
 
-  - `LuckBase = 377`
+  - `Agility = 377`
 
-  - `ArmorClass = 378`
+  - `AgilityBase = 378`
 
-  - `MaxLife = 379`
+  - `Luck = 379`
 
-  - `MaxLifeBase = 380`
+  - `LuckBase = 380`
 
-  - `ActionPointsBase = 381`
+  - `ArmorClass = 381`
 
-  - `ArmorClassBase = 382`
+  - `MaxLife = 382`
 
-  - `MeleeDamage = 383`
+  - `MaxLifeBase = 383`
 
-  - `MeleeDamageBase = 384`
+  - `ActionPointsBase = 384`
 
-  - `IsOverweight = 385`
+  - `ArmorClassBase = 385`
 
-  - `CarryWeight = 386`
+  - `MeleeDamage = 386`
 
-  - `CarryWeightBase = 387`
+  - `MeleeDamageBase = 387`
 
-  - `Sequence = 388`
+  - `IsOverweight = 388`
 
-  - `SequenceBase = 389`
+  - `CarryWeight = 389`
 
-  - `HealingRate = 390`
+  - `CarryWeightBase = 390`
 
-  - `HealingRateBase = 391`
+  - `Sequence = 391`
 
-  - `CriticalChance = 392`
+  - `SequenceBase = 392`
 
-  - `CriticalChanceBase = 393`
+  - `HealingRate = 393`
 
-  - `MaxCritical = 394`
+  - `HealingRateBase = 394`
 
-  - `MaxCriticalBase = 395`
+  - `CriticalChance = 395`
 
-  - `Toxic = 396`
+  - `CriticalChanceBase = 396`
 
-  - `Radioactive = 397`
+  - `MaxCritical = 397`
 
-  - `KillExperience = 398`
+  - `MaxCriticalBase = 398`
 
-  - `BodyType = 399`
+  - `Toxic = 399`
 
-  - `LocomotionType = 400`
+  - `Radioactive = 400`
 
-  - `DamageType = 401`
+  - `KillExperience = 401`
 
-  - `Age = 402`
+  - `BodyType = 402`
 
-  - `Gender = 403`
+  - `LocomotionType = 403`
 
-  - `PoisoningLevel = 404`
+  - `DamageType = 404`
 
-  - `RadiationLevel = 405`
+  - `Age = 405`
 
-  - `UnspentSkillPoints = 406`
+  - `Gender = 406`
 
-  - `UnspentPerks = 407`
+  - `PoisoningLevel = 407`
 
-  - `Karma = 408`
+  - `RadiationLevel = 408`
 
-  - `ReplicationMoney = 409`
+  - `UnspentSkillPoints = 409`
 
-  - `ReplicationCount = 410`
+  - `UnspentPerks = 410`
 
-  - `ReplicationCost = 411`
+  - `Karma = 411`
 
-  - `RateObject = 412`
+  - `ReplicationMoney = 412`
 
-  - `BonusLook = 413`
+  - `ReplicationCount = 413`
 
-  - `NpcRole = 414`
+  - `ReplicationCost = 414`
 
-  - `AiId = 415`
+  - `RateObject = 415`
 
-  - `TeamId = 416`
+  - `BonusLook = 416`
 
-  - `NextCrType = 417`
+  - `NpcRole = 417`
 
-  - `DeadBlockerId = 418`
+  - `AiId = 418`
 
-  - `CurrentArmorPerk = 419`
+  - `TeamId = 419`
 
-  - `NextReplicationMap = 420`
+  - `NextCrType = 420`
 
-  - `NextReplicationEntry = 421`
+  - `DeadBlockerId = 421`
 
-  - `PlayerKarma = 422`
+  - `CurrentArmorPerk = 422`
 
-  - `ArmorPerk = 423`
+  - `NextReplicationMap = 423`
 
-  - `LastStealCrId = 424`
+  - `NextReplicationEntry = 424`
 
-  - `StealCount = 425`
+  - `PlayerKarma = 425`
 
-  - `GlobalMapMoveCounter = 426`
+  - `ArmorPerk = 426`
 
-  - `Experience = 427`
+  - `LastStealCrId = 427`
 
-  - `MaxMoveApBase = 428`
+  - `StealCount = 428`
 
-  - `AnimType = 429`
+  - `GlobalMapMoveCounter = 429`
 
-  - `FollowLeaderId = 430`
+  - `Experience = 430`
 
-  - `LastSendEntrancesLocId = 431`
+  - `MaxMoveApBase = 431`
 
-  - `LastSendEntrancesTick = 432`
+  - `AnimType = 432`
 
-  - `CrTypeAliasBase = 433`
+  - `FollowLeaderId = 433`
 
-  - `CrTypeAlias = 434`
+  - `LastSendEntrancesLocId = 434`
 
-  - `ModelNameBase = 435`
+  - `LastSendEntrancesTick = 435`
 
-  - `IsNoArmor = 436`
+  - `CrTypeAliasBase = 436`
 
-  - `Anims = 437`
+  - `CrTypeAlias = 437`
 
-  - `IsNoAim = 438`
+  - `ModelNameBase = 438`
 
-  - `Kills = 439`
+  - `IsNoArmor = 439`
 
-  - `KillMen = 440`
+  - `Anims = 440`
 
-  - `KillWomen = 441`
+  - `IsNoAim = 441`
 
-  - `KillAlien = 442`
+  - `Kills = 442`
 
-  - `KillChildren = 443`
+  - `KillMen = 443`
 
-  - `KillFloater = 444`
+  - `KillWomen = 444`
 
-  - `KillRat = 445`
+  - `KillAlien = 445`
 
-  - `KillCentaur = 446`
+  - `KillChildren = 446`
 
-  - `ReputationDen = 447`
+  - `KillFloater = 447`
 
-  - `ReputationKlamath = 448`
+  - `KillRat = 448`
 
-  - `ReputationModoc = 449`
+  - `KillCentaur = 449`
 
-  - `ReputationVaultCity = 450`
+  - `ReputationDen = 450`
 
-  - `ReputationGecko = 451`
+  - `ReputationKlamath = 451`
 
-  - `ReputationBrokenHills = 452`
+  - `ReputationModoc = 452`
 
-  - `ReputationNewReno = 453`
+  - `ReputationVaultCity = 453`
 
-  - `ReputationSierra = 454`
+  - `ReputationGecko = 454`
 
-  - `ReputationVault15 = 455`
+  - `ReputationBrokenHills = 455`
 
-  - `ReputationNCR = 456`
+  - `ReputationNewReno = 456`
 
-  - `ReputationCathedral = 457`
+  - `ReputationSierra = 457`
 
-  - `ReputationSAD = 458`
+  - `ReputationVault15 = 458`
 
-  - `ReputationRedding = 459`
+  - `ReputationNCR = 459`
 
-  - `ReputationSF = 460`
+  - `ReputationCathedral = 460`
 
-  - `ReputationNavarro = 461`
+  - `ReputationSAD = 461`
 
-  - `ReputationArroyo = 462`
+  - `ReputationRedding = 462`
 
-  - `ReputationPrimalTribe = 463`
+  - `ReputationSF = 463`
 
-  - `ReputationRangers = 464`
+  - `ReputationNavarro = 464`
 
-  - `ReputationVault13 = 465`
+  - `ReputationArroyo = 465`
 
-  - `ReputationSacramento = 466`
+  - `ReputationPrimalTribe = 466`
 
-  - `Addictions = 467`
+  - `ReputationRangers = 467`
 
-  - `IsAddicted = 468`
+  - `ReputationVault13 = 468`
 
-  - `IsJetAddicted = 469`
+  - `ReputationSacramento = 469`
 
-  - `IsBuffoutAddicted = 470`
+  - `Addictions = 470`
 
-  - `IsMentatsAddicted = 471`
+  - `IsAddicted = 471`
 
-  - `IsPsychoAddicted = 472`
+  - `IsJetAddicted = 472`
 
-  - `IsRadawayAddicted = 473`
+  - `IsBuffoutAddicted = 473`
 
-  - `DamageResistance = 474`
+  - `IsMentatsAddicted = 474`
 
-  - `NormalResistance = 475`
+  - `IsPsychoAddicted = 475`
 
-  - `PoisonResistance = 476`
+  - `IsRadawayAddicted = 476`
 
-  - `RadiationResistance = 477`
+  - `DamageResistance = 477`
 
-  - `ExplodeResistance = 478`
+  - `NormalResistance = 478`
 
-  - `NormalResistanceBase = 479`
+  - `PoisonResistance = 479`
 
-  - `LaserResistanceBase = 480`
+  - `RadiationResistance = 480`
 
-  - `FireResistanceBase = 481`
+  - `ExplodeResistance = 481`
 
-  - `PlasmaResistanceBase = 482`
+  - `NormalResistanceBase = 482`
 
-  - `ElectricityResistanceBase = 483`
+  - `LaserResistanceBase = 483`
 
-  - `EmpResistanceBase = 484`
+  - `FireResistanceBase = 484`
 
-  - `ExplodeResistanceBase = 485`
+  - `PlasmaResistanceBase = 485`
 
-  - `PoisonResistanceBase = 486`
+  - `ElectricityResistanceBase = 486`
 
-  - `RadiationResistanceBase = 487`
+  - `EmpResistanceBase = 487`
 
-  - `DamageThreshold = 488`
+  - `ExplodeResistanceBase = 488`
 
-  - `NormalThresholdBase = 489`
+  - `PoisonResistanceBase = 489`
 
-  - `LaserThresholdBase = 490`
+  - `RadiationResistanceBase = 490`
 
-  - `FireThresholdBase = 491`
+  - `DamageThreshold = 491`
 
-  - `PlasmaThresholdBase = 492`
+  - `NormalThresholdBase = 492`
 
-  - `ElectricityThresholdBase = 493`
+  - `LaserThresholdBase = 493`
 
-  - `EmpThresholdBase = 494`
+  - `FireThresholdBase = 494`
 
-  - `ExplodeThresholdBase = 495`
+  - `PlasmaThresholdBase = 495`
 
-  - `PoisonThresholdBase = 496`
+  - `ElectricityThresholdBase = 496`
 
-  - `RadiationThresholdBase = 497`
+  - `EmpThresholdBase = 497`
 
-  - `IsPoisoned = 498`
+  - `ExplodeThresholdBase = 498`
 
-  - `IsRadiated = 499`
+  - `PoisonThresholdBase = 499`
 
-  - `IsInjured = 500`
+  - `RadiationThresholdBase = 500`
 
-  - `IsDamagedEye = 501`
+  - `IsPoisoned = 501`
 
-  - `IsDamagedRightArm = 502`
+  - `IsRadiated = 502`
 
-  - `IsDamagedLeftArm = 503`
+  - `IsInjured = 503`
 
-  - `IsDamagedRightLeg = 504`
+  - `IsDamagedEye = 504`
 
-  - `IsDamagedLeftLeg = 505`
+  - `IsDamagedRightArm = 505`
 
-  - `Var0 = 506`
+  - `IsDamagedLeftArm = 506`
 
-  - `Var1 = 507`
+  - `IsDamagedRightLeg = 507`
 
-  - `Var2 = 508`
+  - `IsDamagedLeftLeg = 508`
 
-  - `Var3 = 509`
+  - `Var0 = 509`
 
-  - `Var4 = 510`
+  - `Var1 = 510`
 
-  - `Var5 = 511`
+  - `Var2 = 511`
 
-  - `Var6 = 512`
+  - `Var3 = 512`
 
-  - `Var7 = 513`
+  - `Var4 = 513`
 
-  - `Var8 = 514`
+  - `Var5 = 514`
 
-  - `Var9 = 515`
+  - `Var6 = 515`
 
-  - `SkillSmallGuns = 516`
+  - `Var7 = 516`
 
-  - `SkillBigGuns = 517`
+  - `Var8 = 517`
 
-  - `SkillEnergyWeapons = 518`
+  - `Var9 = 518`
 
-  - `SkillUnarmed = 519`
+  - `SkillSmallGuns = 519`
 
-  - `SkillMeleeWeapons = 520`
+  - `SkillBigGuns = 520`
 
-  - `SkillThrowing = 521`
+  - `SkillEnergyWeapons = 521`
 
-  - `SkillFirstAid = 522`
+  - `SkillUnarmed = 522`
 
-  - `SkillDoctor = 523`
+  - `SkillMeleeWeapons = 523`
 
-  - `SkillSneak = 524`
+  - `SkillThrowing = 524`
 
-  - `SkillLockpick = 525`
+  - `SkillFirstAid = 525`
 
-  - `SkillSteal = 526`
+  - `SkillDoctor = 526`
 
-  - `SkillTraps = 527`
+  - `SkillSneak = 527`
 
-  - `SkillScience = 528`
+  - `SkillLockpick = 528`
 
-  - `SkillRepair = 529`
+  - `SkillSteal = 529`
 
-  - `SkillSpeech = 530`
+  - `SkillTraps = 530`
 
-  - `SkillBarter = 531`
+  - `SkillScience = 531`
 
-  - `SkillGambling = 532`
+  - `SkillRepair = 532`
 
-  - `SkillOutdoorsman = 533`
+  - `SkillSpeech = 533`
 
-  - `TagSkills = 534`
+  - `SkillBarter = 534`
 
-  - `TagSkill1 = 535`
+  - `SkillGambling = 535`
 
-  - `TagSkill2 = 536`
+  - `SkillOutdoorsman = 536`
 
-  - `TagSkill3 = 537`
+  - `TagSkills = 537`
 
-  - `PerkBookworm = 538`
+  - `TagSkill1 = 538`
 
-  - `PerkAwareness = 539`
+  - `TagSkill2 = 539`
 
-  - `PerkBonusHthAttacks = 540`
+  - `TagSkill3 = 540`
 
-  - `PerkBonusHthDamage = 541`
+  - `PerkBookworm = 541`
 
-  - `PerkBonusRangedDamage = 542`
+  - `PerkAwareness = 542`
 
-  - `PerkBonusRateOfFire = 543`
+  - `PerkBonusHthAttacks = 543`
 
-  - `PerkEarlierSequence = 544`
+  - `PerkBonusHthDamage = 544`
 
-  - `PerkFasterHealing = 545`
+  - `PerkBonusRangedDamage = 545`
 
-  - `PerkMoreCriticals = 546`
+  - `PerkBonusRateOfFire = 546`
 
-  - `PerkNightVision = 547`
+  - `PerkEarlierSequence = 547`
 
-  - `PerkRadResistance = 548`
+  - `PerkFasterHealing = 548`
 
-  - `PerkToughness = 549`
+  - `PerkMoreCriticals = 549`
 
-  - `PerkStrongBack = 550`
+  - `PerkNightVision = 550`
 
-  - `PerkSharpshooter = 551`
+  - `PerkRadResistance = 551`
 
-  - `PerkSurvivalist = 552`
+  - `PerkToughness = 552`
 
-  - `PerkEducated = 553`
+  - `PerkStrongBack = 553`
 
-  - `PerkHealer = 554`
+  - `PerkSharpshooter = 554`
 
-  - `PerkFortuneFinder = 555`
+  - `PerkSurvivalist = 555`
 
-  - `PerkBetterCriticals = 556`
+  - `PerkEducated = 556`
 
-  - `PerkEmpathy = 557`
+  - `PerkHealer = 557`
 
-  - `PerkSlayer = 558`
+  - `PerkFortuneFinder = 558`
 
-  - `PerkSniper = 559`
+  - `PerkBetterCriticals = 559`
 
-  - `PerkSilentDeath = 560`
+  - `PerkEmpathy = 560`
 
-  - `PerkActionBoy = 561`
+  - `PerkSlayer = 561`
 
-  - `PerkMentalBlock = 562`
+  - `PerkSniper = 562`
 
-  - `PerkLifegiver = 563`
+  - `PerkSilentDeath = 563`
 
-  - `PerkDodger = 564`
+  - `PerkActionBoy = 564`
 
-  - `PerkSnakeater = 565`
+  - `PerkMentalBlock = 565`
 
-  - `PerkMrFixit = 566`
+  - `PerkLifegiver = 566`
 
-  - `PerkMedic = 567`
+  - `PerkDodger = 567`
 
-  - `PerkMasterThief = 568`
+  - `PerkSnakeater = 568`
 
-  - `PerkSpeaker = 569`
+  - `PerkMrFixit = 569`
 
-  - `PerkHeaveHo = 570`
+  - `PerkMedic = 570`
 
-  - `PerkFriendlyFoe = 571`
+  - `PerkMasterThief = 571`
 
-  - `PerkPickpocket = 572`
+  - `PerkSpeaker = 572`
 
-  - `PerkGhost = 573`
+  - `PerkHeaveHo = 573`
 
-  - `PerkCultOfPersonality = 574`
+  - `PerkFriendlyFoe = 574`
 
-  - `PerkScrounger = 575`
+  - `PerkPickpocket = 575`
 
-  - `PerkExplorer = 576`
+  - `PerkGhost = 576`
 
-  - `PerkFlowerChild = 577`
+  - `PerkCultOfPersonality = 577`
 
-  - `PerkPathfinder = 578`
+  - `PerkScrounger = 578`
 
-  - `PerkAnimalFriend = 579`
+  - `PerkExplorer = 579`
 
-  - `PerkScout = 580`
+  - `PerkFlowerChild = 580`
 
-  - `PerkMysteriousStranger = 581`
+  - `PerkPathfinder = 581`
 
-  - `PerkRanger = 582`
+  - `PerkAnimalFriend = 582`
 
-  - `PerkSmoothTalker = 583`
+  - `PerkScout = 583`
 
-  - `PerkSwiftLearner = 584`
+  - `PerkMysteriousStranger = 584`
 
-  - `PerkTag = 585`
+  - `PerkRanger = 585`
 
-  - `PerkMutate = 586`
+  - `PerkSmoothTalker = 586`
 
-  - `PerkAdrenalineRush = 587`
+  - `PerkSwiftLearner = 587`
 
-  - `PerkCautiousNature = 588`
+  - `PerkTag = 588`
 
-  - `PerkComprehension = 589`
+  - `PerkMutate = 589`
 
-  - `PerkDemolitionExpert = 590`
+  - `PerkAdrenalineRush = 590`
 
-  - `PerkGambler = 591`
+  - `PerkCautiousNature = 591`
 
-  - `PerkGainStrength = 592`
+  - `PerkComprehension = 592`
 
-  - `PerkGainPerception = 593`
+  - `PerkDemolitionExpert = 593`
 
-  - `PerkGainEndurance = 594`
+  - `PerkGambler = 594`
 
-  - `PerkGainCharisma = 595`
+  - `PerkGainStrength = 595`
 
-  - `PerkGainIntelligence = 596`
+  - `PerkGainPerception = 596`
 
-  - `PerkGainAgility = 597`
+  - `PerkGainEndurance = 597`
 
-  - `PerkGainLuck = 598`
+  - `PerkGainCharisma = 598`
 
-  - `PerkHarmless = 599`
+  - `PerkGainIntelligence = 599`
 
-  - `PerkHereAndNow = 600`
+  - `PerkGainAgility = 600`
 
-  - `PerkHthEvade = 601`
+  - `PerkGainLuck = 601`
 
-  - `PerkKamaSutraMaster = 602`
+  - `PerkHarmless = 602`
 
-  - `PerkKarmaBeacon = 603`
+  - `PerkHereAndNow = 603`
 
-  - `PerkLightStep = 604`
+  - `PerkHthEvade = 604`
 
-  - `PerkLivingAnatomy = 605`
+  - `PerkKamaSutraMaster = 605`
 
-  - `PerkMagneticPersonality = 606`
+  - `PerkKarmaBeacon = 606`
 
-  - `PerkNegotiator = 607`
+  - `PerkLightStep = 607`
 
-  - `PerkPackRat = 608`
+  - `PerkLivingAnatomy = 608`
 
-  - `PerkPyromaniac = 609`
+  - `PerkMagneticPersonality = 609`
 
-  - `PerkQuickRecovery = 610`
+  - `PerkNegotiator = 610`
 
-  - `PerkSalesman = 611`
+  - `PerkPackRat = 611`
 
-  - `PerkStonewall = 612`
+  - `PerkPyromaniac = 612`
 
-  - `PerkThief = 613`
+  - `PerkQuickRecovery = 613`
 
-  - `PerkWeaponHandling = 614`
+  - `PerkSalesman = 614`
 
-  - `PerkVaultCityTraining = 615`
+  - `PerkStonewall = 615`
 
-  - `PerkExpertExcrement = 616`
+  - `PerkThief = 616`
 
-  - `PerkTerminator = 617`
+  - `PerkWeaponHandling = 617`
 
-  - `PerkGeckoSkinning = 618`
+  - `PerkVaultCityTraining = 618`
 
-  - `PerkVaultCityInoculations = 619`
+  - `PerkExpertExcrement = 619`
 
-  - `PerkDermalImpact = 620`
+  - `PerkTerminator = 620`
 
-  - `PerkDermalImpactEnh = 621`
+  - `PerkGeckoSkinning = 621`
 
-  - `PerkPhoenixImplants = 622`
+  - `PerkVaultCityInoculations = 622`
 
-  - `PerkPhoenixImplantsEnh = 623`
+  - `PerkDermalImpact = 623`
 
-  - `PerkNcrPerception = 624`
+  - `PerkDermalImpactEnh = 624`
 
-  - `PerkNcrEndurance = 625`
+  - `PerkPhoenixImplants = 625`
 
-  - `PerkNcrBarter = 626`
+  - `PerkPhoenixImplantsEnh = 626`
 
-  - `PerkNcrRepair = 627`
+  - `PerkNcrPerception = 627`
 
-  - `PerkVampireAccuracy = 628`
+  - `PerkNcrEndurance = 628`
 
-  - `PerkVampireRegeneration = 629`
+  - `PerkNcrBarter = 629`
 
-  - `PerkQuickPockets = 630`
+  - `PerkNcrRepair = 630`
 
-  - `PerkMasterTrader = 631`
+  - `PerkVampireAccuracy = 631`
 
-  - `PerkSilentRunning = 632`
+  - `PerkVampireRegeneration = 632`
 
-  - `PerkBonusMove = 633`
+  - `PerkQuickPockets = 633`
 
-  - `KarmaPerkBerserker = 634`
+  - `PerkMasterTrader = 634`
 
-  - `KarmaPerkChampion = 635`
+  - `PerkSilentRunning = 635`
 
-  - `KarmaPerkChildkiller = 636`
+  - `PerkBonusMove = 636`
 
-  - `KarmaPerkSexpert = 637`
+  - `KarmaPerkBerserker = 637`
 
-  - `KarmaPerkPrizefighter = 638`
+  - `KarmaPerkChampion = 638`
 
-  - `KarmaPerkGigolo = 639`
+  - `KarmaPerkChildkiller = 639`
 
-  - `KarmaPerkGraveDigger = 640`
+  - `KarmaPerkSexpert = 640`
 
-  - `KarmaPerkMarried = 641`
+  - `KarmaPerkPrizefighter = 641`
 
-  - `KarmaPerkPornStar = 642`
+  - `KarmaPerkGigolo = 642`
 
-  - `KarmaPerkSlaver = 643`
+  - `KarmaPerkGraveDigger = 643`
 
-  - `KarmaPerkVirginWastes = 644`
+  - `KarmaPerkMarried = 644`
 
-  - `KarmaPerkManSalvatore = 645`
+  - `KarmaPerkPornStar = 645`
 
-  - `KarmaPerkManBishop = 646`
+  - `KarmaPerkSlaver = 646`
 
-  - `KarmaPerkManMordino = 647`
+  - `KarmaPerkVirginWastes = 647`
 
-  - `KarmaPerkManWright = 648`
+  - `KarmaPerkManSalvatore = 648`
 
-  - `KarmaPerkSeparated = 649`
+  - `KarmaPerkManBishop = 649`
 
-  - `KarmaPerkPedobear = 650`
+  - `KarmaPerkManMordino = 650`
 
-  - `KarmaPerkVcGuardsman = 651`
+  - `KarmaPerkManWright = 651`
 
-  - `IsTraitFastMetabolism = 652`
+  - `KarmaPerkSeparated = 652`
 
-  - `IsTraitBruiser = 653`
+  - `KarmaPerkPedobear = 653`
 
-  - `IsTraitSmallFrame = 654`
+  - `KarmaPerkVcGuardsman = 654`
 
-  - `IsTraitOneHander = 655`
+  - `IsTraitFastMetabolism = 655`
 
-  - `IsTraitFinesse = 656`
+  - `IsTraitBruiser = 656`
 
-  - `IsTraitKamikaze = 657`
+  - `IsTraitSmallFrame = 657`
 
-  - `IsTraitHeavyHanded = 658`
+  - `IsTraitOneHander = 658`
 
-  - `IsTraitFastShot = 659`
+  - `IsTraitFinesse = 659`
 
-  - `IsTraitBloodyMess = 660`
+  - `IsTraitKamikaze = 660`
 
-  - `IsTraitJinxed = 661`
+  - `IsTraitHeavyHanded = 661`
 
-  - `IsTraitJinxedII = 662`
+  - `IsTraitFastShot = 662`
 
-  - `IsTraitGoodNatured = 663`
+  - `IsTraitBloodyMess = 663`
 
-  - `IsTraitChemReliant = 664`
+  - `IsTraitJinxed = 664`
 
-  - `IsTraitChemResistant = 665`
+  - `IsTraitJinxedII = 665`
 
-  - `IsTraitSexAppeal = 666`
+  - `IsTraitGoodNatured = 666`
 
-  - `IsTraitSkilled = 667`
+  - `IsTraitChemReliant = 667`
 
-  - `IsTraitNightPerson = 668`
+  - `IsTraitChemResistant = 668`
 
-  - `TimeoutSkFirstAid = 669`
+  - `IsTraitSexAppeal = 669`
 
-  - `TimeoutSkDoctor = 670`
+  - `IsTraitSkilled = 670`
 
-  - `TimeoutSkRepair = 671`
+  - `IsTraitNightPerson = 671`
 
-  - `TimeoutSkScience = 672`
+  - `TimeoutSkFirstAid = 672`
 
-  - `TimeoutSkLockpick = 673`
+  - `TimeoutSkDoctor = 673`
 
-  - `TimeoutSkSteal = 674`
+  - `TimeoutSkRepair = 674`
 
-  - `TimeoutSkOutdoorsman = 675`
+  - `TimeoutSkScience = 675`
 
-  - `TimeoutReplication = 676`
+  - `TimeoutSkLockpick = 676`
 
-  - `TimeoutKarmaVoting = 677`
+  - `TimeoutSkSteal = 677`
 
-  - `TimeoutSneak = 678`
+  - `TimeoutSkOutdoorsman = 678`
 
-  - `TimeoutHealing = 679`
+  - `TimeoutRemoveFromGame = 679`
 
-  - `TimeoutStealing = 680`
+  - `TimeoutReplication = 680`
 
-  - `TimeoutAggressor = 681`
+  - `TimeoutKarmaVoting = 681`
 
-  - `MercMasterId = 682`
+  - `TimeoutSneak = 682`
 
-  - `MercAlwaysRun = 683`
+  - `TimeoutHealing = 683`
 
-  - `MercCancelOnAttack = 684`
+  - `TimeoutStealing = 684`
 
-  - `MercLoseDist = 685`
+  - `TimeoutAggressor = 685`
 
-  - `MercMasterDist = 686`
+  - `MercMasterId = 686`
 
-  - `MercType = 687`
+  - `MercAlwaysRun = 687`
 
-  - `MercDefendMaster = 688`
+  - `MercCancelOnAttack = 688`
 
-  - `MercAssistMaster = 689`
+  - `MercLoseDist = 689`
 
-  - `MercCancelTime = 690`
+  - `MercMasterDist = 690`
 
-  - `MercCancelOnGlobal = 691`
+  - `MercType = 691`
 
-  - `MercWaitForMaster = 692`
+  - `MercDefendMaster = 692`
 
-  - `ArroyoMynocDefence = 693`
+  - `MercAssistMaster = 693`
 
-  - `ArroyoCassidyLetter = 694`
+  - `MercCancelTime = 694`
 
-  - `ArroyoMynocOil = 695`
+  - `MercCancelOnGlobal = 695`
 
-  - `ArroyoProofOfDeath = 696`
+  - `MercWaitForMaster = 696`
 
-  - `ArroyoLetterToLinnett = 697`
+  - `ArroyoMynocDefence = 697`
 
-  - `KlamSallyFindProstitute = 698`
+  - `ArroyoCassidyLetter = 698`
 
-  - `KlamBobWater = 699`
+  - `ArroyoMynocOil = 699`
 
-  - `KlamFindTrappers = 700`
+  - `ArroyoProofOfDeath = 700`
 
-  - `KlamBugenLure = 701`
+  - `ArroyoLetterToLinnett = 701`
 
-  - `KlamNotifyHusband = 702`
+  - `KlamSallyFindProstitute = 702`
 
-  - `KlamEidenBramin = 703`
+  - `KlamBobWater = 703`
 
-  - `KlamSmilyModoc = 704`
+  - `KlamFindTrappers = 704`
 
-  - `DenBillRacingWin = 705`
+  - `KlamBugenLure = 705`
 
-  - `DenLeannaCondom = 706`
+  - `KlamNotifyHusband = 706`
 
-  - `QDenAnanDoll = 707`
+  - `KlamEidenBramin = 707`
 
-  - `DenAnanRedoll = 708`
+  - `KlamSmilyModoc = 708`
 
-  - `DenGhost = 709`
+  - `DenBillRacingWin = 709`
 
-  - `DenBillRacingOpening = 710`
+  - `DenLeannaCondom = 710`
 
-  - `DenCarstopJeffry = 711`
+  - `QDenAnanDoll = 711`
 
-  - `DenCarstopBrahmin = 712`
+  - `DenAnanRedoll = 712`
 
-  - `DenCarstopBreeder = 713`
+  - `DenGhost = 713`
 
-  - `DenJoeySteal = 714`
+  - `DenBillRacingOpening = 714`
 
-  - `DenJaneDolg = 715`
+  - `DenCarstopJeffry = 715`
 
-  - `DenJanePsycho = 716`
+  - `DenCarstopBrahmin = 716`
 
-  - `DenLaraPostal = 717`
+  - `DenCarstopBreeder = 717`
 
-  - `DenFlikJet = 718`
+  - `DenJoeySteal = 718`
 
-  - `DenLaraBand = 719`
+  - `DenJaneDolg = 719`
 
-  - `DenJoeyLoan = 720`
+  - `DenJanePsycho = 720`
 
-  - `DenLaraBos = 721`
+  - `DenLaraPostal = 721`
 
-  - `QDenCliffDealer = 722`
+  - `DenFlikJet = 722`
 
-  - `DenFredStim = 723`
+  - `DenLaraBand = 723`
 
-  - `DenJaneVodka = 724`
+  - `DenJoeyLoan = 724`
 
-  - `DenMomSlut = 725`
+  - `DenLaraBos = 725`
 
-  - `DenSmittyBatt = 726`
+  - `QDenCliffDealer = 726`
 
-  - `DenJaneMeat = 727`
+  - `DenFredStim = 727`
 
-  - `DenJaneStim = 728`
+  - `DenJaneVodka = 728`
 
-  - `DenLaraMolotovCoctail = 729`
+  - `DenMomSlut = 729`
 
-  - `DenLeannaBuy = 730`
+  - `DenSmittyBatt = 730`
 
-  - `DenSmittyBoots = 731`
+  - `DenJaneMeat = 731`
 
-  - `DenJaneGuns = 732`
+  - `DenJaneStim = 732`
 
-  - `DenSmittyKey = 733`
+  - `DenLaraMolotovCoctail = 733`
 
-  - `DenJaneArmor = 734`
+  - `DenLeannaBuy = 734`
 
-  - `DenSmittyAmmo = 735`
+  - `DenSmittyBoots = 735`
 
-  - `DenJaneHunt = 736`
+  - `DenJaneGuns = 736`
 
-  - `DenJoeyKnife = 737`
+  - `DenSmittyKey = 737`
 
-  - `DenJoeyLara = 738`
+  - `DenJaneArmor = 738`
 
-  - `DenJaneRadio = 739`
+  - `DenSmittyAmmo = 739`
 
-  - `DenJoeyJet = 740`
+  - `DenJaneHunt = 740`
 
-  - `DenLaraTrust = 741`
+  - `DenJoeyKnife = 741`
 
-  - `DenLeannaWine = 742`
+  - `DenJoeyLara = 742`
 
-  - `DenMomRadscorp = 743`
+  - `DenJaneRadio = 743`
 
-  - `DenSmittyFixit = 744`
+  - `DenJoeyJet = 744`
 
-  - `QDenLeannaThief = 745`
+  - `DenLaraTrust = 745`
 
-  - `ModJoeFarm = 746`
+  - `DenLeannaWine = 746`
 
-  - `ModHose = 747`
+  - `DenMomRadscorp = 747`
 
-  - `ModBaltasGecko = 748`
+  - `DenSmittyFixit = 748`
 
-  - `ModLourenceRatsColony = 749`
+  - `QDenLeannaThief = 749`
 
-  - `ModLourenceFloater = 750`
+  - `ModJoeFarm = 750`
 
-  - `ModJoeVampire = 751`
+  - `ModHose = 751`
 
-  - `BHMarcusEscort = 752`
+  - `ModBaltasGecko = 752`
 
-  - `BHSuperNewTechnology = 753`
+  - `ModLourenceRatsColony = 753`
 
-  - `ReddDocRadio = 754`
+  - `ModLourenceFloater = 754`
 
-  - `ReddDocRadioTroy = 755`
+  - `ModJoeVampire = 755`
 
-  - `ReddDocRadioFung = 756`
+  - `BHMarcusEscort = 756`
 
-  - `ReddDocRadioHoliday = 757`
+  - `BHSuperNewTechnology = 757`
 
-  - `ReddDocRadioJubiley = 758`
+  - `ReddDocRadio = 758`
 
-  - `ReddHubbChildkiller = 759`
+  - `ReddDocRadioTroy = 759`
 
-  - `ReddMarionVinamingo = 760`
+  - `ReddDocRadioFung = 760`
 
-  - `ReddDoctorDelivery = 761`
+  - `ReddDocRadioHoliday = 761`
 
-  - `NavHenryProtoMaterials = 762`
+  - `ReddDocRadioJubiley = 762`
 
-  - `NavSoftJob = 763`
+  - `ReddHubbChildkiller = 763`
 
-  - `NcrHatePatrol = 764`
+  - `ReddMarionVinamingo = 764`
 
-  - `NcrSantiagaFindSpyStatus = 765`
+  - `ReddDoctorDelivery = 765`
 
-  - `NcrBusterBrokenrifles = 766`
+  - `NavHenryProtoMaterials = 766`
 
-  - `NcrKessMedBoardStatus = 767`
+  - `NavSoftJob = 767`
 
-  - `NcrDorotyFindHenryPapers = 768`
+  - `NcrHatePatrol = 768`
 
-  - `NcrLeadSmit2Dustybar = 769`
+  - `NcrSantiagaFindSpyStatus = 769`
 
-  - `NcrKyleReddRecon = 770`
+  - `NcrBusterBrokenrifles = 770`
 
-  - `NcrDuppoFindDasies = 771`
+  - `NcrKessMedBoardStatus = 771`
 
-  - `NcrDappoLostC = 772`
+  - `NcrDorotyFindHenryPapers = 772`
 
-  - `QChosen = 773`
+  - `NcrLeadSmit2Dustybar = 773`
 
-  - `NRBarmenEscort = 774`
+  - `NcrKyleReddRecon = 774`
 
-  - `SFAhs7ImperatorFormat = 775`
+  - `NcrDuppoFindDasies = 775`
 
-  - `SFEvaHelpWithZax = 776`
+  - `NcrDappoLostC = 776`
 
-  - `SFKenliImperatorRestore = 777`
+  - `QChosen = 777`
 
-  - `SFLoPanBlackmail = 778`
+  - `NRBarmenEscort = 778`
 
-  - `SFTigangRecipe = 779`
+  - `SFAhs7ImperatorFormat = 779`
 
-  - `SFNarcoman = 780`
+  - `SFEvaHelpWithZax = 780`
 
-  - `SFAhs7Invitations = 781`
+  - `SFKenliImperatorRestore = 781`
 
-  - `SFSlimSidnancy = 782`
+  - `SFLoPanBlackmail = 782`
 
-  - `VCLetterToTodd = 783`
+  - `SFTigangRecipe = 783`
 
-  - `VCValeryMail = 784`
+  - `SFNarcoman = 784`
 
-  - `VCCindyLetter = 785`
+  - `SFAhs7Invitations = 785`
 
-  - `VCHartmannRecon = 786`
+  - `SFSlimSidnancy = 786`
 
-  - `VCHartmanNcrHelp = 787`
+  - `VCLetterToTodd = 787`
 
-  - `VCBarmenDelivery = 788`
+  - `VCValeryMail = 788`
 
-  - `VCCharlie = 789`
+  - `VCCindyLetter = 789`
 
-  - `VCTroyFreshBlood = 790`
+  - `VCHartmannRecon = 790`
 
-  - `VCAndrewDeliveries = 791`
+  - `VCHartmanNcrHelp = 791`
 
-  - `VCBlackEscort = 792`
+  - `VCBarmenDelivery = 792`
 
-  - `VCHartmanFight = 793`
+  - `VCCharlie = 793`
 
-  - `VCLynettScareNewcomers = 794`
+  - `VCTroyFreshBlood = 794`
 
-  - `VCHartmanRifles = 795`
+  - `VCAndrewDeliveries = 795`
 
-  - `VCHeleneTroyBeauty = 796`
+  - `VCBlackEscort = 796`
 
-  - `TribSulikStuff = 797`
+  - `VCHartmanFight = 797`
 
-  - `TribMuscoTest = 798`
+  - `VCLynettScareNewcomers = 798`
 
-  - `TribShamanPowder = 799`
+  - `VCHartmanRifles = 799`
 
-  - `TribMaiaraBook = 800`
+  - `VCHeleneTroyBeauty = 800`
 
-  - `TribManotaNecklace = 801`
+  - `TribSulikStuff = 801`
 
-  - `BHDeadSaboteursCounter = 802`
+  - `TribMuscoTest = 802`
 
-  - `SpecialAndroid = 803`
+  - `TribShamanPowder = 803`
 
-  - `VCLynettRefuse = 804`
+  - `TribMaiaraBook = 804`
 
-  - `DialogTimeout = 805`
+  - `TribManotaNecklace = 805`
 
-  - `EncLoyalityHubologists = 806`
+  - `BHDeadSaboteursCounter = 806`
 
-  - `EncLoyalityNcr = 807`
+  - `SpecialAndroid = 807`
 
-  - `EncLoyalityVCity = 808`
+  - `VCLynettRefuse = 808`
 
-  - `EncLoyalityRedding = 809`
+  - `DialogTimeout = 809`
 
-  - `EncLoyalityBroken = 810`
+  - `EncLoyalityHubologists = 810`
 
-  - `EncLoyalityGecko = 811`
+  - `EncLoyalityNcr = 811`
 
-  - `EncLoyalityArroyo = 812`
+  - `EncLoyalityVCity = 812`
 
-  - `EncLoyalityKlamath = 813`
+  - `EncLoyalityRedding = 813`
 
-  - `EncLoyalityModoc = 814`
+  - `EncLoyalityBroken = 814`
 
-  - `EncLoyalityDen = 815`
+  - `EncLoyalityGecko = 815`
 
-  - `EncLoyalityReno = 816`
+  - `EncLoyalityArroyo = 816`
 
-  - `EncLoyalityEnclave = 817`
+  - `EncLoyalityKlamath = 817`
 
-  - `EncLoyalitySf = 818`
+  - `EncLoyalityModoc = 818`
 
-  - `ModLourenceToxinRecipe = 819`
+  - `EncLoyalityDen = 819`
 
-  - `SFChitinArmorRecipeKnown = 820`
+  - `EncLoyalityReno = 820`
 
-  - `SpyCathActive = 821`
+  - `EncLoyalityEnclave = 821`
 
-  - `HasNotCard = 822`
+  - `EncLoyalitySf = 822`
 
-  - `SexExp = 823`
+  - `ModLourenceToxinRecipe = 823`
 
-  - `ScenFraction = 824`
+  - `SFChitinArmorRecipeKnown = 824`
 
-  - `ArroyoDocHealing = 825`
+  - `SpyCathActive = 825`
 
-  - `AtollTesla = 826`
+  - `HasNotCard = 826`
 
-  - `AtollMoney = 827`
+  - `SexExp = 827`
 
-  - `BHEscortNpcId = 828`
+  - `ScenFraction = 828`
 
-  - `ScenBosSoldier = 829`
+  - `ArroyoDocHealing = 829`
 
-  - `SFInvasionBadge = 830`
+  - `AtollTesla = 830`
 
-  - `ScenBosScriber = 831`
+  - `AtollMoney = 831`
 
-  - `ScenEnclaveSoldier = 832`
+  - `BHEscortNpcId = 832`
 
-  - `ScenEnclaveScient = 833`
+  - `ScenBosSoldier = 833`
 
-  - `DenJaneTraderFred = 834`
+  - `SFInvasionBadge = 834`
 
-  - `DenJaneJobCounter = 835`
+  - `ScenBosScriber = 835`
 
-  - `DenJoeyCounter = 836`
+  - `ScenEnclaveSoldier = 836`
 
-  - `DenLaraBosCounter = 837`
+  - `ScenEnclaveScient = 837`
 
-  - `DenJaneTraderMom = 838`
+  - `DenJaneTraderFred = 838`
 
-  - `DenNarcCommMember = 839`
+  - `DenJaneJobCounter = 839`
 
-  - `DenJaneTraderLean = 840`
+  - `DenJoeyCounter = 840`
 
-  - `EncOceanTraderFamiliar = 841`
+  - `DenLaraBosCounter = 841`
 
-  - `ModBaltasArmor1 = 842`
+  - `DenJaneTraderMom = 842`
 
-  - `GeckGaroldTrain = 843`
+  - `DenNarcCommMember = 843`
 
-  - `GeckSkitrTransit = 844`
+  - `DenJaneTraderLean = 844`
 
-  - `KlamBaknerBeer = 845`
+  - `EncOceanTraderFamiliar = 845`
 
-  - `ModBaltasArmor = 846`
+  - `ModBaltasArmor1 = 846`
 
-  - `KlamVaccination = 847`
+  - `GeckGaroldTrain = 847`
 
-  - `KlamVaccinationB1 = 848`
+  - `GeckSkitrTransit = 848`
 
-  - `KlamVaccinationB2 = 849`
+  - `KlamBaknerBeer = 849`
 
-  - `KlamVaccinationB3 = 850`
+  - `ModBaltasArmor = 850`
 
-  - `KlamGoldBeer = 851`
+  - `KlamVaccination = 851`
 
-  - `KlamSallyPay = 852`
+  - `KlamVaccinationB1 = 852`
 
-  - `ModBaltasArmor2 = 853`
+  - `KlamVaccinationB2 = 853`
 
-  - `KlamVicFixittrash = 854`
+  - `KlamVaccinationB3 = 854`
 
-  - `ModHoseTools = 855`
+  - `KlamGoldBeer = 855`
 
-  - `ModVampireReaction = 856`
+  - `KlamSallyPay = 856`
 
-  - `NcrAlexQuestStatus = 857`
+  - `ModBaltasArmor2 = 857`
 
-  - `NcrDustyPartyStatusChar = 858`
+  - `KlamVicFixittrash = 858`
 
-  - `NcrMiraTroubleStatusChar = 859`
+  - `ModHoseTools = 859`
 
-  - `NcrBeggarTalk = 860`
+  - `ModVampireReaction = 860`
 
-  - `NcrDorothyGammaStatusChar = 861`
+  - `NcrAlexQuestStatus = 861`
 
-  - `NcrDumontBrkradioStatusChar = 862`
+  - `NcrDustyPartyStatusChar = 862`
 
-  - `NcrCaptainFlirtStatusChar = 863`
+  - `NcrMiraTroubleStatusChar = 863`
 
-  - `NcrIsNightGuardAccessFranted = 864`
+  - `NcrBeggarTalk = 864`
 
-  - `NcrClausHistory = 865`
+  - `NcrDorothyGammaStatusChar = 865`
 
-  - `NcrJubileyTailsStatus = 866`
+  - `NcrDumontBrkradioStatusChar = 866`
 
-  - `NcrRondoDorotyStatus = 867`
+  - `NcrCaptainFlirtStatusChar = 867`
 
-  - `NcrFergusStory = 868`
+  - `NcrIsNightGuardAccessFranted = 868`
 
-  - `NcrCaptainSmitAccessGranted = 869`
+  - `NcrClausHistory = 869`
 
-  - `NcrJubileyTailsCounter = 870`
+  - `NcrJubileyTailsStatus = 870`
 
-  - `NcrBusterDorotyStatus = 871`
+  - `NcrRondoDorotyStatus = 871`
 
-  - `NcrFergusSecret = 872`
+  - `NcrFergusStory = 872`
 
-  - `NcrGunterStory = 873`
+  - `NcrCaptainSmitAccessGranted = 873`
 
-  - `ScenRangerRank = 874`
+  - `NcrJubileyTailsCounter = 874`
 
-  - `NcrDustyFoodDeliveryStatus = 875`
+  - `NcrBusterDorotyStatus = 875`
 
-  - `NcrPlayerLeadSmit2Dustybar = 876`
+  - `NcrFergusSecret = 876`
 
-  - `NcrKarlStory = 877`
+  - `NcrGunterStory = 877`
 
-  - `NcrCarlsonStory = 878`
+  - `ScenRangerRank = 878`
 
-  - `NcrKukComp = 879`
+  - `NcrDustyFoodDeliveryStatus = 879`
 
-  - `NcrMicQStatus = 880`
+  - `NcrPlayerLeadSmit2Dustybar = 880`
 
-  - `ScenRanger = 881`
+  - `NcrKarlStory = 881`
 
-  - `NcrDumontHistory = 882`
+  - `NcrCarlsonStory = 882`
 
-  - `NcrMicQCptnDumbCounter = 883`
+  - `NcrKukComp = 883`
 
-  - `NcrPlayerHasMultipass = 884`
+  - `NcrMicQStatus = 884`
 
-  - `NcrSmitVsVestinResult = 885`
+  - `ScenRanger = 885`
 
-  - `NRJukeboxSeen = 886`
+  - `NcrDumontHistory = 886`
 
-  - `VCTrainigAccess = 887`
+  - `NcrMicQCptnDumbCounter = 887`
 
-  - `NcrLennyFight = 888`
+  - `NcrPlayerHasMultipass = 888`
 
-  - `NcrRatchPlayerPoints = 889`
+  - `NcrSmitVsVestinResult = 889`
 
-  - `NRJesusTrain = 890`
+  - `NRJukeboxSeen = 890`
 
-  - `PurgSuppluysTaken = 891`
+  - `VCTrainigAccess = 891`
 
-  - `NcrWestinPillsStatus = 892`
+  - `NcrLennyFight = 892`
 
-  - `NcrWestinPlayerGetPrepayment = 893`
+  - `NcrRatchPlayerPoints = 893`
 
-  - `SFHubJudgementIgnatStory = 894`
+  - `NRJesusTrain = 894`
 
-  - `ReddMinesPlayerThief = 895`
+  - `PurgSuppluysTaken = 895`
 
-  - `ReddDocMedicals = 896`
+  - `NcrWestinPillsStatus = 896`
 
-  - `NcrWestinPills = 897`
+  - `NcrWestinPlayerGetPrepayment = 897`
 
-  - `SFHubbStatus = 898`
+  - `SFHubJudgementIgnatStory = 898`
 
-  - `SFInvasionSandbagsTaken = 899`
+  - `ReddMinesPlayerThief = 899`
 
-  - `SFInvasionSandbagsGiven = 900`
+  - `ReddDocMedicals = 900`
 
-  - `SFImperatorCancelNum = 901`
+  - `NcrWestinPills = 901`
 
-  - `VCShiComputerAccess = 902`
+  - `SFHubbStatus = 902`
 
-  - `TribManotaStory = 903`
+  - `SFInvasionSandbagsTaken = 903`
 
-  - `VCKnowsAboutDelivery = 904`
+  - `SFInvasionSandbagsGiven = 904`
 
-  - `VCCitizenship = 905`
+  - `SFImperatorCancelNum = 905`
 
-  - `VCHartmanFightStatus = 906`
+  - `VCShiComputerAccess = 906`
 
-  - `VCFreshBloodCounter = 907`
+  - `TribManotaStory = 907`
 
-  - `VCForgeryWitnessInhome = 908`
+  - `VCKnowsAboutDelivery = 908`
 
-  - `VCLynetOrMaclure = 909`
+  - `VCCitizenship = 909`
 
-  - `VCMutCharleyHired = 910`
+  - `VCHartmanFightStatus = 910`
 
-  - `VCCavesCounter = 911`
+  - `VCFreshBloodCounter = 911`
 
-  - `VCPrisonerBulled = 912`
+  - `VCForgeryWitnessInhome = 912`
 
-  - `VCLynettTalk = 913`
+  - `VCLynetOrMaclure = 913`
 
-  - `VCPatrolCounter = 914`
+  - `VCMutCharleyHired = 914`
 
-  - `NpcDialogTimeWait = 915`
+  - `VCCavesCounter = 915`
 
-  - `HoloInfo = 916`
+  - `VCPrisonerBulled = 916`
 
-  - `FavoriteItemPid = 917`
+  - `VCLynettTalk = 917`
 
-  - `IsNoFavoriteItem = 918`
+  - `VCPatrolCounter = 918`
 
-  - `Level = 919`
+  - `NpcDialogTimeWait = 919`
 
-  - `KarmaVoting = 920`
+  - `HoloInfo = 920`
 
-  - `IsNoPvp = 921`
+  - `FavoriteItemPid = 921`
 
-  - `IsEndCombat = 922`
+  - `IsNoFavoriteItem = 922`
 
-  - `IsDlgScriptBarter = 923`
+  - `Level = 923`
 
-  - `IsUnlimitedAmmo = 924`
+  - `KarmaVoting = 924`
 
-  - `IsNoDrop = 925`
+  - `IsNoPvp = 925`
 
-  - `IsNoLooseLimbs = 926`
+  - `IsEndCombat = 926`
 
-  - `IsDeadAges = 927`
+  - `IsDlgScriptBarter = 927`
 
-  - `IsNoHeal = 928`
+  - `IsUnlimitedAmmo = 928`
 
-  - `IsInvulnerable = 929`
+  - `IsNoDrop = 929`
 
-  - `IsSpecialDead = 930`
+  - `IsNoLooseLimbs = 930`
 
-  - `IsRangeHth = 931`
+  - `IsDeadAges = 931`
 
-  - `IsNoKnock = 932`
+  - `IsNoHeal = 932`
 
-  - `IsNoSupply = 933`
+  - `IsInvulnerable = 933`
 
-  - `IsNoKarmaOnKill = 934`
+  - `IsSpecialDead = 934`
 
-  - `IsBarterOnlyCash = 935`
+  - `IsRangeHth = 935`
 
-  - `BarterCoefficient = 936`
+  - `IsNoKnock = 936`
 
-  - `TransferType = 937`
+  - `IsNoSupply = 937`
 
-  - `TransferContainerId = 938`
+  - `IsNoKarmaOnKill = 938`
 
-  - `IsNoBarter = 939`
+  - `IsBarterOnlyCash = 939`
 
-  - `IsNoSteal = 940`
+  - `BarterCoefficient = 940`
 
-  - `IsNoLoot = 941`
+  - `TransferType = 941`
 
-  - `IsNoPush = 942`
+  - `TransferContainerId = 942`
 
-  - `ItemsWeight = 943`
+  - `IsNoBarter = 943`
 
-  - `ActionPoints = 944`
+  - `IsNoSteal = 944`
 
-  - `CurrentAp = 945`
+  - `IsNoLoot = 945`
 
-  - `BagId = 946`
+  - `IsNoPush = 946`
 
-  - `LastWeaponId = 947`
+  - `ItemsWeight = 947`
 
-  - `LastWeaponNotFound = 948`
+  - `ActionPoints = 948`
 
-  - `HandsProtoItemId = 949`
+  - `CurrentAp = 949`
 
-  - `HandsItemMode = 950`
+  - `BagId = 950`
 
-  - `LastWeaponUse = 951`
+  - `LastWeaponId = 951`
 
-  - `IsNoItemGarbager = 952`
+  - `LastWeaponNotFound = 952`
 
-  - `TownSupplyVictimId = 953`
+  - `HandsProtoItemId = 953`
 
-  - `TownSupplyHostileId = 954`
+  - `HandsItemMode = 954`
 
-  - `TravellerRoute = 955`
+  - `LastWeaponUse = 955`
 
-  - `V13Dclaw = 956`
+  - `IsNoItemGarbager = 956`
 
-  - `VCAmandaHelpJoshua = 957`
+  - `TownSupplyVictimId = 957`
 
-  - `VCMailRemembered = 958`
+  - `TownSupplyHostileId = 958`
 
-  - `VCBeautyHoloRemembered = 959`
+  - `TravellerRoute = 959`
 
-  - `VCityCommonBarkusTimeSay = 960`
+  - `V13Dclaw = 960`
 
-  - `SquadMarchSquads = 961`
+  - `VCAmandaHelpJoshua = 961`
 
-  - `SquadMarchQueue = 962`
+  - `VCMailRemembered = 962`
 
-  - `VCHartmanMarch = 963`
+  - `VCBeautyHoloRemembered = 963`
 
-  - `VCHartmannClearCave = 964`
+  - `VCityCommonBarkusTimeSay = 964`
 
-  - `VCDeadAllyCounter = 965`
+  - `SquadMarchSquads = 965`
 
-  - `VCGuardRank = 966`
+  - `SquadMarchQueue = 966`
 
-  - `VCReconCaveId = 967`
+  - `VCHartmanMarch = 967`
 
-  - `VCGuardsmanTriggerPlayerId = 968`
+  - `VCHartmannClearCave = 968`
 
-  - `VCLynettArest = 969`
+  - `VCDeadAllyCounter = 969`
 
-  - `VCLynettForgery = 970`
+  - `VCGuardRank = 970`
 
-  - `VCLynettPrisonerId = 971`
+  - `VCReconCaveId = 971`
 
-  - `ReddingMortonBrothers = 972`
+  - `VCGuardsmanTriggerPlayerId = 972`
 
-  - `SpecialEncounterBaxChurch = 973`
+  - `VCLynettArest = 973`
 
-  - `SpecialEncounteTim = 974`
+  - `VCLynettForgery = 974`
 
-  - `RacingSneakersTrap = 975`
+  - `VCLynettPrisonerId = 975`
 
-  - `SpecialEncounterBridge = 976`
+  - `ReddingMortonBrothers = 976`
 
-  - `SpecialEncounterHoly1 = 977`
+  - `SpecialEncounterBaxChurch = 977`
 
-  - `SpecialEncounterHoly2 = 978`
+  - `SpecialEncounteTim = 978`
 
-  - `SpecialEncounterToxic = 979`
+  - `RacingSneakersTrap = 979`
 
-  - `SpecialEncounterPariah = 980`
+  - `SpecialEncounterBridge = 980`
 
-  - `SpecialEncounterBrahmin = 981`
+  - `SpecialEncounterHoly1 = 981`
 
-  - `SpecialEncounterWhale = 982`
+  - `SpecialEncounterHoly2 = 982`
 
-  - `SpecialEncounterHead = 983`
+  - `SpecialEncounterToxic = 983`
 
-  - `SpecialEncounterShuttle = 984`
+  - `SpecialEncounterPariah = 984`
 
-  - `SpecialEncounterGuardian = 985`
+  - `SpecialEncounterBrahmin = 985`
 
-  - `SpecialEncounterWoodsman = 986`
+  - `SpecialEncounterWhale = 986`
 
-  - `SpecialEncounterUnwashed = 987`
+  - `SpecialEncounterHead = 987`
 
-  - `SpecialEncounterTeleport = 988`
+  - `SpecialEncounterShuttle = 988`
 
-  - `SpecialWastelandChildren = 989`
+  - `SpecialEncounterGuardian = 989`
 
-  - `SpecialEncounterKotw = 990`
+  - `SpecialEncounterWoodsman = 990`
 
-  - `SpecialSoldierHolo = 991`
+  - `SpecialEncounterUnwashed = 991`
 
-  - `SpecialTrapperHolo = 992`
+  - `SpecialEncounterTeleport = 992`
 
-  - `SpecialDollHolo = 993`
+  - `SpecialWastelandChildren = 993`
 
-  - `SpecialEncounterZergLaboratory = 994`
+  - `SpecialEncounterKotw = 994`
 
-  - `SpecialEncounterDoughnutWarehouse = 995`
+  - `SpecialSoldierHolo = 995`
 
-  - `SpecialEncounterAtomChurch = 996`
+  - `SpecialTrapperHolo = 996`
 
-  - `GeckoFindWoody = 997`
+  - `SpecialDollHolo = 997`
 
-  - `NcrDappoLostCCtatus = 998`
+  - `SpecialEncounterZergLaboratory = 998`
+
+  - `SpecialEncounterDoughnutWarehouse = 999`
+
+  - `SpecialEncounterAtomChurch = 1000`
+
+  - `GeckoFindWoody = 1001`
+
+  - `NcrDappoLostCCtatus = 1002`
 
 * `MapProperty`
 
@@ -16834,33 +16959,33 @@
 
   - `Automaps = 4`
 
-  - `MaxPlayers = 5`
+  - `AutoGarbage = 5`
 
-  - `AutoGarbage = 6`
+  - `GeckVisible = 6`
 
-  - `GeckVisible = 7`
+  - `EntranceScript = 7`
 
-  - `EntranceScript = 8`
+  - `WorldX = 8`
 
-  - `WorldX = 9`
+  - `WorldY = 9`
 
-  - `WorldY = 10`
+  - `Radius = 10`
 
-  - `Radius = 11`
+  - `Hidden = 11`
 
-  - `Hidden = 12`
+  - `ToGarbage = 12`
 
-  - `ToGarbage = 13`
+  - `Color = 13`
 
-  - `Color = 14`
+  - `IsEncounter = 14`
 
-  - `IsEncounter = 15`
+  - `GECachesCacheChecked = 15`
 
-  - `GECachesCacheChecked = 16`
+  - `RacingCheckpointNumber = 16`
 
-  - `RacingCheckpointNumber = 17`
+  - `StorehouseContId = 17`
 
-  - `StorehouseContId = 18`
+  - `MaxPlayers = 18`
 
   - `GeckCityMembers = 19`
 

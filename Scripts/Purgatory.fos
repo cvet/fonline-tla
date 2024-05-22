@@ -15,7 +15,7 @@
 #define STAGE_FIGHT           (3) // Открытие дверей во внутренний двор. Начало сражение.
 #define STAGE_FINISH          (4) // Открытие дверей во внешний мир, бой закончен
 
-#define _PlayerName           #(cr)(cr.IsOwnedByPlayer() ? Obsolete::GetPlayerName(cr.Id) : "@msg DLG " + STR_NPC_NAME(cr.DialogId, cr.ProtoId) + "@")
+#define _PlayerName           #(cr)(cr.IsControlledByPlayer ? Obsolete::GetPlayerName(cr.Id) : "@msg DLG " + STR_NPC_NAME(cr.DialogId, cr.ProtoId) + "@")
 
 #define ANSWER_CONFIRM_INVITE (0)
 #define ANSWER_REJECT_INVITE  (1)
@@ -57,7 +57,7 @@ class BattleTeam
     bool LastRequestAccepted;
     int BattlePoints; // Игровые очки, исходя из количества очков команды формируется призовой фонд
     bool Winner;
-    uint Color;
+    ucolor Color;
 
     BattleTeam()
     {
@@ -123,7 +123,7 @@ class BattleTeam
         if (crId != ZERO_IDENT) {
             Critter cr = Game.GetCritter(crId);
             if (valid(cr)) {
-                if (cr.IsOwnedByPlayer()) {
+                if (cr.IsControlledByPlayer) {
                     any[] data = {Index, cr.Id};
                     Game.DeferredCall(SECOND_TICKS(10), CheckInvite, data);
                     SayExtended::ShowDialogBox(cr, Tla::DialogboxPurgatoryInvite);
@@ -200,7 +200,7 @@ class BattleInfo
         Callback = callback;
     }
 
-    void AddTeam(hstring entry, ident mapId, uint color, IBattleTeamInviteCallback callback)
+    void AddTeam(hstring entry, ident mapId, ucolor color, IBattleTeamInviteCallback callback)
     {
         BattleTeam t = BattleTeam();
         t.StartMap = mapId;
@@ -341,7 +341,7 @@ class BattleInfo
         for (uint i = 0, l = Teams.length(); i < l; i++) {
             for (uint j = 0, k = Teams[i].Players.length(); j < k; j++) {
                 cr = Game.GetCritter(Teams[i].Players[j]);
-                if (valid(cr) && cr.IsNpc()) {
+                if (valid(cr) && !cr.IsControlledByPlayer) {
                     for (uint m = 0, n = Teams.length(); m < n; m++) {
                         if (i != m) {
                             for (uint x = 0, z = Teams[m].Players.length(); x < z; x++) {
@@ -351,7 +351,7 @@ class BattleInfo
                         }
                         NpcPlanes::AddWalkPlane(cr, Teams[m].StartEntry, 5, true);
                     }
-                    cr.AddTimeEvent(cte_BattleNpcSearchForTarget, REAL_MINUTE(5), 0);
+                    cr.AddTimeEvent(cte_BattleNpcSearchForTarget, Time::RealMinute(5), 0);
                 }
             }
         }
@@ -398,9 +398,9 @@ class BattleInfo
         for (uint i = 0, l = Teams.length(); i < l; i++) {
             for (uint j = 0, k = Teams[i].Players.length(); j < k; j++) {
                 cr = Game.GetCritter(Teams[i].Players[j]);
-                if (valid(cr) && cr.IsNpc()) {
+                if (valid(cr) && !cr.IsControlledByPlayer) {
                     // НПЦ возвращаются на домашние позиции, иначе карта не будет удалена да и вообще возможны проблемы
-                    cr.AddTimeEvent(cte_RemoveNpc, REAL_MINUTE(Game.Random(1, 2)), 0);
+                    cr.AddTimeEvent(cte_RemoveNpc, Time::RealMinute(Game.Random(1, 2)), 0);
                 }
             }
         }
@@ -515,7 +515,7 @@ void dlg_TeamCount(Critter player, Critter npc, string& lexems)
 
 uint cte_RemoveNpc(Critter cr, any identifier, uint& rate)
 {
-    if (cr.IsNpc()) {
+    if (!cr.IsControlledByPlayer) {
         if (cr.HomeMapId != ZERO_IDENT && Game.GetMap(cr.HomeMapId) !is null) {
             Obsolete::CritterTransitToMapCoords(cr, cr.HomeMapId, cr.HomeHexX, cr.HomeHexY, cr.HomeDir);
             return 0;
@@ -542,7 +542,7 @@ uint cte_BattleNpcSearchForTarget(Critter cr, any identifier, uint& rate)
             }
         }
     }
-    return REAL_MINUTE(1);
+    return Time::RealMinute(1);
 }
 
 // Предметы
@@ -561,19 +561,19 @@ void _BattleDoorInit(Item item, bool firstTime)
 bool _UseBattleDoor(Item item, Critter cr, CritterProperty skill)
 {
     if (int(bInfo.Stage) < item.Val1) {
-        cr.SayMsg(SAY_NETMSG, TEXTMSG_TEXT, STR_STAGE_ERROR);
+        cr.SayMsg(SAY_NETMSG, TextPackName::Text, STR_STAGE_ERROR);
         return true;
     }
     BattleTeam bt = bInfo.GetCritterTeam(cr.Id);
     if (item.Val2 > 0) {
         if (!valid(bt)) {
-            cr.SayMsg(SAY_NETMSG, TEXTMSG_TEXT, STR_PLAYER_ERROR);
+            cr.SayMsg(SAY_NETMSG, TextPackName::Text, STR_PLAYER_ERROR);
             return true;
         }
     }
     if (item.Val3 > 0) {
         if (!bt.Winner) {
-            cr.SayMsg(SAY_NETMSG, TEXTMSG_TEXT, STR_WINNER_ERROR);
+            cr.SayMsg(SAY_NETMSG, TextPackName::Text, STR_WINNER_ERROR);
             return true;
         }
     }
@@ -633,7 +633,7 @@ void PlayerJoinedMessage(Critter cr, Critter crTo)
     lexems += "$team" + (team.Index + 1) + "$teamColor" + team.Color;
     lexems += "$name" + _PlayerName(cr);
     DL(lexems);
-    crTo.SayMsg(SAY_NETMSG, TEXTMSG_TEXT, STR_PLAYER_JOINED, lexems);
+    crTo.SayMsg(SAY_NETMSG, TextPackName::Text, STR_PLAYER_JOINED, lexems);
 }
 
 void PlayerDeadMessage(Critter crDead, Critter crKiller, Map map)
@@ -649,7 +649,7 @@ void PlayerDeadMessage(Critter crDead, Critter crKiller, Map map)
         lexems += "$team2Color" + teamKill.Color + "$killer" + _PlayerName(crKiller);
         Critter[] critters = map.GetCritters(CritterFindType::Players);
         for (uint i = 0; i < critters.length(); i++) {
-            critters[i].SayMsg(SAY_NETMSG, TEXTMSG_TEXT, STR_KILL, lexems);
+            critters[i].SayMsg(SAY_NETMSG, TextPackName::Text, STR_KILL, lexems);
         }
         DL(lexems);
     }
@@ -696,10 +696,10 @@ int GetPoints(Critter cr, Critter killer)
         return -1;
     }
     int points = 1;
-    if (killer.IsOwnedByPlayer()) {
+    if (killer.IsControlledByPlayer) {
         points++;
     }
-    if (cr.IsOwnedByPlayer()) {
+    if (cr.IsControlledByPlayer) {
         points++;
     }
     if (killer.Level <= cr.Level) {
@@ -732,23 +732,23 @@ void test(Critter crp, any id)
     lexems += "$team2Color" + COLOR_BLUE + "$killer" + _PlayerName(crp);
     Critter[] critters = crp.GetMap().GetCritters(CritterFindType::Players);
     for (uint i = 0; i < critters.length(); i++) {
-        critters[i].SayMsg(SAY_NETMSG, TEXTMSG_TEXT, STR_KILL, lexems);
+        critters[i].SayMsg(SAY_NETMSG, TextPackName::Text, STR_KILL, lexems);
     }
     DL(lexems);
 }
 
 ///@ Property Location PrivateServer uint LastLootTransfer
 
-#define TIME_NEXT_RADIO_STAGE1 (REAL_MINUTE(5))
+#define TIME_NEXT_RADIO_STAGE1 (Time::RealMinute(5))
 #define STR_RADIO_STAGE1 \
     (7120) // Внимание! Открыт набор участников для Испытания в Чистилище. Для того, чтобы подать заявку найдите Экзекутора на входе любого города Пустоши.
 #define STR_KILL          (7121) // Мощный электрически разряд из пипбоя отправляет вас на небеса. Правда, вам показалось, что удар был нанесен в шею, откуда-то сзади.
 #define STR_ITEMS         (7122)
 #define SPAWN_ENTRY       #(locPid)((locPid == Content::Location::replication_hell) ? hstring("242") : hstring("0"))
-#define ENTRY_NOPVP_FIRST (100)            // Первый спецгекс нопвп зоны
-#define ENTRY_NOPVP_LAST  (103)            // Первый спецгекс нопвп зоны
-#define CTE_NOPVP_OFF     (42)             // Идентификатор события "очистить нопвп режим"
-#define TIME_CHECK        (REAL_MINUTE(1)) // Время проверки, не вышел ли игрок с нопвп зоны
+#define ENTRY_NOPVP_FIRST (100)                 // Первый спецгекс нопвп зоны
+#define ENTRY_NOPVP_LAST  (103)                 // Первый спецгекс нопвп зоны
+#define CTE_NOPVP_OFF     (42)                  // Идентификатор события "очистить нопвп режим"
+#define TIME_CHECK        (Time::RealMinute(1)) // Время проверки, не вышел ли игрок с нопвп зоны
 #define PURGATORY_WORLD_X (800)
 #define PURGATORY_WORLD_Y (500)
 #define ENTRY_TEAM_1      (hstring("33"))
@@ -769,8 +769,8 @@ class PurgatoryStageChangedHandler : IBattleInfoStageChangedHandler, IBattleInfo
     void OnStageChanged(uint8 stage)
     {
         if (bInfo.Stage == STAGE_FIGHT) {
-            Game.RadioMessageMsg(0, TEXTMSG_TEXT, 7132);
-            Location loc = Game.GetLocationByPid(Content::Location::hub_purgatory);
+            Game.RadioMessageMsg(0, TextPackName::Text, 7132);
+            Location loc = Game.GetLocation(Content::Location::hub_purgatory);
             if (valid(loc)) {
                 Map map = loc.GetMapByIndex(0);
                 if (valid(map)) {
@@ -778,7 +778,7 @@ class PurgatoryStageChangedHandler : IBattleInfoStageChangedHandler, IBattleInfo
                     map.LoopTime1 = 25000; // Раз в 25 секунд
                     Critter[] players = map.GetCritters(CritterFindType::Players);
                     for (uint i = 0; i < players.length(); i++) {
-                        players[i].SayMsg(SAY_NETMSG, TEXTMSG_TEXT, 7132);
+                        players[i].SayMsg(SAY_NETMSG, TextPackName::Text, 7132);
                     }
                 }
             }
@@ -787,7 +787,7 @@ class PurgatoryStageChangedHandler : IBattleInfoStageChangedHandler, IBattleInfo
 
         if (bInfo.Stage == STAGE_FINISH) {
             // Завершение испытания
-            Location loc = Game.GetLocationByPid(Content::Location::hub_purgatory);
+            Location loc = Game.GetLocation(Content::Location::hub_purgatory);
             if (valid(loc)) {
                 loc.Hidden = true;
                 loc.AutoGarbage = true;
@@ -799,7 +799,7 @@ class PurgatoryStageChangedHandler : IBattleInfoStageChangedHandler, IBattleInfo
                 Map mapInfo = loc.GetMapByIndex(0);
                 Critter[] players = mapInfo.GetCritters(CritterFindType::Players);
                 for (uint i = 0; i < players.length(); i++) {
-                    players[i].SayMsg(SAY_NETMSG, TEXTMSG_TEXT, 7131, "$team" + (winners.Index + 1));
+                    players[i].SayMsg(SAY_NETMSG, TextPackName::Text, 7131, "$team" + (winners.Index + 1));
                 }
 
                 int points = winners.BattlePoints;
@@ -819,61 +819,61 @@ class PurgatoryStageChangedHandler : IBattleInfoStageChangedHandler, IBattleInfo
                         // Раздача призов
                         // Сначала обязательные призы
                         for (int i = 0; i < alive; i++) {
-                            _RndCont(prizeContainers).AddItem(Content::Item::bottle_caps, points * 50, 0);
-                            _RndCont(prizeContainers).AddItem(Content::Item::metal_armor_mk_ii, 1, 0);
-                            _RndCont(prizeContainers).AddItem(Content::Item::_223_pistol, 1, 0);
-                            _RndCont(prizeContainers).AddItem(Content::Item::_223_fmj, points * 2, 0);
-                            _RndCont(prizeContainers).AddItem(Content::Item::stimpak, 5, 0);
+                            _RndCont(prizeContainers).AddItem(Content::Item::bottle_caps, points * 50, ContainerItemStack::Root);
+                            _RndCont(prizeContainers).AddItem(Content::Item::metal_armor_mk_ii, 1, ContainerItemStack::Root);
+                            _RndCont(prizeContainers).AddItem(Content::Item::_223_pistol, 1, ContainerItemStack::Root);
+                            _RndCont(prizeContainers).AddItem(Content::Item::_223_fmj, points * 2, ContainerItemStack::Root);
+                            _RndCont(prizeContainers).AddItem(Content::Item::stimpak, 5, ContainerItemStack::Root);
                         }
 
                         uint rnd = Game.Random(1, 3);
                         // ПА
                         if (points > 200 && rnd == 1) {
-                            _RndCont(prizeContainers).AddItem(Content::Item::powered_armor, 1, 0);
+                            _RndCont(prizeContainers).AddItem(Content::Item::powered_armor, 1, ContainerItemStack::Root);
                             points -= 50;
                         }
                         if (points > 200) {
-                            _RndCont(prizeContainers).AddItem(Content::Item::cats_paw_issue_5, 2, 0);
+                            _RndCont(prizeContainers).AddItem(Content::Item::cats_paw_issue_5, 2, ContainerItemStack::Root);
                         }
                         if (points > 200) {
                             if (rnd == 1) {
-                                _RndCont(prizeContainers).AddItem(Content::Item::m72_gauss_rifle, Game.Random(1, 2), 0);
-                                _RndCont(prizeContainers).AddItem(Content::Item::_2mm_ec_ammo, Game.Random(333, 444), 0);
+                                _RndCont(prizeContainers).AddItem(Content::Item::m72_gauss_rifle, Game.Random(1, 2), ContainerItemStack::Root);
+                                _RndCont(prizeContainers).AddItem(Content::Item::_2mm_ec_ammo, Game.Random(333, 444), ContainerItemStack::Root);
                             }
                             if (rnd == 2) {
-                                _RndCont(prizeContainers).AddItem(Content::Item::vindicator_minigun, Game.Random(1, 2), 0);
-                                _RndCont(prizeContainers).AddItem(Content::Item::_4_7mm_caseless, Game.Random(4000, 6000), 0);
+                                _RndCont(prizeContainers).AddItem(Content::Item::vindicator_minigun, Game.Random(1, 2), ContainerItemStack::Root);
+                                _RndCont(prizeContainers).AddItem(Content::Item::_4_7mm_caseless, Game.Random(4000, 6000), ContainerItemStack::Root);
                             }
                             if (rnd == 3) {
-                                _RndCont(prizeContainers).AddItem(Content::Item::yk42b_pulse_rifle, Game.Random(1, 2), 0);
-                                _RndCont(prizeContainers).AddItem(Content::Item::turbo_plasma_rifle, Game.Random(1, 2), 0);
-                                _RndCont(prizeContainers).AddItem(Content::Item::micro_fusion_cell, Game.Random(200, 300), 0);
+                                _RndCont(prizeContainers).AddItem(Content::Item::yk42b_pulse_rifle, Game.Random(1, 2), ContainerItemStack::Root);
+                                _RndCont(prizeContainers).AddItem(Content::Item::turbo_plasma_rifle, Game.Random(1, 2), ContainerItemStack::Root);
+                                _RndCont(prizeContainers).AddItem(Content::Item::micro_fusion_cell, Game.Random(200, 300), ContainerItemStack::Root);
                             }
                             points -= 50;
                         }
                         if (points > 150) {
                             for (int i = 0; i < alive; i++) {
-                                _RndCont(prizeContainers).AddItem(Content::Item::combat_armor, 1, 0);
-                                _RndCont(prizeContainers).AddItem(Content::Item::fn_fal_hpfa, 1, 0);
-                                _RndCont(prizeContainers).AddItem(Content::Item::avenger_minigun, 1, 0);
-                                _RndCont(prizeContainers).AddItem(Content::Item::_5mm_jhp, 500, 0);
+                                _RndCont(prizeContainers).AddItem(Content::Item::combat_armor, 1, ContainerItemStack::Root);
+                                _RndCont(prizeContainers).AddItem(Content::Item::fn_fal_hpfa, 1, ContainerItemStack::Root);
+                                _RndCont(prizeContainers).AddItem(Content::Item::avenger_minigun, 1, ContainerItemStack::Root);
+                                _RndCont(prizeContainers).AddItem(Content::Item::_5mm_jhp, 500, ContainerItemStack::Root);
                             }
                             points -= 50;
                         }
                         if (points > 100) {
-                            _RndCont(prizeContainers).AddItem(Content::Item::super_stimpak, 4 * alive, 0);
-                            _RndCont(prizeContainers).AddItem(Content::Item::psycho, 5 * alive, 0);
-                            _RndCont(prizeContainers).AddItem(Content::Item::hypo, 2 * alive, 0);
+                            _RndCont(prizeContainers).AddItem(Content::Item::super_stimpak, 4 * alive, ContainerItemStack::Root);
+                            _RndCont(prizeContainers).AddItem(Content::Item::psycho, 5 * alive, ContainerItemStack::Root);
+                            _RndCont(prizeContainers).AddItem(Content::Item::hypo, 2 * alive, ContainerItemStack::Root);
                             points -= 50;
                         }
                         if (points > 50) {
-                            _RndCont(prizeContainers).AddItem(Content::Item::super_stimpak, 5 * alive, 0);
-                            _RndCont(prizeContainers).AddItem(Content::Item::buffout, 2 * alive, 0);
-                            _RndCont(prizeContainers).AddItem(Content::Item::jet, 2 * alive, 0);
-                            _RndCont(prizeContainers).AddItem(Content::Item::big_book_of_science, 2, 0);
-                            _RndCont(prizeContainers).AddItem(Content::Item::first_aid_book, 2, 0);
-                            _RndCont(prizeContainers).AddItem(Content::Item::scout_handbook, 2, 0);
-                            _RndCont(prizeContainers).AddItem(Content::Item::guns_and_bullets, 2, 0);
+                            _RndCont(prizeContainers).AddItem(Content::Item::super_stimpak, 5 * alive, ContainerItemStack::Root);
+                            _RndCont(prizeContainers).AddItem(Content::Item::buffout, 2 * alive, ContainerItemStack::Root);
+                            _RndCont(prizeContainers).AddItem(Content::Item::jet, 2 * alive, ContainerItemStack::Root);
+                            _RndCont(prizeContainers).AddItem(Content::Item::big_book_of_science, 2, ContainerItemStack::Root);
+                            _RndCont(prizeContainers).AddItem(Content::Item::first_aid_book, 2, ContainerItemStack::Root);
+                            _RndCont(prizeContainers).AddItem(Content::Item::scout_handbook, 2, ContainerItemStack::Root);
+                            _RndCont(prizeContainers).AddItem(Content::Item::guns_and_bullets, 2, ContainerItemStack::Root);
                         }
                     }
                 }
@@ -885,16 +885,16 @@ class PurgatoryStageChangedHandler : IBattleInfoStageChangedHandler, IBattleInfo
     {
         BattleTeam btDead = bInfo.GetCritterTeam(dead.Id);
         BattleTeam btKiller = bInfo.GetCritterTeam(killer.Id);
-        if (valid(btKiller) && valid(btDead) && killer.IsOwnedByPlayer()) {
+        if (valid(btKiller) && valid(btDead) && killer.IsControlledByPlayer) {
             if (btKiller.Index == btDead.Index) {
                 killer.ReplicationMoney -= 1000;
-                killer.SayMsg(SAY_NETMSG, TEXTMSG_TEXT, 7129);
+                killer.SayMsg(SAY_NETMSG, TextPackName::Text, 7129);
             }
             else {
                 uint xp = killer.Level * 100;
                 killer.ReplicationMoney += 300;
                 killer.Experience += xp;
-                killer.SayMsg(SAY_NETMSG, TEXTMSG_TEXT, 7130, "$xp" + xp);
+                killer.SayMsg(SAY_NETMSG, TextPackName::Text, 7130, "$xp" + xp);
             }
         }
     }
@@ -922,7 +922,7 @@ class PurgatoryInviteCallback : IBattleTeamInviteCallback
 {
     void OnInvite(Critter cr, bool transit, BattleTeam team)
     {
-        if (valid(cr) && cr.IsNpc()) {
+        if (valid(cr) && !cr.IsControlledByPlayer) {
             return;
         }
 
@@ -937,12 +937,12 @@ class PurgatoryInviteCallback : IBattleTeamInviteCallback
 
         if (valid(container)) {
             Item[] items = cr.GetItems();
-            Game.MoveItems(items, container, cr.Id.value);
+            Game.MoveItems(items, container, ContainerItemStack(cr.Id.value));
         }
 
-        CritterState::ToDead(cr, Anim2Actions::DeadPulseDust, null);
-        cr.SayMsg(SAY_NETMSG, TEXTMSG_TEXT, STR_KILL);
-        cr.SayMsg(SAY_NETMSG, TEXTMSG_TEXT, STR_ITEMS);
+        CritterState::ToDead(cr, CritterActionAnim::DeadPulseDust, null);
+        cr.SayMsg(SAY_NETMSG, TextPackName::Text, STR_KILL);
+        cr.SayMsg(SAY_NETMSG, TextPackName::Text, STR_ITEMS);
         if (valid(team)) {
             cr.NextReplicationMap = team.StartMap;
             cr.NextReplicationEntry = team.StartEntry;
@@ -966,7 +966,7 @@ void RunPreparationStage()
     bInfo = BattleInfo();
     bInfo.SetStageHandler(stageHandler);
     bInfo.SetCallBack(stageHandler);
-    Location loc = Game.GetLocationByPid(Content::Location::hub_purgatory);
+    Location loc = Game.GetLocation(Content::Location::hub_purgatory);
     if (valid(loc)) {
         loc.Hidden = true;
         loc.AutoGarbage = true;
@@ -990,7 +990,7 @@ void RunPreparationStage()
     // Расстановка нпц-нанимателей
     for (uint i = 0; i < LocPids.length(); i++) {
         if (LOCATION_IS_CITY(LocPids[i]) || LocPids[i] == Content::Location::replication_hell) {
-            loc = Game.GetLocationByPid(LocPids[i]);
+            loc = Game.GetLocation(LocPids[i]);
             if (!valid(loc)) {
                 continue;
             }
@@ -1069,7 +1069,7 @@ void RunPreparationStage()
 void RadioPurgatory1()
 {
     if (valid(bInfo) && bInfo.Stage == STAGE_PREPARE) {
-        Game.RadioMessageMsg(0, TEXTMSG_TEXT, STR_RADIO_STAGE1);
+        Game.RadioMessageMsg(0, TextPackName::Text, STR_RADIO_STAGE1);
         Game.SavedDeferredCall(GAME_SECOND_TO_TICK(TIME_NEXT_RADIO_STAGE1), RadioPurgatory1);
     }
 }
@@ -1079,15 +1079,15 @@ void RadioPurgatory1()
 void _RiperInit(Critter cr, bool firstTime)
 {
     cr.CurrentHp = cr.MaxLife;
-    cr.AddTimeEvent(cte_RipperShout, REAL_MINUTE(5), 0);
+    cr.AddTimeEvent(cte_RipperShout, Time::RealMinute(5), 0);
     cr.OnIdle.Subscribe(_RiperIdle);
 }
 
 uint cte_RipperShout(Critter cr, any identifier, uint& rate)
 {
     if (valid(bInfo) && bInfo.Stage == STAGE_PREPARE) {
-        cr.SayMsg(SAY_SHOUT, TEXTMSG_DLG, DLGSTR(cr.DialogId, 1));
-        return REAL_MINUTE(9);
+        cr.SayMsg(SAY_SHOUT, TextPackName::Dialogs, DLGSTR(cr.DialogId, 1));
+        return Time::RealMinute(9);
     }
     return 0;
 }
@@ -1108,7 +1108,7 @@ void RunBeginStage()
 
     // Добавление в участники каждой команды по одному нпц из хранилища
     // Чтобы бой состоялся, даже есть только один игрок
-    map = Game.GetMapByPid(Content::Map::purgatory3, 0);
+    map = Game.GetMap(Content::Map::purgatory3);
     if (valid(map)) {
         critters.insertLast(map.GetCritters(CritterFindType::AliveNpc));
     }
@@ -1123,7 +1123,7 @@ void RunBeginStage()
     // Удаление экзекуторов
     for (uint i = 0; i < LocPids.length(); i++) {
         if (LOCATION_IS_CITY(LocPids[i]) || LocPids[i] == Content::Location::replication_hell) {
-            loc = Game.GetLocationByPid(LocPids[i]);
+            loc = Game.GetLocation(LocPids[i]);
             if (valid(loc)) {
                 map = loc.GetMapByIndex(0);
                 if (valid(map)) {
@@ -1165,9 +1165,9 @@ void _PurgatoryInit(Map map, bool firstTime)
 void _PurgatoryMapIn(Map map, Critter cr)
 {
     cr.IsNoPvp = false;
-    if (cr.IsOwnedByPlayer() && Entrance::IsCritterInDeadZone(cr, map, 0, ENTRY_NOPVP_FIRST, ENTRY_NOPVP_LAST)) {
+    if (cr.IsControlledByPlayer && Entrance::IsCritterInDeadZone(cr, map, 0, ENTRY_NOPVP_FIRST, ENTRY_NOPVP_LAST)) {
         cr.IsNoPvp = true;
-        cr.SayMsg(SAY_NETMSG, TEXTMSG_TEXT, 1);
+        cr.SayMsg(SAY_NETMSG, TextPackName::Text, 1);
         if (cr.GetTimeEvents(CTE_NOPVP_OFF) == 0) {
             cr.AddTimeEvent(cte_NoPvpOff, TIME_CHECK, CTE_NOPVP_OFF);
         }
@@ -1181,7 +1181,7 @@ void _PurgatoryMapOut(Map map, Critter cr)
         return;
     }
     cr.IsNoPvp = false;
-    cr.SayMsg(SAY_NETMSG, TEXTMSG_TEXT, 2);
+    cr.SayMsg(SAY_NETMSG, TextPackName::Text, 2);
     _BattleMapCritterIn(map, cr);
 }
 
@@ -1195,7 +1195,7 @@ uint cte_NoPvpOff(Critter cr, any identifier, uint& rate)
         return TIME_CHECK;
     }
     cr.IsNoPvp = false;
-    cr.SayMsg(SAY_NETMSG, TEXTMSG_TEXT, 2);
+    cr.SayMsg(SAY_NETMSG, TextPackName::Text, 2);
     return 0;
 }
 
@@ -1267,17 +1267,17 @@ void _PurgatoryLoop(Map map)
     if (valid(bInfo) && bInfo.Stage == STAGE_FIGHT) {
         Location loc = map.GetLocation();
         if (valid(loc)) {
-            if (Game.GetFullSecond() >= loc.LastLootTransfer + REAL_MINUTE(1)) {
+            if (Game.GetFullSecond() >= loc.LastLootTransfer + Time::RealMinute(1)) {
                 loc.LastLootTransfer = Game.GetFullSecond();
                 Map mapFrom = loc.GetMapByIndex(2);
                 Item[] containersTo = map.GetItems(ItemProperty::Type, ItemType::Container);
                 Item[] containersFrom = mapFrom.GetItems(ItemProperty::Type, ItemType::Container);
                 if (containersFrom.length() > 0 && containersTo.length() > 0) {
                     Item contFrom = containersFrom[Game.Random(0, containersFrom.length() - 1)];
-                    Item[] items = contFrom.GetItems(0);
+                    Item[] items = contFrom.GetItems(ContainerItemStack::Root);
                     Item contTo = containersTo[Game.Random(0, containersTo.length() - 1)];
                     DL("Moving " + items.length() + " items to container at x:" + contTo.HexX + "; y:" + contTo.HexY);
-                    Game.MoveItems(items, contTo, 0);
+                    Game.MoveItems(items, contTo, ContainerItemStack::Root);
                 }
             }
         }
@@ -1287,7 +1287,7 @@ void _PurgatoryLoop(Map map)
 // Удаление локации после того, как время истекло
 void DeletePurgatory(any value)
 {
-    Location loc = Game.GetLocation(value);
+    Location loc = Game.GetLocation(ident(value));
     if (valid(loc)) {
         Critter[] critters = {};
         for (uint i = 0; i < 3; i++) {
@@ -1295,7 +1295,7 @@ void DeletePurgatory(any value)
             critters.insertLast(map.GetCritters(CritterFindType::Players));
         }
         for (uint i = 0; i < critters.length(); i++) {
-            critters[i].SayMsg(SAY_NETMSG, TEXTMSG_TEXT, 7128);
+            critters[i].SayMsg(SAY_NETMSG, TextPackName::Text, 7128);
         }
         Game.DeleteLocation(loc.Id);
     }

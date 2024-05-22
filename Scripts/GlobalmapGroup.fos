@@ -36,7 +36,7 @@ void OnLoop()
 
         group.StepCount++;
         if (group.StepCount % 167 == 1) {
-            group.Points.insertLast(array<int> = {int(group.CurX), int(group.CurY), int(COLOR_RED)});
+            group.Points.insertLast(array<int> = {int(group.CurX), int(group.CurY), int(COLOR_RED.value)});
         }
     }
     else if (group.StepCount > 0) {
@@ -46,7 +46,6 @@ void OnLoop()
 
 class GlobalMapGroupClientInfo
 {
-    uint CarId;
     uint CurX, CurY;
     uint ToX, ToY;
     bool IsMoving;
@@ -70,7 +69,6 @@ class GlobalMapGroupClientInfo
     void Clear()
     {
         CurX = CurY = ToX = ToY = 0;
-        CarId = 0;
         IsMoving = false;
         IsEncounter = false;
     }
@@ -78,7 +76,6 @@ class GlobalMapGroupClientInfo
     void Load(Serializator::Serializator load)
     {
         Clear();
-        load.Get(CarId);
         load.Get(CurX);
         load.Get(CurY);
         load.Get(ToX);
@@ -114,7 +111,7 @@ void LoadGlobalMapGroupData(Serializator::Serializator load)
 #ifdef __SERVER
 
 ///@ Setting Common uint GlobalMapGroupMaxCount = 6                     // Макс размер группы
-#define TIME_CAN_FOLLOW_GM (REAL_SECOND(5)) // Can less than Map timeout
+#define TIME_CAN_FOLLOW_GM (Time::RealSecond(5)) // Can less than Map timeout
 
 ///@ Property Game PrivateServer int LastGlobalMapTrip // Индекс последней группы на глобальной карте
 
@@ -172,8 +169,9 @@ void OnCritterIdle(Critter cr)
 {
     // Global map
     if (!valid(cr.GetMap())) {
-        auto group = GetGlobalMapGroupByRuler(cr);
-        if (valid(group)) {
+        auto group = GetGlobalMapGroup(cr);
+
+        if (cr.Id == group.Rule.Id) {
             GM_GroupMove(group);
         }
     }
@@ -181,17 +179,53 @@ void OnCritterIdle(Critter cr)
 
 void OnGlobalMapCritterIn(Critter cr)
 {
-    // Game.Log("OnGlobalMapCritterIn");
-    if (valid(cr)) {
-        GM_AddCritToGroup(cr, ZERO_IDENT);
+    uint tripId = cr.GlobalMapTripId;
+
+    if (!AllGlobalGroups.exists(tripId)) {
+        GlobalMapGroup group = GlobalMapGroup(cr);
+
+        AllGlobalGroups.set(tripId, group);
+
+        GM_GroupStartMove(cr);
+    }
+    else {
+        GlobalMapGroup group = AllGlobalGroups.get(tripId);
+
+        group.CritMove.insertLast(cr);
     }
 }
 
 void OnGlobalMapCritterOut(Critter cr)
 {
-    // Game.Log("OnGlobalMapCritterOut");
-    if (valid(cr)) {
-        GM_LeaveGroup(cr);
+    uint tripId = cr.GlobalMapTripId;
+    GlobalMapGroup group = AllGlobalGroups.get(tripId);
+
+    int index = group.CritMove.findByRef(cr);
+    Assert(index != -1);
+    group.CritMove.removeAt(index);
+
+    if (!group.CritMove.isEmpty()) {
+        if (cr.Id == group.Rule.Id) {
+            // Give rule to critter with highest charisma
+            Critter newRule;
+            int maxCharisma = 0;
+
+            for (uint i = 0; i < group.CritMove.length(); i++) {
+                Critter cr2 = group.CritMove[i];
+                int charisma = cr2.Charisma;
+
+                if (maxCharisma == 0 || charisma > maxCharisma) {
+                    newRule = cr2;
+                    maxCharisma = charisma;
+                }
+            }
+
+            Assert(newRule != null);
+            group.Rule = newRule;
+        }
+    }
+    else {
+        AllGlobalGroups.remove(tripId);
     }
 }
 
@@ -400,7 +434,7 @@ void global_process(int processType, Critter cr, Item car, float& curX, float& c
 
             if (fuel <= 0 || deterioration >= int(car.Car_MaxDeterioration)) {
                 uint str = (fuel <= 0 ? MsgStr::StrCarFuelEmpty : MsgStr::StrCarBroken);
-                cr.SayMsg(SAY_NETMSG, TEXTMSG_GAME, str);
+                cr.SayMsg(SAY_NETMSG, TextPackName::Game, str);
                 speed = 0.0f;
                 return;
             }
@@ -428,7 +462,7 @@ void global_process(int processType, Critter cr, Item car, float& curX, float& c
             // Validate charisma
             Critter leader = group[0];
             if (int(group.length()) > leader.Charisma + leader.PerkMagneticPersonality) {
-                leader.SayMsg(SAY_NETMSG, TEXTMSG_GAME, MsgStr::StrCritBadCharisma);
+                leader.SayMsg(SAY_NETMSG, TextPackName::Game, MsgStr::StrCritBadCharisma);
                 speed = 0.0f; // Stop
                 return;
             }
@@ -472,7 +506,7 @@ void global_process(int processType, Critter cr, Item car, float& curX, float& c
         // Validate charisma
         Critter leader = group[0];
         if (int(group.length()) > leader.Charisma + leader.PerkMagneticPersonality) {
-            leader.SayMsg(SAY_NETMSG, TEXTMSG_GAME, MsgStr::StrCritBadCharisma);
+            leader.SayMsg(SAY_NETMSG, TextPackName::Game, MsgStr::StrCritBadCharisma);
             if (valid(car)) {
                 CheckForLocationWithoutParking(cr, car, curX, curY);
             }
@@ -481,7 +515,7 @@ void global_process(int processType, Critter cr, Item car, float& curX, float& c
 
         // Calculate speed
         speed = GLOBAL_MAP_BASE_SPEED;
-        if (cr.IsOwnedByPlayer() && cr.GetOwner().GetAccess() >= ACCESS_TESTER) {
+        if (cr.IsControlledByPlayer && cr.GetPlayer().GetAccess() >= ACCESS_TESTER) {
             speed *= 20.0f; // All, exclude clients have highly speed
         }
 
@@ -498,7 +532,7 @@ void global_process(int processType, Critter cr, Item car, float& curX, float& c
                 strNum = MsgStr::StrCarBroken;
             }
             if (strNum != 0) {
-                leader.SayMsg(SAY_NETMSG, TEXTMSG_GAME, strNum);
+                leader.SayMsg(SAY_NETMSG, TextPackName::Game, strNum);
                 speed = 0.0f;
                 CheckForLocationWithoutParking(cr, car, curX, curY);
                 return;
@@ -553,11 +587,11 @@ void global_process(int processType, Critter cr, Item car, float& curX, float& c
         if (Worldmap::GetGlobalMapRelief(curXi, curYi) == 0) {
             // Say to leader
             Critter[] group = GlobalmapGroupExtended::GetGlobalGroup(cr);
-            group[0].SayMsg(SAY_NETMSG, TEXTMSG_GAME, MsgStr::StrCantKickOnWater);
+            group[0].SayMsg(SAY_NETMSG, TextPackName::Game, MsgStr::StrCantKickOnWater);
             return;
         }
 
-        GlobalmapGroupExtended::LeaveGlobalGroup(cr);
+        // GlobalmapGroupExtended::LeaveGlobalGroup(cr);
     }
 }
 
@@ -593,7 +627,7 @@ void ScanZone(Critter[] group, int zx, int zy)
 
     for (uint i = 0; i < group.length(); i++) {
         Critter cr = group[i];
-        if (!cr.IsOwnedByPlayer()) {
+        if (!cr.IsControlledByPlayer) {
             continue;
         }
 
@@ -666,7 +700,6 @@ class GlobalMapGroup
     Critter[] CritMove = {};
     Critter Rule;
 
-    ident CarId;
     float CurX, CurY;
     float ToX, ToY;
     float Speed;
@@ -676,6 +709,11 @@ class GlobalMapGroup
     uint EncounterDescriptor;
     uint EncounterTick;
     bool EncounterForce;
+
+    bool IsValid()
+    {
+        return !CritMove.isEmpty();
+    }
 
     void Stop()
     {
@@ -702,51 +740,26 @@ class GlobalMapGroup
         return true;
     }
 
-    GlobalMapGroup()
-    {
-        Clear();
-    }
-
     GlobalMapGroup(Critter rule)
     {
-        Rule = rule;
         Clear();
+        Rule = rule;
         CritMove.insertLast(rule);
     }
 
     Item GetCar()
     {
-        if (CarId != ZERO_IDENT) {
-            Item car = Game.GetItem(CarId);
-            if (valid(car)) {
-                return car;
-            }
-            else {
-                CarId = ZERO_IDENT;
-            }
+        Item[] items = Rule.GetItems(ItemProperty::Type, ItemType::Car);
+        if (!items.isEmpty()) {
+            return items.first();
         }
         return null;
-    }
-
-    void AddCrit(Critter cr)
-    {
-        for (uint i = 0, l = CritMove.length(); i < l; i++) {
-            if (valid(CritMove[i]) && CritMove[i].Id == cr.Id) {
-                return;
-            }
-        }
-        CritMove.insertLast(cr);
-    }
-
-    bool IsValid()
-    {
-        return CritMove.length() > 0;
     }
 
     Critter GetCritter(ident crid)
     {
         for (uint i = 0; i < CritMove.length(); i++) {
-            if (valid(CritMove[i]) && CritMove[i].Id == crid) {
+            if (CritMove[i].Id == crid) {
                 return CritMove[i];
             }
         }
@@ -768,21 +781,9 @@ class GlobalMapGroup
         return CritMove.length();
     }
 
-    void EraseCrit(Critter cr)
-    {
-        for (uint i = 0, l = CritMove.length(); i < l; i++) {
-            if (valid(CritMove[i]) && CritMove[i].Id == cr.Id) {
-                CritMove.removeAt(i);
-                return;
-            }
-        }
-    }
-
     void Clear()
     {
-        CritMove.clear();
         CurX = CurY = ToX = ToY = 0.0f;
-        CarId = ZERO_IDENT;
         IsSetMove = false;
         TimeCanFollow = 0;
         ProcessLastTick = Game.GetTick();
@@ -793,17 +794,14 @@ class GlobalMapGroup
 
     void SendGlobalData(int type)
     {
-        for (uint i = 0, l = CritMove.length(); i < l; i++) {
+        for (uint i = 0; i < CritMove.length(); i++) {
             Critter cr = CritMove[i];
-            if (valid(cr)) {
-                GlobalMapLocations::SetGlobalMapData(type, cr);
-            }
+            GlobalMapLocations::SetGlobalMapData(type, cr);
         }
     }
 
     void Save(Serializator::Serializator save)
     {
-        save.Set(CarId);
         save.Set(int(CurX));
         save.Set(int(CurY));
         save.Set(int(ToX));
@@ -813,83 +811,23 @@ class GlobalMapGroup
     }
 };
 
-dict<ident, GlobalMapGroup> AllGlobalGroups = {};
-
-GlobalMapGroup GetGlobalMapGroupByRuler(Critter cr)
-{
-    // AllGlobalGroups.getIfNotExist( cr.Id, GlobalMapGroup( cr ) );
-
-    return (AllGlobalGroups[cr.Id]);
-}
-
-GlobalMapGroup GetOrCreateGlobalMapGroupByRuler(Critter cr)
-{
-    AllGlobalGroups.setIfNotExist(cr.Id, GlobalMapGroup(cr));
-
-    return (AllGlobalGroups[cr.Id]);
-}
+dict<uint, GlobalMapGroup> AllGlobalGroups = {};
 
 GlobalMapGroup GetGlobalMapGroup(Critter cr)
 {
-    // Для лидера группы
-    auto group = AllGlobalGroups[cr.Id];
-    if (valid(group)) {
-        return group;
-    }
-    if (cr.GlobalMapLeaderId != ZERO_IDENT) {
-        return AllGlobalGroups[cr.GlobalMapLeaderId];
-    }
-    return null;
-}
+    uint tripId = cr.GlobalMapTripId;
 
-// Добавить криттера в группу на глобале к лидеру с id = rule_id
-void GM_AddCritToGroup(Critter cr, ident rule_id)
-{
-    if (!valid(cr)) {
-        ThrowException("Critter is null");
-        return;
+    if (tripId == 0) {
+        ThrowException("Critter is not on global map", cr);
     }
 
-    if (rule_id == ZERO_IDENT) {
-        GM_GroupStartMove(cr);
-        return;
-    }
-
-    Critter rule = Game.GetCritter(rule_id);
-    auto group = GetGlobalMapGroupByRuler(rule);
-    if (!valid(rule) || valid(rule.GetMap()) || !valid(group) || rule.Id != group.Rule.Id) {
-        if (cr.IsNpc()) {
-            Game.Log(" - Invalid rule on global map. Start move alone.\n");
-        }
-        GM_GroupStartMove(cr);
-        return;
-    }
-
-    cr.WorldX = int(group.CurX);
-    cr.WorldY = int(group.CurY);
-
-    // for( auto it = group->CritMove.begin(), end = group->CritMove.end(); it != end; ++it )
-    //    ( *it )->Send_AddCritter( cr );
-    group.AddCrit(cr);
-
-    // cr.GlobalMapLeaderId = rule.Id; //TODO: Свойство только для чтения. Устанавливается в момент выхода игрока на глобальную карту (TrnsitTopGroup(leader)
-    // cr.GlobalMapTripId = rule.GlobalMapTripId;//и это тоже
-
-    // cr->GroupMove = group;
-    // cr->Data.GlobalGroupUid = rule->Data.GlobalGroupUid;
+    return AllGlobalGroups[tripId];
 }
 
 // Начало движения группы на глобальной карте для лидера группы. Он может быть одним криттером в составе группы.
 void GM_GroupStartMove(Critter cr)
 {
-    if (valid(cr.GetMap())) {
-        cr.TransitToGlobal();
-        return;
-    }
-
-    // cr.HexX = 0; //TODO: проверить readonly
-    // cr.HexY = 0;
-    auto group = GetOrCreateGlobalMapGroupByRuler(cr);
+    auto group = GetGlobalMapGroup(cr);
 
     group.Clear();
     group.CurX = cr.WorldX;
@@ -897,17 +835,9 @@ void GM_GroupStartMove(Critter cr)
     group.ToX = group.CurX;
     group.ToY = group.CurY;
     group.Speed = 0.0f;
-    // cr.GlobalMapTripId = GetGlobalMapTripId(); // TODO: check readonly
-
-    Item[] items = cr.GetItems(ItemProperty::Type, ItemType::Car);
-    if (items.length() > 0) {
-        group.CarId = items[0].Id;
-    }
 
     group.TimeCanFollow = Game.GetFullSecond() + TIME_CAN_FOLLOW_GM;
-    // SETFLAG( cr->Flags, FCRIT_RULEGROUP );
 
-    group.AddCrit(cr);
     GlobalMapLocations::SetGlobalMapData(GM_INFO_ALL, cr);
 
     GM_GlobalProcess(cr, group, GLOBAL_PROCESS_START_FAST);
@@ -1051,83 +981,20 @@ void GM_GlobalProcess(Critter cr, GlobalMapGroup group, int type) // 13 hits
     }
 }
 
-void GM_LeaveGroup(Critter critter) // 6 hits
-{
-    Critter cr = Game.GetCritter(critter.Id);
-
-    auto group = GetGlobalMapGroup(cr);
-    // if( valid( cr.GetMap() ) || !valid( group ) || group.CritMove.length() < 2 )
-    if (!valid(group)) {
-        return;
-    }
-
-    if (group.CritMove.length() < 2) {
-        AllGlobalGroups.remove(cr.Id);
-        return;
-    }
-
-    if (cr.Id != group.Rule.Id) {
-        group.EraseCrit(cr);
-        // TODO: уведомления для игроков в составе группы, один из покинул группу
-        // for( auto it = group->CritMove.begin(), end = group->CritMove.end(); it != end; ++it )
-        //    ( *it )->Send_RemoveCritter( cr );
-
-        Item car = cr.GetItem(ItemProperty::Type, ItemType::Car);
-        if (car != null && car.Id == group.CarId) {
-            group.CarId = ZERO_IDENT;
-            GM_GroupSetMove(group, group.ToX, group.ToY, 0.0f);
-        }
-
-        GM_GroupStartMove(cr);
-    }
-    else {
-        // Give rule to critter with highest charisma
-        Critter newRule;
-        int maxCharisma = 0;
-        for (uint i = 0; i < group.CritMove.length(); i++) {
-            Critter cr1 = group.CritMove[i];
-            if (cr1.Id == group.Rule.Id) {
-                continue;
-            }
-            int charisma = cr1.Charisma;
-            if (maxCharisma == 0 || charisma > maxCharisma) {
-                newRule = cr1;
-                maxCharisma = charisma;
-            }
-        }
-        GM_GiveRule(cr, newRule);
-
-        // Call again
-        if (cr.Id != group.Rule.Id) {
-            GM_LeaveGroup(cr);
-        }
-    }
-}
-
 void GM_GiveRule(Critter cr, Critter newRule) // 5 hits
 {
     auto group = GetGlobalMapGroup(cr);
-    if (valid(cr.GetMap()) || !valid(group) || group.CritMove.length() < 2 || group.Rule.Id != cr.Id || cr.Id == newRule.Id) {
+
+    if (group.CritMove.length() < 2 || group.Rule.Id != cr.Id || cr.Id == newRule.Id) {
         return;
     }
 
     group.Rule = newRule;
-    /*
-        for( auto it = newRule->GroupSelf->CritMove.begin(), end = newRule->GroupSelf->CritMove.end(); it != end; ++it )
-        {
-            Critter* cr_ = *it;
-            cr_->GroupMove = newRule->GroupSelf;
-            cr_->Send_CustomCommand( cr, OTHER_FLAGS, cr->Flags );
-            cr_->Send_CustomCommand( newRule, OTHER_FLAGS, newRule->Flags );
-        }*/
 }
 
 void GM_StopGroup(Critter cr) // 3hits
 {
     auto group = GetGlobalMapGroup(cr);
-    if (!valid(group) || valid(cr.GetMap())) {
-        return;
-    }
 
     group.ToX = group.CurX;
     group.ToY = group.CurY;
@@ -1173,13 +1040,13 @@ bool GM_GroupToMap(GlobalMapGroup group, Map map, hstring entry, uint16 mx, uint
             }
 
             if (entryNum < 0) {
-                rule.SayMsg(SAY_NETMSG, TEXTMSG_GAME, STR_GLOBAL_CAR_PLACE_NOT_FOUND);
+                rule.SayMsg(SAY_NETMSG, TextPackName::Game, STR_GLOBAL_CAR_PLACE_NOT_FOUND);
                 return false;
             }
 
             Entrance::MapGetEntryCoords(map, ENTRY_CAR, entryNum, hx, hy);
             if (!map.CheckPlaceForItem(car_hx, car_hy, car.ProtoId)) {
-                rule.SayMsg(SAY_NETMSG, TEXTMSG_GAME, STR_GLOBAL_CAR_PLACE_NOT_FOUND);
+                rule.SayMsg(SAY_NETMSG, TextPackName::Game, STR_GLOBAL_CAR_PLACE_NOT_FOUND);
                 return false;
             }
             if (mdir < 6) {
@@ -1188,7 +1055,7 @@ bool GM_GroupToMap(GlobalMapGroup group, Map map, hstring entry, uint16 mx, uint
         }
         else {
             if (!Entrance::GetEntryFreeHex(map, ENTRY_DEFAULT, hx, hy)) {
-                rule.SayMsg(SAY_NETMSG, TEXTMSG_GAME, STR_GLOBAL_PLACE_NOT_FOUND);
+                rule.SayMsg(SAY_NETMSG, TextPackName::Game, STR_GLOBAL_PLACE_NOT_FOUND);
                 return false;
             }
         }
@@ -1212,7 +1079,7 @@ bool GM_GroupToMap(GlobalMapGroup group, Map map, hstring entry, uint16 mx, uint
             }
 
             if (entryNum < 0) {
-                rule.SayMsg(SAY_NETMSG, TEXTMSG_GAME, STR_GLOBAL_CAR_PLACE_NOT_FOUND);
+                rule.SayMsg(SAY_NETMSG, TextPackName::Game, STR_GLOBAL_CAR_PLACE_NOT_FOUND);
                 return false;
             }
         }
@@ -1226,7 +1093,9 @@ bool GM_GroupToMap(GlobalMapGroup group, Map map, hstring entry, uint16 mx, uint
     if (valid(car)) {
         Game.MoveItem(car, 1, map, car_hx, car_hy);
     }
+
     rule.TransitToMap(map, hx, hy, Game.Random(0, 5));
+
     // Transit other
     for (int i = 0, l = transitCr.length(); i < l; i++) {
         Critter cr1 = transitCr[i];
@@ -1255,12 +1124,9 @@ bool GM_GroupToLoc(Critter rule, ident locId, uint8 entrance, bool force = false
     if (valid(rule.GetMap())) {
         return false;
     }
-    auto group = GetGlobalMapGroupByRuler(rule);
-    if (!valid(group)) {
-        return false;
-    }
-    // if( rule.IsOwnedByPlayer() )//&& rule.IsOffline() )
-    //     return false;                                                      // Offline on encounter
+
+    auto group = GetGlobalMapGroup(rule);
+
     if (locId == ZERO_IDENT) {
         return false;
     }
@@ -1270,38 +1136,38 @@ bool GM_GroupToLoc(Critter rule, ident locId, uint8 entrance, bool force = false
         return false;
     }
 
-    if (!force && !Location::IsKnownLoc(rule, locId) && rule.IsOwnedByPlayer()) {
+    if (!force && !Location::IsKnownLoc(rule, locId) && rule.IsControlledByPlayer) {
         Game.Log(" - Critter '%s' is not known location. CriterId: " + rule.Id);
         return false;
     }
 
     Location loc = Game.GetLocation(locId);
     if (!valid(loc)) {
-        if (rule.IsOwnedByPlayer()) {
+        if (rule.IsControlledByPlayer) {
             Location::UnsetKnownLoc(rule, locId);
         }
         GlobalMapLocations::SetGlobalMapData(GM_INFO_LOCATIONS, rule);
         // rule->Send_GlobalInfo( GM_INFO_LOCATIONS );
-        rule.SayMsg(SAY_NETMSG, TEXTMSG_GAME, STR_GLOBAL_LOCATION_NOT_FOUND);
+        rule.SayMsg(SAY_NETMSG, TextPackName::Game, STR_GLOBAL_LOCATION_NOT_FOUND);
         return false;
     }
 
     // force позволяет избежать проверки расстояния до локи
     if (!force && uint(math::sqrt(float(Math::Pow2(uint16(group.CurX) - loc.WorldX) + Math::Pow2(uint16(group.CurY) - loc.WorldY)))) > loc.Radius) {
-        if (rule.IsOwnedByPlayer()) {
+        if (rule.IsControlledByPlayer) {
             GlobalMapLocations::SetGlobalMapData(GM_INFO_LOCATIONS, rule);
         }
-        rule.SayMsg(SAY_NETMSG, TEXTMSG_GAME, STR_GLOBAL_LOCATION_REMOVED);
+        rule.SayMsg(SAY_NETMSG, TextPackName::Game, STR_GLOBAL_LOCATION_REMOVED);
         return false;
     }
 
     if (!force && !Location::IsCanEnter(loc, group.CritMove.length())) {
-        rule.SayMsg(SAY_NETMSG, TEXTMSG_GAME, STR_GLOBAL_PLAYERS_OVERFLOW);
+        rule.SayMsg(SAY_NETMSG, TextPackName::Game, STR_GLOBAL_PLAYERS_OVERFLOW);
         return false;
     }
 
     if (loc.GetMapCount() == 0) {
-        if (rule.IsOwnedByPlayer()) {
+        if (rule.IsControlledByPlayer) {
             Location::UnsetKnownLoc(rule, locId);
         }
         Game.Log(" - Location is empty.");
@@ -1334,7 +1200,7 @@ bool GM_GroupToLoc(Critter rule, ident locId, uint8 entrance, bool force = false
 
     Map map = loc.GetMapByIndex(mapIndex);
     if (!valid(map)) {
-        if (rule.IsOwnedByPlayer()) {
+        if (rule.IsControlledByPlayer) {
             Location::UnsetKnownLoc(rule, locId);
         }
         Game.Log(" - Map " + mapIndex + " not found in location " + locId);
@@ -1416,7 +1282,7 @@ void GM_GroupMove(GlobalMapGroup group) // 3hits
             }
             group.ProcessLastTick = tick - dtime % Settings.GlobalMapMoveTime;
 
-            if (rule.IsOwnedByPlayer() && rule.IsDead()) // && rule.IsOffline() )
+            if (rule.IsControlledByPlayer && rule.IsDead()) // && rule.IsOffline() )
             {
                 group.Stop();
                 GM_GlobalProcess(rule, group, GLOBAL_PROCESS_STOPPED);
@@ -1477,7 +1343,7 @@ bool GM_CheckEntrance(Location loc, Critter[] arr, uint8 entrance) // 5 hits
 
 void ProcessGlobalMapCommand(Player player, uint8 command, any param1, any param2) // Process_RuleGlobal
 {
-    Critter cl = player.GetOwnedCritter();
+    Critter cl = player.GetControlledCritter();
 
     switch (command) {
     case GM_CMD_FOLLOW_CRIT: {
@@ -1498,9 +1364,9 @@ void ProcessGlobalMapCommand(Player player, uint8 command, any param1, any param
         }
     } break;
     case GM_CMD_SETMOVE: {
-        auto group = GetGlobalMapGroupByRuler(cl);
+        auto group = GetGlobalMapGroup(cl);
 
-        if (valid(cl.GetMap()) || !valid(group) || cl.Id != group.Rule.Id) {
+        if (cl.Id != group.Rule.Id) {
             break;
         }
         if (float(param1) >= float(GM_MAXX) || float(param2) >= float(GM_MAXY)) {
@@ -1516,15 +1382,15 @@ void ProcessGlobalMapCommand(Player player, uint8 command, any param1, any param
     case GM_CMD_STOP:
         break;
     case GM_CMD_TOLOCAL: {
-        auto group = GetGlobalMapGroupByRuler(cl);
-        if (valid(cl.GetMap()) || !valid(group) || cl.Id != group.Rule.Id) {
+        auto group = GetGlobalMapGroup(cl);
+        if (cl.Id != group.Rule.Id) {
             break;
         }
         if (group.EncounterDescriptor > 0) {
             break;
         }
         if (IS_TIMEOUT(cl.TimeoutTransfer)) {
-            cl.SayMsg(SAY_NETMSG, TEXTMSG_GAME, MsgStr::StrTimeoutTransferWait);
+            cl.SayMsg(SAY_NETMSG, TextPackName::Game, MsgStr::StrTimeoutTransferWait);
             break;
         }
 
@@ -1541,8 +1407,8 @@ void ProcessGlobalMapCommand(Player player, uint8 command, any param1, any param
     }
         return;
     case GM_CMD_ANSWER: {
-        auto group = GetGlobalMapGroupByRuler(cl);
-        if (valid(cl.GetMap()) || !valid(group) || cl.Id != group.Rule.Id) {
+        auto group = GetGlobalMapGroup(cl);
+        if (cl.Id != group.Rule.Id) {
             break;
         }
         if (group.EncounterDescriptor == 0 || group.EncounterForce) {
@@ -1566,8 +1432,9 @@ void ProcessGlobalMapCommand(Player player, uint8 command, any param1, any param
         if (!valid(rule) || valid(rule.GetMap())) {
             break;
         }
-        auto group = GetGlobalMapGroupByRuler(rule);
-        if (!valid(group) || rule.Id != group.Rule.Id) {
+
+        auto group = GetGlobalMapGroup(rule);
+        if (rule.Id != group.Rule.Id) {
             break;
         }
 
@@ -1587,7 +1454,7 @@ void ProcessGlobalMapCommand(Player player, uint8 command, any param1, any param
         return;
     case GM_CMD_KICKCRIT: {
         auto group = GetGlobalMapGroup(cl);
-        if (valid(cl.GetMap()) || !valid(group) || group.CritMove.length() < 2 || group.EncounterDescriptor > 0) {
+        if (group.CritMove.length() < 2 || group.EncounterDescriptor > 0) {
             break;
         }
 
@@ -1614,13 +1481,13 @@ void ProcessGlobalMapCommand(Player player, uint8 command, any param1, any param
         GM_GlobalProcess(kick_cr, group, GLOBAL_PROCESS_KICK);
     } break;
     case GM_CMD_GIVE_RULE: {
-        auto group = GetGlobalMapGroupByRuler(cl);
+        auto group = GetGlobalMapGroup(cl);
         // Check
-        if (cl.Id == param1 || valid(cl.GetMap()) || !valid(group) || cl.Id != group.Rule.Id || group.EncounterDescriptor > 0) {
+        if (cl.Id == param1 || cl.Id != group.Rule.Id || group.EncounterDescriptor > 0) {
             break;
         }
         Critter newRule = group.GetCritter(param1);
-        if (!valid(newRule) || !newRule.IsOwnedByPlayer() || !newRule.IsOnline()) {
+        if (!valid(newRule) || !newRule.IsControlledByPlayer || !newRule.IsOnline()) {
             break;
         }
 
@@ -1628,8 +1495,8 @@ void ProcessGlobalMapCommand(Player player, uint8 command, any param1, any param
         GM_StopGroup(cl);
     } break;
     case GM_CMD_ENTRANCES: {
-        auto group = GetGlobalMapGroupByRuler(cl);
-        if (valid(cl.GetMap()) || !valid(group) || group.EncounterDescriptor > 0) {
+        auto group = GetGlobalMapGroup(cl);
+        if (group.EncounterDescriptor > 0) {
             break;
         }
 
@@ -1659,13 +1526,13 @@ void ProcessGlobalMapCommand(Player player, uint8 command, any param1, any param
             }
         }
 
-        // cl.GetOwner().ClientCall.SetCurrentLocationEntrances( loc.ProtoId, allowedEntrances );
-        cl.GetOwner().ClientCall.ShowGMTown(loc.Id, loc.ProtoId, allowedEntrances);
+        // cl.PlayerClientCall.SetCurrentLocationEntrances( loc.ProtoId, allowedEntrances );
+        cl.PlayerClientCall.ShowGMTown(loc.Id, loc.ProtoId, allowedEntrances);
     } break;
     case GM_CMD_VIEW_MAP: {
-        auto group = GetGlobalMapGroupByRuler(cl);
+        auto group = GetGlobalMapGroup(cl);
 
-        if (valid(cl.GetMap()) || !valid(group) || group.EncounterDescriptor > 0) {
+        if (group.EncounterDescriptor > 0) {
             break;
         }
 
@@ -1711,7 +1578,7 @@ void ProcessGlobalMapCommand(Player player, uint8 command, any param1, any param
         uint look = 0; // 0? cr.LookDistance
 
         cl.ViewMap(map, 0, hx, hy, 0);
-        cl.GetOwner().ClientCall.ShowTownView(locId, entrance);
+        cl.PlayerClientCall.ShowTownView(locId, entrance);
 
     } break;
     default:

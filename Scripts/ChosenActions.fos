@@ -1,7 +1,7 @@
 // FOS Server Client
 
 ///@ RemoteCall Server PickItem(uint16 hx, uint16 hy, hstring pid)
-///@ RemoteCall Server MoveInvItem(ident itemId, uint8 slot)
+///@ RemoteCall Server MoveInvItem(ident itemId, CritterItemSlot slot)
 ///@ RemoteCall Server DropInvItem(ident itemId, uint count)
 ///@ RemoteCall Server ReloadWeapon(ident itemId, ident ammoId)
 ///@ RemoteCall Server OperateContainer(bool take, bool all, ident itemId, uint itemCount)
@@ -62,7 +62,7 @@ void SetAction(any[] action, bool append, bool toBeginning)
 #define CHECK_NEED_AP \
 #(needAp) if (chosen.ActionPoints <int(needAp)) \
     { \
-        Game.Message(Game.ReplaceText(Game.GetMsgStr(TEXTMSG_COMBAT, MsgStr::StrCombatNeedAp), "%d", needAp)); \
+        Game.Message(Game.ReplaceText(Game.GetText(TextPackName::Combat, MsgStr::StrCombatNeedAp), "%d", needAp)); \
         break; \
     } \
     if (chosen.CurrentAp / AP_DIVIDER < int(needAp)) \
@@ -168,7 +168,7 @@ void ChosenProcess()
 
         // Can't move
         if (chosen.IsNoMove) {
-            Game.Message(TEXTMSG_GAME, MsgStr::StrCritterCantMove);
+            Game.Message(TextPackName::Game, MsgStr::StrCritterCantMove);
             break;
         }
 
@@ -250,7 +250,7 @@ void ChosenProcess()
         }
 
         Item realItem = cast<Item>(item);
-        bool isMainItem = (realItem == null || realItem.Id == chosen.GetItem(ItemProperty::CritterSlot, SLOT_HAND1).Id);
+        bool isMainItem = (realItem == null || realItem.Id == chosen.GetItem(ItemProperty::CritterSlot, CritterItemSlot::Main).Id);
 
         // Find target
         Critter targetCr;
@@ -321,15 +321,15 @@ void ChosenProcess()
                 break;
             }
             if (item.Weapon_IsTwoHanded && (chosen.IsDamagedRightArm || chosen.IsDamagedLeftArm)) {
-                Game.Message(TEXTMSG_COMBAT, MsgStr::StrCombatNeedDmgArm);
+                Game.Message(TextPackName::Combat, MsgStr::StrCombatNeedDmgArm);
                 break;
             }
             if (chosen.IsDamagedRightArm && chosen.IsDamagedLeftArm && realItem != null) {
-                Game.Message(TEXTMSG_COMBAT, MsgStr::StrCombatNeedDmgTwoArms);
+                Game.Message(TextPackName::Combat, MsgStr::StrCombatNeedDmgTwoArms);
                 break;
             }
             if (item.Deteriorable && item.IsBroken) {
-                Game.Message(TEXTMSG_GAME, MsgStr::StrDeteriorationWeaponBroken);
+                Game.Message(TextPackName::Game, MsgStr::StrDeteriorationWeaponBroken);
                 break;
             }
         }
@@ -463,7 +463,7 @@ void ChosenProcess()
                     return;
                 }
 
-                Game.Message(TEXTMSG_GAME, MsgStr::StrFindpathAimblock);
+                Game.Message(TextPackName::Game, MsgStr::StrFindpathAimblock);
                 break;
             }
 
@@ -485,13 +485,13 @@ void ChosenProcess()
          */
 
         if (use >= USE_PRIMARY && use <= USE_THIRD) {
-            Game.OnCritterActionEx.Fire(true, chosen, ACTION_USE_WEAPON, rate, item);
+            Game.OnCritterActionEx.Fire(true, chosen, CritterAction::UseWeapon, rate, item);
         }
         else if (use == USE_RELOAD) {
-            Game.OnCritterActionEx.Fire(true, chosen, ACTION_RELOAD_WEAPON, 0, item);
+            Game.OnCritterActionEx.Fire(true, chosen, CritterAction::ReloadWeapon, 0, item);
         }
         else {
-            Game.OnCritterActionEx.Fire(true, chosen, ACTION_USE_ITEM, 0, item);
+            Game.OnCritterActionEx.Fire(true, chosen, CritterAction::UseItem, 0, item);
         }
 
         chosen.CurrentAp -= apCost;
@@ -507,7 +507,7 @@ void ChosenProcess()
     case Tla::ChosenMoveItem: {
         ident itemId = ChosenActions[1];
         uint itemCount = ChosenActions[2];
-        uint8 toSlot = ChosenActions[3];
+        CritterItemSlot toSlot = CritterItemSlot(int(ChosenActions[3]));
         bool isSecondTry = (ChosenActions[5] != 0);
 
         Assert(itemCount > 0);
@@ -517,21 +517,19 @@ void ChosenProcess()
             break;
         }
 
-        uint8 fromSlot = item.CritterSlot;
+        CritterItemSlot fromSlot = item.CritterSlot;
         if (fromSlot == toSlot) {
             break;
         }
-        // if( toSlot != SLOT_GROUND ) ??? странное
-        //    break;
 
-        if (toSlot == SLOT_GROUND) {
+        if (toSlot == CritterItemSlot::Outside) {
             if (!Game.OnItemCheckMoveEx.Fire(item, itemCount, chosen, CurMap)) {
                 break;
             }
         }
 
         Item itemSwap = null;
-        if (toSlot != SLOT_INV && toSlot != SLOT_GROUND) {
+        if (toSlot != CritterItemSlot::Inventory && toSlot != CritterItemSlot::Outside) {
             itemSwap = chosen.GetItem(ItemProperty::CritterSlot, toSlot);
         }
 
@@ -539,13 +537,14 @@ void ChosenProcess()
             // Gameplay swap workaround
             if (itemSwap !is null && !isSecondTry) {
                 // Add actions
-                if (Game.OnCritterCheckMoveItemEx.Fire(chosen, itemSwap, SLOT_INV) && Game.OnCritterCheckMoveItemEx.Fire(chosen, item, toSlot)) {
+                if (Game.OnCritterCheckMoveItemEx.Fire(chosen, itemSwap, CritterItemSlot::Inventory) &&
+                    Game.OnCritterCheckMoveItemEx.Fire(chosen, item, toSlot)) {
                     ChosenActions.reverse();
                     ChosenActions.resize(ChosenActions.length() - 7);
                     ChosenActions.reverse();
 
                     SetAction(array<any> = {Tla::ChosenMoveItem, itemId, itemCount, toSlot, 0, 1, 0}, false, true);
-                    SetAction(array<any> = {Tla::ChosenMoveItem, itemSwap.Id, itemSwap.Count, SLOT_INV, 0, 1, 0}, false, true);
+                    SetAction(array<any> = {Tla::ChosenMoveItem, itemSwap.Id, itemSwap.Count, CritterItemSlot::Inventory, 0, 1, 0}, false, true);
                     return;
                 }
             }
@@ -554,10 +553,11 @@ void ChosenProcess()
 
         // Action points
         uint apCost = Settings.RtApCostMoveItemInventory;
-        if ((fromSlot == SLOT_HAND1 && toSlot == SLOT_HAND2) || (fromSlot == SLOT_HAND2 && toSlot == SLOT_HAND1)) {
+        if ((fromSlot == CritterItemSlot::Main && toSlot == CritterItemSlot::Secondary) ||
+            (fromSlot == CritterItemSlot::Secondary && toSlot == CritterItemSlot::Main)) {
             apCost = 0;
         }
-        if (toSlot == SLOT_GROUND) {
+        if (toSlot == CritterItemSlot::Outside) {
             apCost = Settings.RtApCostDropItem;
         }
         CHECK_NEED_AP(apCost);
@@ -565,10 +565,10 @@ void ChosenProcess()
         // Game.CustomCall( "MoveItem " + apCost + " " + itemCount + " " + itemId + " " + ( itemSwap !is null ? itemSwap.Id : 0 ) + " " + toSlot );
 
         Game.CustomCall("MoveItem " + itemCount + " " + itemId + " " + (itemSwap != null ? itemSwap.Id : ZERO_IDENT) + " " +
-                        (toSlot == SLOT_GROUND ? "-1" : "" + toSlot));
+                        (toSlot == CritterItemSlot::Outside ? "-1" : "" + toSlot));
         chosen.CurrentAp -= apCost;
 
-        if (toSlot != SLOT_GROUND) {
+        if (toSlot != CritterItemSlot::Outside) {
             CurPlayer.ServerCall.MoveInvItem(itemId, toSlot);
         }
         else {
@@ -627,7 +627,7 @@ void ChosenProcess()
         if (take || cast<Critter>(to) != null) {
             Critter toCr = take ? chosen : cast<Critter>(to);
             if (int(toCr.ItemsWeight) + item.Weight * count > toCr.CarryWeight) {
-                Game.Message(TEXTMSG_GAME, (take ? MsgStr::StrOverweight : MsgStr::StrOvervolume));
+                Game.Message(TextPackName::Game, (take ? MsgStr::StrOverweight : MsgStr::StrOvervolume));
                 break;
             }
         }
@@ -635,7 +635,7 @@ void ChosenProcess()
         // Game.CustomCall( "MoveItemCont " + apCost + " " + count + " " + itemId + " " + itemCont );
         ClientItems::RemoveItem(colType, item, count);
 
-        Game.OnCritterActionEx.Fire(true, chosen, ACTION_OPERATE_CONTAINER, transferType, item);
+        Game.OnCritterActionEx.Fire(true, chosen, CritterAction::OperateContainer, transferType, item);
 
         CurPlayer.ServerCall.OperateContainer(take, false, item.Id, count);
     } break;
@@ -650,17 +650,17 @@ void ChosenProcess()
         ContainerCalcInfo( PupCont2Init, c, w, v, MAX_INT, false );
         if( chosen->GetFreeWeight() < (int) w )
         {
-            AddMess( FOMB_GAME, CurLang.Msg[ TEXTMSG_GAME ].GetStr( MsgStr::StrBarterOverweight ) );
+            AddMess( FOMB_GAME, CurLang.Msg[ TextPackName::Game ].GetStr( MsgStr::StrBarterOverweight ) );
             break;
         }
         else if( chosen->GetFreeVolume() < (int) v )
         {
-            AddMess( FOMB_GAME, CurLang.Msg[ TEXTMSG_GAME ].GetStr( MsgStr::StrBarterOversize ) );
+            AddMess( FOMB_GAME, CurLang.Msg[ TextPackName::Game ].GetStr( MsgStr::StrBarterOversize ) );
             break;
         }
 
         Net_SendItemCont( PupTransferType, PupContId, 0, 0, CONT_GETALL );
-        chosen->Action( ACTION_OPERATE_CONTAINER, PupTransferType * 10 + 1, nullptr );
+        chosen->Action( CritterAction::OperateContainer, PupTransferType * 10 + 1, nullptr );
         chosen->SubAp( chosen->GetApCostMoveItemContainer() );
        }
        break;*/
@@ -672,7 +672,7 @@ void ChosenProcess()
             break;
 
         Net_SendItemCont( PupTransferType, PupContId, 0, 0, CONT_PUTALL );
-        chosen->Action( ACTION_OPERATE_CONTAINER, PupTransferType * 10 + 3, nullptr );
+        chosen->Action( CritterAction::OperateContainer, PupTransferType * 10 + 3, nullptr );
         chosen->SubAp( chosen->GetApCostMoveItemContainer() );
        }
        break;*/
@@ -795,7 +795,7 @@ void ChosenProcess()
         // if( !CurMap->TraceBullet( chosen.GetHexX(), chosen.HexY, cr.HexX, cr.HexY, talkDistance + chosen.Multihex, 0, cr, false, nullptr, 0, nullptr,
         // nullptr, nullptr, true ) )
         // {
-        //    AddMess( FOMB_GAME, CurLang.Msg[ TEXTMSG_GAME ].GetStr( MsgStr::StrFindpathAimblock ) );
+        //    AddMess( FOMB_GAME, CurLang.Msg[ TextPackName::Game ].GetStr( MsgStr::StrFindpathAimblock ) );
         //    break;
         // }
 
@@ -844,7 +844,7 @@ void ChosenProcess()
         if (itemId != ZERO_IDENT) {
             Item item = Game.GetItem(itemId);
             if (item != null) {
-                Game.OnCritterActionEx.Fire(true, chosen, ACTION_PICK_ITEM, 0, item);
+                Game.OnCritterActionEx.Fire(true, chosen, CritterAction::PickItem, 0, item);
             }
         }
     } break;
@@ -920,37 +920,37 @@ void ChosenProcess()
 
 void PickItem(Player player, uint16 hx, uint16 hy, hstring pid)
 {
-    CritterAction::PickItem(player.GetOwnedCritter(), hx, hy, pid);
+    CritterActions::PickItem(player.GetControlledCritter(), hx, hy, pid);
 }
 
 void DropInvItem(Player player, ident itemId, uint count)
 {
-    CritterAction::DropInvItem(player.GetOwnedCritter(), itemId, count);
+    CritterActions::DropInvItem(player.GetControlledCritter(), itemId, count);
 }
 
 void UseSkill(Player player, CritterProperty skill, ident targetCrId, ident targetItemId, hstring sceneryPid, uint16 hx, uint16 hy)
 {
-    CritterAction::UseSkill(player.GetOwnedCritter(), skill, targetCrId, targetItemId, sceneryPid, hx, hy);
+    CritterActions::UseSkill(player.GetControlledCritter(), skill, targetCrId, targetItemId, sceneryPid, hx, hy);
 }
 
-void MoveInvItem(Player player, ident itemId, uint8 slot)
+void MoveInvItem(Player player, ident itemId, CritterItemSlot slot)
 {
-    CritterAction::MoveInvItem(player.GetOwnedCritter(), itemId, slot);
+    CritterActions::MoveInvItem(player.GetControlledCritter(), itemId, slot);
 }
 
 void OperateContainer(Player player, bool take, bool all, ident itemId, uint itemCount)
 {
-    CritterAction::OperateContainer(player.GetOwnedCritter(), take, all, itemId, itemCount);
+    CritterActions::OperateContainer(player.GetControlledCritter(), take, all, itemId, itemCount);
 }
 
 void ReloadWeapon(Player player, ident weaponId, ident ammoId)
 {
-    CritterAction::ReloadWeapon(player.GetOwnedCritter(), weaponId, ammoId);
+    CritterActions::ReloadWeapon(player.GetControlledCritter(), weaponId, ammoId);
 }
 
 void Attack(Player player, ident targetId, uint8 mode)
 {
-    CritterAction::Attack(player.GetOwnedCritter(), targetId, mode);
+    CritterActions::Attack(player.GetControlledCritter(), targetId, mode);
 }
 
 #endif

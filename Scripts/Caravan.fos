@@ -198,7 +198,7 @@ class NpcPosition
 
     Map GetMap()
     {
-        return Game.GetMapByPid(MapProtoId, 0);
+        return Game.GetMap(MapProtoId);
     }
 };
 
@@ -404,10 +404,10 @@ class CaravanCabInfo
         cab.IsNoBlock = false;
         DL("try place brahmins");
         // брамины: 1ый х=х0 у=у+1, второй ч х = х-1 у= у-3? dir=1
-        if (map.IsHexPassed(x, y + 1)) {
+        if (map.IsHexMovable(x, y + 1)) {
             map.AddNpc(Content::Critter::Brahmin, x, y + 1, 1);
         }
-        if (map.IsHexPassed(x - 1, y - 3)) {
+        if (map.IsHexMovable(x - 1, y - 3)) {
             map.AddNpc(Content::Critter::Brahmin, x - 1, y - 3, 1);
         }
         uint num = 0;
@@ -418,7 +418,7 @@ class CaravanCabInfo
                 num = CabItems[i].Amount();
                 if (CabItems[i].IsAppear() && num > 0) {
                     DL("Adding loot to cab");
-                    cab.AddItem(CabItems[i].ItemPid, num, 0);
+                    cab.AddItem(CabItems[i].ItemPid, num, ContainerItemStack::Root);
                 }
             }
         }
@@ -674,7 +674,7 @@ class CaravanInfo
         for (uint i = 0, l = Caravaneers.length(); i < l; i++) {
             Critter guard = Game.GetCritter(Caravaneers[i]);
             if (valid(guard)) {
-                if (guard.IsNpc()) {
+                if (!guard.IsControlledByPlayer) {
                     Game.DeleteCritter(guard);
                     continue;
                 }
@@ -784,7 +784,7 @@ bool GetFreeHex(Map map, uint radius, uint16 hx, uint16 hy)
     for (int i = 0; i < numTry; i++) {
         xDelta = Game.Random(0, radius * 2) - radius;
         yDelta = Game.Random(0, radius * 2) - radius;
-        if (map.IsHexPassed(hx + xDelta, hy + yDelta)) {
+        if (map.IsHexMovable(hx + xDelta, hy + yDelta)) {
             hx += xDelta;
             hy += yDelta;
             return true;
@@ -846,7 +846,7 @@ bool _SayNervous(Critter guard, uint msgID, uint boost)
 {
     DL2("try say nrv" + DLGSTR(guard.DialogId, msgID));
     if (Game.Random(guard.CaravanNervosityLvl + boost, 6) >= 5) {
-        guard.SayMsg(SAY_NORM_ON_HEAD, TEXTMSG_DLG, DLGSTR(guard.DialogId, msgID));
+        guard.SayMsg(SAY_NORM_ON_HEAD, TextPackName::Dialogs, DLGSTR(guard.DialogId, msgID));
         return true;
     }
     return false;
@@ -951,7 +951,7 @@ void _SomeCritterDead(Critter guard, Critter fromCrit, Critter killer)
     }
 
     if (killer.Id == guard.Id) {
-        guard.SayMsg(SAY_NORM_ON_HEAD, TEXTMSG_DLG, DLGSTR(guard.DialogId, PHRASE_KILL_SOMEONE));
+        guard.SayMsg(SAY_NORM_ON_HEAD, TextPackName::Dialogs, DLGSTR(guard.DialogId, PHRASE_KILL_SOMEONE));
     }
 }
 
@@ -970,8 +970,8 @@ bool _GuardAttacked(Critter guard, Critter attacker)
 // охранник обворован
 void _GuardStealing(Critter cr, Critter thief, Item item, uint count)
 {
-    // if( success && thief.IsOwnedByPlayer() )
-    if (thief.IsOwnedByPlayer()) {
+    // if( success && thief.IsControlledByPlayer )
+    if (thief.IsControlledByPlayer) {
         NpcPlanes::AddAttackPlane(cr, 0, thief);
         if (!EnemyStack::CheckEnemyInStack(cr, thief.Id)) {
             EnemyStack::AddEnemyToStack(cr, thief.Id);
@@ -988,7 +988,7 @@ void _VCPatrolDead(Critter cr, Critter killer)
     }
     for (uint i = 0, l = ci.Caravaneers.length(); i < l; i++) {
         Critter player = Game.GetCritter(ci.Caravaneers[i]);
-        if (valid(player) && player.IsOwnedByPlayer()) {
+        if (valid(player) && player.IsControlledByPlayer) {
             player.VCDeadPatrollers += 1;
         }
     }
@@ -1050,14 +1050,14 @@ void _DefaultGuardInit(Critter guard, bool firstTime)
 
 void _GuardDead(Critter cr, Critter killer)
 {
-    if (cr.IsNpc()) {
-        cr.AddTimeEvent(cte_DeleteCaravanGuard, REAL_MINUTE(5), 0);
+    if (!cr.IsControlledByPlayer) {
+        cr.AddTimeEvent(cte_DeleteCaravanGuard, Time::RealMinute(5), 0);
     }
 }
 
 uint cte_DeleteCaravanGuard(Critter cr, any identifier, uint& rate)
 {
-    if (cr.IsNpc()) {
+    if (!cr.IsControlledByPlayer) {
         Game.DeleteCritter(cr);
     }
     return 0;
@@ -1096,13 +1096,13 @@ void _BomberInit(Critter guard, bool firstTime)
 {
     if (firstTime) {
         Item item = guard.AddItem(Content::Item::frag_grenade, 14);
-        FavoriteItem::SetFavoriteItemPid(guard, SLOT_HAND1, Content::Item::frag_grenade);
+        FavoriteItem::SetFavoriteItemPid(guard, CritterItemSlot::Main, Content::Item::frag_grenade);
         guard.AddItem(Content::Item::stimpak, 10);
         guard.AddItem(Content::Item::crowbar, 1);
         guard.AddItem(Content::Item::dynamite, 1);
         Item item1 = guard.AddItem(Content::Item::leather_armor, 1);
-        FavoriteItem::SetFavoriteItemPid(guard, SLOT_ARMOR, Content::Item::leather_armor);
-        guard.ChangeItemSlot(item1.Id, SLOT_ARMOR);
+        FavoriteItem::SetFavoriteItemPid(guard, CritterItemSlot::Armor, Content::Item::leather_armor);
+        guard.ChangeItemSlot(item1.Id, CritterItemSlot::Armor);
     }
 
     guard.SkillThrowing = 300;
@@ -1118,12 +1118,12 @@ void _AnaferonInit(Critter guard, bool firstTime)
 {
     if (firstTime) {
         Item item = guard.AddItem(Content::Item::hunting_rifle, 1);
-        FavoriteItem::SetFavoriteItemPid(guard, SLOT_HAND1, Content::Item::hunting_rifle);
+        FavoriteItem::SetFavoriteItemPid(guard, CritterItemSlot::Main, Content::Item::hunting_rifle);
         guard.AddItem(Content::Item::_223_fmj, 50);
         guard.AddItem(Content::Item::combat_knife, 1);
         Item item1 = guard.AddItem(Content::Item::leather_armor, 1);
-        guard.ChangeItemSlot(item1.Id, SLOT_ARMOR);
-        FavoriteItem::SetFavoriteItemPid(guard, SLOT_ARMOR, Content::Item::leather_armor);
+        guard.ChangeItemSlot(item1.Id, CritterItemSlot::Armor);
+        FavoriteItem::SetFavoriteItemPid(guard, CritterItemSlot::Armor, Content::Item::leather_armor);
         guard.AddItem(Content::Item::healing_powder, 6);
         guard.AddItem(Content::Item::stimpak, 2);
     }
@@ -1137,7 +1137,7 @@ void _VasyaInit(Critter guard, bool firstTime)
 {
     if (firstTime) {
         Item item = guard.AddItem(Content::Item::assault_rifle, 1);
-        FavoriteItem::SetFavoriteItemPid(guard, SLOT_HAND1, Content::Item::assault_rifle);
+        FavoriteItem::SetFavoriteItemPid(guard, CritterItemSlot::Main, Content::Item::assault_rifle);
         guard.AddItem(Content::Item::spiked_knuckles, 1);
         guard.AddItem(Content::Item::_5mm_jhp, 100);
         guard.AddItem(Content::Item::jet, 10);
@@ -1145,8 +1145,8 @@ void _VasyaInit(Critter guard, bool firstTime)
         guard.AddItem(Content::Item::beer, 1);
         guard.AddItem(Content::Item::booze, 1);
         Item item1 = guard.AddItem(Content::Item::metal_armor, 1);
-        FavoriteItem::SetFavoriteItemPid(guard, SLOT_ARMOR, Content::Item::metal_armor);
-        guard.ChangeItemSlot(item1.Id, SLOT_ARMOR);
+        FavoriteItem::SetFavoriteItemPid(guard, CritterItemSlot::Armor, Content::Item::metal_armor);
+        guard.ChangeItemSlot(item1.Id, CritterItemSlot::Armor);
         guard.AddItem(Content::Item::lighter, 1);
         guard.AddItem(Content::Item::cigarettes, 1);
     }
@@ -1163,14 +1163,14 @@ void _KillerInit(Critter guard, bool firstTime)
     if (firstTime) {
         guard.AddItem(Content::Item::plasma_rifle, 1);
         Item item = guard.AddItem(Content::Item::turbo_plasma_rifle, 1);
-        guard.ChangeItemSlot(item.Id, SLOT_HAND2);
-        FavoriteItem::SetFavoriteItemPid(guard, SLOT_HAND1, Content::Item::turbo_plasma_rifle);
+        guard.ChangeItemSlot(item.Id, CritterItemSlot::Secondary);
+        FavoriteItem::SetFavoriteItemPid(guard, CritterItemSlot::Main, Content::Item::turbo_plasma_rifle);
         guard.AddItem(Content::Item::plasma_pistol_ext_cart, 1);
         guard.AddItem(Content::Item::super_sledge, 1);
         guard.AddItem(Content::Item::small_energy_cell, 100);
         guard.AddItem(Content::Item::micro_fusion_cell, 100);
         Item item1 = guard.AddItem(Content::Item::combat_armor_mk_ii, 1);
-        FavoriteItem::SetFavoriteItemPid(guard, SLOT_ARMOR, Content::Item::combat_armor_mk_ii);
+        FavoriteItem::SetFavoriteItemPid(guard, CritterItemSlot::Armor, Content::Item::combat_armor_mk_ii);
         guard.AddItem(Content::Item::super_stimpak, 15);
         guard.AddItem(Content::Item::jet, 4);
         guard.AddItem(Content::Item::psycho, 2);
@@ -1190,8 +1190,8 @@ void _ZombieInit(Critter guard, bool firstTime)
 {
     if (firstTime) {
         Item item = guard.AddItem(Content::Item::_10mm_smg, 1);
-        FavoriteItem::SetFavoriteItemPid(guard, SLOT_HAND1, Content::Item::wakizashi_blade);
-        FavoriteItem::SetFavoriteItemPid(guard, SLOT_HAND2, Content::Item::wakizashi_blade);
+        FavoriteItem::SetFavoriteItemPid(guard, CritterItemSlot::Main, Content::Item::wakizashi_blade);
+        FavoriteItem::SetFavoriteItemPid(guard, CritterItemSlot::Secondary, Content::Item::wakizashi_blade);
         guard.AddItem(Content::Item::_10mm_jhp, 5);
         Item item1 = guard.AddItem(Content::Item::wakizashi_blade, 2);
         guard.AddItem(Content::Item::psycho, 10);
@@ -1217,8 +1217,8 @@ void _MazzyInit(Critter guard, bool firstTime)
 {
     if (firstTime) {
         Item item = guard.AddItem(Content::Item::spiked_knuckles, 1);
-        FavoriteItem::SetFavoriteItemPid(guard, SLOT_HAND1, Content::Item::spiked_knuckles);
-        guard.ChangeItemSlot(item.Id, SLOT_HAND1);
+        FavoriteItem::SetFavoriteItemPid(guard, CritterItemSlot::Main, Content::Item::spiked_knuckles);
+        guard.ChangeItemSlot(item.Id, CritterItemSlot::Main);
     }
 
     // default init
@@ -1229,7 +1229,7 @@ void _RatInit(Critter guard, bool firstTime)
 {
     if (firstTime) {
         Item item = guard.AddItem(Content::Item::independent, 1);
-        FavoriteItem::SetFavoriteItemPid(guard, SLOT_HAND1, Content::Item::independent);
+        FavoriteItem::SetFavoriteItemPid(guard, CritterItemSlot::Main, Content::Item::independent);
         guard.AddItem(Content::Item::_5mm_jhp, 50);
         guard.AddItem(Content::Item::_223_pistol, 1);
         guard.AddItem(Content::Item::_223_fmj, 30);
@@ -1239,8 +1239,8 @@ void _RatInit(Critter guard, bool firstTime)
         guard.AddItem(Content::Item::shovel, 1);
         guard.AddItem(Content::Item::super_stimpak, 1);
         Item item1 = guard.AddItem(Content::Item::metal_armor_mk_ii, 1);
-        FavoriteItem::SetFavoriteItemPid(guard, SLOT_ARMOR, Content::Item::metal_armor_mk_ii);
-        guard.ChangeItemSlot(item1.Id, SLOT_ARMOR);
+        FavoriteItem::SetFavoriteItemPid(guard, CritterItemSlot::Armor, Content::Item::metal_armor_mk_ii);
+        guard.ChangeItemSlot(item1.Id, CritterItemSlot::Armor);
     }
 
     // default init
@@ -1254,8 +1254,8 @@ void _PetreskuInit(Critter guard, bool firstTime)
         guard.AddItem(Content::Item::super_stimpak, 10);
         guard.AddItem(Content::Item::jet, 10);
         Item item1 = guard.AddItem(Content::Item::purple_robe, 1);
-        FavoriteItem::SetFavoriteItemPid(guard, SLOT_ARMOR, Content::Item::purple_robe);
-        guard.ChangeItemSlot(item1.Id, SLOT_ARMOR);
+        FavoriteItem::SetFavoriteItemPid(guard, CritterItemSlot::Armor, Content::Item::purple_robe);
+        guard.ChangeItemSlot(item1.Id, CritterItemSlot::Armor);
     }
 
     guard.PerkBonusHthDamage = 1;
@@ -2965,7 +2965,7 @@ bool _CaravanLeaderOnPlaneEnd(Critter cr, int planeId, int reason, Critter someC
 
     Map map = cr.GetMap();
     if (valid(map)) {
-        if (reason != REASON_SUCCESS && plane.Type == AI_PLANE_WALK && map.IsHexPassed(plane.Walk_HexX, plane.Walk_HexY)) {
+        if (reason != REASON_SUCCESS && plane.Type == AI_PLANE_WALK && map.IsHexMovable(plane.Walk_HexX, plane.Walk_HexY)) {
             plane.Walk_Cut--;
         }
     }
@@ -3148,7 +3148,7 @@ bool _OnTryOpenCabs(Item item, Critter cr, CritterProperty skill)
             return true;
         }
 
-        leader.SayMsg(SAY_SHOUT_ON_HEAD, TEXTMSG_TEXT, STR_DONT_TOUCH);
+        leader.SayMsg(SAY_SHOUT_ON_HEAD, TextPackName::Text, STR_DONT_TOUCH);
         return false;
     }
     return true;
@@ -3197,7 +3197,7 @@ void _CaravanLeaderOnSeeSmthDead(Critter leader, Critter fromCrit, Critter kille
     }
 
     // убит игрок-охранник
-    if (fromCrit.IsOwnedByPlayer()) {
+    if (fromCrit.IsControlledByPlayer) {
         _SetPlayerDead(fromCrit, ci);
         return;
     }
@@ -3207,7 +3207,7 @@ void _CaravanLeaderOnSeeSmthDead(Critter leader, Critter fromCrit, Critter kille
         return;
     }
 
-    if (killer.IsOwnedByPlayer()) {
+    if (killer.IsControlledByPlayer) {
         _SetPlayerThieft(killer, ci);
         _PlayerToCaravanEnemy(killer, ci);
     }
@@ -3227,7 +3227,7 @@ void _CaravanLeaderOnDead(Critter leader, Critter killer)
     if (ci.CaravanStatus > CRV_STATUS_PREPARE && ci.CaravanStatus < CRV_STATUS_END) {
         _SetQuestState(ci, CARAVAN_FAILURE_CARAVANLEADER_DEAD);
         if (valid(killer)) {
-            if (killer.IsOwnedByPlayer()) {
+            if (killer.IsControlledByPlayer) {
                 _SetPlayerKillLeader(killer, ci);
                 _PlayerToCaravanEnemy(killer, ci);
                 ci.RemoveGuard(killer.Id);
@@ -3265,7 +3265,7 @@ bool _CaravanLeaderOnGlobal(Critter leader, int type, Item car, float x, float y
     }
     else {
         for (uint i = 0; i < group.length(); i++) {
-            if (group[i].IsOwnedByPlayer()) {
+            if (group[i].IsControlledByPlayer) {
                 _SetPlayerJoin(group[i], ci);
             }
         }
@@ -3281,7 +3281,7 @@ bool _CaravanLeaderOnGlobal(Critter leader, int type, Item car, float x, float y
     if (type != Tla::GlobalProcessMove) {
         // все точки маршрута пройдены или не назначены
         if (ci.CaravanRoute.RouteEnded()) {
-            Location loc = Game.GetLocationByPid(ci.Leader.EndPos.LocPid);
+            Location loc = Game.GetLocation(ci.Leader.EndPos.LocPid);
             uint endX = loc.WorldX;
             uint endY = loc.WorldY;
             if ((endX == uint(x)) and (endY == uint(y))) {
@@ -3476,7 +3476,7 @@ void _ContinueCaravan(Critter leader)
         Map map = guard.GetMap();
         if (!valid(map)) {
             deadGuardIds.insertLast(ci.Caravaneers[i]); // охранника нужно убрать из списка
-            if (guard.IsOwnedByPlayer()) {
+            if (guard.IsControlledByPlayer) {
                 _SetPlayerAbandoned(guard, ci);
             }
             continue;
@@ -3484,7 +3484,7 @@ void _ContinueCaravan(Critter leader)
 
         if (guard.IsDead() || map.Id != map_leader.Id) {
             deadGuardIds.insertLast(ci.Caravaneers[i]); // охранника нужно убрать из списка
-            if (guard.IsOwnedByPlayer()) {
+            if (guard.IsControlledByPlayer) {
                 _SetPlayerAbandoned(guard, ci);
             }
             continue;
@@ -3519,7 +3519,7 @@ bool _EndCaravan(Critter leader)
     for (uint i = 0; i < ci.Caravaneers.length(); i++) {
         Critter player = Game.GetCritter(ci.Caravaneers[i]);
         if (valid(player)) {
-            if (player.IsOwnedByPlayer()) {
+            if (player.IsControlledByPlayer) {
                 _SetPlayerSuccessFirst(player, ci);
                 _SetSuccessNext(player, ci);
             }
@@ -3557,7 +3557,7 @@ bool _EndCaravan(Critter leader)
     for (uint j = 0; j < ci.Caravaneers.length(); j++) {
         Critter guard = Game.GetCritter(ci.Caravaneers[j]);
         if (valid(guard)) {
-            if (guard.IsNpc()) {
+            if (!guard.IsControlledByPlayer) {
                 Game.DeleteCritter(guard);
             }
         }
@@ -3599,7 +3599,7 @@ void DeleteLeader(any value)
                 }
             }
         }
-        if (leader.IsNpc()) {
+        if (!leader.IsControlledByPlayer) {
             Game.DeleteCritter(leader);
         }
     }
@@ -3624,7 +3624,7 @@ void TransitToStartPos(any value)
 bool _CheckHasPlayerInGroup(Critter[] group)
 {
     for (uint i = 0; i < group.length(); i++) {
-        if (group[i].IsOwnedByPlayer()) {
+        if (group[i].IsControlledByPlayer) {
             return true;
         }
     }
@@ -3638,7 +3638,7 @@ void _PlayerToCaravanEnemy(Critter player, CaravanInfo ci)
     for (uint i = 0; i < ci.Caravaneers.length(); i++) {
         Critter cr = Game.GetCritter(ci.Caravaneers[i]);
         if (valid(cr)) {
-            if (cr.IsNpc() && !EnemyStack::CheckEnemyInStack(cr, player.Id)) {
+            if (!cr.IsControlledByPlayer && !EnemyStack::CheckEnemyInStack(cr, player.Id)) {
                 EnemyStack::AddEnemyToStack(cr, player.Id);
             }
         }
@@ -3653,7 +3653,7 @@ void _SetQuestState(CaravanInfo ci, int state)
     for (uint i = 0; i < ci.Caravaneers.length(); i++) {
         Critter cr = Game.GetCritter(ci.Caravaneers[i]);
         if (valid(cr)) {
-            if (cr.IsNpc()) {
+            if (!cr.IsControlledByPlayer) {
                 continue;
             }
             _SetQuestState(ci.QuestVarNum, state, cr);

@@ -196,7 +196,7 @@ class MarchQueue
     {
         Critter cr = Game.GetCritter(CritterId);
         cr.SquadMarchQueue = array<uint8>();
-        if (cr.IsNpc()) {
+        if (!cr.IsControlledByPlayer) {
             cr.IsNoHome = false;
         }
     }
@@ -281,7 +281,7 @@ class MarchQueue
     void ExecuteOrder()
     {
         Critter cr = Game.GetCritter(CritterId);
-        if (!valid(cr) || cr.IsOwnedByPlayer()) {
+        if (!valid(cr) || cr.IsControlledByPlayer) {
             return; // Игроком выполнить приказ с помощью скрипта нельзя, разумеется
         }
         cr.IsNoHome = true;
@@ -331,9 +331,9 @@ class MarchQueue
                 if (valid(weapon) && !weapon.Weapon_IsUnarmed) {
                     break; // В руках оружие
                 }
-                pid1 = FavoriteItem::GetFavoriteItemPid(cr, SLOT_HAND1);
+                pid1 = FavoriteItem::GetFavoriteItemPid(cr, CritterItemSlot::Main);
                 // Проверяем, что у нпц в другом слоте
-                pid2 = FavoriteItem::GetFavoriteItemPid(cr, SLOT_HAND2);
+                pid2 = FavoriteItem::GetFavoriteItemPid(cr, CritterItemSlot::Secondary);
                 proto = Game.GetProtoItem(pid2);
                 if (!valid(proto) || proto.Type != ItemType::Weapon) {
                     Item[] weapons = cr.GetItems(ItemProperty::Type, ItemType::Weapon);
@@ -343,21 +343,21 @@ class MarchQueue
                         }
                     }
                 }
-                FavoriteItem::SetFavoriteItemPid(cr, SLOT_HAND1, pid2);
-                FavoriteItem::SetFavoriteItemPid(cr, SLOT_HAND2, pid1);
+                FavoriteItem::SetFavoriteItemPid(cr, CritterItemSlot::Main, pid2);
+                FavoriteItem::SetFavoriteItemPid(cr, CritterItemSlot::Secondary, pid1);
             }
             else {
                 if (valid(weapon) && !weapon.Weapon_IsUnarmed) {
                     pid1 = weapon.ProtoId;
                     // Проверяем, что у нпц в другом слоте
-                    pid2 = FavoriteItem::GetFavoriteItemPid(cr, SLOT_HAND2);
+                    pid2 = FavoriteItem::GetFavoriteItemPid(cr, CritterItemSlot::Secondary);
                     proto = Game.GetProtoItem(pid2);
                     if (!valid(proto) || proto.Type == ItemType::Weapon) {
                         pid2 = Content::Item::default_weapon; // Убирание оружия - имитируем с помощью выбора любимым оружием рукопашного удара
                     }
                     NpcPlanes::DropPlanes(cr);
-                    FavoriteItem::SetFavoriteItemPid(cr, SLOT_HAND1, pid2);
-                    FavoriteItem::SetFavoriteItemPid(cr, SLOT_HAND2, pid1);
+                    FavoriteItem::SetFavoriteItemPid(cr, CritterItemSlot::Main, pid2);
+                    FavoriteItem::SetFavoriteItemPid(cr, CritterItemSlot::Secondary, pid1);
                 }
             }
             break;
@@ -404,7 +404,7 @@ void DoNextOrder(any[] values)
 {
     DL("next order");
     Critter cr = Game.GetCritter(values[0]);
-    if (!valid(cr) || values[1] >= MAX_EXECUTE_TRIES || !cr.IsNpc()) {
+    if (!valid(cr) || values[1] >= MAX_EXECUTE_TRIES || cr.IsControlledByPlayer) {
         return;
     }
 
@@ -459,8 +459,8 @@ class SquadCommander
             if (!valid(cr) || !valid(q)) {
                 return false;
             }
-            if (cr.IsOwnedByPlayer() && !q.CheckOrderCompleted()) {
-                cr.SayMsg(SAY_NETMSG, TEXTMSG_TEXT, STR_LOOSE);
+            if (cr.IsControlledByPlayer && !q.CheckOrderCompleted()) {
+                cr.SayMsg(SAY_NETMSG, TextPackName::Text, STR_LOOSE);
                 return false;
             }
         }
@@ -471,7 +471,7 @@ class SquadCommander
     {
         Critter cr = Game.GetCritter(CommanderId);
         if (valid(cr) && strNum >= 0) {
-            cr.SayMsg(SAY_SHOUT, TEXTMSG_DLG, DLGSTR(cr.DialogId, strNum));
+            cr.SayMsg(SAY_SHOUT, TextPackName::Dialogs, DLGSTR(cr.DialogId, strNum));
         }
         for (uint i = 0, l = Squad.length(); i < l; i++) {
             MarchQueue q = MarchQueue(Squad[i]);
@@ -486,7 +486,7 @@ class SquadCommander
                 if (!valid(c)) {
                     return;
                 }
-                if (c.IsNpc()) {
+                if (!c.IsControlledByPlayer) {
                     q.ExecuteOrder();
                 }
             }
@@ -557,14 +557,14 @@ bool d_CheckWear(Critter player, Critter npc, int pidHash, int count, int deteri
 // Служит сигналом к началу
 void t_Enter(Critter player, StaticItem trigger, bool entered, uint8 dir)
 {
-    if (!player.IsOwnedByPlayer() || !entered) {
+    if (!player.IsControlledByPlayer || !entered) {
         return;
     }
     if (player.VCHartmanMarch != 1 || Game.VCHartmanMarchStatus) {
         return;
     }
     player.Wait(0);
-    player.SayMsg(SAY_NETMSG, TEXTMSG_TEXT, STR_RIGHT_POSITION);
+    player.SayMsg(SAY_NETMSG, TextPackName::Text, STR_RIGHT_POSITION);
     Map map = player.GetMap();
     Critter cr = map.GetCritter(CritterProperty::NpcRole, ROLE_COMMANDER, CritterFindType::AliveNpc);
     if (!valid(cr) || cr.VCGuardsmanTriggerPlayerId != ZERO_IDENT) {
@@ -618,7 +618,7 @@ void TimeToStart(any[] values)
             return;
         }
         values[2] = int(values[2]) + 1;
-        npc.SayMsg(SAY_SHOUT_ON_HEAD, TEXTMSG_TEXT, STR_WRONG_POSITION);
+        npc.SayMsg(SAY_SHOUT_ON_HEAD, TextPackName::Text, STR_WRONG_POSITION);
         Game.DeferredCall(SECOND_TICKS(5), TimeToStart, values);
         return;
     }
@@ -677,14 +677,14 @@ void NextGuardOrder(any[] values)
         values[0] = int(values[0]) + 1;
     }
     else {
-        cr.SayMsg(SAY_NORM, TEXTMSG_DLG, DLGSTR(cr.DialogId, STR_MARCH_FAILED));
+        cr.SayMsg(SAY_NORM, TextPackName::Dialogs, DLGSTR(cr.DialogId, STR_MARCH_FAILED));
         ResetCommander(cr);
         cmdr.Erase();
         return;
     }
 
     if (values[0] == LAST_ORDER) {
-        cr.SayMsg(SAY_NORM, TEXTMSG_DLG, DLGSTR(cr.DialogId, STR_MARCH_COMPLETED));
+        cr.SayMsg(SAY_NORM, TextPackName::Dialogs, DLGSTR(cr.DialogId, STR_MARCH_COMPLETED));
         ResetCommander(cr);
         cmdr.Erase();
         Critter player = Game.GetCritter(values[2]);
@@ -805,7 +805,7 @@ void _MutantsOutGroundInit(Map map, bool firstTime)
 
 void DeleteQuestLocation(any value)
 {
-    Location loc = Game.GetLocation(value);
+    Location loc = Game.GetLocation(ident(value));
     if (valid(loc)) {
         loc.AutoGarbage = true;
     }
@@ -813,7 +813,7 @@ void DeleteQuestLocation(any value)
 
 void _OutGroundInCritter(Map map, Critter cr)
 {
-    if (!cr.IsOwnedByPlayer()) {
+    if (!cr.IsControlledByPlayer) {
         return;
     }
     if (cr.VCHartmannRecon != 2) {

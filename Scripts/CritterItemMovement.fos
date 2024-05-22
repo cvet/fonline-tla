@@ -43,34 +43,34 @@ bool critter_drop_item(Critter cr, Item item)
 // Call on something critter want move item from one slot to another.
 // Return true to allow transaction, false to disallow.
 // Function must exist on server and client side.
-bool critter_check_move_item(Critter cr, Item item, uint8 toSlot)
+bool critter_check_move_item(Critter cr, Item item, CritterItemSlot toSlot)
 {
-    uint8 fromSlot = item.CritterSlot;
+    CritterItemSlot fromSlot = item.CritterSlot;
 
     // Drop
-    if (toSlot == SLOT_GROUND) {
+    if (toSlot == CritterItemSlot::Outside) {
         return true;
     }
 
     // If busy, then allow only hands item swapping
-    // bool handsSwap = ( ( fromSlot == SLOT_HAND1 && toSlot == SLOT_HAND2 ) || ( fromSlot == SLOT_HAND2 && toSlot == SLOT_HAND1 ) );
+    // bool handsSwap = ( ( fromSlot == CritterItemSlot::Main && toSlot == CritterItemSlot::Secondary ) || ( fromSlot == CritterItemSlot::Secondary && toSlot == CritterItemSlot::Main ) );
     // if( valid( itemSwap )  !handsSwap )
     //    return false;
 
     // Weapon animation
-    if (toSlot == SLOT_HAND1) {
-        if (item.Type == ItemType::Weapon && !CritterAnims::IsCritterAnim1(cr, uint(item.Weapon_Anim1))) {
-            Game.Log("Can not use weapon: Critter " + cr.ModelName + "; anim: " + item.Weapon_Anim1);
+    if (toSlot == CritterItemSlot::Main) {
+        if (item.Type == ItemType::Weapon && !CritterAnims::IsCritterStateAnim(cr, uint(item.Weapon_StateAnim))) {
+            Game.Log("Can not use weapon: Critter " + cr.ModelName + "; anim: " + item.Weapon_StateAnim);
             return false;
         }
     }
 
     // Armor animation
-    if (toSlot == SLOT_ARMOR) {
+    if (toSlot == CritterItemSlot::Armor) {
         if (item.Type != ItemType::Armor) {
             return false;
         }
-        if (item.CritterSlot != SLOT_INV) {
+        if (item.CritterSlot != CritterItemSlot::Inventory) {
             return false;
         }
         if (cr.IsNoArmor) {
@@ -79,7 +79,7 @@ bool critter_check_move_item(Critter cr, Item item, uint8 toSlot)
     }
 
     // Custom slot checks
-    if (toSlot > SLOT_ARMOR) {
+    if (toSlot > CritterItemSlot::Armor) {
         if (toSlot != item.CritterSlot) {
             return false;
         }
@@ -92,27 +92,27 @@ bool critter_check_move_item(Critter cr, Item item, uint8 toSlot)
 #ifdef __SERVER
 // //////////////////////////////////////////////////////////////////////////////////////////////////
 // Call on critter item moved.
-void critter_move_item(Critter critter, Item item, uint8 fromSlot)
+void critter_move_item(Critter critter, Item item, CritterItemSlot fromSlot)
 {
     Critter cr = Game.GetCritter(critter.Id);
-    uint8 toSlot = item.CritterSlot;
+    CritterItemSlot toSlot = item.CritterSlot;
 
     // Armor changing
-    if (item.Type == ItemType::Armor && (fromSlot == SLOT_ARMOR || toSlot == SLOT_ARMOR)) {
+    if (item.Type == ItemType::Armor && (fromSlot == CritterItemSlot::Armor || toSlot == CritterItemSlot::Armor)) {
         // Default dude
         bool isMale = (cr.Gender == GenderType::Male);
         hstring crModel = cr.ModelNameBase;
         if (crModel == EMPTY_HSTRING) {
             crModel = (isMale ? CRTYPE_DEFAULT_M : CRTYPE_DEFAULT_F);
         }
-        if (toSlot == SLOT_ARMOR) {
+        if (toSlot == CritterItemSlot::Armor) {
             crModel = (isMale ? item.Armor_CrTypeMale : item.Armor_CrTypeFemale);
         }
 
         // Long hair dude redirects
         if (cr.ModelNameBase == CRTYPE_LHD_JUMPSUIT && isMale) {
             crModel = CRTYPE_LHD_JUMPSUIT;
-            if (toSlot == SLOT_ARMOR) {
+            if (toSlot == CritterItemSlot::Armor) {
                 crModel = item.Armor_CrTypeMale;
                 if (crModel == CRTYPE_DW_LEATHER_ARMOR_M) {
                     crModel = CRTYPE_LHD_LEATHER_ARMOR;
@@ -132,40 +132,42 @@ void critter_move_item(Critter critter, Item item, uint8 fromSlot)
         }
 
         // Armor modifier
-        cr.CurrentArmorPerk = (toSlot == SLOT_ARMOR ? item.Armor_Perk : 0);
+        cr.CurrentArmorPerk = (toSlot == CritterItemSlot::Armor ? item.Armor_Perk : 0);
     }
 
-    Critter[] other = cr.GetCritters(true, CritterFindType::Alive);
-    for (uint i = 0; i < other.length(); i++) {
-        other[i].OnSomeCritterMoveItem.Fire(cr, item, fromSlot);
-    }
+    CritterStateAnim stateAnim;
 
-    uint anim1;
-    if (fromSlot == SLOT_HAND1) {
-        anim1 = Anim1::Unarmed;
+    if (fromSlot == CritterItemSlot::Main) {
+        stateAnim = CritterStateAnim::Unarmed;
     }
-    else if (toSlot == SLOT_HAND1) {
-        anim1 = (item.Type == ItemType::Weapon ? item.Weapon_Anim1 : Anim1::Unarmed);
+    else if (toSlot == CritterItemSlot::Main) {
+        stateAnim = (item.Type == ItemType::Weapon ? item.Weapon_StateAnim : CritterStateAnim::Unarmed);
     }
     else {
         return;
     }
 
-    if (anim1 != cr.Anim1Alive) {
-        Game.DeferredCall(0, CritterSetAnim1, array<any> = {cr.Id, anim1});
+    if (stateAnim != cr.AliveStateAnim) {
+        Game.DeferredCall(0, CritterSetStateAnim, array<any> = {cr.Id, stateAnim});
     }
+
     // Slot modifiers
     // SLOT_PERK_MIRROR_SHADES // +1 charisma
     // SLOT_PERK_COSMETIC_CASE // +1 charisma to female
     // SLOT_PERK_MOTION_SENSOR // +20 outdoorsman
     // SLOT_PERK_STEALTH_BOY   // +20 sneak
+
+    Critter[] other = cr.GetCritters(true, CritterFindType::Alive);
+    for (uint i = 0; i < other.length(); i++) {
+        other[i].OnSomeCritterMoveItem.Fire(cr, item, fromSlot);
+    }
 }
 
-void CritterSetAnim1(any[] data)
+void CritterSetStateAnim(any[] data)
 {
     Critter cr = Game.GetCritter(data[0]);
     if (cr != null) {
-        cr.SetConditionAnims(CritterCondition::Alive, Anim1(int(data[1])), 0);
+        cr.SetConditionAnims(CritterCondition::Alive, CritterStateAnim(int(data[1])), CritterActionAnim::None);
     }
 }
 #endif

@@ -1,6 +1,82 @@
-// FOS Server Sort 1
+// FOS Server
 
 ///@ Property Location PrivateServer uint MaxPlayers
+///@ Property Location PrivateServer bool AutoGarbage
+///@ Property Location PrivateServer bool GeckVisible // Todo: improve GeckVisible mechanics
+///@ Property Critter PrivateServer bool IsGeck
+///@ Property Item PrivateServer bool IsGeck
+
+void ModuleInit()
+{
+    Game.OnLocationInit.Subscribe(OnLocationInit);
+}
+
+void OnLocationInit(Location loc, bool firstTime)
+{
+    Game.DeferredCall(1000, LocationGarbager, loc.Id);
+}
+
+void LocationGarbager(any locId)
+{
+    Location loc = Game.GetLocation(ident(locId));
+    if (loc == null) {
+        return;
+    }
+
+    if (loc.AutoGarbage && CheckLocationForGarbage(loc)) {
+        Game.DestroyLocation(loc);
+    }
+    else {
+        Game.DeferredCall(1000, LocationGarbager, loc.Id);
+    }
+}
+
+bool CheckLocationForGarbage(Location loc)
+{
+    for (uint i = 0; i < loc.GetMapCount(); i++) {
+        Map map = loc.GetMapByIndex(i);
+
+        if (!CheckMapForGarbage(map)) {
+            return false;
+        }
+
+        // Todo: improve Item::IsGeck for map
+        //if (map.GetItem(ItemProperty::IsGeck, 1) != null) {
+        //    return false;
+        //}
+    }
+
+    return true;
+}
+
+bool CheckMapForGarbage(Map map)
+{
+    Critter[] playerCritters = map.GetCritters(CritterFindType::Players);
+
+    if (!playerCritters.isEmpty()) {
+        return false;
+    }
+
+    Critter[] nonPlayerCritters = map.GetCritters(CritterFindType::Npc);
+
+    for (uint i = 0; i < nonPlayerCritters.length(); i++) {
+        Critter npc = nonPlayerCritters[i];
+
+        if (npc.IsGeck) {
+            return false;
+        }
+
+        if (!npc.IsNoHome && npc.HomeMapId != map.Id) {
+            return false;
+        }
+
+        if (npc.GetItem(ItemProperty::IsGeck, 1) != null) {
+            return false;
+        }
+    }
+
+    return true;
+}
 
 // Позволяет определить, знает ли игрок об указанной локации или нет.
 bool IsKnownLoc(Critter cr, ident locId)
@@ -49,7 +125,7 @@ void SetKnownLoc(Critter cr, hstring locPid)
 // Делает локацию невидимой для криттера.
 void UnsetKnownLoc(Critter cr, ident locId)
 {
-    cr.UnsetKnownLocation(locId);
+    cr.RemoveKnownLocation(locId);
 }
 
 void UnsetKnownLoc(Critter cr, Location loc)
@@ -72,10 +148,10 @@ void UnsetKnownLoc(Critter cr, hstring locPid)
 // time - игровое время в секундах,
 void SetLocationDeleteTime(Location loc, uint time)
 {
-    Game.SavedDeferredCall(GAME_SECOND_TO_TICK(time), DeferredDeleteLocation, loc.Id);
+    Game.SavedDeferredCall(GAME_SECOND_TO_TICK(time), DeferredDestroyLocation, loc.Id);
 }
 
-void DeferredDeleteLocation(any value)
+void DeferredDestroyLocation(any value)
 {
     Location loc = Game.GetLocation(ident(value));
     if (loc !is null) {

@@ -21,7 +21,7 @@ void ConfigEntryParseHook(const string& fname, const string& section, string& ke
     if (section == "Tile") {
         if (key == "PicMap") {
             key = "$Proto";
-            value = "tile_" + _str(value).extractFileName().eraseFileExtension().str();
+            value = "tile_" + strex(value).extractFileName().eraseFileExtension().str();
         }
         else if (key == "IsRoof") {
             key = "IsRoofTile";

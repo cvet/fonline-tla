@@ -11448,7 +11448,7 @@
 
 * `PrivateServer bool GeckVisible`
 
-  ...
+  Todo: improve GeckVisible mechanics
 
 * `PrivateServer ident[] GeckCityMembers`
 

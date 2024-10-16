@@ -1,0 +1,253 @@
+// FOS Server Client
+
+///@ Event Client Game OnItemCheckMove(Item item, uint count, Entity from, Entity to)
+///@ Event Server Game OnItemCheckMove(Item item, uint count, Entity from, Entity to)
+///@ Event Client Game OnCritterCheckMoveItem(Critter cr, Item item, CritterItemSlot toSlot)
+///@ Event Server Game OnCritterCheckMoveItem(Critter cr, Item item, CritterItemSlot toSlot)
+///@ Event Server Game OnCritterItemIn(Critter cr, Item item)
+///@ Event Server Game OnCritterItemOut(Critter cr, Item item)
+///@ Event Server Critter OnMoveItem(Item item, CritterItemSlot fromSlot)
+///@ Event Server Critter OnDropItem(Item item)
+///@ Event Server Critter OnSomeCritterMoveItem(Critter cr, Item item, CritterItemSlot fromSlot)
+///@ Event Server Critter OnSomeCritterDropItem(Critter cr, Item item)
+///@ Event Server Item OnCritterMove(Critter cr, CritterItemSlot fromSlot)
+///@ Event Server Item OnCritterDrop(Critter cr)
+
+void ModuleInit()
+{
+    Game.OnItemCheckMove.Subscribe(OnItemCheckMove);
+    Game.OnCritterCheckMoveItem.Subscribe(OnCritterCheckMoveItem);
+#ifdef __SERVER
+    Game.OnCritterItemMoved.Subscribe(OnCritterItemMoved);
+#endif
+}
+
+bool OnItemCheckMove(Item item, uint count, Entity from, Entity to)
+{
+    return true;
+}
+
+bool OnCritterCheckMoveItem(Critter cr, Item item, CritterItemSlot toSlot)
+{
+    CritterItemSlot fromSlot = item.CritterSlot;
+
+    // Drop
+    if (toSlot == CritterItemSlot::Outside) {
+        return true;
+    }
+
+    // If busy, then allow only hands item swapping
+    // bool handsSwap = ( ( fromSlot == CritterItemSlot::Main && toSlot == CritterItemSlot::Secondary ) || ( fromSlot == CritterItemSlot::Secondary && toSlot == CritterItemSlot::Main ) );
+    // if( valid( itemSwap )  !handsSwap )
+    //    return false;
+
+    // Weapon animation
+    if (toSlot == CritterItemSlot::Main) {
+        if (item.Type == ItemType::Weapon && !CritterAnims::IsCritterStateAnim(cr, uint(item.Weapon_StateAnim))) {
+            Game.Log("Can not use weapon: Critter " + cr.ModelName + "; anim: " + item.Weapon_StateAnim);
+            return false;
+        }
+    }
+
+    // Armor animation
+    if (toSlot == CritterItemSlot::Armor) {
+        if (item.Type != ItemType::Armor) {
+            return false;
+        }
+        if (item.CritterSlot != CritterItemSlot::Inventory) {
+            return false;
+        }
+        if (cr.IsNoArmor) {
+            return false;
+        }
+    }
+
+    // Custom slot checks
+    if (toSlot > CritterItemSlot::Armor) {
+        if (toSlot != item.CritterSlot) {
+            return false;
+        }
+    }
+
+    // Allow moving
+    return true;
+}
+
+#ifdef __SERVER
+
+void OnCritterItemMoved(Critter cr, Item item, CritterItemSlot fromSlot)
+{
+    CritterItemSlot toSlot = item.CritterSlot;
+
+    // Armor changing
+    if (item.Type == ItemType::Armor && (fromSlot == CritterItemSlot::Armor || toSlot == CritterItemSlot::Armor)) {
+        // Default dude
+        bool isMale = cr.Gender == GenderType::Male;
+        hstring crModel = cr.ModelNameBase;
+
+        if (crModel == EMPTY_HSTRING) {
+            crModel = isMale ? CRTYPE_DEFAULT_M : CRTYPE_DEFAULT_F;
+        }
+
+        if (toSlot == CritterItemSlot::Armor) {
+            crModel = isMale ? item.Armor_CrTypeMale : item.Armor_CrTypeFemale;
+        }
+
+        // Long hair dude redirects
+        if (cr.ModelNameBase == CRTYPE_LHD_JUMPSUIT && isMale) {
+            crModel = CRTYPE_LHD_JUMPSUIT;
+
+            if (toSlot == CritterItemSlot::Armor) {
+                crModel = item.Armor_CrTypeMale;
+
+                if (crModel == CRTYPE_DW_LEATHER_ARMOR_M) {
+                    crModel = CRTYPE_LHD_LEATHER_ARMOR;
+                }
+                else if (crModel == CRTYPE_DW_LEATHER_JACKET_M) {
+                    crModel = CRTYPE_LHD_LEATHER_JACKET;
+                }
+                else if (crModel == CRTYPE_DW_METAL_ARMOR_M) {
+                    crModel = CRTYPE_LHD_METAL_ARMOR;
+                }
+            }
+        }
+
+        if (cr.ModelName != crModel) {
+            Assert(crModel != EMPTY_HSTRING);
+            cr.ModelName = crModel;
+        }
+
+        // Armor modifier
+        cr.CurrentArmorPerk = toSlot == CritterItemSlot::Armor ? item.Armor_Perk : 0;
+    }
+
+    AbstractItem activeItem = CritterItem::GetActive(cr);
+    CritterStateAnim stateAnim = activeItem.Type == ItemType::Weapon ? activeItem.Weapon_StateAnim : CritterStateAnim::Unarmed;
+    cr.SetConditionAnims(CritterCondition::Alive, stateAnim, CritterActionAnim::Idle);
+
+    // Todo: Slot modifiers, Armor_Perk
+    // SLOT_PERK_MIRROR_SHADES // +1 charisma
+    // SLOT_PERK_COSMETIC_CASE // +1 charisma to female
+    // SLOT_PERK_MOTION_SENSOR // +20 outdoorsman
+    // SLOT_PERK_STEALTH_BOY   // +20 sneak
+
+    // Callbacks
+    bool isDrop = item.CritterId == ZERO_IDENT;
+    Critter[] other = cr.GetCritters(true, CritterFindType::Any);
+
+    cr.OnMoveItem.Fire(item, fromSlot);
+    item.OnCritterMove.Fire(cr, fromSlot);
+
+    if (fromSlot == CritterItemSlot::Outside) {
+        Game.OnCritterItemIn.Fire(cr, item);
+    }
+    else if (isDrop) {
+        Game.OnCritterItemOut.Fire(cr, item);
+    }
+
+    for (uint i = 0; i < other.length(); i++) {
+        other[i].OnSomeCritterMoveItem.Fire(cr, item, fromSlot);
+    }
+
+    if (isDrop) {
+        item.OnCritterDrop.Fire(cr);
+        cr.OnDropItem.Fire(item);
+
+        for (uint i = 0; i < other.length(); i++) {
+            other[i].OnSomeCritterDropItem.Fire(cr, item);
+        }
+    }
+}
+
+void MoveItem(Item item, uint count, Critter toCr)
+{
+    Entity holder = GetItemHolder(item);
+    Critter holderCr = cast<Critter>(holder);
+
+    if (holderCr != null && !Game.OnCritterCheckMoveItem.Fire(holderCr, item, CritterItemSlot::Outside)) {
+        return;
+    }
+    if (!Game.OnCritterCheckMoveItem.Fire(toCr, item, CritterItemSlot::Inventory)) {
+        return;
+    }
+    if (!Game.OnItemCheckMove.Fire(item, count, holder, toCr)) {
+        return;
+    }
+
+    Game.MoveItem(item, count, toCr);
+}
+
+void MoveItem(Item item, uint count, Item toCont, ContainerItemStack stack)
+{
+    Entity holder = GetItemHolder(item);
+    Critter holderCr = cast<Critter>(holder);
+
+    if (holderCr != null && !Game.OnCritterCheckMoveItem.Fire(holderCr, item, CritterItemSlot::Outside)) {
+        return;
+    }
+    if (!Game.OnItemCheckMove.Fire(item, count, holder, toCont)) {
+        return;
+    }
+
+    Game.MoveItem(item, count, toCont, stack);
+}
+
+void MoveItem(Item item, uint count, Map toMap, uint16 hexX, uint16 hexY)
+{
+    Entity holder = GetItemHolder(item);
+    Critter holderCr = cast<Critter>(holder);
+
+    if (holderCr != null && !Game.OnCritterCheckMoveItem.Fire(holderCr, item, CritterItemSlot::Outside)) {
+        return;
+    }
+    if (!Game.OnItemCheckMove.Fire(item, count, holder, toMap)) {
+        return;
+    }
+
+    Game.MoveItem(item, count, toMap, hexX, hexY);
+}
+
+void MoveItems(Item[] items, Critter toCr)
+{
+    for (uint i = 0; i < items.length(); i++) {
+        MoveItem(items[i], items[i].Count, toCr);
+    }
+}
+
+void MoveItems(Item[] items, Item toCont, ContainerItemStack stack)
+{
+    for (uint i = 0; i < items.length(); i++) {
+        MoveItem(items[i], items[i].Count, toCont, stack);
+    }
+}
+
+void MoveItems(Item[] items, Map toMap, uint16 hexX, uint16 hexY)
+{
+    for (uint i = 0; i < items.length(); i++) {
+        MoveItem(items[i], items[i].Count, toMap, hexX, hexY);
+    }
+}
+
+Entity GetItemHolder(Item item)
+{
+    Entity holder = null;
+
+    switch (item.Ownership) {
+    case ItemOwnership::CritterInventory:
+        holder = Game.GetCritter(item.CritterId);
+        break;
+    case ItemOwnership::MapHex:
+        holder = Game.GetMap(item.MapId);
+        break;
+    case ItemOwnership::ItemContainer:
+        holder = Game.GetItem(item.ContainerId);
+        break;
+    default:
+        break;
+    }
+
+    Assert(holder != null);
+    return holder;
+}
+
+#endif

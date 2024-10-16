@@ -17,7 +17,6 @@ void ModuleInit()
     Game.OnItemMapIn.Subscribe(item_map_in);
     Game.OnItemMapChanged.Subscribe(item_map_changed);
     Game.OnItemMapOut.Subscribe(item_map_out);
-    Game.OnItemInvAllIn.Subscribe(item_inv_all_in);
     Game.OnItemInvIn.Subscribe(item_inv_in);
     Game.OnItemInvChanged.Subscribe(item_inv_changed);
     Game.OnItemInvOut.Subscribe(item_inv_out);
@@ -69,18 +68,19 @@ void finish()
     //
 }
 
-uint MouseStayTick = 0;
 // //////////////////////////////////////////////////////////////////////////////////////////////////
 // Main loop function. Next call every cycle.
+uint MouseStayTick = 0;
+
 void loop() // (uint& wait)
 {
-    Gui::EngineCallback_Loop();
-
-    if (Settings.Cursor != CursorType::Default) {
-        return;
+    Critter chosen = Game.GetChosen();
+    if (chosen != null) {
+        chosen.AttackDistanceHint = Parameters::GetActiveItemAttackDistance(chosen);
     }
 
-    if (Game.GetTick() - 1200 >= MouseStayTick && MouseStayTick != 0) {
+    // Description under cursor
+    if (Settings.Cursor == CursorType::Default && Game.GetTick() - 1200 >= MouseStayTick && MouseStayTick != 0) {
         MouseStayTick = 0;
         Gui::Screen screen = Gui::GetActiveScreen();
         if (screen == null) {
@@ -110,6 +110,8 @@ void loop() // (uint& wait)
             Game.Message(critter_description(cr, CritterLookTypes::LookShort));
         }
     }
+
+    Gui::EngineCallback_Loop();
 }
 
 void mouse_move(int offsetX, int offsetY)
@@ -176,12 +178,12 @@ void render_iface()
     // Help info
     if (Settings.HelpInfo) {
         // About
-        string aboutText =
-            "FOnline " + (Settings.Singleplayer ? "Singleplayer" : "") + "\n" + "by Gamers for Gamers\n" + "version " + Game.CustomCall("Version") + "\n" +
-            "\n" + "Traffic, bytes:\n" + "Send: " + Game.CustomCall("BytesSend") + "\n" + "Receive: " + Game.CustomCall("BytesReceive") + "\n" +
-            "Sum: " + (Game.CustomCall("BytesSend").toInt() + Game.CustomCall("BytesReceive").toInt()) + "\n" + "\n" + "FPS: " + Settings.FPS + " (" +
-            (!Settings.VSync ? "" + math::abs(Settings.FixedFPS) : "VSync") + (!Settings.VSync && Settings.FixedFPS < 0 ? ", sleep" : "") + ")\n" +
-            "Ping: " + Settings.Ping + "\n" + "\n" + "Sound: " + Settings.SoundVolume + "\n" + "Music: " + Settings.MusicVolume + "\n";
+        string aboutText = "FOnline " + (Settings.Singleplayer ? "Singleplayer" : "") + "\n" + "by Gamers for Gamers\n" + "version " + Game.GetGameVersion() +
+                           "\n" + "\n" + "Traffic, bytes:\n" + "Send: " + Game.CustomCall("BytesSend") + "\n" + "Receive: " + Game.CustomCall("BytesReceive") +
+                           "\n" + "Sum: " + (Game.CustomCall("BytesSend").toInt() + Game.CustomCall("BytesReceive").toInt()) + "\n" + "\n" +
+                           "FPS: " + Settings.FPS + " (" + (!Settings.VSync ? "" + math::abs(Settings.FixedFPS) : "VSync") +
+                           (!Settings.VSync && Settings.FixedFPS < 0 ? ", sleep" : "") + ")\n" + "Ping: " + Settings.Ping + "\n" + "\n" +
+                           "Sound: " + Settings.SoundVolume + "\n" + "Music: " + Settings.MusicVolume + "\n";
         if (Settings.DebugInfo) {
             aboutText += "\n" + "Focused object: " + (Gui::GetFocusedObject() !is null ? Gui::GetFocusedObject().Name : "None") + "\n" +
                          "Pressed object: " + (Gui::GetPressedObject() !is null ? Gui::GetPressedObject().Name : "None") + "\n" +
@@ -239,6 +241,9 @@ void critter_in(Critter cr)
     // Karma voting
     int highlight = cr.PlayerKarma / 10;
     cr.NameColor = ucolor(COLOR_CRITTER_NAME.red + highlight, COLOR_CRITTER_NAME.green + highlight, COLOR_CRITTER_NAME.blue + highlight);
+
+    // For correct dialog formatting (male/female)
+    cr.IsSexTagFemale = cr.Gender == GenderType::Female;
 }
 
 void critter_out(Critter cr)
@@ -265,11 +270,6 @@ void item_map_out(Item item)
 
 // //////////////////////////////////////////////////////////////////////////////////////////////////
 // Called on something critter in/out chosen inventory.
-void item_inv_all_in()
-{
-    Gui::EngineCallback_ItemChanged(false);
-}
-
 void item_inv_in(Item item)
 {
     Gui::EngineCallback_ItemChanged(false);
@@ -1368,8 +1368,8 @@ void critter_action(bool localCall, Critter cr, CritterAction action, int action
     switch (action) {
     case CritterAction::MoveItem:
         if (cr.IsAlive()) {
-            uint8 fromSlot = actionExt;
-            uint8 toSlot = item.CritterSlot;
+            CritterItemSlot fromSlot = CritterItemSlot(actionExt);
+            CritterItemSlot toSlot = item.CritterSlot;
 
             cr.StopAnim();
 

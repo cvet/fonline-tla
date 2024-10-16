@@ -531,12 +531,12 @@ bool critter_use_skill(Critter cr, CritterProperty skill, Critter targetCr, Item
             int freeWeight = cr.CarryWeight - cr.ItemsWeight;
             if (freeWeight >= int(item.Weight * item.Count)) {
                 // Pick full
-                Game.MoveItem(item, 0, cr);
+                ItemMovement::MoveItem(item, 0, cr);
             }
             else {
                 // Pick half
                 if (item.Stackable && freeWeight >= int(item.Weight)) {
-                    Game.MoveItem(item, freeWeight / item.Weight, cr);
+                    ItemMovement::MoveItem(item, freeWeight / item.Weight, cr);
                 }
                 // Overweight
                 else {
@@ -580,18 +580,18 @@ bool critter_use_skill(Critter cr, CritterProperty skill, Critter targetCr, Item
         cr.SayMsg(SAY_NETMSG, TextPackName::Game, MsgStr::StrUseNothing);
     } break;
     case CritterProperty::SkillSneak: {
-        if (cr.IsHide) {
-            cr.IsHide = false;
+        if (cr.InSneakMode) {
+            cr.InSneakMode = false;
         }
         else if (not isPlayer) {
-            cr.IsHide = true;
+            cr.InSneakMode = true;
         }
         else {
             if (IS_TIMEOUT(cr.TimeoutSneak)) {
                 cr.SayMsg(SAY_NETMSG, TextPackName::Game, MsgStr::StrTimeoutSneakWait);
             }
             else {
-                cr.IsHide = true;
+                cr.InSneakMode = true;
             }
         }
     } break;
@@ -659,13 +659,13 @@ bool critter_use_skill(Critter cr, CritterProperty skill, Critter targetCr, Item
         if (activePid == Content::Item::first_aid_kit) {
             sk += 25;
             if (Game.Random(0, 30) == 0) {
-                cr.DeleteItem(Content::Item::first_aid_kit, 1);
+                cr.DestroyItem(Content::Item::first_aid_kit, 1);
             }
         }
         else if (activePid == Content::Item::field_medic_kit) {
             sk += 50;
             if (Game.Random(0, 30) == 0) {
-                cr.DeleteItem(Content::Item::field_medic_kit, 1);
+                cr.DestroyItem(Content::Item::field_medic_kit, 1);
             }
         }
         int mod = 11 - cr.Luck;
@@ -739,13 +739,13 @@ bool critter_use_skill(Critter cr, CritterProperty skill, Critter targetCr, Item
         if (activePid == Content::Item::doctors_bag) {
             sk += 25;
             if (Game.Random(0, 30) == 0) {
-                cr.DeleteItem(Content::Item::doctors_bag, 1);
+                cr.DestroyItem(Content::Item::doctors_bag, 1);
             }
         }
         else if (activePid == Content::Item::paramedics_bag) {
             sk += 50;
             if (Game.Random(0, 30) == 0) {
-                cr.DeleteItem(Content::Item::paramedics_bag, 1);
+                cr.DestroyItem(Content::Item::paramedics_bag, 1);
             }
         }
 
@@ -838,7 +838,7 @@ void critter_reload_weapon(Critter cr, Item weapon, Item ammo)
         uint count = MIN(ammo.Count, weapon.Weapon_MaxAmmoCount - weapon.AmmoCount);
         weapon.AmmoCount += count;
         weapon.AmmoPid = ammo.ProtoId;
-        Game.DeleteItem(ammo, count);
+        Game.DestroyItem(ammo, count);
     }
 }
 
@@ -974,7 +974,7 @@ void critter_init(Critter cr, bool firstTime)
         }
 
         // Erase zero time events
-        cr.EraseTimeEvents(0);
+        cr.RemoveTimeEvents(0);
 
         // TRAIT_FAST_SHOT migration, delete in future
         if (cr.IsTraitFastShot) {
@@ -1004,7 +1004,7 @@ void critter_finish(Critter cr)
     if (toDelete && cr.DeadBlockerId != ZERO_IDENT) {
         Item block = Game.GetItem(cr.DeadBlockerId);
         if (valid(block)) {
-            Game.DeleteItem(block);
+            Game.DestroyItem(block);
         }
         cr.DeadBlockerId = ZERO_IDENT;
     }
@@ -1014,6 +1014,7 @@ void critter_finish(Critter cr)
 // Call every Settings.CritterIdleTick time.
 void critter_idle(Critter cr)
 {
+    // Replication
     if (cr.IsDead() && cr.ReplicationTime >= 0 && !IS_TIMEOUT(cr.TimeoutReplication)) {
         Replication::ReplicateCritter(cr);
     }
@@ -1022,6 +1023,7 @@ void critter_idle(Critter cr)
     if (!IS_TIMEOUT(cr.TimeoutHealing)) {
         if (!cr.IsDead() && !cr.IsNoHeal && !IS_TIMEOUT(cr.TimeoutBattle) && cr.CurrentHp < cr.MaxLife) {
             cr.CurrentHp += cr.HealingRate * (cr.PerkVampireRegeneration != 0 ? 2 : 1);
+
             if (cr.CurrentHp > cr.MaxLife) {
                 cr.CurrentHp = cr.MaxLife;
             }
@@ -1039,19 +1041,33 @@ void critter_idle(Critter cr)
         }
 
         int delta = tick - cr.ApRegenerationTick;
+
         if (delta >= 500) {
             cr.ApRegenerationTick = tick;
 
             uint apRegeneration = cr.ApRegenerationTime;
+
             if (apRegeneration == 0) {
                 apRegeneration = Settings.ApRegeneration; // 7000
             }
+
             uint maxAp = cr.ActionPoints * AP_DIVIDER; // 100
             cr.CurrentAp = cr.CurrentAp + maxAp * delta / apRegeneration;
+
             if (cr.CurrentAp > int(maxAp)) {
                 cr.CurrentAp = maxAp;
             }
         }
+    }
+
+    // Look distance and sneak coef
+    uint lookDist = Parameters::GetCritterLookDistance(cr);
+    uint sneakCoef = Parameters::GetCritterSneakCoefficient(cr);
+
+    if (lookDist != cr.LookDistance || sneakCoef != cr.SneakCoefficient) {
+        cr.LookDistance = lookDist;
+        cr.SneakCoefficient = sneakCoef;
+        cr.RefreshView();
     }
 
     // Auto unload player critter
@@ -1088,17 +1104,17 @@ void critter_dead(Critter cr, Critter killer)
             // Disable drop of hidden items
             for (uint i = 0; i < items.length(); i++) {
                 if (items[i].IsGag) {
-                    Game.DeleteItem(items[i]);
+                    Game.DestroyItem(items[i]);
                     items[i] = null;
                 }
                 else if (items[i].IsHidden) {
                     items[i] = null;
                 }
             }
-            Game.MoveItems(items, map, cr.HexX, cr.HexY);
+            ItemMovement::MoveItems(items, map, cr.HexX, cr.HexY);
         }
         else {
-            Game.DeleteItems(items);
+            Game.DestroyItems(items);
         }
     }
 
@@ -1219,7 +1235,7 @@ void critter_respawn(Critter cr)
     if (cr.DeadBlockerId != ZERO_IDENT) {
         Item block = Game.GetItem(cr.DeadBlockerId);
         if (valid(block)) {
-            Game.DeleteItem(block);
+            Game.DestroyItem(block);
         }
         cr.DeadBlockerId = ZERO_IDENT;
     }
@@ -1238,6 +1254,14 @@ void map_critter_in(Map map, Critter cr)
     if (cr.IsControlledByPlayer) {
         GameEventCaches::PlaceLoot2Container(map, cr);
     }
+
+    if (!cr.IsControlledByPlayer && cr.HomeMapId == ZERO_IDENT) {
+        cr.HomeMapId = map.Id;
+        cr.HomeMapPid = map.ProtoId;
+        cr.HomeHexX = cr.HexX;
+        cr.HomeHexY = cr.HexY;
+        cr.HomeDir = cr.Dir;
+    }
 }
 
 // //////////////////////////////////////////////////////////////////////////////////////////////////
@@ -1249,6 +1273,9 @@ void map_critter_out(Map map, Critter cr)
     cr.TimeoutBattle = 0;
 
     NoPvpMaps::OnCritterMapOut(cr, map);
+
+    cr.MapLeaveHexX = cr.HexX;
+    cr.MapLeaveHexY = cr.HexY;
 }
 
 // //////////////////////////////////////////////////////////////////////////////////////////////////
@@ -1467,8 +1494,8 @@ bool OnPlayerCheckMove(Player player, Critter cr, uint& speed)
         speed = walkSpeed;
     }
 
-    if (speed > walkSpeed && cr.IsHide) {
-        cr.IsHide = false;
+    if (speed > walkSpeed && cr.InSneakMode) {
+        cr.InSneakMode = false;
     }
 
     return true;
@@ -1488,10 +1515,10 @@ bool OnPlayerCheckDir(Player player, Critter cr, int16& dirAngle)
 
 void OnCritterTalk(Critter cr, Critter trader, bool begin, uint talkers)
 {
-    cr.IsHide = false;
+    cr.InSneakMode = false;
 }
 
 void OnCritterBarter(Critter cr, Critter trader, bool begin, uint barterCount)
 {
-    cr.IsHide = false;
+    cr.InSneakMode = false;
 }

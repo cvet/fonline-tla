@@ -10008,6 +10008,10 @@
 
   ...
 
+* `void RefreshDialogTime()`
+
+  ...
+
 * `bool IsFree()`
 
   ...  

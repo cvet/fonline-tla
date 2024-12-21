@@ -4315,6 +4315,10 @@
 
   ...
 
+* `Public ucolor ColorizeColor`
+
+  ...
+
 * `PrivateServer bool CarIsBioEngine`
 
   ...
@@ -4552,10 +4556,6 @@
   ...
 
 * `PrivateCommon bool IsShowAnimExt`
-
-  ...
-
-* `PrivateCommon bool IsColorizeInv`
 
   ...
 
@@ -5360,6 +5360,10 @@
 
   ...  
   return ...
+
+* `void SetAlpha(uint8 alpha)`
+
+  ...
 
 ## Critter entity
 
@@ -10012,6 +10016,10 @@
 
   ...
 
+* `void RefreshDialogTime()`
+
+  ...
+
 * `bool IsFree()`
 
   ...  
@@ -10217,6 +10225,10 @@
 
   ...  
   return ...
+
+* `void SetAlpha(uint8 alpha)`
+
+  ...
 
 * `void SetContour(ContourType contour)`
 
@@ -14410,127 +14422,127 @@
 
   - `RadioBroadcastRecv = 63`
 
-  - `CarIsBioEngine = 64`
+  - `ColorizeColor = 64`
 
-  - `CarIsNoLockpick = 65`
+  - `CarIsBioEngine = 65`
 
-  - `CaravanCabLeaderId = 66`
+  - `CarIsNoLockpick = 66`
 
-  - `ELockCloseAtSeconds = 67`
+  - `CaravanCabLeaderId = 67`
 
-  - `ELockCode = 68`
+  - `ELockCloseAtSeconds = 68`
 
-  - `ExplodeInvokeId = 69`
+  - `ELockCode = 69`
 
-  - `ExplodeSwitcherExplodeId = 70`
+  - `ExplodeInvokeId = 70`
 
-  - `ExplodeOwnerId = 71`
+  - `ExplodeSwitcherExplodeId = 71`
 
-  - `ExplodeBonusDamage = 72`
+  - `ExplodeOwnerId = 72`
 
-  - `ExplodeBonusRadius = 73`
+  - `ExplodeBonusDamage = 73`
 
-  - `ExplodeTimeRespawnMine = 74`
+  - `ExplodeBonusRadius = 74`
 
-  - `GECachesNumParameters = 75`
+  - `ExplodeTimeRespawnMine = 75`
 
-  - `GeigerEnabled = 76`
+  - `GECachesNumParameters = 76`
 
-  - `GeigerCapacity = 77`
+  - `GeigerEnabled = 77`
 
-  - `GeigerTimeEvent = 78`
+  - `GeigerCapacity = 78`
 
-  - `QHunterCountFluteUse = 79`
+  - `GeigerTimeEvent = 79`
 
-  - `DoorAutoCloseTime = 80`
+  - `QHunterCountFluteUse = 80`
 
-  - `DoorAutoDialog = 81`
+  - `DoorAutoCloseTime = 81`
 
-  - `IsGeck = 82`
+  - `DoorAutoDialog = 82`
 
-  - `LockerId = 83`
+  - `IsGeck = 83`
 
-  - `LockerComplexity = 84`
+  - `LockerId = 84`
 
-  - `Locker_Locked = 85`
+  - `LockerComplexity = 85`
 
-  - `Locker_Jammed = 86`
+  - `Locker_Locked = 86`
 
-  - `Locker_Broken = 87`
+  - `Locker_Jammed = 87`
 
-  - `Locker_NoOpen = 88`
+  - `Locker_Broken = 88`
 
-  - `Locker_IsElectro = 89`
+  - `Locker_NoOpen = 89`
 
-  - `Door_NoBlockMove = 90`
+  - `Locker_IsElectro = 90`
 
-  - `Door_NoBlockShoot = 91`
+  - `Door_NoBlockMove = 91`
 
-  - `Door_NoBlockLight = 92`
+  - `Door_NoBlockShoot = 92`
 
-  - `Container_Volume = 93`
+  - `Door_NoBlockLight = 93`
 
-  - `Container_Changeble = 94`
+  - `Container_Volume = 94`
 
-  - `Container_CannotPickUp = 95`
+  - `Container_Changeble = 95`
 
-  - `Door_IsMultyHex = 96`
+  - `Container_CannotPickUp = 96`
 
-  - `Door_MultyHexLine1 = 97`
+  - `Door_IsMultyHex = 97`
 
-  - `Door_MultyHexLine2 = 98`
+  - `Door_MultyHexLine1 = 98`
 
-  - `Door_BlockerIds = 99`
+  - `Door_MultyHexLine2 = 99`
 
-  - `NavarroCountUseScaner = 100`
+  - `Door_BlockerIds = 100`
 
-  - `NCRPostmanLocPidStart = 101`
+  - `NavarroCountUseScaner = 101`
 
-  - `NCRPostmanLocPidRec = 102`
+  - `NCRPostmanLocPidStart = 102`
 
-  - `NCRPostmanMapPidRec = 103`
+  - `NCRPostmanLocPidRec = 103`
 
-  - `NCRPostmanNpcDidRec = 104`
+  - `NCRPostmanMapPidRec = 104`
 
-  - `NCRPostmanPlayerID = 105`
+  - `NCRPostmanNpcDidRec = 105`
 
-  - `PetId = 106`
+  - `NCRPostmanPlayerID = 106`
 
-  - `PetProto = 107`
+  - `PetId = 107`
 
-  - `PosterSNWall = 108`
+  - `PetProto = 108`
 
-  - `PosterEWWall = 109`
+  - `PosterSNWall = 109`
 
-  - `RatGrenadeInvokeId = 110`
+  - `PosterEWWall = 110`
 
-  - `ReddGatesGoodList = 111`
+  - `RatGrenadeInvokeId = 111`
 
-  - `ReddGatesBadList = 112`
+  - `ReddGatesGoodList = 112`
 
-  - `RespawnItemMode = 113`
+  - `ReddGatesBadList = 113`
 
-  - `RespawnItemRespTime = 114`
+  - `RespawnItemMode = 114`
 
-  - `RespawnItemVarNum = 115`
+  - `RespawnItemRespTime = 115`
 
-  - `SeAndroidRadioListened = 116`
+  - `RespawnItemVarNum = 116`
 
-  - `SeAndroidVarNum = 117`
+  - `SeAndroidRadioListened = 117`
 
-  - `SmokeGrenadeOwnerId = 118`
+  - `SeAndroidVarNum = 118`
 
-  - `Weight = 119`
+  - `SmokeGrenadeOwnerId = 119`
 
-  - `Volume = 120`
+  - `Weight = 120`
 
-  - `GroundLevel = 121`
+  - `Volume = 121`
 
-  - `IsShowAnim = 122`
+  - `GroundLevel = 122`
 
-  - `IsShowAnimExt = 123`
+  - `IsShowAnim = 123`
 
-  - `IsColorizeInv = 124`
+  - `IsShowAnimExt = 124`
 
   - `IsCanTalk = 125`
 

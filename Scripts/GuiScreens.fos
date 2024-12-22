@@ -8910,6 +8910,11 @@ namespace Character
 
 namespace Dialog
 {
+    string[] @SplitParams(string param)
+    {
+        return cast<string[] @>(param.split("\n"));
+    }
+
     class Dialog : Gui::Screen
     {
         bool TalkerIsNpc;
@@ -8932,9 +8937,14 @@ namespace Dialog
             TalkerIsNpc = params["TalkerIsNpc"];
             TalkerId = params["TalkerId"];
             Text = params["Text"];
-            // Todo: restore gui Answers       = cast< string[]@ >( params[ "Answers" ] );
+            Answers = SplitParams(params["Answers"]);
             TalkTime = params["TalkTime"];
             TalkStartTick = Game.GetTick();
+        }
+
+        void OnHide() override
+        {
+            Game.HideScreen(CLIENT_SCREEN_BARTER);
         }
     };
 
@@ -9103,7 +9113,7 @@ namespace Dialog
             dict["TalkerIsNpc"] = cast<Dialog>(Parent).TalkerIsNpc ? "1" : "0";
             dict["TalkerId"] = "" + cast<Dialog>(Parent).TalkerId;
             dict["TalkStartTick"] = "" + cast<Dialog>(Parent).TalkStartTick;
-            dict["FromDialog"] = "1";
+            dict["FromDialog"] = true;
             Game.ShowScreen(CLIENT_SCREEN_SAY, dict);
         }
     };
@@ -9280,6 +9290,15 @@ namespace Barter
             return "$" + cost;
         }
 
+        void SetDialogText(string msg)
+        {
+            auto panel = FindPanel("DiscPanel");
+            auto text = panel.FindText("DescText");
+            if (text != null) {
+                text.SetText(msg);
+            }
+        }
+
         void OnConstruct() override
         {
             SetModal(true);
@@ -9292,6 +9311,11 @@ namespace Barter
         void OnShow(dict<string, any> params) override
         {
             CritterId = params["CritterId"];
+        }
+
+        void OnHide() override
+        {
+            ClientItems::RefreshItemsCollection(ITEMS_INVENTORY);
         }
     };
 
@@ -9384,7 +9408,15 @@ namespace Barter
             SetCellPrototype(".ImageChosen");
             SetGridSize(3);
             SetColumns(1);
+            SetUserDataExt(ITEMS_BARTER);
             SetUseSorting(true);
+        }
+
+        Item[] OnGetItems() override
+        {
+            Item[] items = ClientItems::RefreshItemsCollection(UserDataExt);
+
+            return items;
         }
 
         int OnCheckItem(Item item) override
@@ -9436,7 +9468,15 @@ namespace Barter
             SetCellPrototype(".ImageChosen");
             SetGridSize(4);
             SetColumns(1);
+            SetUserDataExt(ITEMS_BARTER_OFFER);
             SetUseSorting(true);
+        }
+
+        Item[] OnGetItems() override
+        {
+            Item[] items = ClientItems::RefreshItemsCollection(UserDataExt);
+            Game.Log("refreshing items " + UserDataExt);
+            return items;
         }
 
         int OnCheckItem(Item item) override
@@ -9575,7 +9615,15 @@ namespace Barter
             SetCellPrototype(".ImageOther");
             SetGridSize(3);
             SetColumns(1);
+            SetUserDataExt(ITEMS_BARTER_OPPONENT);
             SetUseSorting(true);
+        }
+
+        Item[] OnGetItems() override
+        {
+            Item[] items = ClientItems::RefreshItemsCollection(UserDataExt);
+
+            return items;
         }
 
         int OnCheckItem(Item item) override
@@ -9627,7 +9675,15 @@ namespace Barter
             SetCellPrototype(".ImageOther");
             SetGridSize(4);
             SetColumns(1);
+            SetUserDataExt(ITEMS_BARTER_OPPONENT_OFFER);
             SetUseSorting(true);
+        }
+
+        Item[] OnGetItems() override
+        {
+            Item[] items = ClientItems::RefreshItemsCollection(UserDataExt);
+
+            return items;
         }
 
         int OnCheckItem(Item item) override
@@ -9737,7 +9793,7 @@ namespace Barter
 
         void OnLMouseClick() override
         {
-            Game.CustomCall("BarterOffer");
+            ClientItems::BarterOffer();
         }
     };
 
@@ -13140,6 +13196,7 @@ namespace Split
                     return items[i];
                 }
             }
+            Game.Log("item not found");
             return null;
         }
 
@@ -13209,7 +13266,7 @@ namespace Split
             auto @preview = cast<GuiScreens::Preview::Preview>(GetChild(0));
             preview.PreviewItemId = split.TargetItemId;
             preview.ItemInInv = true;
-            preview.ItemsCollection = split.ItemsCollection;
+            preview.ItemsCollection = ClientItems::GetCollectionFromType(split.ItemsCollection);
         }
     };
 
@@ -13333,7 +13390,9 @@ namespace Split
         {
             Split @split = cast<Split>(Screen);
             Item @item = split.GetTargetItem();
+            Game.Log("Calling barter close! collection " + split.ItemsCollection + "; split.SplitCount " + split.SplitCount);
             if (item !is null) {
+                Game.Log("Item not null/ Count: " + item.Count);
                 if (split.SplitCount > item.Count) {
                     split.SplitCount = item.Count;
                     return;
@@ -13347,7 +13406,9 @@ namespace Split
                 }
                 else if (split.ItemsCollection == ITEMS_BARTER || split.ItemsCollection == ITEMS_BARTER_OFFER ||
                          split.ItemsCollection == ITEMS_BARTER_OPPONENT || split.ItemsCollection == ITEMS_BARTER_OPPONENT_OFFER) {
-                    Game.CustomCall("BarterMoveItem " + split.TargetItemId + " " + split.ItemsCollection + " " + split.SplitCount);
+                    Game.Log("Calling barter transfer!");
+                    ClientItems::BarterTransfer(split.TargetItemId, split.ItemsCollection, split.SplitCount);
+                    //Game.CustomCall( "BarterMoveItem " + split.TargetItemId + " " + split.ItemsCollection + " " + split.SplitCount );
                 }
             }
             Game.HideScreen();
@@ -16036,7 +16097,7 @@ namespace Preview
         ident PreviewCritterId;
         ident PreviewItemId;
         bool ItemInInv = false;
-        int ItemsCollection = ITEMS_CHOSEN_ALL;
+        ClientItems::Collection ItemsCollection = ClientItems::Collection::ChosenAll;
         Sprite::Sprite spr = Sprite::Sprite();
         int CurDir = 0;
         uint LastDirChangeTick = 0;

@@ -1,17 +1,16 @@
 // FOS Server
-
 void ModuleInit()
 {
     Game.OnCritterBarter.Subscribe(OnCritterBarter);
 }
 
-bool OnCritterBarter(Critter trader, Critter playerCr, bool begin, uint barterCount)
+bool OnCritterBarter(Critter playerCr, Critter trader, bool begin, uint barterCount)
 {
     if (begin) {
         if (trader.IsNoBarter) {
+            playerCr.SayMsg(SAY_NETMSG, TextPackName::Game, MsgStr::StrBarterNoBarterMode);
             playerCr.SayMsg(SAY_DIALOG, TextPackName::Game, MsgStr::StrBarterNoBarterMode);
-            playerCr.SayMsg(SAY_DIALOG, TextPackName::Game, MsgStr::StrBarterNoBarterMode);
-            return false;
+            return true;
         }
 
         Item[] items = trader.GetItems(ItemProperty::CritterSlot, CritterItemSlot::Inventory);
@@ -20,11 +19,201 @@ bool OnCritterBarter(Critter trader, Critter playerCr, bool begin, uint barterCo
         playerCr.SendItems(items);
     }
     else {
-        Item[] items = null;
-        playerCr.TransferType = TransferTypes::Close;
-        playerCr.TransferContainerId = ZERO_IDENT;
-        playerCr.SendItems(items);
+        SendBarterClose(playerCr);
     }
 
-    return true;
+    return false;
+}
+
+void RefreshBarter(Critter playerCr, Critter trader)
+{
+    Item[] items = trader.GetItems(ItemProperty::CritterSlot, CritterItemSlot::Inventory);
+    playerCr.TransferType = TransferTypes::CritBarter;
+    playerCr.TransferContainerId = trader.Id;
+    playerCr.SendItems(items, false, false, 42);
+}
+
+void SendBarterClose(Critter playerCr)
+{
+    Item[] items = null;
+    playerCr.TransferType = TransferTypes::Close;
+    playerCr.TransferContainerId = ZERO_IDENT;
+    playerCr.SendItems(items);
+}
+
+void ProcessBarterNpcOffer(Critter playerCr, ident[] saleItemsIds, uint[] saleItemsCount, ident[] buyItemsIds, uint[] buyItemsCount)
+{
+    if (saleItemsIds.length() != saleItemsCount.length() || buyItemsIds.length() != buyItemsCount.length()) {
+        Game.Log("Wrong barter data. player " + playerCr.Id);
+        SendBarterClose(playerCr);
+        return;
+    }
+
+    if (saleItemsIds.length() == 0) {
+        playerCr.SayMsg(SAY_NETMSG, TextPackName::Game, MsgStr::StrBarterBadOffer);
+        playerCr.SayMsg(SAY_DIALOG, TextPackName::Game, MsgStr::StrBarterBadOffer);
+        return;
+    }
+
+    if (playerCr.TransferContainerId == ZERO_IDENT) {
+        Game.Log("Npc trader id invalid. Offer from player " + playerCr.Id);
+        SendBarterClose(playerCr);
+        return;
+    }
+
+    if (playerCr.Condition != CritterCondition::Alive) {
+        Game.Log("Player isn't alive. Condition: " + playerCr.Condition + ". Player id " + playerCr.Id);
+        SendBarterClose(playerCr);
+        return;
+    }
+
+    Critter npcCr = Game.GetCritter(playerCr.TransferContainerId);
+
+    if (npcCr == null) {
+        Game.Log("Npc trader is null. Offer from player " + playerCr.Id + ". TraderId = " + playerCr.TransferContainerId);
+        SendBarterClose(playerCr);
+        return;
+    }
+
+    if (npcCr.Condition != CritterCondition::Alive) {
+        Game.Log("ProcessBarterNpcOffer Npc isn't alive. Npc pid: " + npcCr.ProtoId + "; Condition: " + npcCr.Condition + ". Offer from player " + playerCr.Id);
+        SendBarterClose(playerCr);
+        return;
+    }
+
+    Map mapPlayer = playerCr.GetMap();
+
+    if (mapPlayer == null) {
+        Game.Log("Player is on global map. Npc pid: " + npcCr.ProtoId + ". Offer from player " + playerCr.Id);
+        SendBarterClose(playerCr);
+        return;
+    }
+
+    Map mapNpc = npcCr.GetMap();
+
+    if (mapNpc == null) {
+        Game.Log("Npc is on global map. Npc pid: " + npcCr.ProtoId + ". Offer from player " + playerCr.Id);
+        SendBarterClose(playerCr);
+        return;
+    }
+
+    if (mapNpc.Id != mapPlayer.Id) {
+        Game.Log("Npc and player is on different maps. Npc pid: " + npcCr.ProtoId + ". Offer from player " + playerCr.Id + " Npc Map.Id" + mapNpc.Id +
+                 " Player Map.Id " + mapPlayer.Id);
+        SendBarterClose(playerCr);
+        return;
+    }
+
+    uint dist = Game.GetDistance(playerCr.HexX, playerCr.HexY, npcCr.HexX, npcCr.HexY);
+
+    if (dist > Settings.TalkDistance) {
+        Game.Log("Too long barter distance: " + dist + " Npc pid: " + npcCr.ProtoId + ". Offer from player " + playerCr.Id);
+        SendBarterClose(playerCr);
+        return;
+    }
+
+    int barter_k = Parameters::CritterGetBarterCoefficient(npcCr) - Parameters::CritterGetBarterCoefficient(playerCr);
+    barter_k = CLAMP(barter_k, 5, 95);
+
+    Item[] itemsSell = {};
+    Item[] itemsBuy = {};
+    int sell_cost = 0;
+    int buy_cost = 0;
+
+    for (uint i = 0; i < saleItemsIds.length(); i++) {
+        Item item = playerCr.GetItem(saleItemsIds[i]);
+        uint itemCount = saleItemsCount[i];
+
+        if (item == null) {
+            Game.Log("Saleitem not found. PlayerId:" + playerCr.Id + "; npcid = " + npcCr.Id + "; itemId = " + saleItemsIds[i]);
+            SendBarterClose(playerCr);
+            return;
+        }
+
+        if (itemCount == 0 || itemCount > item.Count) {
+            Game.Log("Saleitem wrong count. PlayerId:" + playerCr.Id + "; npcid = " + npcCr.Id + "; itemId = " + saleItemsIds[i] + "; Count: " + itemCount);
+            SendBarterClose(playerCr);
+            return;
+        }
+
+        if (itemCount > 0 && !item.Stackable) {
+            Game.Log("Saleitem non stackable wrong count. PlayerId:" + playerCr.Id + "; npcid = " + npcCr.Id + "; itemId = " + saleItemsIds[i] +
+                     "; Count: " + itemCount);
+            SendBarterClose(playerCr);
+            return;
+        }
+
+        if (!Game.OnItemCheckMove.Fire(item, itemCount, playerCr, npcCr)) {
+            Game.Log("Saleitem item check move error. PlayerId:" + playerCr.Id + "; npcid = " + npcCr.Id + "; itemId = " + saleItemsIds[i] +
+                     "; Count: " + itemCount);
+            SendBarterClose(playerCr);
+            return;
+        }
+
+        uint itemCost = item.Cost * (100 - barter_k) / 100;
+        sell_cost += itemCost * itemCount;
+        itemsSell.insertLast(item);
+    }
+
+    for (uint i = 0; i < buyItemsIds.length(); i++) {
+        Item item = npcCr.GetItem(buyItemsIds[i]);
+        uint itemCount = buyItemsCount[i];
+
+        if (item == null) {
+            Game.Log("Buyitem not found. PlayerId:" + playerCr.Id + "; npcid = " + npcCr.Id + "; itemId = " + buyItemsIds[i]);
+            SendBarterClose(playerCr);
+            return;
+        }
+
+        if (itemCount == 0 || itemCount > item.Count) {
+            Game.Log("Buyitem wrong count. PlayerId:" + playerCr.Id + "; npcid = " + npcCr.Id + "; itemId = " + buyItemsIds[i] + "; Count: " + itemCount);
+            SendBarterClose(playerCr);
+            return;
+        }
+
+        if (itemCount > 0 && !item.Stackable) {
+            Game.Log("Buyitem non stackable wrong count. PlayerId:" + playerCr.Id + "; npcid = " + npcCr.Id + "; itemId = " + buyItemsIds[i] +
+                     "; Count: " + itemCount);
+            SendBarterClose(playerCr);
+            return;
+        }
+
+        if (!Game.OnItemCheckMove.Fire(item, itemCount, npcCr, playerCr)) {
+            Game.Log("Buy item check move error. PlayerId:" + playerCr.Id + "; npcid = " + npcCr.Id + "; itemId = " + saleItemsIds[i] +
+                     "; Count: " + itemCount);
+            SendBarterClose(playerCr);
+            return;
+        }
+
+        uint itemCost = item.Cost * (100 - barter_k) / 100;
+        buy_cost += itemCost * itemCount;
+        itemsBuy.insertLast(item);
+    }
+
+    Game.Log("Total SellCost = " + sell_cost + "; buy_cort" + buy_cost + "; koef = " + barter_k);
+
+    if (buy_cost > sell_cost) {
+        Game.Log("Barter offer error sell < buy. PlayerId:" + playerCr.Id + "; npcid = " + npcCr.Id);
+        playerCr.SayMsg(SAY_NETMSG, TextPackName::Game, MsgStr::StrBarterBadOffer);
+        playerCr.SayMsg(SAY_DIALOG, TextPackName::Game, MsgStr::StrBarterBadOffer);
+        return;
+    }
+
+    if (!Game.OnItemsBarter.Fire(itemsSell, saleItemsCount, itemsBuy, buyItemsCount, playerCr, npcCr)) {
+        playerCr.SayMsg(SAY_NETMSG, TextPackName::Game, MsgStr::StrBarterBadOffer);
+        playerCr.SayMsg(SAY_DIALOG, TextPackName::Game, MsgStr::StrBarterBadOffer);
+        return;
+    }
+
+    for (uint i = 0; i < itemsSell.length(); i++) {
+        ItemMovement::MoveItem(itemsSell[i], saleItemsCount[i], npcCr);
+    }
+
+    for (uint i = 0; i < itemsBuy.length(); i++) {
+        ItemMovement::MoveItem(itemsBuy[i], buyItemsCount[i], playerCr);
+    }
+
+    playerCr.SayMsg(SAY_NETMSG, TextPackName::Game, MsgStr::StrBarterGoodOffer);
+    playerCr.SayMsg(SAY_DIALOG, TextPackName::Game, MsgStr::StrBarterGoodOffer);
+    RefreshBarter(playerCr, npcCr);
 }

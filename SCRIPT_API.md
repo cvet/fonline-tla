@@ -3471,6 +3471,13 @@
   param th ...  
   param lines ...
 
+* `int GetTextLines(int width, int height, int font)`
+
+  ...  
+  param width ...  
+  param height ...  
+  param font ...
+
 * `void DrawSprite(uint sprId, int x, int y)`
 
   ...  
@@ -9488,6 +9495,10 @@
 
   ...
 
+* `OnPlayerSaidTextFromScenery(int sceneryPid, uint16 hexX, uint16 hexY, string text)`
+
+  ...
+
 * `OnMessage(Critter sender, int msg, any value)`
 
   ...
@@ -13626,17 +13637,23 @@
 
   - `DamageBack = 16`
 
-  - `KnockFront = 91`
+* `FalloutAnims2Unarmed`
 
-  - `KnockBack = 92`
+  ...
 
-  - `StandupBack = 38`
+  - `Unknown = 0`
 
-  - `StandupFront = 30`
+  - `KnockFront = 1`
 
-  - `Pickup = 21`
+  - `KnockBack = 2`
 
-  - `Use = 22`
+  - `StandupBack = 8`
+
+  - `StandupFront = 10`
+
+  - `Pickup = 11`
+
+  - `Use = 12`
 
   - `DodgeEmpty = 14`
 
@@ -13648,35 +13665,41 @@
 
   - `Run = 20`
 
-  - `DeadFront = 101`
+* `FalloutAnims2Dead`
 
-  - `DeadBack = 102`
+  ...
 
-  - `DeadBloodySingle = 104`
+  - `Unknown = 0`
 
-  - `DeadBurn = 105`
+  - `DeadFront = 1`
 
-  - `DeadBloodyBurst = 106`
+  - `DeadBack = 2`
 
-  - `DeadBurst = 107`
+  - `DeadBloodySingle = 4`
 
-  - `DeadPulse = 108`
+  - `DeadBurn = 5`
 
-  - `DeadLaser = 109`
+  - `DeadBloodyBurst = 6`
 
-  - `DeadBurn2 = 110`
+  - `DeadBurst = 7`
 
-  - `DeadPulseDust = 111`
+  - `DeadPulse = 8`
 
-  - `DeadExplode = 112`
+  - `DeadLaser = 9`
 
-  - `DeadFused = 113`
+  - `DeadBurn2 = 10`
 
-  - `DeadBurnRun = 114`
+  - `DeadPulseDust = 11`
 
-  - `DeadFront2 = 115`
+  - `DeadExplode = 12`
 
-  - `DeadBack2 = 116`
+  - `DeadFused = 13`
+
+  - `DeadBurnRun = 14`
+
+  - `DeadFront2 = 15`
+
+  - `DeadBack2 = 16`
 
 * `DamageTypes`
 

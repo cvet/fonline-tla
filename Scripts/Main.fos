@@ -112,9 +112,9 @@ bool generate_world()
     uint16 minute = 0;
     Game.SetTime(multiplier, year, month, day, hour, minute, 0);
 
-    if (!valid(Game.CreateLocation(Content::Location::replication_1, 383, 230, null)) ||
-        /*!valid ( Game.CreateLocation( Content::Location::den, 475, 275, null )) ||*/
-        !valid(Game.CreateLocation(Content::Location::klamath, 375, 125, null))   /*||
+    if (!valid(Game.CreateLocation(Content::Location::replication_1, 383, 230, null)) /*||
+        !valid ( Game.CreateLocation( Content::Location::den, 475, 275, null )) ||
+        !valid(Game.CreateLocation(Content::Location::klamath, 375, 125, null))   ||
                                                                                 ! valid(Game.CreateLocation( Content::Location::modoc, 925, 275, null )) ||
                                                                                 !valid(Game.CreateLocation( Content::Location::vault_city, 1225, 325, null )) ||
                                                                                 !valid(Game.CreateLocation( Content::Location::gecko, 1275, 225, null )) ||
@@ -127,8 +127,8 @@ bool generate_world()
                                                                                 !valid(Game.CreateLocation( Content::Location::mariposa, 675, 1425, null )) ||
                                                                                 !valid(Game.CreateLocation( Content::Location::redding, 675, 525, null )) ||
                                                                                 !valid(Game.CreateLocation( Content::Location::san_francisco, 475, 1325, null )) ||
-                                                                                !valid(Game.CreateLocation( Content::Location::navarro, 168, 866, null ))*/
-        || !valid(Game.CreateLocation(Content::Location::arroyo, 175, 125, null)) /*||
+                                                                                !valid(Game.CreateLocation( Content::Location::navarro, 168, 866, null ))
+        || !valid(Game.CreateLocation(Content::Location::arroyo, 175, 125, null)) ||
                                                                                 !valid(Game.CreateLocation( Content::Location::primal_tribe, 120, 578, null )) ||
                                                                                 !valid(Game.CreateLocation( Content::Location::vault_13, 975, 1425, null )) ||
                                                                                 !valid(Game.CreateLocation( Content::Location::barter_ground, 690, 760, null )) ||
@@ -478,7 +478,6 @@ bool critter_use_item(Critter cr, Item item, Critter targetCr, Item targetItem, 
 // Call on something critter use skill.
 bool critter_use_skill(Critter cr, CritterProperty skill, Critter targetCr, Item targetItem, StaticItem targetScen)
 {
-    Game.Log("main:critter_use_skill " + skill);
     bool isPlayer = cr.IsControlledByPlayer;
 
     // Cars
@@ -496,16 +495,13 @@ bool critter_use_skill(Critter cr, CritterProperty skill, Critter targetCr, Item
         Lockers::UseSkillOnLocker(cr, targetItem, skill)) {
         return true;
     }
-    Game.Log("beforeswitch check " + CritterProperty::SpecialSkillPickOnGround);
+	
     switch (skill) {
     case uint(CritterProperty::SpecialSkillPickOnGround): // Pick item or scenery on ground
     {
-        Game.Log("CritterProperty::SpecialSkillPickOnGround scenery!!");
         // Scenery
         if (valid(targetScen)) {
-            Game.Log("valid(targetScen)");
             if (targetScen.SceneryScript != EMPTY_HSTRING) {
-                Game.Log("using scenery!!");
                 Game.CallStaticItemFunction(cr, targetScen, null, int(skill));
             }
             else {
@@ -523,33 +519,27 @@ bool critter_use_skill(Critter cr, CritterProperty skill, Critter targetCr, Item
         if (valid(targetItem) && targetItem.ProtoId == Content::Item::active_mine && Explode::OnUseExplode(cr, targetItem, null, null, null, 0)) {
             return true;
         }
-        Game.Log("Pick some item");
         // Pick some item
         if (valid(targetItem)) {
-            Game.Log("Valid item");
             Item item = targetItem;
             if (not item.IsCanPickUp) {
                 cr.SayMsg(SAY_NETMSG, TextPackName::Game, MsgStr::StrUseNothing);
                 break;
             }
 
-            Game.Log("freeWeight");
             int freeWeight = cr.CarryWeight - cr.ItemsWeight;
             if (freeWeight >= int(item.Weight * item.Count)) {
                 // Pick full
-                ItemMovement::MoveItem(item, 0, cr);
-                Game.Log("ItemMovement::MoveItem(item, 0, cr)");
+                ItemMovement::MoveItem(item, item.Count, cr);
             }
             else {
                 // Pick half
                 if (item.Stackable && freeWeight >= int(item.Weight)) {
                     ItemMovement::MoveItem(item, freeWeight / item.Weight, cr);
-                    Game.Log("Pick half");
                 }
                 // Overweight
                 else {
                     cr.SayMsg(SAY_NETMSG, TextPackName::Game, MsgStr::StrOverweight);
-                    Game.Log("Overweight");
                 }
             }
         }
@@ -577,7 +567,10 @@ bool critter_use_skill(Critter cr, CritterProperty skill, Critter targetCr, Item
             }
             return true;
         }
-
+		if (valid(targetScen) && targetScen.SceneryScript != EMPTY_HSTRING) {
+            Game.CallStaticItemFunction(cr, targetScen, null, int(skill));
+			return true;
+        }
         cr.SayMsg(SAY_NETMSG, TextPackName::Game, MsgStr::StrUseNothing); // Todo: "You fail to learn anything."
     } break;
     case CritterProperty::SkillRepair: {
@@ -620,11 +613,18 @@ bool critter_use_skill(Critter cr, CritterProperty skill, Critter targetCr, Item
                     cr.SayMsg(SAY_NETMSG, TextPackName::Game, MsgStr::StrSkillWeariness);
                 }
                 else {
-                    cr.Action(CritterAction::PickCritter, 1, null);
-                    Lockers::ShowContainer(cr, targetCr, null, TransferTypes::CritSteal);
-                    cr.TimeoutSkSteal = STEAL_TIMEOUT(cr);
-                    cr.LastStealCrId = ZERO_IDENT;
-                    cr.StealCount = 0;
+					if(targetCr.IsNoSteal)
+					{
+						cr.SayMsg(SAY_NETMSG, TextPackName::Game, MsgStr::StrNoStealCritter);						
+					}
+					else
+					{
+						cr.Action(CritterAction::PickCritter, 1, null);
+						Lockers::ShowContainer(cr, targetCr, null, TransferTypes::CritSteal);
+						cr.TimeoutSkSteal = STEAL_TIMEOUT(cr);
+						cr.LastStealCrId = ZERO_IDENT;
+						cr.StealCount = 0;
+					}
                 }
             }
         }
@@ -664,19 +664,23 @@ bool critter_use_skill(Critter cr, CritterProperty skill, Critter targetCr, Item
         }
 
         int sk = cr.SkillFirstAid;
-        hstring activePid = cr.GetItem(ItemProperty::CritterSlot, CritterItemSlot::Main).ProtoId;
-        if (activePid == Content::Item::first_aid_kit) {
-            sk += 25;
-            if (Game.Random(0, 30) == 0) {
-                cr.DestroyItem(Content::Item::first_aid_kit, 1);
-            }
-        }
-        else if (activePid == Content::Item::field_medic_kit) {
-            sk += 50;
-            if (Game.Random(0, 30) == 0) {
-                cr.DestroyItem(Content::Item::field_medic_kit, 1);
-            }
-        }
+		auto mainSlotItem = cr.GetItem(ItemProperty::CritterSlot, CritterItemSlot::Main);
+		if(valid(mainSlotItem))
+		{
+			hstring activePid = mainSlotItem.ProtoId;
+			if (activePid == Content::Item::first_aid_kit) {
+				sk += 25;
+				if (Game.Random(0, 30) == 0) {
+					cr.DestroyItem(Content::Item::first_aid_kit, 1);
+				}
+			}
+			else if (activePid == Content::Item::field_medic_kit) {
+				sk += 50;
+				if (Game.Random(0, 30) == 0) {
+					cr.DestroyItem(Content::Item::field_medic_kit, 1);
+				}
+			}
+		}
         int mod = 11 - cr.Luck;
         mod = CLAMP(mod, 1, 10);
         int heal = Game.Random(sk / mod, sk);

@@ -2388,20 +2388,16 @@ namespace Game
             Item @item = cast<Item>(entity);
             CritterProperty skill = CritterProperty(int(Settings.CursorData));
             if (cr != null) {
-                Game.Log("Use skill on critter");
                 ChosenActions::SetChosenActions(array<any> = {Tla::ChosenUseSklOnCritter, uint(skill), cr.Id, 0, 0, 0, 0});
                 GuiScreensExt::NextCursor();
                 Settings.CursorData = 0;
             }
             else {
-                Game.Log("Use skill on item");
                 if (item !is null) {
                     if (item.Type != ItemType::Generic && item.Type != ItemType::Grid) {
-                        Game.Log("Use skill on non generic");
                         ChosenActions::SetChosenActions(array<any> = {Tla::ChosenUseSklOnItem, uint(skill), item.Id, 0, 0, 0, 0});
                     }
                     else {
-                        Game.Log("Use skill on scenery?");
                         ChosenActions::SetChosenActions(array<any> = {Tla::ChosenUseSklOnScen, uint(skill), item.ProtoId.hash, item.HexX, item.HexY, 0, 0});
                     }
                     GuiScreensExt::NextCursor();
@@ -2413,7 +2409,8 @@ namespace Game
             bool isAttack = (cursor == CursorType::UseWeapon);
             Item @useItem = (!isAttack && Settings.CursorData != 0 ? chosen.GetItem(ident(Settings.CursorData)) :
                                                                      chosen.GetItem(ItemProperty::CritterSlot, CritterItemSlot::Main));
-            if (useItem !is null) {
+            ProtoItem proto = CritterItem::GetSlotItemProto(chosen);
+            if (useItem !is null || (isAttack && proto != null)) {
                 Entity @entity = null;
                 if (isAttack) {
                     @entity = CurMap.GetEntityAtScreenPos(Settings.MouseX, Settings.MouseY);
@@ -2436,10 +2433,12 @@ namespace Game
                         }
                     }
                     else {
-                        ChosenActions::SetChosenActions(array<any> = {Tla::ChosenUseItem, useItem.Id, 0, TARGET_CRITTER, cr.Id, isAttack ? mode : USE_USE, 0});
+                        ChosenActions::SetChosenActions(
+                            array<any> =
+                                {Tla::ChosenUseItem, valid(useItem) ? useItem.Id : ZERO_IDENT, 0, TARGET_CRITTER, cr.Id, isAttack ? mode : USE_USE, 0});
                     }
                 }
-                else if (item !is null) {
+                else if (item !is null && useItem !is null) {
                     ChosenActions::SetChosenActions(array<any> = {Tla::ChosenUseItem, useItem.Id, 0, TARGET_ITEM, item.Id, USE_USE, 0});
                 }
             }
@@ -3113,10 +3112,11 @@ namespace Game
             if (useItem is null && chosen !is null) {
                 @useItem = chosen.GetItem(ItemProperty::CritterSlot, CritterItemSlot::Main);
             }
-
-            if (useItem !is null) {
-                int use = _WeaponModeUse(useItem.Mode);
-                if (useItem.Type == ItemType::Weapon) {
+            ProtoItem proto = CritterItem::GetSlotItemProto(chosen);
+            uint8 mode = (useItem == null ? chosen.HandsItemMode : useItem.Mode);
+            if (proto !is null) {
+                int use = _WeaponModeUse(mode);
+                if (proto.Type == ItemType::Weapon) {
                     if (use == USE_RELOAD) {
                         usePic = hstring("art/intrface/reload.frm");
                     }
@@ -3124,13 +3124,13 @@ namespace Game
                         usePic = hstring("art/intrface/useon.frm");
                     }
                     else if (use < MAX_USES) {
-                        usePic = _WeaponPicUse(useItem, use);
+                        usePic = _WeaponPicUse(proto, use);
                     }
                 }
-                if (usePic == EMPTY_HSTRING && useItem.IsCanUseOnSmth) {
+                if (usePic == EMPTY_HSTRING && proto.IsCanUseOnSmth) {
                     usePic = hstring("art/intrface/useon.frm");
                 }
-                if (usePic == EMPTY_HSTRING && useItem.IsCanUse) {
+                if (usePic == EMPTY_HSTRING && proto.IsCanUse) {
                     usePic = hstring("art/intrface/uset.frm");
                 }
             }
@@ -3157,7 +3157,7 @@ namespace Game
             else if (item is null) {
                 Critter @chosen = Game.GetChosen();
                 if (chosen !is null) {
-                    Item @item2 = chosen.GetItem(ItemProperty::CritterSlot, CritterItemSlot::Main);
+                    auto item2 = CritterItem::GetSlotItemProto(chosen);
                     apCost = Parameters::GetItemUseApCost(chosen, item2, chosen.HandsItemMode);
                 }
             }
@@ -12624,12 +12624,13 @@ namespace Aim
                 return "";
             }
             Item @item = chosen.GetItem(ItemProperty::CritterSlot, CritterItemSlot::Main);
-            uint8 mode = item.Mode;
+            ProtoItem proto = CritterItem::GetSlotItemProto(chosen);
+            uint8 mode = (item == null ? chosen.HandsItemMode : item.Mode);
             uint8 use = _WeaponModeUse(mode);
             uint8 aim = _WeaponModeAim(mode);
             mode = _WeaponModeMake(use, loc);
-            int hit = ClientMain::to_hit(chosen, cr, item, mode);
-            return hit == 0 ? "-" : "" + hit;
+            int hit = ClientMain::to_hit(chosen, cr, proto, mode);
+            return (hit == 0 ? "-" : "" + hit);
         }
 
         void OnHitLocationSelect(uint loc)
@@ -12638,9 +12639,9 @@ namespace Aim
             Critter @chosen = Game.GetChosen();
             ident targetCritterId = cast<Aim>(Screen).TargetCritterId;
             Item @item = chosen.GetItem(ItemProperty::CritterSlot, CritterItemSlot::Main);
-            uint8 use = item.Mode & 0xF;
+            uint8 use = (item == null ? chosen.HandsItemMode : item.Mode) & 0xF;
             uint8 mode = use | (loc << 4);
-            ChosenActions::SetChosenActions(array<any> = {Tla::ChosenUseItem, item.Id, item.ProtoId.hash, TARGET_CRITTER, targetCritterId, mode, 0});
+            ChosenActions::SetChosenActions(array<any> = {Tla::ChosenUseItem, valid(item) ? item.Id : ZERO_IDENT, 0, TARGET_CRITTER, targetCritterId, mode, 0});
         }
 
         void OnConstruct() override
@@ -12675,7 +12676,8 @@ namespace Aim
                 Game.HideScreen();
                 return;
             }
-            string name = hstring(CritterAnims::GetCritterAlias(cr.ModelName).str + "na.frm");
+            string name = hstring(CritterAnims::GetCritterAlias(cr.ModelName).str.replace("aa.frm", "na.frm"));
+            Game.Log("name picture " + name);
             SetBackgroundImage(name);
         }
     };
@@ -12752,6 +12754,7 @@ namespace Aim
             Critter @cr = Game.GetCritter(cast<Aim>(Screen).TargetCritterId);
             if (cr !is null) {
                 Text = Game.GetText(TextPackName::Combat, 1000 + cr.CrTypeAlias * 10 + HitLocations::LocationEyes - 1);
+                Game.Log("CrTypeAlias " + (1000 + cr.CrTypeAlias * 10 + HitLocations::LocationEyes - 1));
             }
         }
 
@@ -15750,8 +15753,9 @@ namespace Cursor
                     return;
                 }
 
-                Item @item = CritterItem::GetActive(chosen);
-                int hit = ClientMain::to_hit(chosen, cr, item, item.Mode);
+                Item @item = chosen.GetItem(ItemProperty::CritterSlot, CritterItemSlot::Main);
+                ProtoItem proto = CritterItem::GetSlotItemProto(chosen);
+                int hit = ClientMain::to_hit(chosen, cr, proto, item == null ? chosen.HandsItemMode : item.Mode);
                 if (hit == 0) {
                     return;
                 }

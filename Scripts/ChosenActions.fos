@@ -68,6 +68,15 @@ void SetAction(any[] action, bool append, bool toBeginning)
     if (chosen.CurrentAp / AP_DIVIDER < int(needAp)) \
         return;
 
+#define CHECK_NEED_AP2 \
+    #(needAp) if (chosen.ActionPoints < int(needAp)) \
+    { \
+        Game.Message(Game.ReplaceText(Game.GetText(TextPackName::Combat, MsgStr::StrCombatNeedAp), "%d", needAp)); \
+        return true; \
+    } \
+    if (chosen.CurrentAp / AP_DIVIDER < int(needAp)) \
+        return false;
+
 void ChosenProcess()
 {
     Critter chosen = Game.GetChosen();
@@ -244,7 +253,7 @@ void ChosenProcess()
         uint8 aim = (rate >> 4);
 
         // Find item
-        AbstractItem item = (itemId != ZERO_IDENT ? cast<AbstractItem>(chosen.GetItem(itemId)) : CritterItem::GetActive(chosen));
+        AbstractItem item = (itemId != ZERO_IDENT ? cast<AbstractItem>(chosen.GetItem(itemId)) : CritterItem::GetSlotItemProto(chosen));
         if (item is null) {
             break;
         }
@@ -297,6 +306,7 @@ void ChosenProcess()
 
         // Calculate ap cost
         uint apCost = Parameters::GetItemUseApCost(chosen, item, rate);
+        CHECK_NEED_AP(apCost);
 
         // Check weapon
         if (isAttack) {
@@ -402,7 +412,7 @@ void ChosenProcess()
             }
 
             CurPlayer.ServerCall.ReloadWeapon(realItem.Id, targetId);
-            chosen.CurrentAp -= apCost;
+            chosen.CurrentAp -= apCost * AP_DIVIDER;
         }
         else // Use
         {
@@ -492,8 +502,7 @@ void ChosenProcess()
         else {
             Game.OnCritterActionEx.Fire(true, chosen, CritterAction::UseItem, 0, item);
         }
-
-        chosen.CurrentAp -= apCost;
+        chosen.CurrentAp -= apCost * AP_DIVIDER;
         if (isAttack && valid(targetCr)) {
             CurPlayer.ServerCall.Attack(targetCr.Id, rate);
         }
@@ -726,6 +735,16 @@ void ChosenProcess()
             CurPlayer.ServerCall.UseSkill(skill, ZERO_IDENT, itemAction.Id, EMPTY_HSTRING, 0, 0);
         }
     } break;
+    case Tla::ChosenUseSklOnScen: {
+        CritterProperty skill = CritterProperty(int(ChosenActions[1]));
+        hstring sceneryProto = hstring_fromHash(ChosenActions[2]);
+        uint16 hx = ChosenActions[3];
+        uint16 hy = ChosenActions[4];
+        if (!UseSkillOnScenerySuccess(skill, chosen, sceneryProto, hx, hy)) {
+            return;
+        }
+    } break;
+
     case Tla::ChosenUseSklOnCritter: {
         CritterProperty skill = CritterProperty(int(ChosenActions[1]));
         ident crId = ChosenActions[2];
@@ -738,7 +757,7 @@ void ChosenProcess()
             }
 
             uint dist = Game.GetDistance(chosen.HexX, chosen.HexY, cr.HexX, cr.HexY);
-            uint useDist = 3 + chosen.Multihex;
+            uint useDist = 1 + chosen.Multihex;
             if (dist > useDist) {
                 bool isRun = false; // 814 ( Settings.AlwaysRun && dist >= Settings.AlwaysRunUseDist );
                 SetAction(array<any> = {Tla::ChosenMoveToCrit, cr.Id, 0, isRun ? 1 : 0, useDist, 0, 0}, false, false);
@@ -762,6 +781,7 @@ void ChosenProcess()
 
         chosen.CurrentAp = chosen.CurrentAp - apCost * AP_DIVIDER;
 
+        Game.OnCritterActionEx.Fire(true, chosen, CritterAction::UseSkill, 0, null);
         CurPlayer.ServerCall.UseSkill(skill, cr.Id, ZERO_IDENT, EMPTY_HSTRING, 0, 0);
     } break;
     case Tla::ChosenTalkNpc: {
@@ -896,6 +916,30 @@ void ChosenProcess()
         ChosenActions.reverse();
     }
 }
+
+bool UseSkillOnScenerySuccess(CritterProperty skill, Critter chosen, hstring sceneryProto, uint16 hx, uint16 hy)
+{
+    if (valid(CurMap) && valid(chosen)) {
+        uint dist = Game.GetDistance(chosen.HexX, chosen.HexY, hx, hy);
+        uint useDist = 1 + chosen.Multihex;
+        if (dist > useDist) {
+            bool isRun = Settings.AlwaysRun && dist >= Settings.AlwaysRunUseDist;
+            SetAction(array<any> = {Tla::ChosenMove, hx, hy, isRun ? 1 : 0, useDist, 0, 1}, false, false);
+
+            if (CurMap.GetPathLength(chosen, hx, hy, useDist) > 0) {
+                SetAction(array<any> = {Tla::ChosenUseSklOnScen, uint(skill), sceneryProto.uhash, hx, hy, 0, 0}, true, false);
+            }
+            return false;
+        }
+        uint apCost = Settings.RtApCostUseSkill;
+        CHECK_NEED_AP2(apCost);
+
+        Game.OnCritterActionEx.Fire(true, chosen, CritterAction::UseSkill, 0, null);
+        CurPlayer.ServerCall.UseSkill(skill, ZERO_IDENT, ZERO_IDENT, sceneryProto, hx, hy);
+    }
+    return true;
+}
+
 /*
    void UseSneak( Critter client, bool enable )
    {

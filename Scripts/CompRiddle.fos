@@ -17,8 +17,9 @@
 #define STR_HEADER      (403) // Система авторизации. Введите код доступа.
 #define STR_ANSWER      (404) // Ответ системы: @lex code@.
 #define STR_CAMERA      (405) // Вы подключились к спутнику связи Poseidon NET.
+#define STR_INPUTTEXT   (406) // ????
 #define _GetNumbers     {0, 1, 2, 3, 4, 5, 6, 7, 8, 9}
-#define _GetXP          #(player)(player.SkillScience * player.Level / 5)
+#define _GetXP          #(player)(player.SkillScience * player.Level)
 #define MAX_CODE_LENGTH (4)
 #define MAX_SOLVE_TRIES (Game.Random(4, 6))
 #define TIME_RESET \
@@ -146,7 +147,7 @@ class ComputerRiddleInfo
     // Правильно угаданный символ отображается как есть
     // Неправильно угаданный - отображается минус
     // Позиция не угадана, угадана цифра - отображается звезда
-    bool TrySolveRiddle(Critter player, string codePlayer, string codeAnswer)
+    bool TrySolveRiddle(Critter player, string codePlayer, string& codeAnswer)
     {
         if (TriesLeft < 1) {
             player.SayMsg(SAY_NETMSG, TextPackName::Text, STR_BLOCKED);
@@ -224,7 +225,10 @@ bool s_Use(Critter player, StaticItem scenery, Item item, int skill)
         player.CompRiddleMapId = player.GetMap().Id;
         player.CompRiddleHexX = scenery.HexX;
         player.CompRiddleHexY = scenery.HexY;
-        SayExtended::ShowScreenEx(player, STR_HEADER);
+        player.OnPlayerSaidTextFromScenery.Unsubscribe(AnswerTrySolveRiddle);
+        player.OnPlayerSaidTextFromScenery.Subscribe(AnswerTrySolveRiddle);
+        player.CanSendSay = true;
+        player.PlayerClientCall.ShowSayExtendedScreenFromScenery(STR_HEADER, STR_INPUTTEXT, scenery.ProtoId.uhash, scenery.HexX, scenery.HexY);
         /*
            //player.ShowScreen( ShowScreenModes::Say, 0, "answer_TrySolve" );
            player.SayMsg( Tla::SaySayTitle, TextPackName::Text, STR_HEADER );
@@ -235,13 +239,15 @@ bool s_Use(Critter player, StaticItem scenery, Item item, int skill)
     return false;
 }
 
-void answer_TrySolve(Critter player, uint answerI, string answerS)
+void AnswerTrySolveRiddle(Critter player, int sceneryPid, uint16 hexX, uint16 hexY, string text)
 {
+    player.OnPlayerSaidTextFromScenery.Unsubscribe(AnswerTrySolveRiddle);
+    player.CanSendSay = false;
     ComputerRiddleInfo info = GetRiddleInfo(player);
     if (valid(info)) {
         string code = "";
-        bool solved = info.TrySolveRiddle(player, answerS, code);
-        player.SayMsg(SAY_NETMSG, TextPackName::Text, STR_ANSWER, "$pcode" + answerS + "$code" + code);
+        bool solved = info.TrySolveRiddle(player, text, code);
+        player.SayMsg(SAY_NETMSG, TextPackName::Text, STR_ANSWER, "$pcode" + text + "$code" + code);
         if (solved) {
             player.SayMsg(SAY_NETMSG, TextPackName::Text, STR_SOLVED);
             player.Experience += _GetXP(player);
@@ -260,9 +266,11 @@ void ShowCamera(any value)
             Location loc = locations[Game.Random(0, locations.length() - 1)];
             if (valid(loc)) {
                 Map map = loc.GetMapByIndex(0);
+                Game.Log("ViewMap");
                 if (valid(map)) {
                     uint16 hx = 0, hy = 0;
                     if (Entrance::MapGetEntryCoords(map, 0, 0, hx, hy)) {
+                        Game.Log("Entry founded");
                         cr.ViewMap(map, 50, hx, hy, 5);
                     }
                 }

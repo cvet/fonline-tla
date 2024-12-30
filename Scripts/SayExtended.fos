@@ -3,6 +3,7 @@
 ///@ RemoteCall Client ShowDialogBoxPurgatoryInvite()
 ///@ RemoteCall Client ShowDialogBoxIllBrahmin()
 ///@ RemoteCall Client ShowSayExtended(int msgIdHeader, int p1, int p2)
+///@ RemoteCall Client ShowSayExtendedScreenFromScenery(int msgIdHeader,int msgIdInputText, int sceneryPid, uint16 hexX, uint16 hexY);
 
 // Перевести диалог на указанный результат
 ///@ RemoteCall Client ForceDialogResult(ident talkerId, hstring dialogId, bool isNpc, int result, bool refresh)
@@ -13,7 +14,9 @@
 ///@ RemoteCall Server Rpc_AnswerDialogBox(int dialogID, int answerIndex)
 
 ///@ RemoteCall Server Rpc_ProcessSay(string text, bool fromDialog, ident talkerId, bool isNpc)
+///@ RemoteCall Server ProcessSayExtendedFromScenery(string text, int sceneryPid, uint16 hexX, uint16 hexY)
 ///@ Event Common Game OnPlayerSaidText(Critter critter, string text, bool fromDialog, ident talkerId, bool isNpc)
+///@ Event Server Critter OnPlayerSaidTextFromScenery(int sceneryPid, uint16 hexX, uint16 hexY, string text)
 
 // Игрок может отправлять текст на сервер. Переменную нужно уставлять вручную в dlg_ - функциях
 // введена, чтобы не отправляли любые тексты из любых диалогов
@@ -36,7 +39,7 @@ void Rpc_ProcessSayExtended(Player player, string text)
 {
     Critter cr = player.GetControlledCritter();
     cr.Wait(1000);
-    Game.Log("called Rpc_ProcessSayExtended" + text);
+    Game.OnPlayerSaidText.Fire(cr, text, false, ZERO_IDENT, false);
 }
 
 void Rpc_ProcessSay(Player player, string text, bool fromDialog, ident talkerId, bool isNpc)
@@ -47,15 +50,46 @@ void Rpc_ProcessSay(Player player, string text, bool fromDialog, ident talkerId,
     if (!cr.CanSendSay) {
         cr.Wait(10000); // Защита от взлома? если оно работает
         Game.Log("Player said restricted text " + cr.Id);
+        return;
     }
     if (text.length() > MAX_SAY_TEXT_LENGTH) {
         cr.Wait(10000);
         Game.Log("Too long text from cr " + cr.Id + ": " + text.length());
+        return;
     }
 
-    ReplicationTerminal::OnPlayerSaidText(cr, text, fromDialog, talkerId, isNpc);
+    //ReplicationTerminal::OnPlayerSaidText(cr, text, fromDialog, talkerId, isNpc);
 
-    // Game.OnPlayerSaidText.Fire( cr, text, fromDialog );
+    Game.OnPlayerSaidText.Fire(cr, text, fromDialog, talkerId, isNpc);
+}
+
+void ProcessSayExtendedFromScenery(Player player, string text, int sceneryPid, uint16 hexX, uint16 hexY)
+{
+    Critter cr = player.GetControlledCritter();
+
+    cr.Wait(1000);
+
+    if (!cr.CanSendSay) {
+        cr.Wait(10000);
+        Game.Log("Player said restricted text " + cr.Id);
+        return;
+    }
+    if (text.length() > MAX_SAY_TEXT_LENGTH) {
+        cr.Wait(10000);
+        Game.Log("Too long text from cr " + cr.Id + ": " + text.length());
+        return;
+    }
+
+    Map @map = cr.GetMap();
+
+    if (valid(map)) {
+        hstring sceneryProto = hstring_fromHash(sceneryPid);
+        StaticItem scenery = map.GetStaticItem(hexX, hexY, sceneryProto);
+
+        if (valid(scenery)) {
+            cr.OnPlayerSaidTextFromScenery.Fire(sceneryPid, hexX, hexY, text);
+        }
+    }
 }
 
 #endif
@@ -95,6 +129,16 @@ void AddDialogStr(uint msg, string lexems, bool append)
 void ShowSayExtended(int msgIdHeader, int p1, int p2)
 {
     Game.ShowScreen(CLIENT_SCREEN_SAY_EXTENDED, dict<string, any> = {{"MsgHeaderId", msgIdHeader}});
+}
+
+void ShowSayExtendedScreenFromScenery(int msgIdHeader, int msgIdInputText, int sceneryPid, uint16 hexX, uint16 hexY)
+{
+    Critter chosen = Game.GetChosen();
+    if (valid(CurMap) && valid(chosen)) {
+        Game.ShowScreen(
+            CLIENT_SCREEN_SAY_EXTENDED,
+            dict<string, any> = {{"MsgHeaderId", msgIdHeader}, {"InputMessageID", msgIdInputText}, {"ProtoID", sceneryPid}, {"HexX", hexX}, {"HexY", hexY}});
+    }
 }
 
 #endif

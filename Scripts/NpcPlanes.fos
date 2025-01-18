@@ -72,14 +72,14 @@ void ModuleInit()
 
 void OnCritterIdle(Critter npc)
 {
-    if (npc.IsControlledByPlayer || npc.IsBusy()) {
+    if (npc.IsControlledByPlayer || CritterState::IsBusy(npc)) {
         return;
     }
 
     if (npc.IsAlive()) {
         const uint wait = ProcessAi(npc);
         if (wait != 0) {
-            npc.Wait(wait);
+            CritterState::Wait(npc, wait);
         }
     }
 }
@@ -92,8 +92,8 @@ bool CheckHasEnoughAP(Critter cr, int ap)
 uint ProcessAi(Critter npc)
 {
     // Check busy
-    if (npc.IsBusy()) {
-        return 1000;
+    if (CritterState::IsBusy(npc)) {
+         return 1000;
     }
 
     // Global map
@@ -209,7 +209,7 @@ uint ProcessAi(Critter npc)
             }
         }
 
-        bool is_busy = (plane.IsMove || npc.IsBusy()); // || npc.IsWait );
+        bool is_busy = (plane.IsMove || CritterState::IsBusy(npc)); // || CritterState::IsWait(npc);
 
         // Process planes
         switch (plane.Type) {
@@ -594,7 +594,8 @@ uint ProcessAi(Critter npc)
             else {
                 npc.SetDir(Game.GetDirection(npc.HexX, npc.HexY, hx, hy));
                 CritterActions::PickItem(npc, hx, hy, pid);
-                //	npc->NextPlane( REASON_SUCCESS );
+                NextPlane(npc, REASON_SUCCESS);
+                break;
             }
         } break;
         /************************************************************************/
@@ -689,6 +690,12 @@ class NpcPlane
     NpcPlane ChildPlane;
     bool Assigned;
     int RefCounter;
+
+    string ToString()
+    {
+        return "PlaneId = " + PlaneId + ";Type = " + Type + ";Priority = " + Priority + ";Identifier = " + Identifier + ";IdentifierExt = " + IdentifierExt +
+               "; coords = " + Pick_HexX + ":" + Pick_HexY;
+    }
 
     NpcPlane(uint type, uint priority)
     {
@@ -960,11 +967,11 @@ bool AddPlane(Critter cr, NpcPlane plane)
 {
     if (valid(cr) && !cr.IsControlledByPlayer) {
         NpcPlane[] planes = {};
-        if (AllNpcPlanes.exists(cr.Id)) {
-            planes = AllNpcPlanes.get(cr.Id, planes);
-        }
         if (!valid(AllNpcPlanes)) {
             Game.Log("invalid AllNpcPlanes");
+        }
+        if (AllNpcPlanes.exists(cr.Id)) {
+            planes = AllNpcPlanes.get(cr.Id, planes);
         }
         // AllNpcPlanes.setIfNotExist( cr.Id, array< NpcPlane >() );
         if (!valid(planes)) {
@@ -1015,10 +1022,10 @@ void NextPlane(Critter cr, int reason)
         // Remove first plane and notify about
         NpcPlane plane = planes[0];
         if (valid(plane)) {
-            planes.removeFirst();
-
             if (Game.OnNpcPlaneEnd.Fire(cr, plane.PlaneId, reason, null, null)) {
+                planes.removeFirst();
                 if (plane.GetCurPlane().PlaneId == plane.PlaneId) {
+                    //Нет дочерних планов.
                     return;
                 }
                 NpcPlane cur = plane;
@@ -1028,10 +1035,11 @@ void NextPlane(Critter cr, int reason)
                     child = cur.ChildPlane;
                 }
                 cur.ChildPlane = null;
-                planes.insertFirst(cur);
+                planes.insertFirst(plane);
             }
             else {
                 // поменять приоритет
+                planes.removeFirst();
                 uint position = 0;
                 if (planes.length() > 0) {
                     for (uint l = planes.length(); position < l; position++) {

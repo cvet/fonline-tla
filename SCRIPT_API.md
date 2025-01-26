@@ -5229,7 +5229,7 @@
 
   ...
 
-* `PrivateServer int[] SceneryParams`
+* `PrivateServer hstring[] SceneryParams`
 
   ...
 

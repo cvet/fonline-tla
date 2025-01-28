@@ -13908,6 +13908,50 @@
 
   - `Tragic = 6`
 
+* `KarmaLevel`
+
+  ...
+
+  - `Unknown = 0`
+
+  - `SaviorOfTheDamned = 1`
+
+  - `GuardianOfTheWastes = 2`
+
+  - `ShieldOfHope = 3`
+
+  - `Defender = 4`
+
+  - `Wanderer = 5`
+
+  - `Betrayer = 6`
+
+  - `SwordOfDespair = 7`
+
+  - `ScourgeOfTheWastes = 8`
+
+  - `DemonSpawn = 9`
+
+* `ReputationLevel`
+
+  ...
+
+  - `Unknown = 0`
+
+  - `Idolized = 1`
+
+  - `Liked = 2`
+
+  - `Accepted = 3`
+
+  - `Neutral = 4`
+
+  - `Antipathy = 5`
+
+  - `Hated = 6`
+
+  - `Vilified = 7`
+
 * `EScores`
 
   ...

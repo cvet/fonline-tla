@@ -4544,6 +4544,8 @@ namespace GlobalMap
 
     class GlobalGroupGrid : Gui::Grid
     {
+        ident[] CrittersIds = {};
+
         void OnConstruct() override
         {
             SetPosition(8, 227);
@@ -4558,14 +4560,33 @@ namespace GlobalMap
             if (chosen is null) {
                 return;
             }
+            CrittersIds.clear();
+            auto critters = Game.GetCritters(CritterFindType::Any);
+            for (uint i = 0, l = critters.length(); i < l; i++) {
+                CrittersIds.insertLast(critters[i].Id);
+            }
+            ResizeGrid(CrittersIds.length());
         }
     };
 
     class ProtoGroupGrid : Gui::Panel
     {
+        ident CritterId;
+
         void OnConstruct() override
         {
             SetSize(170, 23);
+        }
+
+        void OnResizeGrid(Gui::Object cell, uint cellIndex) override
+        {
+            auto critters = cast<GlobalGroupGrid>(Parent).CrittersIds;
+            auto critter = Game.GetCritter(critters[cellIndex]);
+            if (critter != null) {
+                CritterId = critter.Id;
+                FindText("CritterName").Text = critter.Name;
+                FindText("CritterCond").Text = (critter.IsOffline() ? "offline" : "online");
+            }
         }
     };
 
@@ -4575,15 +4596,6 @@ namespace GlobalMap
         {
             SetSize(120, 22);
             SetTextFlags(FT_CENTERY);
-        }
-
-        string get_Text() override
-        {
-            Critter @chosen = Game.GetChosen();
-            if (chosen is null) {
-                return "";
-            }
-            return chosen.Name;
         }
     };
 
@@ -13962,24 +13974,18 @@ namespace Timer
 
 namespace DialogBox
 {
-#define DIALOGBOX_NONE          (0)
-#define DIALOGBOX_FOLLOW        (1)
-#define DIALOGBOX_BARTER        (2)
-#define DIALOGBOX_ENCOUNTER_ANY (3)
-#define DIALOGBOX_ENCOUNTER_RT  (4)
-#define DIALOGBOX_ENCOUNTER_TB  (5)
-#define DIALOGBOX_MANUAL        (6)
-
     class DialogBox : Gui::Screen
     {
         uint BaseHeight;
-        uint DialogID;
+        DialogBoxType DialogType;
+        uint Answers;
+        string Lexems;
 
         void OnConstruct() override
         {
             SetModal(true);
             SetCanMove(true, false);
-            SetSize(302, 99);
+            SetSize(302, 990);
             SetBackgroundImage("art/intrface/dialogbox_top.png");
         }
 
@@ -13990,10 +13996,11 @@ namespace DialogBox
 
         void OnShow(dict<string, any> params) override
         {
-            uint height = BaseHeight;
             uint heightButtons = Find("ButtonSlot").Height;
-            DialogID = params["DialogID"];
-            height += (Stdlib::StrToStrArr(params["ButtonTexts"]).length()) * heightButtons;
+            DialogType = DialogBoxType(int(params["DialogBoxType"]));
+            Lexems = params["Lexems"];
+            Answers = params["Answers"];
+            uint height = BaseHeight + Answers * heightButtons;
             SetSize(Width, height);
         }
     };
@@ -14009,7 +14016,11 @@ namespace DialogBox
 
         void OnShow(dict<string, any> params) override
         {
-            SetText(params["Text"]);
+            auto box = cast<DialogBox>(Parent);
+            string text = MSG_GAME(Dialogbox::GetDialogTextStr(box.DialogType));
+            text = Game.FormatTags(text, box.Lexems);
+
+            SetText(text);
         }
     };
 
@@ -14024,7 +14035,7 @@ namespace DialogBox
 
         void OnShow(dict<string, any> params) override
         {
-            ResizeGrid(Stdlib::StrToStrArr(params["ButtonTexts"]).length());
+            ResizeGrid(params["Answers"]);
         }
     };
 
@@ -14032,7 +14043,7 @@ namespace DialogBox
     {
         void OnConstruct() override
         {
-            SetSize(302, 28);
+            SetSize(302, 24);
         }
     };
 
@@ -14047,7 +14058,7 @@ namespace DialogBox
 
         void OnShow(dict<string, any> params) override
         {
-            SetActive(CellIndex == Stdlib::StrToStrArr(params["ButtonTexts"]).length() - 1);
+            SetActive(CellIndex == cast<DialogBox>(Parent.Parent.Parent).Answers - 1);
         }
     };
 
@@ -14061,7 +14072,7 @@ namespace DialogBox
 
         void OnShow(dict<string, any> params) override
         {
-            SetActive(CellIndex <= Stdlib::StrToStrArr(params["ButtonTexts"]).length() - 1);
+            SetActive(CellIndex <= cast<DialogBox>(Parent.Parent.Parent).Answers - 1);
         }
     };
 
@@ -14076,7 +14087,7 @@ namespace DialogBox
 
         void OnLMouseClick() override
         {
-            CurPlayer.ServerCall.Rpc_AnswerDialogBox(cast<DialogBox>(Parent).DialogID, CellIndex);
+            Dialogbox::AnswerDialog(cast<DialogBox>(Parent.Parent.Parent).DialogType, CellIndex);
             Game.HideScreen();
         }
     };
@@ -14093,7 +14104,7 @@ namespace DialogBox
 
         void OnShow(dict<string, any> params) override
         {
-            SetText(Stdlib::StrToStrArr(params["ButtonTexts"])[CellIndex]);
+            SetText(MSG_GAME(Dialogbox::GetDialogTextStr(cast<DialogBox>(Parent.Parent.Parent).DialogType) + CellIndex + 1));
         }
     };
 
@@ -16093,7 +16104,7 @@ namespace ItemsContainer
 
         Item[] OnGetItems() override
         {
-            Item[] items = ClientItems::RefreshItemsCollection(UserDataExt);
+            Item[] items = ClientItems::RefreshItemsCollection(ClientItems::Collection(UserDataExt));
 
             return items;
         }

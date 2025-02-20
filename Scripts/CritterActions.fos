@@ -674,3 +674,87 @@ void Attack(Critter cr, ident targetId, uint8 mode)
     cr.TimeoutAggressor = Game.GetFullSecond() + Time::RealMinute(1);
     Combat::CombatAttack(cr, target, weapon, mode, ammo);
 }
+
+void UseItemOn(Critter cr, ident usedItemId, ident targetCrId, ident targetItemId, hstring sceneryPid, uint16 hx, uint16 hy, uint timer)
+{
+    if (!cr.IsAlive()) {
+        ThrowException("Client is not alive", cr);
+    }
+
+    if (usedItemId == ZERO_IDENT) {
+        ThrowException("Critter used zero ident item", cr);
+    }
+
+    Item usedItem = Game.GetItem(usedItemId);
+    if (usedItem == null) {
+        ThrowException("Critter used item not found", cr, usedItemId);
+    }
+
+    uint ap = Settings.RtApCostUseItem;
+    if (!ProcessAp(cr, ap)) {
+        return;
+    }
+
+    Critter targetCr;
+    Item targetItem;
+    StaticItem targetScen;
+    uint useDist = 1 + cr.Multihex;
+
+    if (targetCrId != ZERO_IDENT) {
+        if (cr.Id != targetCrId) {
+            if (cr.GetMap() != null) {
+                targetCr = Game.GetCritter(targetCrId);
+                if (targetCr == null) {
+                    ThrowException("Target critter not found", cr, targetCrId);
+                }
+                if (!cr.IsSee(targetCr)) {
+                    ThrowException("Critter doesn't see target critter", cr, targetCr);
+                }
+                if (Game.GetDistance(cr.HexX, cr.HexY, targetCr.HexX, targetCr.HexY) > useDist + targetCr.Multihex) {
+                    ThrowException("Target critter too far", cr, targetCr);
+                }
+            }
+            else {
+                // need realization
+                ThrowException("Target critter not found in global group", cr, targetCrId);
+            }
+        }
+    }
+    else if (targetItemId != ZERO_IDENT || sceneryPid != EMPTY_HSTRING) {
+        Map map = cr.GetMap();
+        if (map == null) {
+            ThrowException("Critter on global map", cr);
+        }
+
+        if (sceneryPid == EMPTY_HSTRING) {
+            targetItem = map.GetItem(targetItemId);
+            if (targetItem == null) {
+                ThrowException("Target item not found on map", cr, map, targetItemId);
+            }
+            if (targetItem.IsHidden) {
+                ThrowException("Target item is hidden", cr, map, targetItem);
+            }
+            if (Game.GetDistance(cr.HexX, cr.HexY, targetItem.HexX, targetItem.HexY) > useDist) {
+                ThrowException("Target item too far", cr, targetItem);
+            }
+        }
+        else {
+            ProtoItem proto = Game.GetProtoItem(sceneryPid);
+            if (proto == null) {
+                ThrowException("Proto item not found", cr, sceneryPid);
+            }
+
+            if (Game.GetDistance(cr.HexX, cr.HexY, hx, hy) > useDist) {
+                ThrowException("Target scenery too far", cr, hx, hy, sceneryPid);
+            }
+
+            targetScen = map.GetStaticItem(hx, hy, sceneryPid);
+            if (targetScen == null) {
+                ThrowException("Scenery not found", cr, hx, hy, sceneryPid);
+            }
+        }
+    }
+    // Send action
+    cr.Action(CritterAction::UseItem, 0, null);
+    Game.OnCritterUseItemOn.Fire(cr, usedItem, targetCr, targetItem, targetScen, timer);
+}

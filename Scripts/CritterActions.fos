@@ -7,14 +7,51 @@ bool ProcessAp(Critter cr, uint ap)
         if (apRegeneration == 0) {
             apRegeneration = Settings.ApRegeneration;
         }
-        cr.Wait(apRegeneration / cr.ActionPoints * (ap - cr.CurrentAp / AP_DIVIDER));
+        CritterState::Wait(cr, apRegeneration / cr.ActionPoints * (ap - cr.CurrentAp / AP_DIVIDER));
         return false;
     }
     cr.CurrentAp = (cr.CurrentAp / AP_DIVIDER - ap) * AP_DIVIDER;
     cr.ApRegenerationTick = Game.GetTick() + Settings.Breaktime;
-    cr.Wait(Settings.Breaktime);
+    CritterState::Wait(cr, Settings.Breaktime);
 
     return true;
+}
+
+void PickCritter(Critter cr, Critter pickCr)
+{
+    // Spend ap
+    if (!ProcessAp(cr, Settings.RtApCostPickCritter)) {
+        return;
+    }
+
+    if (!cr.IsAlive()) {
+        ThrowException("Critter is not alive", cr);
+    }
+
+    if (!pickCr.IsDead()) {
+        ThrowException("Pick critter is not dead", pickCr);
+    }
+
+    if (pickCr.IsNoLoot) {
+        return;
+    }
+
+    if (Game.GetDistance(cr.HexX, cr.HexY, pickCr.HexX, pickCr.HexY) > 1 + cr.Multihex) {
+        ThrowException("Target too far", cr, cr.HexX, cr.HexY, pickCr.HexX, pickCr.HexY);
+    }
+
+    Map map = cr.GetMap();
+    if (map == null) {
+        ThrowException("Critter is on global map", cr);
+    }
+
+    Map mapPick = pickCr.GetMap();
+    if (mapPick == null) {
+        ThrowException("Pick critter is on global map", pickCr);
+    }
+
+    cr.Action(CritterAction::PickCritter, 0, null);
+    Game.OnCritterUseSkill.Fire(cr, CritterProperty::SpecialSkillLootCritter, pickCr, null, null);
 }
 
 void PickItem(Critter cr, uint16 hx, uint16 hy, hstring pid)
@@ -27,6 +64,7 @@ void PickItem(Critter cr, uint16 hx, uint16 hy, hstring pid)
     if (!cr.IsAlive()) {
         ThrowException("Critter is not alive", cr);
     }
+
     if (Game.GetDistance(cr.HexX, cr.HexY, hx, hy) > 1 + cr.Multihex) {
         ThrowException("Target too far", cr, cr.HexX, cr.HexY, hx, hy);
     }
@@ -224,7 +262,7 @@ void OperateContainer(Critter cr, bool take, bool all, ident itemId, uint itemCo
         ThrowException("Critter is not alive", cr);
     }
 
-    cr.Wait(Settings.Breaktime);
+    CritterState::Wait(cr, Settings.Breaktime);
 
     TransferTypes transferType = cr.TransferType;
     if (transferType == TransferTypes::Close) {
@@ -635,4 +673,88 @@ void Attack(Critter cr, ident targetId, uint8 mode)
     // Raise attack event
     cr.TimeoutAggressor = Game.GetFullSecond() + Time::RealMinute(1);
     Combat::CombatAttack(cr, target, weapon, mode, ammo);
+}
+
+void UseItemOn(Critter cr, ident usedItemId, ident targetCrId, ident targetItemId, hstring sceneryPid, uint16 hx, uint16 hy, uint timer)
+{
+    if (!cr.IsAlive()) {
+        ThrowException("Client is not alive", cr);
+    }
+
+    if (usedItemId == ZERO_IDENT) {
+        ThrowException("Critter used zero ident item", cr);
+    }
+
+    Item usedItem = Game.GetItem(usedItemId);
+    if (usedItem == null) {
+        ThrowException("Critter used item not found", cr, usedItemId);
+    }
+
+    uint ap = Settings.RtApCostUseItem;
+    if (!ProcessAp(cr, ap)) {
+        return;
+    }
+
+    Critter targetCr;
+    Item targetItem;
+    StaticItem targetScen;
+    uint useDist = 1 + cr.Multihex;
+
+    if (targetCrId != ZERO_IDENT) {
+        if (cr.Id != targetCrId) {
+            if (cr.GetMap() != null) {
+                targetCr = Game.GetCritter(targetCrId);
+                if (targetCr == null) {
+                    ThrowException("Target critter not found", cr, targetCrId);
+                }
+                if (!cr.IsSee(targetCr)) {
+                    ThrowException("Critter doesn't see target critter", cr, targetCr);
+                }
+                if (Game.GetDistance(cr.HexX, cr.HexY, targetCr.HexX, targetCr.HexY) > useDist + targetCr.Multihex) {
+                    ThrowException("Target critter too far", cr, targetCr);
+                }
+            }
+            else {
+                // need realization
+                ThrowException("Target critter not found in global group", cr, targetCrId);
+            }
+        }
+    }
+    else if (targetItemId != ZERO_IDENT || sceneryPid != EMPTY_HSTRING) {
+        Map map = cr.GetMap();
+        if (map == null) {
+            ThrowException("Critter on global map", cr);
+        }
+
+        if (sceneryPid == EMPTY_HSTRING) {
+            targetItem = map.GetItem(targetItemId);
+            if (targetItem == null) {
+                ThrowException("Target item not found on map", cr, map, targetItemId);
+            }
+            if (targetItem.IsHidden) {
+                ThrowException("Target item is hidden", cr, map, targetItem);
+            }
+            if (Game.GetDistance(cr.HexX, cr.HexY, targetItem.HexX, targetItem.HexY) > useDist) {
+                ThrowException("Target item too far", cr, targetItem);
+            }
+        }
+        else {
+            ProtoItem proto = Game.GetProtoItem(sceneryPid);
+            if (proto == null) {
+                ThrowException("Proto item not found", cr, sceneryPid);
+            }
+
+            if (Game.GetDistance(cr.HexX, cr.HexY, hx, hy) > useDist) {
+                ThrowException("Target scenery too far", cr, hx, hy, sceneryPid);
+            }
+
+            targetScen = map.GetStaticItem(hx, hy, sceneryPid);
+            if (targetScen == null) {
+                ThrowException("Scenery not found", cr, hx, hy, sceneryPid);
+            }
+        }
+    }
+    // Send action
+    cr.Action(CritterAction::UseItem, 0, null);
+    Game.OnCritterUseItemOn.Fire(cr, usedItem, targetCr, targetItem, targetScen, timer);
 }

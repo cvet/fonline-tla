@@ -51,6 +51,7 @@
 #define REASON_GAG_CRITTER        (41)
 #define REASON_GAG_ITEM           (42)
 #define REASON_NO_UNARMED         (43)
+#define REASON_CANT_SEE_TARGET    (44)
 // Run
 #define REASON_ATTACK_TARGET     (50)
 #define REASON_ATTACK_WEAPON     (51)
@@ -59,7 +60,7 @@
 
 void NL(Critter npc, string str)
 {
-    Game.Log(npc.Name + " - " + str);
+    Game.Log("id=" + npc.Id + " " + npc.Name + " - " + str);
     npc.Say(SAY_NORM_ON_HEAD, str);
 }
 
@@ -68,20 +69,26 @@ funcdef void NpcPlaneMiscFunc(Critter cr);
 void ModuleInit()
 {
     Game.OnCritterIdle.Subscribe(OnCritterIdle);
+    Game.OnMapCritterOut.Subscribe(OnMapCritterOut);
 }
 
 void OnCritterIdle(Critter npc)
 {
-    if (npc.IsControlledByPlayer || npc.IsBusy()) {
+    if (npc.IsControlledByPlayer || CritterState::IsBusy(npc)) {
         return;
     }
 
     if (npc.IsAlive()) {
         const uint wait = ProcessAi(npc);
         if (wait != 0) {
-            npc.Wait(wait);
+            CritterState::Wait(npc, wait);
         }
     }
+}
+
+void OnMapCritterOut(Map map, Critter cr)
+{
+    DropPlanes(cr);
 }
 
 bool CheckHasEnoughAP(Critter cr, int ap)
@@ -92,7 +99,7 @@ bool CheckHasEnoughAP(Critter cr, int ap)
 uint ProcessAi(Critter npc)
 {
     // Check busy
-    if (npc.IsBusy()) {
+    if (CritterState::IsBusy(npc)) {
         return 1000;
     }
 
@@ -139,7 +146,7 @@ uint ProcessAi(Critter npc)
         // Enemy stack
         Critter enemy = EnemyStack::ScanEnemyStack(npc);
         if (enemy != null) {
-            if (AddAttackPlane(npc, 0, enemy)) {
+            if (AddAttackPlane(npc, 0, REASON_FOUND_IN_ENEMY_STACK, enemy)) {
                 return 0;
             }
         }
@@ -147,7 +154,7 @@ uint ProcessAi(Critter npc)
         // Go home
         if (!npc.IsNoHome && map.Id == npc.HomeMapId && (npc.HexX != npc.HomeHexX || npc.HexY != npc.HomeHexY)) {
             if (!npc.IsNoMove) {
-                AddWalkPlane(npc, 0, 0, 0, npc.HomeHexX, npc.HomeHexY, npc.HomeDir, false, 0);
+                AddWalkPlane(npc, 0, 0, 0, npc.HomeHexX, npc.HomeHexY, npc.HomeDir == 0 ? 1 : 0, false, 0, REASON_GO_HOME);
             }
             else if (map.IsHexesMovable(npc.HomeHexX, npc.HomeHexY, npc.Multihex)) {
                 npc.TransitToMap(map, npc.HomeHexX, npc.HomeHexY, npc.HomeDir);
@@ -167,6 +174,7 @@ uint ProcessAi(Critter npc)
             if (plane.Run) {
                 if (npc.IsDamagedRightLeg || npc.IsDamagedLeftLeg || npc.IsOverweight) {
                     plane.Run = false;
+                    SavePlan(npc, plane);
                 }
             }
 
@@ -179,12 +187,14 @@ uint ProcessAi(Critter npc)
                     ap_move += npc->GetMoveAp();
              */
             plane.IsMove = false;
+            SavePlan(npc, plane);
             if (!CheckHasEnoughAP(npc, ap_move)) {
                 uint wait = Settings.ApRegeneration / npc.ActionPoints * (ap_move - npc.CurrentAp) / AP_DIVIDER;
                 // npc->SetWait( GameOpt.ApRegeneration / npc->GetActionPoints() * ( (int) ( need_ap ) - npc->GetRealAp() ) / AP_DIVIDER );
                 return wait;
             }
             plane.IsMove = true;
+            SavePlan(npc, plane);
 
             MovingState state = npc.GetMovingState();
             if (state != MovingState::InProgress && state != MovingState::Success) {
@@ -202,14 +212,17 @@ uint ProcessAi(Critter npc)
                     break;
                 }
 
-                if (Game.OnNpcPlaneEnd.Fire(npc, plane.PlaneId, reason, Game.GetCritter(gagId), Game.GetItem(gagId))) {
+                Critter gagCr = (gagId == ZERO_IDENT ? null : Game.GetCritter(gagId));
+                Item gagItem = (gagId == ZERO_IDENT ? null : Game.GetItem(gagId));
+                if (Game.OnNpcPlaneEnd.Fire(npc, plane.PlaneId, reason, gagCr, gagItem)) {
                     ErasePlane(npc, 0); // TODO: возможно, здесь нужночто-то другое, не удалять план
                 }
                 return 0;
             }
+            plane.IsMove = false;
         }
 
-        bool is_busy = (plane.IsMove || npc.IsBusy()); // || npc.IsWait );
+        bool is_busy = (plane.IsMove || CritterState::IsBusy(npc)); // || CritterState::IsWait(npc);
 
         // Process planes
         switch (plane.Type) {
@@ -269,10 +282,12 @@ uint ProcessAi(Critter npc)
 
                 if (plane.IsMove && plane.Attack_LastHexX == 0 && plane.Attack_LastHexY == 0) {
                     plane.IsMove = false;
+                    SavePlan(npc, plane);
                 }
 
                 plane.Attack_LastHexX = targ.HexX;
                 plane.Attack_LastHexY = targ.HexY;
+                SavePlan(npc, plane);
 
                 if (is_busy) {
                     break;
@@ -413,6 +428,7 @@ uint ProcessAi(Critter npc)
                 if (actualDist > maxDist) {
                     if (!npc.IsNoMove) {
                         plane.IsMove = true;
+                        SavePlan(npc, plane);
                         npc.MoveToCritter(targ, best_dist, plane.Run && !npc.IsNoRun ? npc.WalkSpeed * 2 : npc.WalkSpeed);
                         break;
                     }
@@ -445,6 +461,7 @@ uint ProcessAi(Critter npc)
                                 LineTracer::LineTracerHex(tx, ty, targetHx, targetHy, map, maxDist, tracer);
                                 if (tracer.Success) {
                                     plane.IsMove = true;
+                                    SavePlan(npc, plane);
                                     npc.MoveToHex(tx, ty, 0, plane.Run && !npc.IsNoRun ? npc.WalkSpeed * 2 : npc.WalkSpeed);
                                     break;
                                 }
@@ -464,6 +481,7 @@ uint ProcessAi(Critter npc)
                         }
                         else if (maxDist > 1 && best_dist == 1) {
                             plane.IsMove = true;
+                            SavePlan(npc, plane);
                             npc.MoveToCritter(targ, best_dist, plane.Run && !npc.IsNoRun ? npc.WalkSpeed * 2 : npc.WalkSpeed);
                         }
 
@@ -520,11 +538,12 @@ uint ProcessAi(Critter npc)
                 if (npc.GetMovingState() == MovingState::InProgress) {
                     break;
                 }
-
-                AddWalkPlane(npc, 0, 0, 0, plane.Attack_LastHexX, plane.Attack_LastHexY, 1, plane.Run, npc.LookDistance / 2);
-
-                plane.Attack_LastHexX = 0;
-                plane.Attack_LastHexY = 0;
+                //AddWalkPlane(npc, 0, 0, 0, plane.Attack_LastHexX, plane.Attack_LastHexY, 1, plane.Run, npc.LookDistance / 2, REASON_CANT_SEE_TARGET);
+                //plane.Attack_LastHexX = 0;
+                //plane.Attack_LastHexY = 0;
+                //SavePlan(npc, plane);
+                NextPlane(npc, REASON_CANT_SEE_TARGET);
+                break;
             }
         } break;
         /************************************************************************/
@@ -550,8 +569,11 @@ uint ProcessAi(Critter npc)
             else {
                 if (npc.IsNoMove) {
                     NextPlane(npc, REASON_CANT_WALK);
+                    break;
                 }
                 npc.MoveToHex(plane.Walk_HexX, plane.Walk_HexY, plane.Walk_Cut, plane.Run && !npc.IsNoRun ? npc.WalkSpeed * 2 : npc.WalkSpeed);
+                plane.IsMove = true;
+                SavePlan(npc, plane);
             }
         } break;
         /************************************************************************/
@@ -590,11 +612,14 @@ uint ProcessAi(Critter npc)
 
             if (Game.GetDistance(npc.HexX, npc.HexY, hx, hy) > 1 + npc.Multihex) {
                 npc.MoveToHex(hx, hy, 1 + npc.Multihex, is_run && !npc.IsNoRun ? npc.WalkSpeed * 2 : npc.WalkSpeed);
+                plane.IsMove = true;
+                SavePlan(npc, plane);
             }
             else {
                 npc.SetDir(Game.GetDirection(npc.HexX, npc.HexY, hx, hy));
                 CritterActions::PickItem(npc, hx, hy, pid);
-                //	npc->NextPlane( REASON_SUCCESS );
+                NextPlane(npc, REASON_SUCCESS);
+                break;
             }
         } break;
         /************************************************************************/
@@ -689,6 +714,12 @@ class NpcPlane
     NpcPlane ChildPlane;
     bool Assigned;
     int RefCounter;
+
+    string ToString()
+    {
+        return "PlaneId = " + PlaneId + ";Type = " + Type + ";Priority = " + Priority + ";Identifier = " + Identifier + ";IdentifierExt = " + IdentifierExt +
+               "; coords pick = " + Pick_HexX + ":" + Pick_HexY + "; coords walk x=" + Walk_HexX + "; y = " + Walk_HexY;
+    }
 
     NpcPlane(uint type, uint priority)
     {
@@ -793,7 +824,7 @@ uint ErasePlane(Critter cr, int planeType, bool all)
                 }
             }
             else {
-                planes.remove(planes[i]);
+                planes.removeAt(i);
                 erased++;
             }
         }
@@ -807,7 +838,7 @@ bool ErasePlane(Critter cr, uint index)
     if (!valid(cr)) {
         ThrowException("Attempt to call method on destroyed object.");
     }
-    if (!cr.IsControlledByPlayer) {
+    if (cr.IsControlledByPlayer) {
         ThrowException("Critter is not npc.");
     }
 
@@ -820,7 +851,7 @@ bool ErasePlane(Critter cr, uint index)
             if (i == index) {
                 NpcPlane plane = planes[i];
                 if (plane != null) {
-                    planes.remove(plane);
+                    planes.removeAt(i);
                     AllNpcPlanes.set(cr.Id, planes);
                     return true;
                 }
@@ -869,6 +900,18 @@ NpcPlane GetCurPlane(Critter cr)
         }
     }
     return null;
+}
+
+void SavePlan(Critter npc, NpcPlane planeS)
+{
+    NpcPlane[] planes = AllNpcPlanes.get(npc.Id, null);
+    if (planes != null && !planes.isEmpty()) {
+        NpcPlane plane = planes[0];
+        if (plane != null && plane.PlaneId == planeS.PlaneId) {
+            planes.removeFirst();
+            planes.insertFirst(planeS);
+        }
+    }
 }
 
 NpcPlane[] GetPlanes(Critter cr)
@@ -958,13 +1001,19 @@ uint GetPlanes(Critter cr, any identifier, any identifierExt, NpcPlane[] planes)
 
 bool AddPlane(Critter cr, NpcPlane plane)
 {
+    return AddPlane(cr, plane, REASON_FROM_SCRIPT);
+}
+
+bool AddPlane(Critter cr, NpcPlane plane, int reason)
+{
     if (valid(cr) && !cr.IsControlledByPlayer) {
         NpcPlane[] planes = {};
-        if (AllNpcPlanes.exists(cr.Id)) {
-            planes = AllNpcPlanes.get(cr.Id, planes);
-        }
         if (!valid(AllNpcPlanes)) {
             Game.Log("invalid AllNpcPlanes");
+            return false;
+        }
+        if (AllNpcPlanes.exists(cr.Id)) {
+            planes = AllNpcPlanes.get(cr.Id, planes);
         }
         // AllNpcPlanes.setIfNotExist( cr.Id, array< NpcPlane >() );
         if (!valid(planes)) {
@@ -986,6 +1035,8 @@ bool AddPlane(Critter cr, NpcPlane plane)
                 }
             }
         }
+        uint index = 0;
+
         if (planes.length() == 0) {
             planes.insertFirst(plane);
         }
@@ -998,11 +1049,18 @@ bool AddPlane(Critter cr, NpcPlane plane)
                 }
             }
             planes.insertAt(i, plane);
+            index = i;
         }
 
         // void insertAt(uint, const array<T>&in)
-
         AllNpcPlanes.set(cr.Id, planes);
+
+        Critter someCr = plane.Attack_TargId == ZERO_IDENT ? null : Game.GetCritter(plane.Attack_TargId);
+        Item someItem = plane.Pick_UseItemId == ZERO_IDENT ? null : Game.GetItem(plane.Pick_UseItemId);
+        if (!Game.OnNpcPlaneBegin.Fire(cr, plane.PlaneId, reason, someCr, someItem) || !cr.OnNpcPlaneBegin.Fire(plane.PlaneId, reason, someCr, someItem)) {
+            ErasePlane(cr, index);
+            return false;
+        }
         return true;
     }
     return false;
@@ -1015,10 +1073,10 @@ void NextPlane(Critter cr, int reason)
         // Remove first plane and notify about
         NpcPlane plane = planes[0];
         if (valid(plane)) {
-            planes.removeFirst();
-
             if (Game.OnNpcPlaneEnd.Fire(cr, plane.PlaneId, reason, null, null)) {
+                planes.removeFirst();
                 if (plane.GetCurPlane().PlaneId == plane.PlaneId) {
+                    //Нет дочерних планов.
                     return;
                 }
                 NpcPlane cur = plane;
@@ -1028,10 +1086,11 @@ void NextPlane(Critter cr, int reason)
                     child = cur.ChildPlane;
                 }
                 cur.ChildPlane = null;
-                planes.insertFirst(cur);
+                planes.insertFirst(plane);
             }
             else {
                 // поменять приоритет
+                planes.removeFirst();
                 uint position = 0;
                 if (planes.length() > 0) {
                     for (uint l = planes.length(); position < l; position++) {
@@ -1092,6 +1151,11 @@ bool AddWalkPlane(Critter npc, uint priority, uint16 hexX, uint16 hexY, uint8 di
 
 bool AddWalkPlane(Critter npc, uint priority, any identifier, any identifierExt, uint16 hexX, uint16 hexY, uint8 dir, bool run, uint cut)
 {
+    return AddWalkPlane(npc, priority, identifier, identifierExt, hexX, hexY, dir, run, REASON_FROM_SCRIPT);
+}
+
+bool AddWalkPlane(Critter npc, uint priority, any identifier, any identifierExt, uint16 hexX, uint16 hexY, uint8 dir, bool run, uint cut, int reason)
+{
     if (npc.IsNoMove) {
         return false;
     }
@@ -1106,12 +1170,16 @@ bool AddWalkPlane(Critter npc, uint priority, any identifier, any identifierExt,
     plane.Walk_Dir = dir;
     plane.Run = run;
     plane.Walk_Cut = cut;
-    return AddPlane(npc, plane);
+    return AddPlane(npc, plane, reason);
 }
 
 bool AddAttackPlane(Critter npc, uint priority, Critter target)
 {
-    NL(npc, "AddAttackPlane");
+    return AddAttackPlane(npc, priority, REASON_FROM_SCRIPT, target);
+}
+
+bool AddAttackPlane(Critter npc, uint priority, int reason, Critter target)
+{
     NpcPlane plane = CreatePlane();
     plane.Type = AI_PLANE_ATTACK;
     plane.Priority = (priority == 0 ? AI_PLANE_ATTACK_PRIORITY : priority);
@@ -1123,7 +1191,7 @@ bool AddAttackPlane(Critter npc, uint priority, Critter target)
     plane.Attack_LastHexX = target.HexX;
     plane.Attack_LastHexY = target.HexY;
     plane.Run = false;
-    return AddPlane(npc, plane);
+    return AddPlane(npc, plane, reason);
 }
 
 bool AddAttackPlane(Critter npc, uint priority, ident critId)
@@ -1300,9 +1368,11 @@ uint EraseAttackPlane(Critter npc, ident critId)
     NpcPlane[] planes = GetPlanes(npc);
 
     uint erased = 0;
-    for (uint i = 0; i < planes.length(); i++) {
-        if (planes[i].Attack_TargId == critId && ErasePlane(npc, i - erased)) {
-            erased++;
+    if (planes != null) {
+        for (uint i = 0; i < planes.length(); i++) {
+            if (planes[i].Attack_TargId == critId && ErasePlane(npc, i - erased)) {
+                erased++;
+            }
         }
     }
 

@@ -2931,7 +2931,7 @@ namespace Game
         void OnDraw() override
         {
             Critter @chosen = Game.GetChosen();
-            GetChild(0).SetActive(chosen !is null && chosen.IsBusy());
+            GetChild(0).SetActive(chosen !is null && ChosenActions::IsBusy(chosen));
         }
     };
 
@@ -4012,9 +4012,11 @@ namespace GlobalMap
             SetHoverImage("art/intrface/GM_Town/town_view_sh_dn.png");
         }
 
-        void OnLMouseClick() override
+        void OnLMousePressed() override
         {
-            GlobalMapLocations::TryEnterHoveredLocation();
+            if (!GlobalMapLocations::TryEnterHoveredLocation()) {
+                CurPlayer.ServerCall.ProcessGlobalMapCommand(3, 0, 0);
+            }
         }
     };
 
@@ -4344,7 +4346,7 @@ namespace GlobalMap
             KnownCityLocations = array<hstring>();
             for (uint i = 0, l = chosen.KnownLocProtoId.length(); i < l; i++) {
                 // Не для всех городов и локаций есть ярлыки
-                if (MSG_LOCATION(STR_LOC_LABEL_PIC(chosen.KnownLocProtoId[i])) != "error") {
+                if (!MSG_LOCATION(STR_LOC_LABEL_PIC(chosen.KnownLocProtoId[i])).isEmpty()) {
                     KnownCityLocations.insertLast(chosen.KnownLocProtoId[i]);
                 }
             }
@@ -4542,6 +4544,8 @@ namespace GlobalMap
 
     class GlobalGroupGrid : Gui::Grid
     {
+        ident[] CrittersIds = {};
+
         void OnConstruct() override
         {
             SetPosition(8, 227);
@@ -4556,14 +4560,33 @@ namespace GlobalMap
             if (chosen is null) {
                 return;
             }
+            CrittersIds.clear();
+            auto critters = Game.GetCritters(CritterFindType::Any);
+            for (uint i = 0, l = critters.length(); i < l; i++) {
+                CrittersIds.insertLast(critters[i].Id);
+            }
+            ResizeGrid(CrittersIds.length());
         }
     };
 
     class ProtoGroupGrid : Gui::Panel
     {
+        ident CritterId;
+
         void OnConstruct() override
         {
             SetSize(170, 23);
+        }
+
+        void OnResizeGrid(Gui::Object cell, uint cellIndex) override
+        {
+            auto critters = cast<GlobalGroupGrid>(Parent).CrittersIds;
+            auto critter = Game.GetCritter(critters[cellIndex]);
+            if (critter != null) {
+                CritterId = critter.Id;
+                FindText("CritterName").Text = critter.Name;
+                FindText("CritterCond").Text = (critter.IsOffline() ? "offline" : "online");
+            }
         }
     };
 
@@ -4573,15 +4596,6 @@ namespace GlobalMap
         {
             SetSize(120, 22);
             SetTextFlags(FT_CENTERY);
-        }
-
-        string get_Text() override
-        {
-            Critter @chosen = Game.GetChosen();
-            if (chosen is null) {
-                return "";
-            }
-            return chosen.Name;
         }
     };
 
@@ -7845,6 +7859,12 @@ namespace Character
                 FindText("Desc").Text = MSG_GAME(STR_PARAM_DESC(prop));
                 FindPanel("Image").SetBackgroundImage(MSG_GAME(STR_PARAM_PIC(prop)));
             }
+            auto panel = cast<PropsPanel>(obj.Parent);
+            if (prop == CritterProperty::Invalid && panel !is null) {
+                FindText("Name").Text = panel.Caption;
+                FindText("Desc").Text = panel.Description;
+                FindPanel("Image").SetBackgroundImage(panel.Image);
+            }
         }
     };
 
@@ -7939,14 +7959,20 @@ namespace Character
         void OnLMouseClick() override
         {
             if (UnspentSP < GetPropValue(CritterProperty::UnspentSkillPoints)) {
-                string skills;
+                any[] args = {};
                 for (uint i = 0; i < SkillUp.length(); i++) {
                     if (SkillUp.getValue(i) != 0) {
-                        skills += " " + SkillUp.getKey(i) + " " + SkillUp.getValue(i);
+                        auto skill = SkillUp.getKey(i);
+                        auto skill_value = SkillUp.getValue(i);
+                        if (IsTagSkill(skill)) {
+                            skill_value /= 2;
+                        }
+                        args.insertLast(skill);
+                        args.insertLast(skill_value);
                     }
                 }
-                if (skills != "") {
-                    Game.CustomCall("AssignSkillPoints" + skills);
+                if (args.length() > 1) {
+                    CurPlayer.ServerCall.ProcessSkillsUp(args);
                 }
             }
             Game.HideScreen();
@@ -8125,23 +8151,17 @@ namespace Character
 
         string get_Text() override
         {
-            return Game.ReplaceText(MSG_GAME(MsgStr::StrChaNextLevel), "%d", NUMERICAL_NUMBER(GetPropValue(CritterProperty::Level) * 1000));
+            return Game.ReplaceText(MSG_GAME(MsgStr::StrChaNextLevel), "%d", NUMERICAL_NUMBER(GetPropValue(CritterProperty::Level)) * 1000);
         }
     };
 
     class Switcher : Gui::Panel
     {
         int CurSwitch = 0; // 0 - perks, 1 - karma, 2 - kills
-        int[] SwitchScroll = {0, 0, 0};
 
         void OnConstruct() override
         {
             SetPosition(12, 328);
-        }
-
-        void OnShow(dict<string, any> params) override
-        {
-            SwitchScroll[0] = SwitchScroll[1] = SwitchScroll[2] = 0;
         }
 
         void OnDraw() override
@@ -8240,6 +8260,12 @@ namespace Character
         void OnLMouseClick() override
         {
             cast<Switcher>(Parent).CurSwitch = 0;
+
+            Gui::Panel @panel = Parent.FindPanel("PropdGridBase");
+            Gui::Panel @panel2 = panel.FindPanel("PropsGrid");
+            auto grid = cast<PropsGrid>(panel2);
+            grid.FillGrid(0);
+            Game.ShowScreen(CLIENT_SCREEN_CHARACTER);
         }
     };
 
@@ -8254,20 +8280,12 @@ namespace Character
         void OnLMouseClick() override
         {
             cast<Switcher>(Parent).CurSwitch = 1;
-        }
-    };
 
-    class KillsRegion : Gui::Panel
-    {
-        void OnConstruct() override
-        {
-            SetPosition(209, 0);
-            SetSize(109, 33);
-        }
-
-        void OnLMouseClick() override
-        {
-            cast<Switcher>(Parent).CurSwitch = 2;
+            Gui::Panel @panel = Parent.FindPanel("PropdGridBase");
+            Gui::Panel @panel2 = panel.FindPanel("PropsGrid");
+            auto grid = cast<PropsGrid>(panel2);
+            grid.FillGrid(1);
+            Game.ShowScreen(CLIENT_SCREEN_CHARACTER);
         }
     };
 
@@ -8283,10 +8301,12 @@ namespace Character
 
         void OnLMousePressed() override
         {
-            int curSwitch = cast<Switcher>(Parent).CurSwitch;
-            if (cast<Switcher>(Parent).SwitchScroll[curSwitch] > 0) {
-                cast<Switcher>(Parent).SwitchScroll[curSwitch]--;
-            }
+            //int curSwitch = cast< Switcher >( Parent ).CurSwitch;
+            //if( cast< Switcher >( Parent ).SwitchScroll[ curSwitch ] > 0 )
+            //    cast< Switcher >( Parent ).SwitchScroll[ curSwitch ]--;
+            Gui::Panel @panel = Parent.FindPanel("PropdGridBase");
+            Gui::Panel @panel2 = panel.FindPanel("PropsGrid");
+            panel2.ModifyScroll(-10, 0);
         }
     };
 
@@ -8302,120 +8322,279 @@ namespace Character
 
         void OnLMousePressed() override
         {
-            int curSwitch = cast<Switcher>(Parent).CurSwitch;
-            cast<Switcher>(Parent).SwitchScroll[curSwitch]++;
+            //int curSwitch = cast< Switcher >( Parent ).CurSwitch;
+            //cast< Switcher >( Parent ).SwitchScroll[ curSwitch ]++;
+            Gui::Panel @panel = Parent.FindPanel("PropdGridBase");
+            Gui::Panel @panel2 = panel.FindPanel("PropsGrid");
+            panel2.ModifyScroll(+10, 0);
         }
     };
 
-    class CurText : Gui::Text
+    class KillsRegion : Gui::Panel
+    {
+        void OnConstruct() override
+        {
+            SetPosition(209, 0);
+            SetSize(109, 33);
+        }
+
+        void OnLMouseClick() override
+        {
+            cast<Switcher>(Parent).CurSwitch = 2;
+            Gui::Panel @panel = Parent.FindPanel("PropdGridBase");
+            Gui::Panel @panel2 = panel.FindPanel("PropsGrid");
+            auto grid = cast<PropsGrid>(panel2);
+            grid.FillGrid(2);
+            Game.ShowScreen(CLIENT_SCREEN_CHARACTER);
+        }
+    };
+
+    class PropdGridBase : Gui::Panel
     {
         void OnConstruct() override
         {
             SetPosition(17, 38);
             SetSize(282, 100);
         }
+    };
 
-        void OnDraw() override
+    class PropsGrid : Gui::Grid
+    {
+        string[] Captions = {};
+        string[] Descriptions = {};
+        string[] Images = {};
+        int[] HeadersIndexes = {};
+
+        void FillGrid(int curSwitch)
+        {
+            Captions.clear();
+            Descriptions.clear();
+            Images.clear();
+            HeadersIndexes.clear();
+            ResizeGrid(0);
+            switch (curSwitch) {
+            case 0:
+                FillPerks();
+                break;
+            case 1:
+                FillKarma();
+                break;
+            case 2:
+                FillKills();
+                break;
+            }
+        }
+
+        void FillKills()
+        {
+            int totalRows = 0;
+            Critter @chosen = Game.GetChosen();
+            if (chosen is null) {
+                return;
+            }
+            uint[] kills = array<uint>(chosen.Kills);
+            bool killsTitleAdded = false;
+            for (uint i = 0; i < kills.length(); i++) {
+                if (kills[i] != 0) {
+                    if (!killsTitleAdded) {
+                        killsTitleAdded = true;
+                        Captions.insertLast(MSG_GAME(MsgStr::StrKillsName));
+                        Descriptions.insertLast(MSG_GAME(MsgStr::StrKillsDesc));
+                        Images.insertLast(MSG_GAME(MsgStr::StrKillsSkillDex));
+                        HeadersIndexes.insertLast(totalRows);
+                        totalRows++;
+                    }
+                    string text = MSG_GAME(STR_KILL_NAME(i));
+                    if (kills[i] > 1) {
+                        text += " (" + kills[i] + ")";
+                    }
+
+                    Captions.insertLast(text);
+                    Descriptions.insertLast(MSG_GAME(STR_KILL_DESC(i)));
+                    Images.insertLast(MSG_GAME(MsgStr::StrKillsSkillDex));
+                    totalRows++;
+                }
+            }
+
+            ResizeGrid(totalRows);
+        }
+
+        void FillPerks()
+        {
+            int totalRows = 0;
+            // Traits
+            bool traitsTitleAdded = false;
+            for (uint i = 0; i < CritterPropertyGroup::Traits.length(); i++) {
+                if (GetPropValue(CritterPropertyGroup::Traits[i]) != 0) {
+                    if (!traitsTitleAdded) {
+                        traitsTitleAdded = true;
+                        Captions.insertLast(MSG_GAME(MsgStr::StrTraitsName));
+                        Descriptions.insertLast(MSG_GAME(MsgStr::StrTraitsDescr));
+                        Images.insertLast(MSG_GAME(MsgStr::StrTraitsSkilldex));
+                        HeadersIndexes.insertLast(totalRows);
+                        totalRows++;
+                    }
+
+                    Captions.insertLast(MSG_GAME(STR_PARAM_NAME(CritterPropertyGroup::Traits[i])));
+                    Descriptions.insertLast(MSG_GAME(STR_PARAM_DESC(CritterPropertyGroup::Traits[i])));
+                    Images.insertLast(MSG_GAME(STR_PARAM_PIC(CritterPropertyGroup::Traits[i])));
+                    totalRows++;
+                }
+            }
+
+            // Perks
+            bool perksTitleAdded = false;
+            for (uint i = 0; i < CritterPropertyGroup::Perks.length(); i++) {
+                int value = GetPropValue(CritterPropertyGroup::Perks[i]);
+                if (value != 0) {
+                    if (!perksTitleAdded) {
+                        perksTitleAdded = true;
+                        Captions.insertLast(MSG_GAME(MsgStr::StrPerksName));
+                        Descriptions.insertLast(MSG_GAME(MsgStr::StrPerksDescr));
+                        Images.insertLast(MSG_GAME(MsgStr::StrPerksSkilldex));
+                        HeadersIndexes.insertLast(totalRows);
+                        totalRows++;
+                    }
+                    string text = MSG_GAME(STR_PARAM_NAME(CritterPropertyGroup::Perks[i]));
+                    if (value > 1) {
+                        text += " (" + value + ")";
+                    }
+
+                    Captions.insertLast(text);
+                    Descriptions.insertLast(MSG_GAME(STR_PARAM_DESC(CritterPropertyGroup::Perks[i])));
+                    Images.insertLast(MSG_GAME(STR_PARAM_PIC(CritterPropertyGroup::Perks[i])));
+                    totalRows++;
+                }
+            }
+            ResizeGrid(totalRows);
+        }
+
+        void FillKarma()
         {
             Critter @chosen = Game.GetChosen();
             if (chosen is null) {
                 return;
             }
 
-            string text;
-            int curSwitch = cast<Switcher>(Parent).CurSwitch;
-            int scroll = cast<Switcher>(Parent).SwitchScroll[curSwitch];
-            if (curSwitch == 0) {
-                // Traits
-                bool traitsTitleAdded = false;
-                for (uint i = 0; i < CritterPropertyGroup::Traits.length(); i++) {
-                    if (GetPropValue(CritterPropertyGroup::Traits[i]) != 0) {
-                        if (!traitsTitleAdded) {
-                            traitsTitleAdded = true;
-                            text += "    " + MSG_GAME(MsgStr::StrTraitsName) + "\n";
-                        }
-                        text += MSG_GAME(STR_PARAM_NAME(CritterPropertyGroup::Traits[i])) + "\n";
-                    }
-                }
+            string karmaCaption = MSG_GAME(MsgStr::StrKarmaGenGenName) + " " + MSG_GAME(MsgStr::StrKarmaGenCaption);
+            auto karmaValue = GetPropValue(CritterProperty::Karma);
+            auto karmaLevel = Reputation::GetKarmaLevel(karmaValue);
+            karmaCaption = Game.ReplaceText(karmaCaption, "%d", karmaValue);
+            karmaCaption = Game.ReplaceText(karmaCaption, "%s", MSG_GAME(STR_KARMA_LEVEL_NAME(karmaLevel)));
 
-                // Perks
-                bool perksTitleAdded = false;
-                for (uint i = 0; i < CritterPropertyGroup::Perks.length(); i++) {
-                    int value = GetPropValue(CritterPropertyGroup::Perks[i]);
-                    if (value != 0) {
-                        if (!perksTitleAdded) {
-                            perksTitleAdded = true;
-                            text += "    " + MSG_GAME(MsgStr::StrPerksName) + "\n";
-                        }
-                        text += MSG_GAME(STR_PARAM_NAME(CritterPropertyGroup::Perks[i]));
-                        if (value > 1) {
-                            text += " (" + value + ")";
-                        }
-                        text += "\n";
-                    }
+            Captions.insertLast(karmaCaption);
+            Descriptions.insertLast(MSG_GAME(MsgStr::StrKarmaGenDescription));
+            Images.insertLast(MSG_GAME(STR_KARMA_LEVEL_SKILLDEX(karmaLevel)));
+
+            int totalRows = 1;
+
+            // Karma perks
+            for (uint i = 0; i < CritterPropertyGroup::KarmaPerks.length(); i++) {
+                auto perk = CritterPropertyGroup::KarmaPerks[i];
+                if (GetPropValue(perk) != 0) {
+                    Captions.insertLast(MSG_GAME(STR_PARAM_NAME(perk)));
+                    Descriptions.insertLast(MSG_GAME(STR_PARAM_DESC(perk)));
+                    Images.insertLast(MSG_GAME(STR_PARAM_PIC(perk)));
+                    totalRows++;
                 }
             }
-            else if (curSwitch == 1) {
-                // General karma
-                text += MSG_GAME(MsgStr::StrKarmaGenGenName) + "\n";
 
-                // Karma perks
-                for (uint i = 0; i < CritterPropertyGroup::KarmaPerks.length(); i++) {
-                    if (GetPropValue(CritterPropertyGroup::KarmaPerks[i]) != 0) {
-                        text += MSG_GAME(STR_PARAM_NAME(CritterPropertyGroup::KarmaPerks[i])) + "\n";
-                    }
+            // Town reputation
+            bool townReputationTitleAdded = false;
+            for (uint i = 0; i < CritterPropertyGroup::Reputations.length(); i++) {
+                if (!townReputationTitleAdded) {
+                    townReputationTitleAdded = true;
+                    Captions.insertLast(MSG_GAME(MsgStr::StrTownrepTitleName));
+                    Descriptions.insertLast(MSG_GAME(MsgStr::StrTownrepTitleDesc));
+                    Images.insertLast(MSG_GAME(MsgStr::StrTownrepTitlePic));
+                    HeadersIndexes.insertLast(totalRows);
+                    totalRows++;
                 }
 
-                // Town reputation
-                bool townReputationTitleAdded = false;
-                for (uint i = 0; i < CritterPropertyGroup::Reputations.length(); i++) {
-                    if (!townReputationTitleAdded) {
-                        townReputationTitleAdded = true;
-                        text += "    " + MSG_GAME(MsgStr::StrTownrepTitleName) + "\n";
+                int value = GetPropValue(CritterPropertyGroup::Reputations[i]);
+                auto repLevel = Reputation::GetReputationLevel(value);
+                Captions.insertLast(MSG_GAME(STR_REPUTATION_NAME(i)) + ": " + MSG_GAME(STR_REPUTATION_LEVEL_NAME(repLevel)) + " (" + value + ")");
+                Descriptions.insertLast(MSG_GAME(STR_REPUTATION_LEVEL_DESC(repLevel)));
+                Images.insertLast(MSG_GAME(STR_REPUTATION_LEVEL_SKILLDEX(repLevel)));
+                totalRows++;
+            }
+
+            // Addiction
+            bool addictionTitleAdded = false;
+            bool[] addictions = array<bool>(chosen.Addictions);
+            for (uint i = 0; i < addictions.length(); i++) {
+                if (addictions[i]) {
+                    if (!addictionTitleAdded) {
+                        addictionTitleAdded = true;
+                        Captions.insertLast(MSG_GAME(MsgStr::StrAddictTitleName));
+                        Descriptions.insertLast(MSG_GAME(MsgStr::StrAddictTitleDesc));
+                        Images.insertLast(MSG_GAME(MsgStr::StrAddictTitlePic));
+                        HeadersIndexes.insertLast(totalRows);
+                        totalRows++;
                     }
 
-                    int value = GetPropValue(CritterPropertyGroup::Reputations[i]);
-                    text += MSG_GAME(STR_REPUTATION_NAME(i)) + ": " + MSG_GAME(STR_TOWNREP_RATIO_NAME(value)) + " " + value + "\n";
-                }
-
-                // Addiction
-                bool addictionTitleAdded = false;
-                bool[] addictions = array<bool>(chosen.Addictions);
-                for (uint i = 0; i < addictions.length(); i++) {
-                    if (addictions[i]) {
-                        if (!addictionTitleAdded) {
-                            addictionTitleAdded = true;
-                            text += "    " + MSG_GAME(MsgStr::StrAddictTitleName) + "\n";
-                        }
-
-                        text += MSG_GAME(STR_ADDICTION_NAME(i)) + "\n";
-                    }
+                    Captions.insertLast(MSG_GAME(STR_ADDICTION_NAME(i)));
+                    Descriptions.insertLast(MSG_GAME(STR_ADDICTION_NAME(i)));
+                    Images.insertLast(MSG_GAME(STR_ADDICTION_PIC(i)));
+                    totalRows++;
                 }
             }
-            else if (curSwitch == 2) {
-                uint[] kills = array<uint>(chosen.Kills);
-                for (uint i = 0; i < kills.length(); i++) {
-                    if (kills[i] != 0) {
-                        text += MSG_GAME(STR_KILL_NAME(i));
-                        if (kills[i] > 1) {
-                            text += " (" + kills[i] + ")";
-                        }
-                        text += "\n";
-                    }
-                }
-            }
-            SetTextFlags(FT_SKIPLINES(scroll));
-            SetText(text);
+            ResizeGrid(totalRows);
         }
 
-        void OnMousePressed(MouseButton button) override
+        void OnConstruct() override
         {
-            int curSwitch = cast<Switcher>(Parent).CurSwitch;
-            if (button == MouseButton::WheelUp && cast<Switcher>(Parent).SwitchScroll[curSwitch] > 0) {
-                cast<Switcher>(Parent).SwitchScroll[curSwitch]--;
-            }
-            else if (button == MouseButton::WheelDown) {
-                cast<Switcher>(Parent).SwitchScroll[curSwitch]++;
+            SetSize(282, 100);
+            SetCropContent(true);
+            SetAutoScroll(true, false);
+            SetCellPrototype("PropsPanel");
+            SetGridSize(0);
+            SetColumns(1);
+        }
+
+        void OnShow(dict<string, any> params) override
+        {
+            FillGrid(cast<Switcher>(Parent.Parent).CurSwitch);
+        }
+    };
+
+    class PropsPanel : Gui::Panel
+    {
+        bool IsHeader;
+        string Caption;
+        string Description;
+        string Image;
+        int Index;
+
+        void OnConstruct() override
+        {
+            SetSize(282, 13);
+        }
+
+        void OnResizeGrid(Gui::Object cell, uint cellIndex) override
+        {
+            auto grid = cast<PropsGrid>(Parent);
+            Caption = grid.Captions[cellIndex];
+            Image = grid.Images[cellIndex];
+            Description = grid.Descriptions[cellIndex];
+            IsHeader = grid.HeadersIndexes.exists(cellIndex);
+            Index = cellIndex;
+        }
+    };
+
+    class PropsNameText : Gui::Text
+    {
+        void OnConstruct() override
+        {
+            SetSize(282, 13);
+        }
+
+        void OnShow(dict<string, any> params) override
+        {
+            auto panel = cast<PropsPanel>(Parent);
+            Text = panel.Caption;
+            if (panel.IsHeader) {
+                SetTextFlags(FT_CENTERX);
             }
         }
     };
@@ -8815,10 +8994,10 @@ namespace Character
         CreateKillsTitleTextHierarchy(obj);
         CreatePerksRegionHierarchy(obj);
         CreateKarmaRegionHierarchy(obj);
-        CreateKillsRegionHierarchy(obj);
         CreateScrollUpHierarchy(obj);
         CreateScrollDownHierarchy(obj);
-        CreateCurTextHierarchy(obj);
+        CreateKillsRegionHierarchy(obj);
+        CreatePropdGridBaseHierarchy(obj);
         obj.Init(parent);
         return obj;
     }
@@ -8879,13 +9058,6 @@ namespace Character
         return obj;
     }
 
-    KillsRegion CreateKillsRegionHierarchy(Gui::Object parent)
-    {
-        KillsRegion obj = KillsRegion();
-        obj.Init(parent);
-        return obj;
-    }
-
     ScrollUp CreateScrollUpHierarchy(Gui::Object parent)
     {
         ScrollUp obj = ScrollUp();
@@ -8900,9 +9072,40 @@ namespace Character
         return obj;
     }
 
-    CurText CreateCurTextHierarchy(Gui::Object parent)
+    KillsRegion CreateKillsRegionHierarchy(Gui::Object parent)
     {
-        CurText obj = CurText();
+        KillsRegion obj = KillsRegion();
+        obj.Init(parent);
+        return obj;
+    }
+
+    PropdGridBase CreatePropdGridBaseHierarchy(Gui::Object parent)
+    {
+        PropdGridBase obj = PropdGridBase();
+        CreatePropsGridHierarchy(obj);
+        obj.Init(parent);
+        return obj;
+    }
+
+    PropsGrid CreatePropsGridHierarchy(Gui::Object parent)
+    {
+        PropsGrid obj = PropsGrid();
+        CreatePropsPanelHierarchy(obj);
+        obj.Init(parent);
+        return obj;
+    }
+
+    PropsPanel CreatePropsPanelHierarchy(Gui::Object parent)
+    {
+        PropsPanel obj = PropsPanel();
+        CreatePropsNameTextHierarchy(obj);
+        obj.Init(parent);
+        return obj;
+    }
+
+    PropsNameText CreatePropsNameTextHierarchy(Gui::Object parent)
+    {
+        PropsNameText obj = PropsNameText();
         obj.Init(parent);
         return obj;
     }
@@ -8928,6 +9131,15 @@ namespace Dialog
         string[] Answers = {};
         uint TalkTime;
         uint TalkStartTick;
+
+        void SetDialogText(string msg)
+        {
+            auto panel = FindPanel("SpeechPanel");
+            auto text = panel.FindText("SpeechText");
+            if (text != null) {
+                text.SetText(msg);
+            }
+        }
 
         void OnConstruct() override
         {
@@ -10407,7 +10619,7 @@ namespace PipBoy
     {
         void OnConstruct() override
         {
-            SetPosition(0, 150);
+            SetPosition(0, 160);
             SetSize(360, 20);
         }
     };
@@ -10518,7 +10730,7 @@ namespace PipBoy
     {
         void OnConstruct() override
         {
-            SetPosition(0, 170);
+            SetPosition(0, 180);
             SetSize(360, 10);
             SetText(MSG_GAME(MsgStr::StrPipScores));
             SetTextFlags(FT_CENTERX | FT_CENTERY);
@@ -13398,9 +13610,8 @@ namespace Split
         {
             Split @split = cast<Split>(Screen);
             Item @item = split.GetTargetItem();
-            Game.Log("Calling barter close! collection " + split.ItemsCollection + "; split.SplitCount " + split.SplitCount);
+
             if (item !is null) {
-                Game.Log("Item not null/ Count: " + item.Count);
                 if (split.SplitCount > item.Count) {
                     split.SplitCount = item.Count;
                     return;
@@ -13414,7 +13625,6 @@ namespace Split
                 }
                 else if (split.ItemsCollection == ITEMS_BARTER || split.ItemsCollection == ITEMS_BARTER_OFFER ||
                          split.ItemsCollection == ITEMS_BARTER_OPPONENT || split.ItemsCollection == ITEMS_BARTER_OPPONENT_OFFER) {
-                    Game.Log("Calling barter transfer!");
                     ClientItems::BarterTransfer(split.TargetItemId, split.ItemsCollection, split.SplitCount);
                     //Game.CustomCall( "BarterMoveItem " + split.TargetItemId + " " + split.ItemsCollection + " " + split.SplitCount );
                 }
@@ -13764,24 +13974,18 @@ namespace Timer
 
 namespace DialogBox
 {
-#define DIALOGBOX_NONE          (0)
-#define DIALOGBOX_FOLLOW        (1)
-#define DIALOGBOX_BARTER        (2)
-#define DIALOGBOX_ENCOUNTER_ANY (3)
-#define DIALOGBOX_ENCOUNTER_RT  (4)
-#define DIALOGBOX_ENCOUNTER_TB  (5)
-#define DIALOGBOX_MANUAL        (6)
-
     class DialogBox : Gui::Screen
     {
         uint BaseHeight;
-        uint DialogID;
+        DialogBoxType DialogType;
+        uint Answers;
+        string Lexems;
 
         void OnConstruct() override
         {
             SetModal(true);
             SetCanMove(true, false);
-            SetSize(302, 99);
+            SetSize(302, 990);
             SetBackgroundImage("art/intrface/dialogbox_top.png");
         }
 
@@ -13792,10 +13996,11 @@ namespace DialogBox
 
         void OnShow(dict<string, any> params) override
         {
-            uint height = BaseHeight;
             uint heightButtons = Find("ButtonSlot").Height;
-            DialogID = params["DialogID"];
-            height += (Stdlib::StrToStrArr(params["ButtonTexts"]).length()) * heightButtons;
+            DialogType = DialogBoxType(int(params["DialogBoxType"]));
+            Lexems = params["Lexems"];
+            Answers = params["Answers"];
+            uint height = BaseHeight + Answers * heightButtons;
             SetSize(Width, height);
         }
     };
@@ -13811,7 +14016,11 @@ namespace DialogBox
 
         void OnShow(dict<string, any> params) override
         {
-            SetText(params["Text"]);
+            auto box = cast<DialogBox>(Parent);
+            string text = MSG_GAME(Dialogbox::GetDialogTextStr(box.DialogType));
+            text = Game.FormatTags(text, box.Lexems);
+
+            SetText(text);
         }
     };
 
@@ -13826,7 +14035,7 @@ namespace DialogBox
 
         void OnShow(dict<string, any> params) override
         {
-            ResizeGrid(Stdlib::StrToStrArr(params["ButtonTexts"]).length());
+            ResizeGrid(params["Answers"]);
         }
     };
 
@@ -13834,7 +14043,7 @@ namespace DialogBox
     {
         void OnConstruct() override
         {
-            SetSize(302, 28);
+            SetSize(302, 24);
         }
     };
 
@@ -13849,7 +14058,7 @@ namespace DialogBox
 
         void OnShow(dict<string, any> params) override
         {
-            SetActive(CellIndex == Stdlib::StrToStrArr(params["ButtonTexts"]).length() - 1);
+            SetActive(CellIndex == cast<DialogBox>(Parent.Parent.Parent).Answers - 1);
         }
     };
 
@@ -13863,7 +14072,7 @@ namespace DialogBox
 
         void OnShow(dict<string, any> params) override
         {
-            SetActive(CellIndex <= Stdlib::StrToStrArr(params["ButtonTexts"]).length() - 1);
+            SetActive(CellIndex <= cast<DialogBox>(Parent.Parent.Parent).Answers - 1);
         }
     };
 
@@ -13878,7 +14087,7 @@ namespace DialogBox
 
         void OnLMouseClick() override
         {
-            CurPlayer.ServerCall.Rpc_AnswerDialogBox(cast<DialogBox>(Parent).DialogID, CellIndex);
+            Dialogbox::AnswerDialog(cast<DialogBox>(Parent.Parent.Parent).DialogType, CellIndex);
             Game.HideScreen();
         }
     };
@@ -13895,7 +14104,7 @@ namespace DialogBox
 
         void OnShow(dict<string, any> params) override
         {
-            SetText(Stdlib::StrToStrArr(params["ButtonTexts"])[CellIndex]);
+            SetText(MSG_GAME(Dialogbox::GetDialogTextStr(cast<DialogBox>(Parent.Parent.Parent).DialogType) + CellIndex + 1));
         }
     };
 
@@ -14118,7 +14327,7 @@ namespace Say
         void OnShow(dict<string, any> params) override
         {
             if (!(params is null)) {
-                TalkerIsNpc = params["TalkerIsNpc"] == "true";
+                TalkerIsNpc = params["TalkerIsNpc"] == "1";
                 FromDialog = params["FromDialog"] == "true";
                 TalkerId = params["TalkerId"];
             }
@@ -14319,7 +14528,7 @@ namespace GMTown
             if (params !is null) {
                 LocId = params["LocationId"];
                 LocPid = hstring(params["LocationPid"]);
-                // Todo: restore gui IndexMaps      = cast< array< int > >( params[ "IndexMaps" ] );
+                IndexMaps = Stdlib::StrToIntArr(string(params["IndexMaps"]));
                 string picName = MSG_LOCATION(STR_LOC_PIC(LocPid));
                 SetBackgroundImage(picName);
             }
@@ -15231,7 +15440,8 @@ namespace Perk
         void OnLMouseClick() override
         {
             if (TargetPerk != CritterProperty::Invalid) {
-                Game.CustomCall("AssignPerk " + TargetPerk);
+                CurPlayer.ServerCall.ProcessPerkUp(TargetPerk);
+                //Game.CustomCall( "AssignPerk " + TargetPerk );
                 Game.HideScreen();
             }
         }

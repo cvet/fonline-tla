@@ -11448,10 +11448,6 @@
 
   ...
 
-* `PrivateServer hstring[] Automaps ReadOnly`
-
-  ...
-
 * `PrivateServer hstring EntranceScript ScriptFuncType = LocationEntrance`
 
   ...
@@ -11499,6 +11495,10 @@
 * `PrivateServer bool GeckVisible`
 
   Todo: improve GeckVisible mechanics
+
+* `PrivateServer hstring[] Automaps`
+
+  ...
 
 * `PrivateServer ident[] GeckCityMembers`
 
@@ -17150,31 +17150,31 @@
 
   - `MapEntrances = 6`
 
-  - `Automaps = 7`
+  - `EntranceScript = 7`
 
-  - `EntranceScript = 8`
+  - `WorldX = 8`
 
-  - `WorldX = 9`
+  - `WorldY = 9`
 
-  - `WorldY = 10`
+  - `Radius = 10`
 
-  - `Radius = 11`
+  - `Hidden = 11`
 
-  - `Hidden = 12`
+  - `Color = 12`
 
-  - `Color = 13`
+  - `GECachesCacheChecked = 13`
 
-  - `GECachesCacheChecked = 14`
+  - `RacingCheckpointNumber = 14`
 
-  - `RacingCheckpointNumber = 15`
+  - `StorehouseContId = 15`
 
-  - `StorehouseContId = 16`
+  - `MaxPlayers = 16`
 
-  - `MaxPlayers = 17`
+  - `AutoGarbage = 17`
 
-  - `AutoGarbage = 18`
+  - `GeckVisible = 18`
 
-  - `GeckVisible = 19`
+  - `Automaps = 19`
 
   - `GeckCityMembers = 20`
 

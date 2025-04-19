@@ -972,11 +972,15 @@
 
   ...
 
-* `const uint AnimWalkSpeed = 80`
+* `const int WalkAnimBaseSpeed = 60`
 
   ...
 
-* `const uint AnimRunSpeed = 160`
+* `const int RunAnimStartSpeed = 80`
+
+  ...
+
+* `const int RunAnimBaseSpeed = 120`
 
   ...
 
@@ -1911,11 +1915,15 @@
 
   ...
 
-* `OnPlayerCheckMove(Player player, Critter cr, uint& speed)`
+* `OnPlayerMoveCritter(Player player, Critter cr, uint& speed)`
 
   ...
 
-* `OnPlayerCheckDir(Player player, Critter cr, int16& dirAngle)`
+* `OnPlayerDirCritter(Player player, Critter cr, int16& dirAngle)`
+
+  ...
+
+* `OnCritterTransit(Critter cr, Map prevMap)`
 
   ...
 
@@ -2380,6 +2388,10 @@
   ...
 
 * `int16 RotateDirAngle(int16 dirAngle, bool clockwise, int16 step)`
+
+  ...
+
+* `int16 GetDirAngleDiff(int16 dirAngle1, int16 dirAngle2)`
 
   ...
 
@@ -3212,10 +3224,6 @@
   ...
 
 * `void SetMousePos(int x, int y)`
-
-  ...
-
-* `void MoveItemLocally(uint itemCount, ident itemId, ident swapItemId, CritterItemSlot toSlot)`
 
   ...
 
@@ -9696,6 +9704,10 @@
   ...
 
 * `void SetContour(ContourType contour)`
+
+  ...
+
+* `void MoveItemLocally(ident itemId, uint itemCount, ident swapItemId, CritterItemSlot toSlot)`
 
   ...
 

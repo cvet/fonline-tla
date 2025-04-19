@@ -2899,6 +2899,10 @@
 
   ...
 
+* `Critter[] SortCrittersByDeep(Critter[] critters) ExcludeInSingleplayer`
+
+  ...
+
 * `void FlushScreen(ucolor fromColor, ucolor toColor, tick_t duration)`
 
   ...
@@ -4788,10 +4792,6 @@
 
   ...
 
-* `void Animate(hstring animName, bool looped, bool reversed)`
-
-  ...
-
 * `void PlayAnim(hstring animName, bool looped, bool reversed)`
 
   ...
@@ -4977,7 +4977,7 @@
 
   ...
 
-* `PrivateServer uint MovingSpeed ReadOnly Temporary`
+* `PrivateServer int MovingSpeed ReadOnly Temporary`
 
   ...
 
@@ -9481,7 +9481,7 @@
 
   ...
 
-* `void ChangeMovingSpeed(uint speed)`
+* `void ChangeMovingSpeed(int speed)`
 
   ...
 
@@ -9929,6 +9929,10 @@
 * `PrivateServer uint=>uint ResourcesData`
 
   ...
+
+* `PrivateServer bool NoLogOut`
+
+  Todo: добавить поддержку Map::NoLogOut
 
 * `PrivateServer uint VCLastBarDialog`
 
@@ -16145,9 +16149,11 @@
 
   - `ResourcesData = 49`
 
-  - `VCLastBarDialog = 50`
+  - `NoLogOut = 50`
 
-  - `WarehouseTurretActive = 51`
+  - `VCLastBarDialog = 51`
+
+  - `WarehouseTurretActive = 52`
 
 * `LocationProperty`
 

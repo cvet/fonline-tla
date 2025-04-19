@@ -113,8 +113,6 @@ void InitServerEngine(FOServer* server)
     return result;
 }
 
-///# ...
-///# return ...
 ///@ ExportMethod
 [[maybe_unused]] bool Server_Critter_IsFree(Critter* self)
 {
@@ -123,8 +121,6 @@ void InitServerEngine(FOServer* server)
     return true;
 }
 
-///# ...
-///# return ...
 ///@ ExportMethod
 [[maybe_unused]] bool Server_Critter_IsBusy(Critter* self)
 {
@@ -133,8 +129,6 @@ void InitServerEngine(FOServer* server)
     return false;
 }
 
-///# ...
-///# param ms ...
 ///@ ExportMethod
 [[maybe_unused]] void Server_Critter_Wait(Critter* self, uint ms)
 {

@@ -15,7 +15,7 @@ struct ServerExtData
 };
 
 ///@ EngineHook
-void InitServerEngine(FOServer* server)
+FO_SCRIPT_API void InitServerEngine(FOServer* server)
 {
     STACK_TRACE_ENTRY();
 
@@ -23,7 +23,7 @@ void InitServerEngine(FOServer* server)
 }
 
 ///@ ExportMethod
-[[maybe_unused]] void Server_Game_LoadImage(FOServer* self, int imageSlot, string_view imageName)
+FO_SCRIPT_API void Server_Game_LoadImage(FOServer* self, int imageSlot, string_view imageName)
 {
     STACK_TRACE_ENTRY();
 
@@ -93,7 +93,7 @@ void InitServerEngine(FOServer* server)
 }
 
 ///@ ExportMethod
-[[maybe_unused]] uint Server_Game_GetImageColor(FOServer* self, int imageSlot, int x, int y)
+FO_SCRIPT_API uint Server_Game_GetImageColor(FOServer* self, int imageSlot, int x, int y)
 {
     STACK_TRACE_ENTRY();
 
@@ -114,7 +114,7 @@ void InitServerEngine(FOServer* server)
 }
 
 ///@ ExportMethod
-[[maybe_unused]] bool Server_Critter_IsFree(Critter* self)
+FO_SCRIPT_API bool Server_Critter_IsFree(Critter* self)
 {
     UNUSED_VARIABLE(self);
 
@@ -122,7 +122,7 @@ void InitServerEngine(FOServer* server)
 }
 
 ///@ ExportMethod
-[[maybe_unused]] bool Server_Critter_IsBusy(Critter* self)
+FO_SCRIPT_API bool Server_Critter_IsBusy(Critter* self)
 {
     UNUSED_VARIABLE(self);
 
@@ -130,7 +130,7 @@ void InitServerEngine(FOServer* server)
 }
 
 ///@ ExportMethod
-[[maybe_unused]] void Server_Critter_Wait(Critter* self, uint ms)
+FO_SCRIPT_API void Server_Critter_Wait(Critter* self, uint ms)
 {
     UNUSED_VARIABLE(self);
     UNUSED_VARIABLE(ms);

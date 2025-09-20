@@ -3,7 +3,7 @@
 #include "StringUtils.h"
 
 ///@ EngineHook
-void ConfigSectionParseHook(const string& fname, string& section, map<string, string>& init_section_kv)
+FO_SCRIPT_API void ConfigSectionParseHook(const string& fname, string& section, map<string, string>& init_section_kv)
 {
     UNUSED_VARIABLE(fname);
     UNUSED_VARIABLE(init_section_kv);
@@ -14,7 +14,7 @@ void ConfigSectionParseHook(const string& fname, string& section, map<string, st
 }
 
 ///@ EngineHook
-void ConfigEntryParseHook(const string& fname, const string& section, string& key, string& value)
+FO_SCRIPT_API void ConfigEntryParseHook(const string& fname, const string& section, string& key, string& value)
 {
     UNUSED_VARIABLE(fname);
 

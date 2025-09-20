@@ -896,10 +896,6 @@
 
   ...
 
-* `bool ForceGNM = false`
-
-  ...
-
 * `bool ForceGlslEsProfile = false`
 
   ...
@@ -5008,10 +5004,6 @@
   ...
 
 * `Protected uint LookDistance`
-
-  ...
-
-* `PrivateClient uint AttackDistanceHint`
 
   ...
 
@@ -10356,7 +10348,7 @@
 
   ...
 
-* `void SetShootBorders(bool enabled)`
+* `void SetShootBorders(bool enabled, uint dist)`
 
   ...
 
@@ -14049,1931 +14041,1929 @@
 
   - `LookDistance = 46`
 
-  - `AttackDistanceHint = 47`
+  - `TalkDistance = 47`
 
-  - `TalkDistance = 48`
+  - `MaxTalkers = 48`
 
-  - `MaxTalkers = 49`
+  - `DialogId = 49`
 
-  - `DialogId = 50`
+  - `Lexems = 50`
 
-  - `Lexems = 51`
+  - `KnownLocations = 51`
 
-  - `KnownLocations = 52`
+  - `InSneakMode = 52`
 
-  - `InSneakMode = 53`
+  - `DeadDrawNoFlatten = 53`
 
-  - `DeadDrawNoFlatten = 54`
+  - `NameColor = 54`
 
-  - `NameColor = 55`
+  - `ContourColor = 55`
 
-  - `ContourColor = 56`
+  - `ArroyoRaydersAttackedId = 56`
 
-  - `ArroyoRaydersAttackedId = 57`
+  - `BehemothOwner = 57`
 
-  - `BehemothOwner = 58`
+  - `BehemothRadio = 58`
 
-  - `BehemothRadio = 59`
+  - `BehemothLastComand = 59`
 
-  - `BehemothLastComand = 60`
+  - `BehemothOrderType = 60`
 
-  - `BehemothOrderType = 61`
+  - `BehemothLastOrder = 61`
 
-  - `BehemothLastOrder = 62`
+  - `BehemothParam_1 = 62`
 
-  - `BehemothParam_1 = 63`
+  - `BehemothParam_2 = 63`
 
-  - `BehemothParam_2 = 64`
+  - `BehemothLastReport = 64`
 
-  - `BehemothLastReport = 65`
+  - `BHHubHoloRemembered = 65`
 
-  - `BHHubHoloRemembered = 66`
+  - `BHUranDiscount = 66`
 
-  - `BHUranDiscount = 67`
+  - `BBMsgPage = 67`
 
-  - `BBMsgPage = 68`
+  - `BBSelectedMsg = 68`
 
-  - `BBSelectedMsg = 69`
+  - `KlamAldoBusy = 69`
 
-  - `KlamAldoBusy = 70`
+  - `KlamAldoListenId = 70`
 
-  - `KlamAldoListenId = 71`
+  - `KlamAldoReaderId = 71`
 
-  - `KlamAldoReaderId = 72`
+  - `BBMsgCount = 72`
 
-  - `BBMsgCount = 73`
+  - `CaravanCrvId = 73`
 
-  - `CaravanCrvId = 74`
+  - `VCDeadPatrollers = 74`
 
-  - `VCDeadPatrollers = 75`
+  - `ReddWadeCaravanEscort = 75`
 
-  - `ReddWadeCaravanEscort = 76`
+  - `ReddSavinelCaravanEscort = 76`
 
-  - `ReddSavinelCaravanEscort = 77`
+  - `ReddStanCaravanEscort = 77`
 
-  - `ReddStanCaravanEscort = 78`
+  - `NcrReddingCaravanEscort = 78`
 
-  - `NcrReddingCaravanEscort = 79`
+  - `BHKitCaravanEscort = 79`
 
-  - `BHKitCaravanEscort = 80`
+  - `VCShrimPatrol = 80`
 
-  - `VCShrimPatrol = 81`
+  - `ArroyoSelmaCaravanEscort = 81`
 
-  - `ArroyoSelmaCaravanEscort = 82`
+  - `ArroyoGayzumCaravanEscort = 82`
 
-  - `ArroyoGayzumCaravanEscort = 83`
+  - `ArroyoLaumerCaravanEscort = 83`
 
-  - `ArroyoLaumerCaravanEscort = 84`
+  - `ModAurelianoCaravanEscort = 84`
 
-  - `ModAurelianoCaravanEscort = 85`
+  - `CommonCrvResetCounter = 85`
 
-  - `CommonCrvResetCounter = 86`
+  - `ReddCrvResetCounter = 86`
 
-  - `ReddCrvResetCounter = 87`
+  - `NcrCrvResetCounter = 87`
 
-  - `NcrCrvResetCounter = 88`
+  - `BHCrvResetCounter = 88`
 
-  - `BHCrvResetCounter = 89`
+  - `ArroyoCrvResetCounter = 89`
 
-  - `ArroyoCrvResetCounter = 90`
+  - `CaravanReaction = 90`
 
-  - `CaravanReaction = 91`
+  - `CaravanNervosityLvl = 91`
 
-  - `CaravanNervosityLvl = 92`
+  - `CaravanIdleCount = 92`
 
-  - `CaravanIdleCount = 93`
+  - `LastSelectedCaravan = 93`
 
-  - `LastSelectedCaravan = 94`
+  - `ApRegenerationTick = 94`
 
-  - `ApRegenerationTick = 95`
+  - `ApRegenerationTime = 95`
 
-  - `ApRegenerationTime = 96`
+  - `CollectorTimeNextSearch = 96`
 
-  - `CollectorTimeNextSearch = 97`
+  - `CompRiddleMapId = 97`
 
-  - `CompRiddleMapId = 98`
+  - `CompRiddleHexX = 98`
 
-  - `CompRiddleHexX = 99`
+  - `CompRiddleHexY = 99`
 
-  - `CompRiddleHexY = 100`
+  - `KnockoutAp = 100`
 
-  - `KnockoutAp = 101`
+  - `WaitEndTick = 101`
 
-  - `WaitEndTick = 102`
+  - `ActionAnimKnockoutEnd = 102`
 
-  - `ActionAnimKnockoutEnd = 103`
+  - `NcrBusterLostCStatus = 103`
 
-  - `NcrBusterLostCStatus = 104`
+  - `QDappoLostRobotHexNum = 104`
 
-  - `QDappoLostRobotHexNum = 105`
+  - `BankMoney = 105`
 
-  - `BankMoney = 106`
+  - `DenHubBank5 = 106`
 
-  - `DenHubBank5 = 107`
+  - `DenHubGuard5 = 107`
 
-  - `DenHubGuard5 = 108`
+  - `DenPoormanItemId = 108`
 
-  - `DenPoormanItemId = 109`
+  - `DenVirginCount = 109`
 
-  - `DenVirginCount = 110`
+  - `DenVirginIsHome = 110`
 
-  - `DenVirginIsHome = 111`
+  - `UniqTimeout = 111`
 
-  - `UniqTimeout = 112`
+  - `Loyality = 112`
 
-  - `Loyality = 113`
+  - `NpcStory = 113`
 
-  - `NpcStory = 114`
+  - `NameMemNpcPlayer = 114`
 
-  - `NameMemNpcPlayer = 115`
+  - `NameMemPlayerNpc = 115`
 
-  - `NameMemPlayerNpc = 116`
+  - `TradeWas = 116`
 
-  - `TradeWas = 117`
+  - `DenKliffBlessWas = 117`
 
-  - `DenKliffBlessWas = 118`
+  - `DenVirginiaSexWas = 118`
 
-  - `DenVirginiaSexWas = 119`
+  - `NcrPlayerTalkPoliceman = 119`
 
-  - `NcrPlayerTalkPoliceman = 120`
+  - `SFLoPanPayed = 120`
 
-  - `SFLoPanPayed = 121`
+  - `ChanceOneFromTwo = 121`
 
-  - `ChanceOneFromTwo = 122`
+  - `ChanceOneFromThree = 122`
 
-  - `ChanceOneFromThree = 123`
+  - `ChanceOneFromFive = 123`
 
-  - `ChanceOneFromFive = 124`
+  - `CurrentDialogNumber = 124`
 
-  - `CurrentDialogNumber = 125`
+  - `LastDialogBoxShownTick = 125`
 
-  - `LastDialogBoxShownTick = 126`
+  - `DrugEffects = 126`
 
-  - `DrugEffects = 127`
+  - `DoughnutsCounter = 127`
 
-  - `DoughnutsCounter = 128`
+  - `LastElectronicLocked = 128`
 
-  - `LastElectronicLocked = 129`
+  - `EliTimeNextSing = 129`
 
-  - `EliTimeNextSing = 130`
+  - `EnemyStack = 130`
 
-  - `EnemyStack = 131`
+  - `IsNoEnemyStack = 131`
 
-  - `IsNoEnemyStack = 132`
+  - `EnergyBarierTerminalHx = 132`
 
-  - `EnergyBarierTerminalHx = 133`
+  - `EnergyBarierTerminalHy = 133`
 
-  - `EnergyBarierTerminalHy = 134`
+  - `EnergyBarierNetNum = 134`
 
-  - `EnergyBarierNetNum = 135`
+  - `EnergyBarierHackBonus = 135`
 
-  - `EnergyBarierHackBonus = 136`
+  - `EnergyBarierHitBonus = 136`
 
-  - `EnergyBarierHitBonus = 137`
+  - `FighterPatternCanGenStim = 137`
 
-  - `FighterPatternCanGenStim = 138`
+  - `FighterPatternAllyAssistRadius = 138`
 
-  - `FighterPatternAllyAssistRadius = 139`
+  - `FighterPatternAssistAlliesNum = 139`
 
-  - `FighterPatternAssistAlliesNum = 140`
+  - `FighterPatternMustHealLvl = 140`
 
-  - `FighterPatternMustHealLvl = 141`
+  - `FighterPatternLocalAlarmDeads = 141`
 
-  - `FighterPatternLocalAlarmDeads = 142`
+  - `FighterPatternGlobalAlarmDeads = 142`
 
-  - `FighterPatternGlobalAlarmDeads = 143`
+  - `FighterQuestMinHp = 143`
 
-  - `FighterQuestMinHp = 144`
+  - `FighterQuestOnlyHandCombat = 144`
 
-  - `FighterQuestOnlyHandCombat = 145`
+  - `FighterQuestTeamIdOld = 145`
 
-  - `FighterQuestTeamIdOld = 146`
+  - `FighterQuestTeamIdFight = 146`
 
-  - `FighterQuestTeamIdFight = 147`
+  - `FighterQuestPlayerId = 147`
 
-  - `FighterQuestPlayerId = 148`
+  - `FighterQuestFightPriority = 148`
 
-  - `FighterQuestFightPriority = 149`
+  - `FighterQuestVarNum = 149`
 
-  - `FighterQuestVarNum = 150`
+  - `FixboyPowerArmor = 150`
 
-  - `FixboyPowerArmor = 151`
+  - `ModLourenceVenomedratRecipe = 151`
 
-  - `ModLourenceVenomedratRecipe = 152`
+  - `ModLourenceTNTRatRecipe = 152`
 
-  - `ModLourenceTNTRatRecipe = 153`
+  - `NavEmpRocketRecipe = 153`
 
-  - `NavEmpRocketRecipe = 154`
+  - `FixboyDefault = 154`
 
-  - `FixboyDefault = 155`
+  - `SFRecipeSsupersledge = 155`
 
-  - `SFRecipeSsupersledge = 156`
+  - `SFRecipePlasmagrenades = 156`
 
-  - `SFRecipePlasmagrenades = 157`
+  - `Fixboy700NitroExpress = 157`
 
-  - `Fixboy700NitroExpress = 158`
+  - `FixboyAmmoPressOperator = 158`
 
-  - `FixboyAmmoPressOperator = 159`
+  - `RacingCheckPoints = 159`
 
-  - `RacingCheckPoints = 160`
+  - `RacingCheckpointLocId = 160`
 
-  - `RacingCheckpointLocId = 161`
+  - `GERacingCritterHx = 161`
 
-  - `GERacingCritterHx = 162`
+  - `GERacingCritterHy = 162`
 
-  - `GERacingCritterHy = 163`
+  - `GERacingCritterDir = 163`
 
-  - `GERacingCritterDir = 164`
+  - `GERacingNpcRole = 164`
 
-  - `GERacingNpcRole = 165`
+  - `GERacingOpeningPhrases = 165`
 
-  - `GERacingOpeningPhrases = 166`
+  - `GEReplExplodeTank = 166`
 
-  - `GEReplExplodeTank = 167`
+  - `GEReplNopasaran = 167`
 
-  - `GEReplNopasaran = 168`
+  - `GEReplFindstation = 168`
 
-  - `GEReplFindstation = 169`
+  - `GEReplNotifictions = 169`
 
-  - `GEReplNotifictions = 170`
+  - `GEReplEntryZombie = 170`
 
-  - `GEReplEntryZombie = 171`
+  - `GEReplLastOrder = 171`
 
-  - `GEReplLastOrder = 172`
+  - `GEReplIsAddedAttackPlane = 172`
 
-  - `GEReplIsAddedAttackPlane = 173`
+  - `HellMineTimeoutEnd = 173`
 
-  - `HellMineTimeoutEnd = 174`
+  - `HostileLQIsStoped = 174`
 
-  - `HostileLQIsStoped = 175`
+  - `HostileLQData = 175`
 
-  - `HostileLQData = 176`
+  - `SFAhs7Escort = 176`
 
-  - `SFAhs7Escort = 177`
+  - `SFHonomerPlayerId = 177`
 
-  - `SFHonomerPlayerId = 178`
+  - `SFEscortLocation = 178`
 
-  - `SFEscortLocation = 179`
+  - `SFLabFailed = 179`
 
-  - `SFLabFailed = 180`
+  - `QHubLabIsDialogRun = 180`
 
-  - `QHubLabIsDialogRun = 181`
+  - `BarterLourensRats1 = 181`
 
-  - `BarterLourensRats1 = 182`
+  - `ModLourenceRatsFlute = 182`
 
-  - `ModLourenceRatsFlute = 183`
+  - `BarterLourensRatBodycount = 183`
 
-  - `BarterLourensRatBodycount = 184`
+  - `ModHoughRatsFluteTimeout = 184`
 
-  - `ModHoughRatsFluteTimeout = 185`
+  - `ModLourenceToxinTimeout = 185`
 
-  - `ModLourenceToxinTimeout = 186`
+  - `ModLourenceRatsFluteCounter = 186`
 
-  - `ModLourenceRatsFluteCounter = 187`
+  - `ModLourenceLureActive = 187`
 
-  - `ModLourenceLureActive = 188`
+  - `GuardedItemSkill = 188`
 
-  - `GuardedItemSkill = 189`
+  - `V13DclawEggs = 189`
 
-  - `V13DclawEggs = 190`
+  - `KlamTorrCowboy = 190`
 
-  - `KlamTorrCowboy = 191`
+  - `KlamCowboyCountGav = 191`
 
-  - `KlamCowboyCountGav = 192`
+  - `KlamCowboyMobHx = 192`
 
-  - `KlamCowboyMobHx = 193`
+  - `KlamCowboyMobHy = 193`
 
-  - `KlamCowboyMobHy = 194`
+  - `KlamDantonBramin = 194`
 
-  - `KlamDantonBramin = 195`
+  - `KlamJosallDanton = 195`
 
-  - `KlamJosallDanton = 196`
+  - `KlamKuklachev = 196`
 
-  - `KlamKuklachev = 197`
+  - `KlamSmilyGecko = 197`
 
-  - `KlamSmilyGecko = 198`
+  - `KlamSmilyCurrentHp = 198`
 
-  - `KlamSmilyCurrentHp = 199`
+  - `KlamSmilyCountKills = 199`
 
-  - `KlamSmilyCountKills = 200`
+  - `KlamSmilyHealing = 200`
 
-  - `KlamSmilyHealing = 201`
+  - `LimitedBarterData = 201`
 
-  - `LimitedBarterData = 202`
+  - `IsGeck = 202`
 
-  - `IsGeck = 203`
+  - `StealExpCount = 203`
 
-  - `StealExpCount = 204`
+  - `FirstAidCount = 204`
 
-  - `FirstAidCount = 205`
+  - `MainQuest = 205`
 
-  - `MainQuest = 206`
+  - `GCityCitizen = 206`
 
-  - `GCityCitizen = 207`
+  - `MapGeckCityTraderSkillBarter = 207`
 
-  - `MapGeckCityTraderSkillBarter = 208`
+  - `MapKlamathRobotTimeNextSay = 208`
 
-  - `MapKlamathRobotTimeNextSay = 209`
+  - `ModJoeGiantWasp = 209`
 
-  - `ModJoeGiantWasp = 210`
+  - `TribSulikRaid = 210`
 
-  - `TribSulikRaid = 211`
+  - `TribRaiderKillCount = 211`
 
-  - `TribRaiderKillCount = 212`
+  - `NCRElizeSlavers = 212`
 
-  - `NCRElizeSlavers = 213`
+  - `MapPrimalTribeRaiderHx = 213`
 
-  - `MapPrimalTribeRaiderHx = 214`
+  - `MapPrimalTribeRaiderHy = 214`
 
-  - `MapPrimalTribeRaiderHy = 215`
+  - `SFRonKillBeasts = 215`
 
-  - `SFRonKillBeasts = 216`
+  - `SFRonFindbodies = 216`
 
-  - `SFRonFindbodies = 217`
+  - `SFTankerCentaurNoticed = 217`
 
-  - `SFTankerCentaurNoticed = 218`
+  - `SFTankerFloaterNoticed = 218`
 
-  - `SFTankerFloaterNoticed = 219`
+  - `MapSFTankerBicycleId = 219`
 
-  - `MapSFTankerBicycleId = 220`
+  - `MirelurkCombatCurStage = 220`
 
-  - `MirelurkCombatCurStage = 221`
+  - `MirelurkCombatTimeNextStage = 221`
 
-  - `MirelurkCombatTimeNextStage = 222`
+  - `MirelurkCombatLastBrokenBag = 222`
 
-  - `MirelurkCombatLastBrokenBag = 223`
+  - `MirelurkCombatDestroyingItem = 223`
 
-  - `MirelurkCombatDestroyingItem = 224`
+  - `MobAttackedId = 224`
 
-  - `MobAttackedId = 225`
+  - `MobFury = 225`
 
-  - `MobFury = 226`
+  - `MobFear = 226`
 
-  - `MobFear = 227`
+  - `MobMaxFear = 227`
 
-  - `MobMaxFear = 228`
+  - `ModVampireFarmLocation = 228`
 
-  - `ModVampireFarmLocation = 229`
+  - `MonologueData = 229`
 
-  - `MonologueData = 230`
+  - `NavHenryEmpTest = 230`
 
-  - `NavHenryEmpTest = 231`
+  - `NavEmpTestedCritter = 231`
 
-  - `NavEmpTestedCritter = 232`
+  - `NavarroTimeOutScan = 232`
 
-  - `NavarroTimeOutScan = 233`
+  - `NavarroChipUsedId = 233`
 
-  - `NavarroChipUsedId = 234`
+  - `NcrAlexHoloFindStatus = 234`
 
-  - `NcrAlexHoloFindStatus = 235`
+  - `NCRFelixFindBrahmin = 235`
 
-  - `NCRFelixFindBrahmin = 236`
+  - `NCRHubBook = 236`
 
-  - `NCRHubBook = 237`
+  - `NCRFelixSaveBrahmin = 237`
 
-  - `NCRFelixSaveBrahmin = 238`
+  - `NCRHubBookAccess1 = 238`
 
-  - `NCRHubBookAccess1 = 239`
+  - `NCRHubBookAccess2 = 239`
 
-  - `NCRHubBookAccess2 = 240`
+  - `NCRHubBookAccess3 = 240`
 
-  - `NCRHubBookAccess3 = 241`
+  - `NCRHubBookAccess4 = 241`
 
-  - `NCRHubBookAccess4 = 242`
+  - `NCRHubBookAccess5 = 242`
 
-  - `NCRHubBookAccess5 = 243`
+  - `NCRHubBookAccess6 = 243`
 
-  - `NCRHubBookAccess6 = 244`
+  - `NCRHubBookAccess7 = 244`
 
-  - `NCRHubBookAccess7 = 245`
+  - `NCRHubBookQuestTimeout = 245`
 
-  - `NCRHubBookQuestTimeout = 246`
+  - `NcrCommonBeggarInvokeId = 246`
 
-  - `NcrCommonBeggarInvokeId = 247`
+  - `NcrCommonBeggarPhraseNum = 247`
 
-  - `NcrCommonBeggarPhraseNum = 248`
+  - `NcrCommonBeggarHideMoneyInvocation = 248`
 
-  - `NcrCommonBeggarHideMoneyInvocation = 249`
+  - `NcrCommonBrahminId = 249`
 
-  - `NcrCommonBrahminId = 250`
+  - `QNcrElizeInvasion = 250`
 
-  - `QNcrElizeInvasion = 251`
+  - `NCRKarlsonSon = 251`
 
-  - `NCRKarlsonSon = 252`
+  - `NcrSonCatcherId = 252`
 
-  - `NcrSonCatcherId = 253`
+  - `NcrSonMovesCounter = 253`
 
-  - `NcrSonMovesCounter = 254`
+  - `NcrMichealMessageNum = 254`
 
-  - `NcrMichealMessageNum = 255`
+  - `MailDelivery = 255`
 
-  - `MailDelivery = 256`
+  - `NcrMailRecieverId = 256`
 
-  - `NcrMailRecieverId = 257`
+  - `NcrMailTimeout = 257`
 
-  - `NcrMailTimeout = 258`
+  - `NcrRatchBuggy = 258`
 
-  - `NcrRatchBuggy = 259`
+  - `NcrShaimanProtest = 259`
 
-  - `NcrShaimanProtest = 260`
+  - `NcrShaimanStringNum = 260`
 
-  - `NcrShaimanStringNum = 261`
+  - `NcrSiegeTerminate = 261`
 
-  - `NcrSiegeTerminate = 262`
+  - `NcrSiegeKillsCounter = 262`
 
-  - `NcrSiegeKillsCounter = 263`
+  - `NcrSmitVsVestinStatus = 263`
 
-  - `NcrSmitVsVestinStatus = 264`
+  - `NcrSmitStringNum = 264`
 
-  - `NcrSmitStringNum = 265`
+  - `NcrSmitGateStringNum = 265`
 
-  - `NcrSmitGateStringNum = 266`
+  - `NcrSmitPlayerId = 266`
 
-  - `NcrSmitPlayerId = 267`
+  - `NcrSmitIdleCount = 267`
 
-  - `NcrSmitIdleCount = 268`
+  - `NcrWestinMapPidTo = 268`
 
-  - `NcrWestinMapPidTo = 269`
+  - `NcrWestinHexNumTo = 269`
 
-  - `NcrWestinHexNumTo = 270`
+  - `NcrWestinEveryEveningInvokeId = 270`
 
-  - `NcrWestinEveryEveningInvokeId = 271`
+  - `NcrWestinEveryMorningInvokeId = 271`
 
-  - `NcrWestinEveryMorningInvokeId = 272`
+  - `LastBagRefreshedTime = 272`
 
-  - `LastBagRefreshedTime = 273`
+  - `LastNpcDialog = 273`
 
-  - `LastNpcDialog = 274`
+  - `NpcDialogStringNum = 274`
 
-  - `NpcDialogStringNum = 275`
+  - `Planes = 275`
 
-  - `Planes = 276`
+  - `NpcRevengeNpcHxHy = 276`
 
-  - `NpcRevengeNpcHxHy = 277`
+  - `NpcRevengeCountWait = 277`
 
-  - `NpcRevengeCountWait = 278`
+  - `NRWriKidnap = 278`
 
-  - `NRWriKidnap = 279`
+  - `NRSalvatoreKill = 279`
 
-  - `NRSalvatoreKill = 280`
+  - `NRWriKidnapNotifyTime = 280`
 
-  - `NRWriKidnapNotifyTime = 281`
+  - `NRKidnapKillsCounter = 281`
 
-  - `NRKidnapKillsCounter = 282`
+  - `QNrWriKidnapInvokeId = 282`
 
-  - `QNrWriKidnapInvokeId = 283`
+  - `NukeStock = 283`
 
-  - `NukeStock = 284`
+  - `NukeRestockTime = 284`
 
-  - `NukeRestockTime = 285`
+  - `PatternSniperCountRunning = 285`
 
-  - `PatternSniperCountRunning = 286`
+  - `PetOwnerId = 286`
 
-  - `PetOwnerId = 287`
+  - `PetLifeTime = 287`
 
-  - `PetLifeTime = 288`
+  - `IsGenerated = 288`
 
-  - `IsGenerated = 289`
+  - `PokerWins = 289`
 
-  - `PokerWins = 290`
+  - `PokerNumOfNpc = 290`
 
-  - `PokerNumOfNpc = 291`
+  - `PokerWincash = 291`
 
-  - `PokerWincash = 292`
+  - `PokerFraud = 292`
 
-  - `PokerFraud = 293`
+  - `PokerManywins = 293`
 
-  - `PokerManywins = 294`
+  - `PokerData = 294`
 
-  - `PokerData = 295`
+  - `QWarehouse = 295`
 
-  - `QWarehouse = 296`
+  - `QWarehouseSub1 = 296`
 
-  - `QWarehouseSub1 = 297`
+  - `QWarehouseSub2 = 297`
 
-  - `QWarehouseSub2 = 298`
+  - `WarehouseDataId = 298`
 
-  - `WarehouseDataId = 299`
+  - `WarehouseQuestData = 299`
 
-  - `WarehouseQuestData = 300`
+  - `WarehouseOther = 300`
 
-  - `WarehouseOther = 301`
+  - `RatGrenadeProtoId = 301`
 
-  - `RatGrenadeProtoId = 302`
+  - `RatGrenadeOwnerId = 302`
 
-  - `RatGrenadeOwnerId = 303`
+  - `ReddMineNuggets = 303`
 
-  - `ReddMineNuggets = 304`
+  - `ReddMarionWan = 304`
 
-  - `ReddMarionWan = 305`
+  - `ReddQWinamingoKills = 305`
 
-  - `ReddQWinamingoKills = 306`
+  - `ReddQWinamingoHealing = 306`
 
-  - `ReddQWinamingoHealing = 307`
+  - `ReddDoctorPoisoned = 307`
 
-  - `ReddDoctorPoisoned = 308`
+  - `ReddRooneyCemetery = 308`
 
-  - `ReddRooneyCemetery = 309`
+  - `CanRepairWeapons = 309`
 
-  - `CanRepairWeapons = 310`
+  - `CanRepairWeaponsSpecial = 310`
 
-  - `CanRepairWeaponsSpecial = 311`
+  - `CanRepairArmor = 311`
 
-  - `CanRepairArmor = 312`
+  - `CanRepairArmorSpecial = 312`
 
-  - `CanRepairArmorSpecial = 313`
+  - `RepairCompleteTime = 313`
 
-  - `RepairCompleteTime = 314`
+  - `RepairItemPid = 314`
 
-  - `RepairItemPid = 315`
+  - `ReplicationTime = 315`
 
-  - `ReplicationTime = 316`
+  - `HellVisits = 316`
 
-  - `HellVisits = 317`
+  - `ReplBankIsCanEnter = 317`
 
-  - `ReplBankIsCanEnter = 318`
+  - `ReplBankeIsAttackGagPlayer = 318`
 
-  - `ReplBankeIsAttackGagPlayer = 319`
+  - `ReplHellTurretHack = 319`
 
-  - `ReplHellTurretHack = 320`
+  - `TerminalPlayerId = 320`
 
-  - `TerminalPlayerId = 321`
+  - `TerminalDialogId = 321`
 
-  - `TerminalDialogId = 322`
+  - `ModFarrelAmmiak = 322`
 
-  - `ModFarrelAmmiak = 323`
+  - `RouletteCroupierNum = 323`
 
-  - `RouletteCroupierNum = 324`
+  - `RouletteBetCoord1 = 324`
 
-  - `RouletteBetCoord1 = 325`
+  - `RouletteBetCoord2 = 325`
 
-  - `RouletteBetCoord2 = 326`
+  - `RouletteBetCoord3 = 326`
 
-  - `RouletteBetCoord3 = 327`
+  - `RouletteBetSize = 327`
 
-  - `RouletteBetSize = 328`
+  - `RouletteBetType = 328`
 
-  - `RouletteBetType = 329`
+  - `RouletteData = 329`
 
-  - `RouletteData = 330`
+  - `CanSendSay = 330`
 
-  - `CanSendSay = 331`
+  - `Scores = 331`
 
-  - `Scores = 332`
+  - `SEAndroidMonologEnd = 332`
 
-  - `SEAndroidMonologEnd = 333`
+  - `SETalkingHeadStringNum = 333`
 
-  - `SETalkingHeadStringNum = 334`
+  - `SETeleportEatId = 334`
 
-  - `SETeleportEatId = 335`
+  - `SFAhs7HubJudgement = 335`
 
-  - `SFAhs7HubJudgement = 336`
+  - `SFLoPanBlackmailSum = 336`
 
-  - `SFLoPanBlackmailSum = 337`
+  - `SFHububJudgementLocId = 337`
 
-  - `SFHububJudgementLocId = 338`
+  - `SFHubJudgementKills = 338`
 
-  - `SFHubJudgementKills = 339`
+  - `SfMercMaster = 339`
 
-  - `SfMercMaster = 340`
+  - `SFCommonOneWeekInvokeId = 340`
 
-  - `SFCommonOneWeekInvokeId = 341`
+  - `SFCommonFightPlayerId = 341`
 
-  - `SFCommonFightPlayerId = 342`
+  - `ClickCounter = 342`
 
-  - `ClickCounter = 343`
+  - `SFInvasionMirelurkKills = 343`
 
-  - `SFInvasionMirelurkKills = 344`
+  - `BHRocketBase = 344`
 
-  - `BHRocketBase = 345`
+  - `NcrElizeSlvrsHunting = 345`
 
-  - `NcrElizeSlvrsHunting = 346`
+  - `NcrElizeSlvrsHuntingStatus = 346`
 
-  - `NcrElizeSlvrsHuntingStatus = 347`
+  - `NcrSantiagoSpyMission = 347`
 
-  - `NcrSantiagoSpyMission = 348`
+  - `QSpyMissonStringNum = 348`
 
-  - `QSpyMissonStringNum = 349`
+  - `TimeoutBattle = 349`
 
-  - `TimeoutBattle = 350`
+  - `TimeoutTransfer = 350`
 
-  - `TimeoutTransfer = 351`
+  - `WalkSpeedBase = 351`
 
-  - `WalkSpeedBase = 352`
+  - `WalkSpeed = 352`
 
-  - `WalkSpeed = 353`
+  - `IsNoMove = 353`
 
-  - `IsNoMove = 354`
+  - `IsNoMoveBase = 354`
 
-  - `IsNoMoveBase = 355`
+  - `IsNoRun = 355`
 
-  - `IsNoRun = 356`
+  - `IsNoRunBase = 356`
 
-  - `IsNoRunBase = 357`
+  - `Strength = 357`
 
-  - `Strength = 358`
+  - `StrengthBase = 358`
 
-  - `StrengthBase = 359`
+  - `Perception = 359`
 
-  - `Perception = 360`
+  - `PerceptionBase = 360`
 
-  - `PerceptionBase = 361`
+  - `Endurance = 361`
 
-  - `Endurance = 362`
+  - `EnduranceBase = 362`
 
-  - `EnduranceBase = 363`
+  - `Charisma = 363`
 
-  - `Charisma = 364`
+  - `CharismaBase = 364`
 
-  - `CharismaBase = 365`
+  - `Intellect = 365`
 
-  - `Intellect = 366`
+  - `IntellectBase = 366`
 
-  - `IntellectBase = 367`
+  - `Agility = 367`
 
-  - `Agility = 368`
+  - `AgilityBase = 368`
 
-  - `AgilityBase = 369`
+  - `Luck = 369`
 
-  - `Luck = 370`
+  - `LuckBase = 370`
 
-  - `LuckBase = 371`
+  - `ArmorClass = 371`
 
-  - `ArmorClass = 372`
+  - `CurrentHp = 372`
 
-  - `CurrentHp = 373`
+  - `MaxLife = 373`
 
-  - `MaxLife = 374`
+  - `MaxLifeBase = 374`
 
-  - `MaxLifeBase = 375`
+  - `ActionPointsBase = 375`
 
-  - `ActionPointsBase = 376`
+  - `ArmorClassBase = 376`
 
-  - `ArmorClassBase = 377`
+  - `MeleeDamage = 377`
 
-  - `MeleeDamage = 378`
+  - `MeleeDamageBase = 378`
 
-  - `MeleeDamageBase = 379`
+  - `IsOverweight = 379`
 
-  - `IsOverweight = 380`
+  - `CarryWeight = 380`
 
-  - `CarryWeight = 381`
+  - `CarryWeightBase = 381`
 
-  - `CarryWeightBase = 382`
+  - `Sequence = 382`
 
-  - `Sequence = 383`
+  - `SequenceBase = 383`
 
-  - `SequenceBase = 384`
+  - `HealingRate = 384`
 
-  - `HealingRate = 385`
+  - `HealingRateBase = 385`
 
-  - `HealingRateBase = 386`
+  - `CriticalChance = 386`
 
-  - `CriticalChance = 387`
+  - `CriticalChanceBase = 387`
 
-  - `CriticalChanceBase = 388`
+  - `MaxCritical = 388`
 
-  - `MaxCritical = 389`
+  - `MaxCriticalBase = 389`
 
-  - `MaxCriticalBase = 390`
+  - `Toxic = 390`
 
-  - `Toxic = 391`
+  - `Radioactive = 391`
 
-  - `Radioactive = 392`
+  - `KillExperience = 392`
 
-  - `KillExperience = 393`
+  - `BodyType = 393`
 
-  - `BodyType = 394`
+  - `LocomotionType = 394`
 
-  - `LocomotionType = 395`
+  - `DamageType = 395`
 
-  - `DamageType = 396`
+  - `Age = 396`
 
-  - `Age = 397`
+  - `Gender = 397`
 
-  - `Gender = 398`
+  - `PoisoningLevel = 398`
 
-  - `PoisoningLevel = 399`
+  - `RadiationLevel = 399`
 
-  - `RadiationLevel = 400`
+  - `UnspentSkillPoints = 400`
 
-  - `UnspentSkillPoints = 401`
+  - `UnspentPerks = 401`
 
-  - `UnspentPerks = 402`
+  - `Karma = 402`
 
-  - `Karma = 403`
+  - `ReplicationMoney = 403`
 
-  - `ReplicationMoney = 404`
+  - `ReplicationCount = 404`
 
-  - `ReplicationCount = 405`
+  - `ReplicationCost = 405`
 
-  - `ReplicationCost = 406`
+  - `RateObject = 406`
 
-  - `RateObject = 407`
+  - `BonusLook = 407`
 
-  - `BonusLook = 408`
+  - `NpcRole = 408`
 
-  - `NpcRole = 409`
+  - `AiId = 409`
 
-  - `AiId = 410`
+  - `TeamId = 410`
 
-  - `TeamId = 411`
+  - `NextCrType = 411`
 
-  - `NextCrType = 412`
+  - `DeadBlockerId = 412`
 
-  - `DeadBlockerId = 413`
+  - `CurrentArmorPerk = 413`
 
-  - `CurrentArmorPerk = 414`
+  - `NextReplicationMap = 414`
 
-  - `NextReplicationMap = 415`
+  - `NextReplicationEntry = 415`
 
-  - `NextReplicationEntry = 416`
+  - `PlayerKarma = 416`
 
-  - `PlayerKarma = 417`
+  - `ArmorPerk = 417`
 
-  - `ArmorPerk = 418`
+  - `LastStealCrId = 418`
 
-  - `LastStealCrId = 419`
+  - `StealCount = 419`
 
-  - `StealCount = 420`
+  - `GlobalMapMoveCounter = 420`
 
-  - `GlobalMapMoveCounter = 421`
+  - `Experience = 421`
 
-  - `Experience = 422`
+  - `MaxMoveApBase = 422`
 
-  - `MaxMoveApBase = 423`
+  - `AnimType = 423`
 
-  - `AnimType = 424`
+  - `IsNoUnarmed = 424`
 
-  - `IsNoUnarmed = 425`
+  - `KnownLocProtoId = 425`
 
-  - `KnownLocProtoId = 426`
+  - `IsNoHome = 426`
 
-  - `IsNoHome = 427`
+  - `HomeMapId = 427`
 
-  - `HomeMapId = 428`
+  - `HomeMapPid = 428`
 
-  - `HomeMapPid = 429`
+  - `HomeHexX = 429`
 
-  - `HomeHexX = 430`
+  - `HomeHexY = 430`
 
-  - `HomeHexY = 431`
+  - `HomeDir = 431`
 
-  - `HomeDir = 432`
+  - `IsNoTalk = 432`
 
-  - `IsNoTalk = 433`
+  - `MapLeaveHexX = 433`
 
-  - `MapLeaveHexX = 434`
+  - `MapLeaveHexY = 434`
 
-  - `MapLeaveHexY = 435`
+  - `KnownLockerId = 435`
 
-  - `KnownLockerId = 436`
+  - `SpecialSkillPickOnGround = 436`
 
-  - `SpecialSkillPickOnGround = 437`
+  - `SpecialSkillLootCritter = 437`
 
-  - `SpecialSkillLootCritter = 438`
+  - `FollowLeaderId = 438`
 
-  - `FollowLeaderId = 439`
+  - `LastSendEntrancesLocId = 439`
 
-  - `LastSendEntrancesLocId = 440`
+  - `LastSendEntrancesTick = 440`
 
-  - `LastSendEntrancesTick = 441`
+  - `CrTypeAliasBase = 441`
 
-  - `CrTypeAliasBase = 442`
+  - `CrTypeAlias = 442`
 
-  - `CrTypeAlias = 443`
+  - `ModelNameBase = 443`
 
-  - `ModelNameBase = 444`
+  - `IsNoArmor = 444`
 
-  - `IsNoArmor = 445`
+  - `Anims = 445`
 
-  - `Anims = 446`
+  - `IsNoAim = 446`
 
-  - `IsNoAim = 447`
+  - `Kills = 447`
 
-  - `Kills = 448`
+  - `KillMen = 448`
 
-  - `KillMen = 449`
+  - `KillWomen = 449`
 
-  - `KillWomen = 450`
+  - `KillAlien = 450`
 
-  - `KillAlien = 451`
+  - `KillChildren = 451`
 
-  - `KillChildren = 452`
+  - `KillFloater = 452`
 
-  - `KillFloater = 453`
+  - `KillRat = 453`
 
-  - `KillRat = 454`
+  - `KillCentaur = 454`
 
-  - `KillCentaur = 455`
+  - `ReputationDen = 455`
 
-  - `ReputationDen = 456`
+  - `ReputationKlamath = 456`
 
-  - `ReputationKlamath = 457`
+  - `ReputationModoc = 457`
 
-  - `ReputationModoc = 458`
+  - `ReputationVaultCity = 458`
 
-  - `ReputationVaultCity = 459`
+  - `ReputationGecko = 459`
 
-  - `ReputationGecko = 460`
+  - `ReputationBrokenHills = 460`
 
-  - `ReputationBrokenHills = 461`
+  - `ReputationNewReno = 461`
 
-  - `ReputationNewReno = 462`
+  - `ReputationSierra = 462`
 
-  - `ReputationSierra = 463`
+  - `ReputationVault15 = 463`
 
-  - `ReputationVault15 = 464`
+  - `ReputationNCR = 464`
 
-  - `ReputationNCR = 465`
+  - `ReputationCathedral = 465`
 
-  - `ReputationCathedral = 466`
+  - `ReputationSAD = 466`
 
-  - `ReputationSAD = 467`
+  - `ReputationRedding = 467`
 
-  - `ReputationRedding = 468`
+  - `ReputationSF = 468`
 
-  - `ReputationSF = 469`
+  - `ReputationNavarro = 469`
 
-  - `ReputationNavarro = 470`
+  - `ReputationArroyo = 470`
 
-  - `ReputationArroyo = 471`
+  - `ReputationPrimalTribe = 471`
 
-  - `ReputationPrimalTribe = 472`
+  - `ReputationRangers = 472`
 
-  - `ReputationRangers = 473`
+  - `ReputationVault13 = 473`
 
-  - `ReputationVault13 = 474`
+  - `ReputationSacramento = 474`
 
-  - `ReputationSacramento = 475`
+  - `Addictions = 475`
 
-  - `Addictions = 476`
+  - `IsAddicted = 476`
 
-  - `IsAddicted = 477`
+  - `IsJetAddicted = 477`
 
-  - `IsJetAddicted = 478`
+  - `IsBuffoutAddicted = 478`
 
-  - `IsBuffoutAddicted = 479`
+  - `IsMentatsAddicted = 479`
 
-  - `IsMentatsAddicted = 480`
+  - `IsPsychoAddicted = 480`
 
-  - `IsPsychoAddicted = 481`
+  - `IsRadawayAddicted = 481`
 
-  - `IsRadawayAddicted = 482`
+  - `DamageResistance = 482`
 
-  - `DamageResistance = 483`
+  - `NormalResistance = 483`
 
-  - `NormalResistance = 484`
+  - `PoisonResistance = 484`
 
-  - `PoisonResistance = 485`
+  - `RadiationResistance = 485`
 
-  - `RadiationResistance = 486`
+  - `ExplodeResistance = 486`
 
-  - `ExplodeResistance = 487`
+  - `NormalResistanceBase = 487`
 
-  - `NormalResistanceBase = 488`
+  - `LaserResistanceBase = 488`
 
-  - `LaserResistanceBase = 489`
+  - `FireResistanceBase = 489`
 
-  - `FireResistanceBase = 490`
+  - `PlasmaResistanceBase = 490`
 
-  - `PlasmaResistanceBase = 491`
+  - `ElectricityResistanceBase = 491`
 
-  - `ElectricityResistanceBase = 492`
+  - `EmpResistanceBase = 492`
 
-  - `EmpResistanceBase = 493`
+  - `ExplodeResistanceBase = 493`
 
-  - `ExplodeResistanceBase = 494`
+  - `PoisonResistanceBase = 494`
 
-  - `PoisonResistanceBase = 495`
+  - `RadiationResistanceBase = 495`
 
-  - `RadiationResistanceBase = 496`
+  - `DamageThreshold = 496`
 
-  - `DamageThreshold = 497`
+  - `NormalThresholdBase = 497`
 
-  - `NormalThresholdBase = 498`
+  - `LaserThresholdBase = 498`
 
-  - `LaserThresholdBase = 499`
+  - `FireThresholdBase = 499`
 
-  - `FireThresholdBase = 500`
+  - `PlasmaThresholdBase = 500`
 
-  - `PlasmaThresholdBase = 501`
+  - `ElectricityThresholdBase = 501`
 
-  - `ElectricityThresholdBase = 502`
+  - `EmpThresholdBase = 502`
 
-  - `EmpThresholdBase = 503`
+  - `ExplodeThresholdBase = 503`
 
-  - `ExplodeThresholdBase = 504`
+  - `PoisonThresholdBase = 504`
 
-  - `PoisonThresholdBase = 505`
+  - `RadiationThresholdBase = 505`
 
-  - `RadiationThresholdBase = 506`
+  - `IsPoisoned = 506`
 
-  - `IsPoisoned = 507`
+  - `IsRadiated = 507`
 
-  - `IsRadiated = 508`
+  - `IsInjured = 508`
 
-  - `IsInjured = 509`
+  - `IsDamagedEye = 509`
 
-  - `IsDamagedEye = 510`
+  - `IsDamagedRightArm = 510`
 
-  - `IsDamagedRightArm = 511`
+  - `IsDamagedLeftArm = 511`
 
-  - `IsDamagedLeftArm = 512`
+  - `IsDamagedRightLeg = 512`
 
-  - `IsDamagedRightLeg = 513`
+  - `IsDamagedLeftLeg = 513`
 
-  - `IsDamagedLeftLeg = 514`
+  - `Var0 = 514`
 
-  - `Var0 = 515`
+  - `Var1 = 515`
 
-  - `Var1 = 516`
+  - `Var2 = 516`
 
-  - `Var2 = 517`
+  - `Var3 = 517`
 
-  - `Var3 = 518`
+  - `Var4 = 518`
 
-  - `Var4 = 519`
+  - `Var5 = 519`
 
-  - `Var5 = 520`
+  - `Var6 = 520`
 
-  - `Var6 = 521`
+  - `Var7 = 521`
 
-  - `Var7 = 522`
+  - `Var8 = 522`
 
-  - `Var8 = 523`
+  - `Var9 = 523`
 
-  - `Var9 = 524`
+  - `SkillSmallGuns = 524`
 
-  - `SkillSmallGuns = 525`
+  - `SkillBigGuns = 525`
 
-  - `SkillBigGuns = 526`
+  - `SkillEnergyWeapons = 526`
 
-  - `SkillEnergyWeapons = 527`
+  - `SkillUnarmed = 527`
 
-  - `SkillUnarmed = 528`
+  - `SkillMeleeWeapons = 528`
 
-  - `SkillMeleeWeapons = 529`
+  - `SkillThrowing = 529`
 
-  - `SkillThrowing = 530`
+  - `SkillFirstAid = 530`
 
-  - `SkillFirstAid = 531`
+  - `SkillDoctor = 531`
 
-  - `SkillDoctor = 532`
+  - `SkillSneak = 532`
 
-  - `SkillSneak = 533`
+  - `SkillLockpick = 533`
 
-  - `SkillLockpick = 534`
+  - `SkillSteal = 534`
 
-  - `SkillSteal = 535`
+  - `SkillTraps = 535`
 
-  - `SkillTraps = 536`
+  - `SkillScience = 536`
 
-  - `SkillScience = 537`
+  - `SkillRepair = 537`
 
-  - `SkillRepair = 538`
+  - `SkillSpeech = 538`
 
-  - `SkillSpeech = 539`
+  - `SkillBarter = 539`
 
-  - `SkillBarter = 540`
+  - `SkillGambling = 540`
 
-  - `SkillGambling = 541`
+  - `SkillOutdoorsman = 541`
 
-  - `SkillOutdoorsman = 542`
+  - `TagSkills = 542`
 
-  - `TagSkills = 543`
+  - `TagSkill1 = 543`
 
-  - `TagSkill1 = 544`
+  - `TagSkill2 = 544`
 
-  - `TagSkill2 = 545`
+  - `TagSkill3 = 545`
 
-  - `TagSkill3 = 546`
+  - `PerkBookworm = 546`
 
-  - `PerkBookworm = 547`
+  - `PerkAwareness = 547`
 
-  - `PerkAwareness = 548`
+  - `PerkBonusHthAttacks = 548`
 
-  - `PerkBonusHthAttacks = 549`
+  - `PerkBonusHthDamage = 549`
 
-  - `PerkBonusHthDamage = 550`
+  - `PerkBonusRangedDamage = 550`
 
-  - `PerkBonusRangedDamage = 551`
+  - `PerkBonusRateOfFire = 551`
 
-  - `PerkBonusRateOfFire = 552`
+  - `PerkEarlierSequence = 552`
 
-  - `PerkEarlierSequence = 553`
+  - `PerkFasterHealing = 553`
 
-  - `PerkFasterHealing = 554`
+  - `PerkMoreCriticals = 554`
 
-  - `PerkMoreCriticals = 555`
+  - `PerkNightVision = 555`
 
-  - `PerkNightVision = 556`
+  - `PerkRadResistance = 556`
 
-  - `PerkRadResistance = 557`
+  - `PerkToughness = 557`
 
-  - `PerkToughness = 558`
+  - `PerkStrongBack = 558`
 
-  - `PerkStrongBack = 559`
+  - `PerkSharpshooter = 559`
 
-  - `PerkSharpshooter = 560`
+  - `PerkSurvivalist = 560`
 
-  - `PerkSurvivalist = 561`
+  - `PerkEducated = 561`
 
-  - `PerkEducated = 562`
+  - `PerkHealer = 562`
 
-  - `PerkHealer = 563`
+  - `PerkFortuneFinder = 563`
 
-  - `PerkFortuneFinder = 564`
+  - `PerkBetterCriticals = 564`
 
-  - `PerkBetterCriticals = 565`
+  - `PerkEmpathy = 565`
 
-  - `PerkEmpathy = 566`
+  - `PerkSlayer = 566`
 
-  - `PerkSlayer = 567`
+  - `PerkSniper = 567`
 
-  - `PerkSniper = 568`
+  - `PerkSilentDeath = 568`
 
-  - `PerkSilentDeath = 569`
+  - `PerkActionBoy = 569`
 
-  - `PerkActionBoy = 570`
+  - `PerkMentalBlock = 570`
 
-  - `PerkMentalBlock = 571`
+  - `PerkLifegiver = 571`
 
-  - `PerkLifegiver = 572`
+  - `PerkDodger = 572`
 
-  - `PerkDodger = 573`
+  - `PerkSnakeater = 573`
 
-  - `PerkSnakeater = 574`
+  - `PerkMrFixit = 574`
 
-  - `PerkMrFixit = 575`
+  - `PerkMedic = 575`
 
-  - `PerkMedic = 576`
+  - `PerkMasterThief = 576`
 
-  - `PerkMasterThief = 577`
+  - `PerkSpeaker = 577`
 
-  - `PerkSpeaker = 578`
+  - `PerkHeaveHo = 578`
 
-  - `PerkHeaveHo = 579`
+  - `PerkFriendlyFoe = 579`
 
-  - `PerkFriendlyFoe = 580`
+  - `PerkPickpocket = 580`
 
-  - `PerkPickpocket = 581`
+  - `PerkGhost = 581`
 
-  - `PerkGhost = 582`
+  - `PerkCultOfPersonality = 582`
 
-  - `PerkCultOfPersonality = 583`
+  - `PerkScrounger = 583`
 
-  - `PerkScrounger = 584`
+  - `PerkExplorer = 584`
 
-  - `PerkExplorer = 585`
+  - `PerkFlowerChild = 585`
 
-  - `PerkFlowerChild = 586`
+  - `PerkPathfinder = 586`
 
-  - `PerkPathfinder = 587`
+  - `PerkAnimalFriend = 587`
 
-  - `PerkAnimalFriend = 588`
+  - `PerkScout = 588`
 
-  - `PerkScout = 589`
+  - `PerkMysteriousStranger = 589`
 
-  - `PerkMysteriousStranger = 590`
+  - `PerkRanger = 590`
 
-  - `PerkRanger = 591`
+  - `PerkSmoothTalker = 591`
 
-  - `PerkSmoothTalker = 592`
+  - `PerkSwiftLearner = 592`
 
-  - `PerkSwiftLearner = 593`
+  - `PerkTag = 593`
 
-  - `PerkTag = 594`
+  - `PerkMutate = 594`
 
-  - `PerkMutate = 595`
+  - `PerkAdrenalineRush = 595`
 
-  - `PerkAdrenalineRush = 596`
+  - `PerkCautiousNature = 596`
 
-  - `PerkCautiousNature = 597`
+  - `PerkComprehension = 597`
 
-  - `PerkComprehension = 598`
+  - `PerkDemolitionExpert = 598`
 
-  - `PerkDemolitionExpert = 599`
+  - `PerkGambler = 599`
 
-  - `PerkGambler = 600`
+  - `PerkGainStrength = 600`
 
-  - `PerkGainStrength = 601`
+  - `PerkGainPerception = 601`
 
-  - `PerkGainPerception = 602`
+  - `PerkGainEndurance = 602`
 
-  - `PerkGainEndurance = 603`
+  - `PerkGainCharisma = 603`
 
-  - `PerkGainCharisma = 604`
+  - `PerkGainIntelligence = 604`
 
-  - `PerkGainIntelligence = 605`
+  - `PerkGainAgility = 605`
 
-  - `PerkGainAgility = 606`
+  - `PerkGainLuck = 606`
 
-  - `PerkGainLuck = 607`
+  - `PerkHarmless = 607`
 
-  - `PerkHarmless = 608`
+  - `PerkHereAndNow = 608`
 
-  - `PerkHereAndNow = 609`
+  - `PerkHthEvade = 609`
 
-  - `PerkHthEvade = 610`
+  - `PerkKamaSutraMaster = 610`
 
-  - `PerkKamaSutraMaster = 611`
+  - `PerkKarmaBeacon = 611`
 
-  - `PerkKarmaBeacon = 612`
+  - `PerkLightStep = 612`
 
-  - `PerkLightStep = 613`
+  - `PerkLivingAnatomy = 613`
 
-  - `PerkLivingAnatomy = 614`
+  - `PerkMagneticPersonality = 614`
 
-  - `PerkMagneticPersonality = 615`
+  - `PerkNegotiator = 615`
 
-  - `PerkNegotiator = 616`
+  - `PerkPackRat = 616`
 
-  - `PerkPackRat = 617`
+  - `PerkPyromaniac = 617`
 
-  - `PerkPyromaniac = 618`
+  - `PerkQuickRecovery = 618`
 
-  - `PerkQuickRecovery = 619`
+  - `PerkSalesman = 619`
 
-  - `PerkSalesman = 620`
+  - `PerkStonewall = 620`
 
-  - `PerkStonewall = 621`
+  - `PerkThief = 621`
 
-  - `PerkThief = 622`
+  - `PerkWeaponHandling = 622`
 
-  - `PerkWeaponHandling = 623`
+  - `PerkVaultCityTraining = 623`
 
-  - `PerkVaultCityTraining = 624`
+  - `PerkExpertExcrement = 624`
 
-  - `PerkExpertExcrement = 625`
+  - `PerkTerminator = 625`
 
-  - `PerkTerminator = 626`
+  - `PerkGeckoSkinning = 626`
 
-  - `PerkGeckoSkinning = 627`
+  - `PerkVaultCityInoculations = 627`
 
-  - `PerkVaultCityInoculations = 628`
+  - `PerkDermalImpact = 628`
 
-  - `PerkDermalImpact = 629`
+  - `PerkDermalImpactEnh = 629`
 
-  - `PerkDermalImpactEnh = 630`
+  - `PerkPhoenixImplants = 630`
 
-  - `PerkPhoenixImplants = 631`
+  - `PerkPhoenixImplantsEnh = 631`
 
-  - `PerkPhoenixImplantsEnh = 632`
+  - `PerkNcrPerception = 632`
 
-  - `PerkNcrPerception = 633`
+  - `PerkNcrEndurance = 633`
 
-  - `PerkNcrEndurance = 634`
+  - `PerkNcrBarter = 634`
 
-  - `PerkNcrBarter = 635`
+  - `PerkNcrRepair = 635`
 
-  - `PerkNcrRepair = 636`
+  - `PerkVampireAccuracy = 636`
 
-  - `PerkVampireAccuracy = 637`
+  - `PerkVampireRegeneration = 637`
 
-  - `PerkVampireRegeneration = 638`
+  - `PerkQuickPockets = 638`
 
-  - `PerkQuickPockets = 639`
+  - `PerkMasterTrader = 639`
 
-  - `PerkMasterTrader = 640`
+  - `PerkSilentRunning = 640`
 
-  - `PerkSilentRunning = 641`
+  - `PerkBonusMove = 641`
 
-  - `PerkBonusMove = 642`
+  - `KarmaPerkBerserker = 642`
 
-  - `KarmaPerkBerserker = 643`
+  - `KarmaPerkChampion = 643`
 
-  - `KarmaPerkChampion = 644`
+  - `KarmaPerkChildkiller = 644`
 
-  - `KarmaPerkChildkiller = 645`
+  - `KarmaPerkSexpert = 645`
 
-  - `KarmaPerkSexpert = 646`
+  - `KarmaPerkPrizefighter = 646`
 
-  - `KarmaPerkPrizefighter = 647`
+  - `KarmaPerkGigolo = 647`
 
-  - `KarmaPerkGigolo = 648`
+  - `KarmaPerkGraveDigger = 648`
 
-  - `KarmaPerkGraveDigger = 649`
+  - `KarmaPerkMarried = 649`
 
-  - `KarmaPerkMarried = 650`
+  - `KarmaPerkPornStar = 650`
 
-  - `KarmaPerkPornStar = 651`
+  - `KarmaPerkSlaver = 651`
 
-  - `KarmaPerkSlaver = 652`
+  - `KarmaPerkVirginWastes = 652`
 
-  - `KarmaPerkVirginWastes = 653`
+  - `KarmaPerkManSalvatore = 653`
 
-  - `KarmaPerkManSalvatore = 654`
+  - `KarmaPerkManBishop = 654`
 
-  - `KarmaPerkManBishop = 655`
+  - `KarmaPerkManMordino = 655`
 
-  - `KarmaPerkManMordino = 656`
+  - `KarmaPerkManWright = 656`
 
-  - `KarmaPerkManWright = 657`
+  - `KarmaPerkSeparated = 657`
 
-  - `KarmaPerkSeparated = 658`
+  - `KarmaPerkPedobear = 658`
 
-  - `KarmaPerkPedobear = 659`
+  - `KarmaPerkVcGuardsman = 659`
 
-  - `KarmaPerkVcGuardsman = 660`
+  - `IsTraitFastMetabolism = 660`
 
-  - `IsTraitFastMetabolism = 661`
+  - `IsTraitBruiser = 661`
 
-  - `IsTraitBruiser = 662`
+  - `IsTraitSmallFrame = 662`
 
-  - `IsTraitSmallFrame = 663`
+  - `IsTraitOneHander = 663`
 
-  - `IsTraitOneHander = 664`
+  - `IsTraitFinesse = 664`
 
-  - `IsTraitFinesse = 665`
+  - `IsTraitKamikaze = 665`
 
-  - `IsTraitKamikaze = 666`
+  - `IsTraitHeavyHanded = 666`
 
-  - `IsTraitHeavyHanded = 667`
+  - `IsTraitFastShot = 667`
 
-  - `IsTraitFastShot = 668`
+  - `IsTraitBloodyMess = 668`
 
-  - `IsTraitBloodyMess = 669`
+  - `IsTraitJinxed = 669`
 
-  - `IsTraitJinxed = 670`
+  - `IsTraitJinxedII = 670`
 
-  - `IsTraitJinxedII = 671`
+  - `IsTraitGoodNatured = 671`
 
-  - `IsTraitGoodNatured = 672`
+  - `IsTraitChemReliant = 672`
 
-  - `IsTraitChemReliant = 673`
+  - `IsTraitChemResistant = 673`
 
-  - `IsTraitChemResistant = 674`
+  - `IsTraitSexAppeal = 674`
 
-  - `IsTraitSexAppeal = 675`
+  - `IsTraitSkilled = 675`
 
-  - `IsTraitSkilled = 676`
+  - `IsTraitNightPerson = 676`
 
-  - `IsTraitNightPerson = 677`
+  - `TimeoutSkFirstAid = 677`
 
-  - `TimeoutSkFirstAid = 678`
+  - `TimeoutSkDoctor = 678`
 
-  - `TimeoutSkDoctor = 679`
+  - `TimeoutSkRepair = 679`
 
-  - `TimeoutSkRepair = 680`
+  - `TimeoutSkScience = 680`
 
-  - `TimeoutSkScience = 681`
+  - `TimeoutSkLockpick = 681`
 
-  - `TimeoutSkLockpick = 682`
+  - `TimeoutSkSteal = 682`
 
-  - `TimeoutSkSteal = 683`
+  - `TimeoutSkOutdoorsman = 683`
 
-  - `TimeoutSkOutdoorsman = 684`
+  - `TimeoutRemoveFromGame = 684`
 
-  - `TimeoutRemoveFromGame = 685`
+  - `TimeoutReplication = 685`
 
-  - `TimeoutReplication = 686`
+  - `TimeoutKarmaVoting = 686`
 
-  - `TimeoutKarmaVoting = 687`
+  - `TimeoutSneak = 687`
 
-  - `TimeoutSneak = 688`
+  - `TimeoutHealing = 688`
 
-  - `TimeoutHealing = 689`
+  - `TimeoutStealing = 689`
 
-  - `TimeoutStealing = 690`
+  - `TimeoutAggressor = 690`
 
-  - `TimeoutAggressor = 691`
+  - `MercMasterId = 691`
 
-  - `MercMasterId = 692`
+  - `MercAlwaysRun = 692`
 
-  - `MercAlwaysRun = 693`
+  - `MercCancelOnAttack = 693`
 
-  - `MercCancelOnAttack = 694`
+  - `MercLoseDist = 694`
 
-  - `MercLoseDist = 695`
+  - `MercMasterDist = 695`
 
-  - `MercMasterDist = 696`
+  - `MercType = 696`
 
-  - `MercType = 697`
+  - `MercDefendMaster = 697`
 
-  - `MercDefendMaster = 698`
+  - `MercAssistMaster = 698`
 
-  - `MercAssistMaster = 699`
+  - `MercCancelTime = 699`
 
-  - `MercCancelTime = 700`
+  - `MercCancelOnGlobal = 700`
 
-  - `MercCancelOnGlobal = 701`
+  - `MercWaitForMaster = 701`
 
-  - `MercWaitForMaster = 702`
+  - `ArroyoMynocDefence = 702`
 
-  - `ArroyoMynocDefence = 703`
+  - `ArroyoCassidyLetter = 703`
 
-  - `ArroyoCassidyLetter = 704`
+  - `ArroyoMynocOil = 704`
 
-  - `ArroyoMynocOil = 705`
+  - `ArroyoProofOfDeath = 705`
 
-  - `ArroyoProofOfDeath = 706`
+  - `ArroyoLetterToLinnett = 706`
 
-  - `ArroyoLetterToLinnett = 707`
+  - `KlamSallyFindProstitute = 707`
 
-  - `KlamSallyFindProstitute = 708`
+  - `KlamBobWater = 708`
 
-  - `KlamBobWater = 709`
+  - `KlamFindTrappers = 709`
 
-  - `KlamFindTrappers = 710`
+  - `KlamBugenLure = 710`
 
-  - `KlamBugenLure = 711`
+  - `KlamNotifyHusband = 711`
 
-  - `KlamNotifyHusband = 712`
+  - `KlamEidenBramin = 712`
 
-  - `KlamEidenBramin = 713`
+  - `KlamSmilyModoc = 713`
 
-  - `KlamSmilyModoc = 714`
+  - `DenBillRacingWin = 714`
 
-  - `DenBillRacingWin = 715`
+  - `DenLeannaCondom = 715`
 
-  - `DenLeannaCondom = 716`
+  - `QDenAnanDoll = 716`
 
-  - `QDenAnanDoll = 717`
+  - `DenAnanRedoll = 717`
 
-  - `DenAnanRedoll = 718`
+  - `DenGhost = 718`
 
-  - `DenGhost = 719`
+  - `DenBillRacingOpening = 719`
 
-  - `DenBillRacingOpening = 720`
+  - `DenCarstopJeffry = 720`
 
-  - `DenCarstopJeffry = 721`
+  - `DenCarstopBrahmin = 721`
 
-  - `DenCarstopBrahmin = 722`
+  - `DenCarstopBreeder = 722`
 
-  - `DenCarstopBreeder = 723`
+  - `DenJoeySteal = 723`
 
-  - `DenJoeySteal = 724`
+  - `DenJaneDolg = 724`
 
-  - `DenJaneDolg = 725`
+  - `DenJanePsycho = 725`
 
-  - `DenJanePsycho = 726`
+  - `DenLaraPostal = 726`
 
-  - `DenLaraPostal = 727`
+  - `DenFlikJet = 727`
 
-  - `DenFlikJet = 728`
+  - `DenLaraBand = 728`
 
-  - `DenLaraBand = 729`
+  - `DenJoeyLoan = 729`
 
-  - `DenJoeyLoan = 730`
+  - `DenLaraBos = 730`
 
-  - `DenLaraBos = 731`
+  - `QDenCliffDealer = 731`
 
-  - `QDenCliffDealer = 732`
+  - `DenFredStim = 732`
 
-  - `DenFredStim = 733`
+  - `DenJaneVodka = 733`
 
-  - `DenJaneVodka = 734`
+  - `DenMomSlut = 734`
 
-  - `DenMomSlut = 735`
+  - `DenSmittyBatt = 735`
 
-  - `DenSmittyBatt = 736`
+  - `DenJaneMeat = 736`
 
-  - `DenJaneMeat = 737`
+  - `DenJaneStim = 737`
 
-  - `DenJaneStim = 738`
+  - `DenLaraMolotovCoctail = 738`
 
-  - `DenLaraMolotovCoctail = 739`
+  - `DenLeannaBuy = 739`
 
-  - `DenLeannaBuy = 740`
+  - `DenSmittyBoots = 740`
 
-  - `DenSmittyBoots = 741`
+  - `DenJaneGuns = 741`
 
-  - `DenJaneGuns = 742`
+  - `DenSmittyKey = 742`
 
-  - `DenSmittyKey = 743`
+  - `DenJaneArmor = 743`
 
-  - `DenJaneArmor = 744`
+  - `DenSmittyAmmo = 744`
 
-  - `DenSmittyAmmo = 745`
+  - `DenJaneHunt = 745`
 
-  - `DenJaneHunt = 746`
+  - `DenJoeyKnife = 746`
 
-  - `DenJoeyKnife = 747`
+  - `DenJoeyLara = 747`
 
-  - `DenJoeyLara = 748`
+  - `DenJaneRadio = 748`
 
-  - `DenJaneRadio = 749`
+  - `DenJoeyJet = 749`
 
-  - `DenJoeyJet = 750`
+  - `DenLaraTrust = 750`
 
-  - `DenLaraTrust = 751`
+  - `DenLeannaWine = 751`
 
-  - `DenLeannaWine = 752`
+  - `DenMomRadscorp = 752`
 
-  - `DenMomRadscorp = 753`
+  - `DenSmittyFixit = 753`
 
-  - `DenSmittyFixit = 754`
+  - `QDenLeannaThief = 754`
 
-  - `QDenLeannaThief = 755`
+  - `ModJoeFarm = 755`
 
-  - `ModJoeFarm = 756`
+  - `ModHose = 756`
 
-  - `ModHose = 757`
+  - `ModBaltasGecko = 757`
 
-  - `ModBaltasGecko = 758`
+  - `ModLourenceRatsColony = 758`
 
-  - `ModLourenceRatsColony = 759`
+  - `ModLourenceFloater = 759`
 
-  - `ModLourenceFloater = 760`
+  - `ModJoeVampire = 760`
 
-  - `ModJoeVampire = 761`
+  - `BHMarcusEscort = 761`
 
-  - `BHMarcusEscort = 762`
+  - `BHSuperNewTechnology = 762`
 
-  - `BHSuperNewTechnology = 763`
+  - `ReddDocRadio = 763`
 
-  - `ReddDocRadio = 764`
+  - `ReddDocRadioTroy = 764`
 
-  - `ReddDocRadioTroy = 765`
+  - `ReddDocRadioFung = 765`
 
-  - `ReddDocRadioFung = 766`
+  - `ReddDocRadioHoliday = 766`
 
-  - `ReddDocRadioHoliday = 767`
+  - `ReddDocRadioJubiley = 767`
 
-  - `ReddDocRadioJubiley = 768`
+  - `ReddHubbChildkiller = 768`
 
-  - `ReddHubbChildkiller = 769`
+  - `ReddMarionVinamingo = 769`
 
-  - `ReddMarionVinamingo = 770`
+  - `ReddDoctorDelivery = 770`
 
-  - `ReddDoctorDelivery = 771`
+  - `NavHenryProtoMaterials = 771`
 
-  - `NavHenryProtoMaterials = 772`
+  - `NavSoftJob = 772`
 
-  - `NavSoftJob = 773`
+  - `NcrHatePatrol = 773`
 
-  - `NcrHatePatrol = 774`
+  - `NcrSantiagaFindSpyStatus = 774`
 
-  - `NcrSantiagaFindSpyStatus = 775`
+  - `NcrBusterBrokenrifles = 775`
 
-  - `NcrBusterBrokenrifles = 776`
+  - `NcrKessMedBoardStatus = 776`
 
-  - `NcrKessMedBoardStatus = 777`
+  - `NcrDorotyFindHenryPapers = 777`
 
-  - `NcrDorotyFindHenryPapers = 778`
+  - `NcrLeadSmit2Dustybar = 778`
 
-  - `NcrLeadSmit2Dustybar = 779`
+  - `NcrKyleReddRecon = 779`
 
-  - `NcrKyleReddRecon = 780`
+  - `NcrDuppoFindDasies = 780`
 
-  - `NcrDuppoFindDasies = 781`
+  - `NcrDappoLostC = 781`
 
-  - `NcrDappoLostC = 782`
+  - `QChosen = 782`
 
-  - `QChosen = 783`
+  - `NRBarmenEscort = 783`
 
-  - `NRBarmenEscort = 784`
+  - `SFAhs7ImperatorFormat = 784`
 
-  - `SFAhs7ImperatorFormat = 785`
+  - `SFEvaHelpWithZax = 785`
 
-  - `SFEvaHelpWithZax = 786`
+  - `SFKenliImperatorRestore = 786`
 
-  - `SFKenliImperatorRestore = 787`
+  - `SFLoPanBlackmail = 787`
 
-  - `SFLoPanBlackmail = 788`
+  - `SFTigangRecipe = 788`
 
-  - `SFTigangRecipe = 789`
+  - `SFNarcoman = 789`
 
-  - `SFNarcoman = 790`
+  - `SFAhs7Invitations = 790`
 
-  - `SFAhs7Invitations = 791`
+  - `SFSlimSidnancy = 791`
 
-  - `SFSlimSidnancy = 792`
+  - `VCLetterToTodd = 792`
 
-  - `VCLetterToTodd = 793`
+  - `VCValeryMail = 793`
 
-  - `VCValeryMail = 794`
+  - `VCCindyLetter = 794`
 
-  - `VCCindyLetter = 795`
+  - `VCHartmannRecon = 795`
 
-  - `VCHartmannRecon = 796`
+  - `VCHartmanNcrHelp = 796`
 
-  - `VCHartmanNcrHelp = 797`
+  - `VCBarmenDelivery = 797`
 
-  - `VCBarmenDelivery = 798`
+  - `VCCharlie = 798`
 
-  - `VCCharlie = 799`
+  - `VCTroyFreshBlood = 799`
 
-  - `VCTroyFreshBlood = 800`
+  - `VCAndrewDeliveries = 800`
 
-  - `VCAndrewDeliveries = 801`
+  - `VCBlackEscort = 801`
 
-  - `VCBlackEscort = 802`
+  - `VCHartmanFight = 802`
 
-  - `VCHartmanFight = 803`
+  - `VCLynettScareNewcomers = 803`
 
-  - `VCLynettScareNewcomers = 804`
+  - `VCHartmanRifles = 804`
 
-  - `VCHartmanRifles = 805`
+  - `VCHeleneTroyBeauty = 805`
 
-  - `VCHeleneTroyBeauty = 806`
+  - `TribSulikStuff = 806`
 
-  - `TribSulikStuff = 807`
+  - `TribMuscoTest = 807`
 
-  - `TribMuscoTest = 808`
+  - `TribShamanPowder = 808`
 
-  - `TribShamanPowder = 809`
+  - `TribMaiaraBook = 809`
 
-  - `TribMaiaraBook = 810`
+  - `TribManotaNecklace = 810`
 
-  - `TribManotaNecklace = 811`
+  - `BHDeadSaboteursCounter = 811`
 
-  - `BHDeadSaboteursCounter = 812`
+  - `SpecialAndroid = 812`
 
-  - `SpecialAndroid = 813`
+  - `VCLynettRefuse = 813`
 
-  - `VCLynettRefuse = 814`
+  - `DialogTimeout = 814`
 
-  - `DialogTimeout = 815`
+  - `EncLoyalityHubologists = 815`
 
-  - `EncLoyalityHubologists = 816`
+  - `EncLoyalityNcr = 816`
 
-  - `EncLoyalityNcr = 817`
+  - `EncLoyalityVCity = 817`
 
-  - `EncLoyalityVCity = 818`
+  - `EncLoyalityRedding = 818`
 
-  - `EncLoyalityRedding = 819`
+  - `EncLoyalityBroken = 819`
 
-  - `EncLoyalityBroken = 820`
+  - `EncLoyalityGecko = 820`
 
-  - `EncLoyalityGecko = 821`
+  - `EncLoyalityArroyo = 821`
 
-  - `EncLoyalityArroyo = 822`
+  - `EncLoyalityKlamath = 822`
 
-  - `EncLoyalityKlamath = 823`
+  - `EncLoyalityModoc = 823`
 
-  - `EncLoyalityModoc = 824`
+  - `EncLoyalityDen = 824`
 
-  - `EncLoyalityDen = 825`
+  - `EncLoyalityReno = 825`
 
-  - `EncLoyalityReno = 826`
+  - `EncLoyalityEnclave = 826`
 
-  - `EncLoyalityEnclave = 827`
+  - `EncLoyalitySf = 827`
 
-  - `EncLoyalitySf = 828`
+  - `ModLourenceToxinRecipe = 828`
 
-  - `ModLourenceToxinRecipe = 829`
+  - `SFChitinArmorRecipeKnown = 829`
 
-  - `SFChitinArmorRecipeKnown = 830`
+  - `SpyCathActive = 830`
 
-  - `SpyCathActive = 831`
+  - `HasNotCard = 831`
 
-  - `HasNotCard = 832`
+  - `SexExp = 832`
 
-  - `SexExp = 833`
+  - `ScenFraction = 833`
 
-  - `ScenFraction = 834`
+  - `ArroyoDocHealing = 834`
 
-  - `ArroyoDocHealing = 835`
+  - `AtollTesla = 835`
 
-  - `AtollTesla = 836`
+  - `AtollMoney = 836`
 
-  - `AtollMoney = 837`
+  - `BHEscortNpcId = 837`
 
-  - `BHEscortNpcId = 838`
+  - `ScenBosSoldier = 838`
 
-  - `ScenBosSoldier = 839`
+  - `SFInvasionBadge = 839`
 
-  - `SFInvasionBadge = 840`
+  - `ScenBosScriber = 840`
 
-  - `ScenBosScriber = 841`
+  - `ScenEnclaveSoldier = 841`
 
-  - `ScenEnclaveSoldier = 842`
+  - `ScenEnclaveScient = 842`
 
-  - `ScenEnclaveScient = 843`
+  - `DenJaneTraderFred = 843`
 
-  - `DenJaneTraderFred = 844`
+  - `DenJaneJobCounter = 844`
 
-  - `DenJaneJobCounter = 845`
+  - `DenJoeyCounter = 845`
 
-  - `DenJoeyCounter = 846`
+  - `DenLaraBosCounter = 846`
 
-  - `DenLaraBosCounter = 847`
+  - `DenJaneTraderMom = 847`
 
-  - `DenJaneTraderMom = 848`
+  - `DenNarcCommMember = 848`
 
-  - `DenNarcCommMember = 849`
+  - `DenJaneTraderLean = 849`
 
-  - `DenJaneTraderLean = 850`
+  - `EncOceanTraderFamiliar = 850`
 
-  - `EncOceanTraderFamiliar = 851`
+  - `ModBaltasArmor1 = 851`
 
-  - `ModBaltasArmor1 = 852`
+  - `GeckGaroldTrain = 852`
 
-  - `GeckGaroldTrain = 853`
+  - `GeckSkitrTransit = 853`
 
-  - `GeckSkitrTransit = 854`
+  - `KlamBaknerBeer = 854`
 
-  - `KlamBaknerBeer = 855`
+  - `ModBaltasArmor = 855`
 
-  - `ModBaltasArmor = 856`
+  - `KlamVaccination = 856`
 
-  - `KlamVaccination = 857`
+  - `KlamVaccinationB1 = 857`
 
-  - `KlamVaccinationB1 = 858`
+  - `KlamVaccinationB2 = 858`
 
-  - `KlamVaccinationB2 = 859`
+  - `KlamVaccinationB3 = 859`
 
-  - `KlamVaccinationB3 = 860`
+  - `KlamGoldBeer = 860`
 
-  - `KlamGoldBeer = 861`
+  - `KlamSallyPay = 861`
 
-  - `KlamSallyPay = 862`
+  - `ModBaltasArmor2 = 862`
 
-  - `ModBaltasArmor2 = 863`
+  - `KlamVicFixittrash = 863`
 
-  - `KlamVicFixittrash = 864`
+  - `ModHoseTools = 864`
 
-  - `ModHoseTools = 865`
+  - `ModVampireReaction = 865`
 
-  - `ModVampireReaction = 866`
+  - `NcrAlexQuestStatus = 866`
 
-  - `NcrAlexQuestStatus = 867`
+  - `NcrDustyPartyStatusChar = 867`
 
-  - `NcrDustyPartyStatusChar = 868`
+  - `NcrMiraTroubleStatusChar = 868`
 
-  - `NcrMiraTroubleStatusChar = 869`
+  - `NcrBeggarTalk = 869`
 
-  - `NcrBeggarTalk = 870`
+  - `NcrDorothyGammaStatusChar = 870`
 
-  - `NcrDorothyGammaStatusChar = 871`
+  - `NcrDumontBrkradioStatusChar = 871`
 
-  - `NcrDumontBrkradioStatusChar = 872`
+  - `NcrCaptainFlirtStatusChar = 872`
 
-  - `NcrCaptainFlirtStatusChar = 873`
+  - `NcrIsNightGuardAccessFranted = 873`
 
-  - `NcrIsNightGuardAccessFranted = 874`
+  - `NcrClausHistory = 874`
 
-  - `NcrClausHistory = 875`
+  - `NcrJubileyTailsStatus = 875`
 
-  - `NcrJubileyTailsStatus = 876`
+  - `NcrRondoDorotyStatus = 876`
 
-  - `NcrRondoDorotyStatus = 877`
+  - `NcrFergusStory = 877`
 
-  - `NcrFergusStory = 878`
+  - `NcrCaptainSmitAccessGranted = 878`
 
-  - `NcrCaptainSmitAccessGranted = 879`
+  - `NcrJubileyTailsCounter = 879`
 
-  - `NcrJubileyTailsCounter = 880`
+  - `NcrBusterDorotyStatus = 880`
 
-  - `NcrBusterDorotyStatus = 881`
+  - `NcrFergusSecret = 881`
 
-  - `NcrFergusSecret = 882`
+  - `NcrGunterStory = 882`
 
-  - `NcrGunterStory = 883`
+  - `ScenRangerRank = 883`
 
-  - `ScenRangerRank = 884`
+  - `NcrDustyFoodDeliveryStatus = 884`
 
-  - `NcrDustyFoodDeliveryStatus = 885`
+  - `NcrPlayerLeadSmit2Dustybar = 885`
 
-  - `NcrPlayerLeadSmit2Dustybar = 886`
+  - `NcrKarlStory = 886`
 
-  - `NcrKarlStory = 887`
+  - `NcrCarlsonStory = 887`
 
-  - `NcrCarlsonStory = 888`
+  - `NcrKukComp = 888`
 
-  - `NcrKukComp = 889`
+  - `NcrMicQStatus = 889`
 
-  - `NcrMicQStatus = 890`
+  - `ScenRanger = 890`
 
-  - `ScenRanger = 891`
+  - `NcrDumontHistory = 891`
 
-  - `NcrDumontHistory = 892`
+  - `NcrMicQCptnDumbCounter = 892`
 
-  - `NcrMicQCptnDumbCounter = 893`
+  - `NcrPlayerHasMultipass = 893`
 
-  - `NcrPlayerHasMultipass = 894`
+  - `NcrSmitVsVestinResult = 894`
 
-  - `NcrSmitVsVestinResult = 895`
+  - `NRJukeboxSeen = 895`
 
-  - `NRJukeboxSeen = 896`
+  - `VCTrainigAccess = 896`
 
-  - `VCTrainigAccess = 897`
+  - `NcrLennyFight = 897`
 
-  - `NcrLennyFight = 898`
+  - `NcrRatchPlayerPoints = 898`
 
-  - `NcrRatchPlayerPoints = 899`
+  - `NRJesusTrain = 899`
 
-  - `NRJesusTrain = 900`
+  - `PurgSuppluysTaken = 900`
 
-  - `PurgSuppluysTaken = 901`
+  - `NcrWestinPillsStatus = 901`
 
-  - `NcrWestinPillsStatus = 902`
+  - `NcrWestinPlayerGetPrepayment = 902`
 
-  - `NcrWestinPlayerGetPrepayment = 903`
+  - `SFHubJudgementIgnatStory = 903`
 
-  - `SFHubJudgementIgnatStory = 904`
+  - `ReddMinesPlayerThief = 904`
 
-  - `ReddMinesPlayerThief = 905`
+  - `ReddDocMedicals = 905`
 
-  - `ReddDocMedicals = 906`
+  - `NcrWestinPills = 906`
 
-  - `NcrWestinPills = 907`
+  - `SFHubbStatus = 907`
 
-  - `SFHubbStatus = 908`
+  - `SFInvasionSandbagsTaken = 908`
 
-  - `SFInvasionSandbagsTaken = 909`
+  - `SFInvasionSandbagsGiven = 909`
 
-  - `SFInvasionSandbagsGiven = 910`
+  - `SFImperatorCancelNum = 910`
 
-  - `SFImperatorCancelNum = 911`
+  - `VCShiComputerAccess = 911`
 
-  - `VCShiComputerAccess = 912`
+  - `TribManotaStory = 912`
 
-  - `TribManotaStory = 913`
+  - `VCKnowsAboutDelivery = 913`
 
-  - `VCKnowsAboutDelivery = 914`
+  - `VCCitizenship = 914`
 
-  - `VCCitizenship = 915`
+  - `VCHartmanFightStatus = 915`
 
-  - `VCHartmanFightStatus = 916`
+  - `VCFreshBloodCounter = 916`
 
-  - `VCFreshBloodCounter = 917`
+  - `VCForgeryWitnessInhome = 917`
 
-  - `VCForgeryWitnessInhome = 918`
+  - `VCLynetOrMaclure = 918`
 
-  - `VCLynetOrMaclure = 919`
+  - `VCMutCharleyHired = 919`
 
-  - `VCMutCharleyHired = 920`
+  - `VCCavesCounter = 920`
 
-  - `VCCavesCounter = 921`
+  - `VCPrisonerBulled = 921`
 
-  - `VCPrisonerBulled = 922`
+  - `VCLynettTalk = 922`
 
-  - `VCLynettTalk = 923`
+  - `VCPatrolCounter = 923`
 
-  - `VCPatrolCounter = 924`
+  - `NpcDialogTimeWait = 924`
 
-  - `NpcDialogTimeWait = 925`
+  - `KlamTrappersRadaway = 925`
 
-  - `KlamTrappersRadaway = 926`
+  - `HoloInfo = 926`
 
-  - `HoloInfo = 927`
+  - `FavoriteItemPid = 927`
 
-  - `FavoriteItemPid = 928`
+  - `IsNoFavoriteItem = 928`
 
-  - `IsNoFavoriteItem = 929`
+  - `Level = 929`
 
-  - `Level = 930`
+  - `KarmaVoting = 930`
 
-  - `KarmaVoting = 931`
+  - `IsNoPvp = 931`
 
-  - `IsNoPvp = 932`
+  - `IsEndCombat = 932`
 
-  - `IsEndCombat = 933`
+  - `IsDlgScriptBarter = 933`
 
-  - `IsDlgScriptBarter = 934`
+  - `IsUnlimitedAmmo = 934`
 
-  - `IsUnlimitedAmmo = 935`
+  - `IsNoDrop = 935`
 
-  - `IsNoDrop = 936`
+  - `IsNoLooseLimbs = 936`
 
-  - `IsNoLooseLimbs = 937`
+  - `IsDeadAges = 937`
 
-  - `IsDeadAges = 938`
+  - `IsNoHeal = 938`
 
-  - `IsNoHeal = 939`
+  - `IsInvulnerable = 939`
 
-  - `IsInvulnerable = 940`
+  - `IsSpecialDead = 940`
 
-  - `IsSpecialDead = 941`
+  - `IsRangeHth = 941`
 
-  - `IsRangeHth = 942`
+  - `IsNoKnock = 942`
 
-  - `IsNoKnock = 943`
+  - `IsNoSupply = 943`
 
-  - `IsNoSupply = 944`
+  - `IsNoKarmaOnKill = 944`
 
-  - `IsNoKarmaOnKill = 945`
+  - `IsBarterOnlyCash = 945`
 
-  - `IsBarterOnlyCash = 946`
+  - `BarterCoefficient = 946`
 
-  - `BarterCoefficient = 947`
+  - `TransferType = 947`
 
-  - `TransferType = 948`
+  - `TransferContainerId = 948`
 
-  - `TransferContainerId = 949`
+  - `IsNoBarter = 949`
 
-  - `IsNoBarter = 950`
+  - `IsNoSteal = 950`
 
-  - `IsNoSteal = 951`
+  - `IsNoLoot = 951`
 
-  - `IsNoLoot = 952`
+  - `IsNoPush = 952`
 
-  - `IsNoPush = 953`
+  - `ItemsWeight = 953`
 
-  - `ItemsWeight = 954`
+  - `ActionPoints = 954`
 
-  - `ActionPoints = 955`
+  - `CurrentAp = 955`
 
-  - `CurrentAp = 956`
+  - `BagId = 956`
 
-  - `BagId = 957`
+  - `LastWeaponId = 957`
 
-  - `LastWeaponId = 958`
+  - `LastWeaponNotFound = 958`
 
-  - `LastWeaponNotFound = 959`
+  - `HandsProtoItemId = 959`
 
-  - `HandsProtoItemId = 960`
+  - `HandsItemMode = 960`
 
-  - `HandsItemMode = 961`
+  - `LastWeaponUse = 961`
 
-  - `LastWeaponUse = 962`
+  - `IsNoItemGarbager = 962`
 
-  - `IsNoItemGarbager = 963`
+  - `TownSupplyVictimId = 963`
 
-  - `TownSupplyVictimId = 964`
+  - `TownSupplyHostileId = 964`
 
-  - `TownSupplyHostileId = 965`
+  - `TravellerRoute = 965`
 
-  - `TravellerRoute = 966`
+  - `V13Dclaw = 966`
 
-  - `V13Dclaw = 967`
+  - `VCAmandaHelpJoshua = 967`
 
-  - `VCAmandaHelpJoshua = 968`
+  - `VCMailRemembered = 968`
 
-  - `VCMailRemembered = 969`
+  - `VCBeautyHoloRemembered = 969`
 
-  - `VCBeautyHoloRemembered = 970`
+  - `VCityCommonBarkusTimeSay = 970`
 
-  - `VCityCommonBarkusTimeSay = 971`
+  - `SquadMarchSquads = 971`
 
-  - `SquadMarchSquads = 972`
+  - `SquadMarchQueue = 972`
 
-  - `SquadMarchQueue = 973`
+  - `VCHartmanMarch = 973`
 
-  - `VCHartmanMarch = 974`
+  - `VCHartmannClearCave = 974`
 
-  - `VCHartmannClearCave = 975`
+  - `VCDeadAllyCounter = 975`
 
-  - `VCDeadAllyCounter = 976`
+  - `VCGuardRank = 976`
 
-  - `VCGuardRank = 977`
+  - `VCReconCaveId = 977`
 
-  - `VCReconCaveId = 978`
+  - `VCGuardsmanTriggerPlayerId = 978`
 
-  - `VCGuardsmanTriggerPlayerId = 979`
+  - `VCLynettArest = 979`
 
-  - `VCLynettArest = 980`
+  - `VCLynettForgery = 980`
 
-  - `VCLynettForgery = 981`
+  - `VCLynettPrisonerId = 981`
 
-  - `VCLynettPrisonerId = 982`
+  - `ReddingMortonBrothers = 982`
 
-  - `ReddingMortonBrothers = 983`
+  - `SpecialEncounterBaxChurch = 983`
 
-  - `SpecialEncounterBaxChurch = 984`
+  - `SpecialEncounteTim = 984`
 
-  - `SpecialEncounteTim = 985`
+  - `RacingSneakersTrap = 985`
 
-  - `RacingSneakersTrap = 986`
+  - `SpecialEncounterBridge = 986`
 
-  - `SpecialEncounterBridge = 987`
+  - `SpecialEncounterHoly1 = 987`
 
-  - `SpecialEncounterHoly1 = 988`
+  - `SpecialEncounterHoly2 = 988`
 
-  - `SpecialEncounterHoly2 = 989`
+  - `SpecialEncounterToxic = 989`
 
-  - `SpecialEncounterToxic = 990`
+  - `SpecialEncounterPariah = 990`
 
-  - `SpecialEncounterPariah = 991`
+  - `SpecialEncounterBrahmin = 991`
 
-  - `SpecialEncounterBrahmin = 992`
+  - `SpecialEncounterWhale = 992`
 
-  - `SpecialEncounterWhale = 993`
+  - `SpecialEncounterHead = 993`
 
-  - `SpecialEncounterHead = 994`
+  - `SpecialEncounterShuttle = 994`
 
-  - `SpecialEncounterShuttle = 995`
+  - `SpecialEncounterGuardian = 995`
 
-  - `SpecialEncounterGuardian = 996`
+  - `SpecialEncounterWoodsman = 996`
 
-  - `SpecialEncounterWoodsman = 997`
+  - `SpecialEncounterUnwashed = 997`
 
-  - `SpecialEncounterUnwashed = 998`
+  - `SpecialEncounterTeleport = 998`
 
-  - `SpecialEncounterTeleport = 999`
+  - `SpecialWastelandChildren = 999`
 
-  - `SpecialWastelandChildren = 1000`
+  - `SpecialEncounterKotw = 1000`
 
-  - `SpecialEncounterKotw = 1001`
+  - `SpecialSoldierHolo = 1001`
 
-  - `SpecialSoldierHolo = 1002`
+  - `SpecialTrapperHolo = 1002`
 
-  - `SpecialTrapperHolo = 1003`
+  - `SpecialDollHolo = 1003`
 
-  - `SpecialDollHolo = 1004`
+  - `SpecialEncounterZergLaboratory = 1004`
 
-  - `SpecialEncounterZergLaboratory = 1005`
+  - `SpecialEncounterDoughnutWarehouse = 1005`
 
-  - `SpecialEncounterDoughnutWarehouse = 1006`
+  - `SpecialEncounterAtomChurch = 1006`
 
-  - `SpecialEncounterAtomChurch = 1007`
+  - `GeckoFindWoody = 1007`
 
-  - `GeckoFindWoody = 1008`
-
-  - `NcrDappoLostCCtatus = 1009`
+  - `NcrDappoLostCCtatus = 1008`
 
 * `MapProperty`
 

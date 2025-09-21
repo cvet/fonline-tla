@@ -31,12 +31,6 @@ FO_SCRIPT_API void ConfigEntryParseHook(const string& fname, const string& secti
         }
     }
 
-    if (key == "LightColor" && value.front() != '0') {
-        auto rgba = static_cast<uint>(strex(value).toInt64());
-        rgba = (rgba & 0xFF000000) | ((rgba & 0xFF) << 16) | (rgba & 0xFF00) | ((rgba & 0xFF0000) >> 16);
-        value = strex("0x{:x}", rgba);
-    }
-
     if (section == "ProtoMap" || section == "Critter" || section == "Item" || section == "ProtoItem" || section == "Tile") {
         static thread_local string prev_key;
         static thread_local string prev_value;

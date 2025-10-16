@@ -137,7 +137,7 @@ void BehemothCommand(ident behemothId, string cmd)
         if (_IsCmdRoute(firstKeyWord)) {
             globalX = GetIntValue(valuesStr, 2, -1);
             globalY = GetIntValue(valuesStr, 3, -1);
-            Location[] locations = Game.GetLocations(globalX, globalY, Settings.GlobalMapZoneLength);
+            Location[] locations = Game.GetLocations(ipos(globalX, globalY), Settings.GlobalMapZoneLength);
             // Переданы координаты, куда нужно двигаться.
             if (globalX > 0 && globalY > 0 && locations.length() > 0) {
                 for (uint i = 0, l = locations.length(); i < l; i++) {
@@ -282,25 +282,25 @@ bool _BehemothOnGlobal(Critter cr, int type, Item car, float x, float y, float t
     if (cr.BehemothOrderType == TYPE_ORDER_ROUTE) {
         Location locTo = GetLocationTo(cr);
         if (valid(locTo)) {
-            if (uint(x) == locTo.WorldX && uint(y) == locTo.WorldY) {
+            if (uint(x) == locTo.WorldPos.x && uint(y) == locTo.WorldPos.y) {
                 ident mapId = locTo.GetMapByIndex(0).Id;
                 if (Obsolete::CritterTransitToMapEntry(cr, mapId, ENTER_ENTRY)) {
                     cr.HomeMapId = mapId;
-                    cr.HomeHexX = cr.HexX;
-                    cr.HomeHexY = cr.HexY;
+                    cr.HomeHexX = cr.Hex.x;
+                    cr.HomeHexY = cr.Hex.y;
                     cr.HomeDir = cr.Dir;
                     Game.RadioMessageMsg(cr.BehemothRadio,
                                          TextPackName::Text,
                                          603,
-                                         "$where@text Locations " + STR_LOC_NAME(locTo.ProtoId) + "@$x" + cr.HexX + "$y" + cr.HexY);
+                                         "$where@text Locations " + STR_LOC_NAME(locTo.ProtoId) + "@$x" + cr.Hex.x + "$y" + cr.Hex.y);
                 }
                 CancelOrder(cr.Id, true);
                 return true;
             }
             speed = GLOBAL_MAP_BASE_SPEED;
-            if (uint(toX) != locTo.WorldX || uint(toY) != locTo.WorldY) {
-                toX = locTo.WorldX;
-                toY = locTo.WorldY;
+            if (uint(toX) != locTo.WorldPos.x || uint(toY) != locTo.WorldPos.y) {
+                toX = locTo.WorldPos.x;
+                toY = locTo.WorldPos.y;
                 return true;
             }
         }
@@ -350,8 +350,8 @@ bool _BehemothPlaneEnd(Critter cr, int planeId, int reason, Critter someCr, Item
     NpcPlanes::NpcPlane plane = NpcPlanes::GetCritterPlane(cr, planeId);
 
     if (plane.Identifier == PLANE_MOVE && valid(cr.GetMap()) && cr.IsAlive()) {
-        cr.HomeHexX = cr.HexX;
-        cr.HomeHexY = cr.HexY;
+        cr.HomeHexX = cr.Hex.x;
+        cr.HomeHexY = cr.Hex.y;
         cr.HomeDir = cr.Dir;
         CancelOrder(cr.Id, false);
         Game.RadioMessageMsg(cr.BehemothRadio, TextPackName::Text, STR_PLANES_EXECUTED);
@@ -423,8 +423,8 @@ void RunOrderRoute(Critter cr)
 {
     Map map = cr.GetMap();
     if (valid(map)) {
-        uint16 hx = cr.HexX;
-        uint16 hy = cr.HexY;
+        uint16 hx = cr.Hex.x;
+        uint16 hy = cr.Hex.y;
         Entrance::GetNearEntry(map, EXIT_ENTRY, hx, hy);
         if (Entrance::GetNearEntry(map, EXIT_ENTRY, hx, hy)) {
             NpcPlanes::AddWalkPlane(cr, AI_PLANE_WALK_PRIORITY, PLANE_EXIT_MAP, Game.GetFullSecond(), hx, hy, 0, false, 3);
@@ -447,7 +447,7 @@ void RunOrderCamera(Critter cr)
         return;
     }
     else {
-        any[] values = {cr.BehemothOwner, map.Id, cr.HexX, cr.HexY, cr.Dir};
+        any[] values = {cr.BehemothOwner, map.Id, cr.Hex.x, cr.Hex.y, cr.Dir};
         Game.RadioMessageMsg(cr.BehemothRadio, TextPackName::Text, STR_EXECUTE);
         Game.DeferredCall(SECOND_TICKS(2), ShowCamera, values);
     }
@@ -459,7 +459,7 @@ void ShowCamera(any[] values)
     if (valid(player) && player.ControlledByPlayer) {
         Map map = Game.GetMap(ident(values[1]));
         if (valid(map)) {
-            player.ViewMap(map, 50, values[2], values[3], values[4]);
+            player.ViewMap(map, 50, mpos(values[2], values[3]), values[4]);
         }
     }
 }
@@ -478,14 +478,14 @@ void RunOrderMove(Critter cr)
         Game.RadioMessageMsg(cr.BehemothRadio, TextPackName::Text, STR_CANNOT_EXECUTE);
         return;
     }
-    uint16 hx = cr.HexX;
-    uint16 hy = cr.HexY;
+    uint16 hx = cr.Hex.x;
+    uint16 hy = cr.Hex.y;
     uint8 dir = cr.BehemothParam_2;
     if (dir > 5) {
         dir = cr.Dir;
     }
     uint steps = CLAMP(cr.BehemothParam_1, 0, 30);
-    map.MoveHexByDir(hx, hy, dir, steps);
+    map.MoveHexByDir(mpos(hx, hy), dir, steps);
     cr.SetDir(dir);
     NpcPlanes::AddWalkPlane(cr, AI_PLANE_WALK_PRIORITY, PLANE_MOVE, Game.GetFullSecond(), hx, hy, dir, false, 0);
 }
@@ -543,7 +543,7 @@ void RadioMessageMsgTmp(uint16 channel, TextPackName textMsg, uint strNum, strin
 // debug 528 ~run Behemoth::AddBehemoth 1 0 0
 void AddBehemoth(Critter cr)
 {
-    Critter npc = cr.GetMap().AddNpc(Content::Critter::Behemoth, cr.HexX + 3, cr.HexY + 3, 6);
+    Critter npc = cr.GetMap().AddNpc(Content::Critter::Behemoth, mpos(cr.Hex.x + 3, cr.Hex.y + 3), 6);
     npc.SetupScript(_BehemothInit);
     npc.BehemothOwner = cr.Id;
     npc.AddItem(Content::Item::heavy_dual_minigun_long_range, 1);
@@ -555,7 +555,7 @@ void WhereNpc(Critter cr, any id)
 {
     Critter npc = Game.GetCritter(id);
     if (valid(npc)) {
-        cr.Say(SAY_NETMSG, "Global X = " + npc.WorldX + "; Y = " + npc.WorldY);
+        cr.Say(SAY_NETMSG, "Global X = " + npc.WorldPos.x + "; Y = " + npc.WorldPos.y);
     }
 }
 

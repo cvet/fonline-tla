@@ -11,8 +11,6 @@ void ModuleInit()
     Game.OnFinish.Subscribe(finish);
     Game.OnLoop.Subscribe(loop);
     Game.OnMouseMove.Subscribe(mouse_move);
-    Game.OnGetActiveScreens.Subscribe(get_active_screens);
-    Game.OnScreenChange.Subscribe(screen_change);
     Game.OnRenderIface.Subscribe(render_iface);
     Game.OnRenderMap.Subscribe(render_map);
     Game.OnCritterIn.Subscribe(critter_in);
@@ -122,25 +120,6 @@ void mouse_move(ipos offset)
 }
 
 // //////////////////////////////////////////////////////////////////////////////////////////////////
-// Say to engine what screens is active.
-void get_active_screens(int[] & result)
-{
-    Gui::EngineCallback_GetActiveScreens(result);
-}
-
-// //////////////////////////////////////////////////////////////////////////////////////////////////
-// Show/hide screen behaviour.
-void screen_change(bool show, int screen, dict<string, any> params)
-{
-    if (show) {
-        Gui::EngineCallback_ShowScreen(screen, params);
-    }
-    else {
-        Gui::EngineCallback_HideScreen(screen);
-    }
-}
-
-// //////////////////////////////////////////////////////////////////////////////////////////////////
 // Render interface function. You can use Draw* functions only there.
 // Layer specification:
 //    1
@@ -154,8 +133,7 @@ void screen_change(bool show, int screen, dict<string, any> params)
 //    100 (over map), 101 (over all)
 void render_iface()
 {
-    Gui::Screen mainScreen = Gui::GetActiveMainScreen();
-    bool needDrawMap = mainScreen != null && mainScreen.Index == CLIENT_MAIN_SCREEN_GAME && CurMap != null;
+    bool needDrawMap = Gui::IsScreenActive(GuiScreen::Game) && CurMap != null;
 
     if (needDrawMap) {
         CurMap.DrawMap();
@@ -405,16 +383,15 @@ void in_message(string text, int sayType, ident crId)
     }
 
     if (sayType == SAY_DIALOG) {
-        Gui::Screen screen = Gui::GetActiveScreen();
+        Gui::Screen screen = Gui::GetActiveScreen(GuiScreen::Barter);
         if (screen != null) {
-            if (screen.Index == CLIENT_SCREEN_BARTER) {
-                auto barterScreen = cast<GuiScreens::Barter::Barter>(screen);
-                barterScreen.SetDialogText(text);
-            }
-            if (screen.Index == CLIENT_SCREEN_DIALOG) {
-                auto dialogScreen = cast<GuiScreens::Dialog::Dialog>(screen);
-                dialogScreen.SetDialogText(text);
-            }
+            auto barterScreen = cast<GuiScreens::Barter::Barter>(screen);
+            barterScreen.SetDialogText(text);
+        }
+        screen = Gui::GetActiveScreen(GuiScreen::Dialog);
+        if (screen != null) {
+            auto dialogScreen = cast<GuiScreens::Dialog::Dialog>(screen);
+            dialogScreen.SetDialogText(text);
         }
     }
 
@@ -1707,8 +1684,8 @@ bool check_interface_hit(int x, int y)
 // Called to check current container item under mouse.
 bool get_cont_item(ident& itemId, bool& isEnemy)
 {
-    Gui::Screen screen = Gui::GetActiveScreen();
-    if (screen is null || screen.Index != CLIENT_SCREEN_INVENTORY) { // screen.IsHardcoded ||
+    Gui::Screen screen = Gui::GetActiveScreen(GuiScreen::Inventory);
+    if (screen == null) {
         return false;
     }
 
@@ -1770,7 +1747,7 @@ bool ItemsDragAndDropHandler(Gui::Object obj, Gui::Object target)
     // Drop item
     if (targetItemView is null) {
         if (objItem.Stackable && objItem.Count > 1) {
-            Game.ShowScreen(CLIENT_SCREEN_SPLIT, dict<string, any> = {{"TargetItemId", objItem.Id}, {"ItemsCollection", ITEMS_CHOSEN_ALL}});
+            Gui::ShowScreen(GuiScreen::Split, dict<string, any> = {{"TargetItemId", objItem.Id}, {"ItemsCollection", ITEMS_CHOSEN_ALL}});
         }
         else {
             ChosenActions::SetChosenActions(array<any> = {Tla::ChosenMoveItem, objItem.Id, objItem.Count, CritterItemSlot::Outside, 0, 0, 0});
@@ -1784,7 +1761,7 @@ bool ItemsDragAndDropHandler(Gui::Object obj, Gui::Object target)
         (objItemView.UserDataExt == ITEMS_BARTER_OFFER && targetItemView.UserDataExt == ITEMS_BARTER) ||
         (objItemView.UserDataExt == ITEMS_BARTER_OPPONENT_OFFER && targetItemView.UserDataExt == ITEMS_BARTER_OPPONENT)) {
         if (objItem.Stackable && objItem.Count > 1) {
-            Game.ShowScreen(CLIENT_SCREEN_SPLIT, dict<string, any> = {{"TargetItemId", objItem.Id}, {"ItemsCollection", objItemView.UserDataExt}});
+            Gui::ShowScreen(GuiScreen::Split, dict<string, any> = {{"TargetItemId", objItem.Id}, {"ItemsCollection", objItemView.UserDataExt}});
         }
         else {
             ClientItems::BarterTransfer(objItem.Id, objItemView.UserDataExt, objItem.Count);
@@ -1798,7 +1775,7 @@ bool ItemsDragAndDropHandler(Gui::Object obj, Gui::Object target)
         (objItemView.UserDataExt == ITEMS_PICKUP_FROM && targetItemView.UserDataExt == ITEMS_PICKUP)) {
         if (objItem.Stackable && objItem.Count > 1) {
             // Game.CustomCall( "SplitItem " + objItem.Id + " " + objItemView.UserDataExt );
-            Game.ShowScreen(CLIENT_SCREEN_SPLIT, dict<string, any> = {{"TargetItemId", objItem.Id}, {"ItemsCollection", objItemView.UserDataExt}});
+            Gui::ShowScreen(GuiScreen::Split, dict<string, any> = {{"TargetItemId", objItem.Id}, {"ItemsCollection", objItemView.UserDataExt}});
         }
         else {
             any[] actions = {};

@@ -2464,6 +2464,26 @@
 
   ...
 
+* `uint GetTick()`
+
+  ...
+
+* `tick_t GetServerTime()`
+
+  ...
+
+* `tick_t DateToServerTime(uint16 year, uint16 month, uint16 day, uint16 hour, uint16 minute, uint16 second)`
+
+  ...
+
+* `void ServerToDateTime(tick_t serverTime, uint16& year, uint16& month, uint16& day, uint16& dayOfWeek, uint16& hour, uint16& minute, uint16& second)`
+
+  ...
+
+* `void GetCurDateTime(uint16& year, uint16& month, uint16& day, uint16& dayOfWeek, uint16& hour, uint16& minute, uint16& second, uint16& milliseconds)`
+
+  ...
+
 ### Game server methods
 
 * `ident CreatePlayer(string name, string password)`
@@ -2559,10 +2579,6 @@
   ...
 
 * `uint GetDistance(mpos hex, Item item)`
-
-  ...
-
-* `uint GetTick()`
 
   ...
 
@@ -2671,18 +2687,6 @@
   ...
 
 * `void RadioMessageMsg(uint16 channel, TextPackName textPack, uint numStr, string lexems)`
-
-  ...
-
-* `tick_t GetFullSecond()`
-
-  ...
-
-* `tick_t EvaluateFullSecond(uint16 year, uint16 month, uint16 day, uint16 hour, uint16 minute, uint16 second)`
-
-  ...
-
-* `void EvaluateGameTime(tick_t serverTime, uint16& year, uint16& month, uint16& day, uint16& dayOfWeek, uint16& hour, uint16& minute, uint16& second)`
 
   ...
 
@@ -2810,11 +2814,7 @@
 
   ...
 
-* `void GetTime(uint16& year, uint16& month, uint16& day, uint16& dayOfWeek, uint16& hour, uint16& minute, uint16& second, uint16& milliseconds)`
-
-  ...
-
-* `void SetTime(uint16 multiplier, uint16 year, uint16 month, uint16 day, uint16 hour, uint16 minute, uint16 second)`
+* `void SetServerTime(uint16 multiplier, uint16 year, uint16 month, uint16 day, uint16 hour, uint16 minute, uint16 second)`
 
   ...
 
@@ -2921,10 +2921,6 @@
   ...
 
 * `uint GetDistance(Item item, mpos hex) ExcludeInSingleplayer`
-
-  ...
-
-* `uint GetTick()`
 
   ...
 
@@ -3052,18 +3048,6 @@
 
   ...
 
-* `tick_t GetFullSecond() ExcludeInSingleplayer`
-
-  ...
-
-* `tick_t EvaluateFullSecond(uint16 year, uint16 month, uint16 day, uint16 hour, uint16 minute, uint16 second) ExcludeInSingleplayer`
-
-  ...
-
-* `void EvaluateGameTime(tick_t serverTime, uint16& year, uint16& month, uint16& day, uint16& dayOfWeek, uint16& hour, uint16& minute, uint16& second) ExcludeInSingleplayer`
-
-  ...
-
 * `void Preload3dFiles(string[] fnames)`
 
   ...
@@ -3085,10 +3069,6 @@
   ...
 
 * `void SimulateKeyboardPress(KeyCode key1, KeyCode key2, string key1Text, string key2Text)`
-
-  ...
-
-* `void GetTime(uint16& year, uint16& month, uint16& day, uint16& dayOfWeek, uint16& hour, uint16& minute, uint16& second, uint16& milliseconds) ExcludeInSingleplayer`
 
   ...
 

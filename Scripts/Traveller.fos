@@ -78,11 +78,11 @@ void CancelTraveller(ident crId)
     if (!valid(cr)) {
         return;
     }
-    if (cr.GetTimeEvents(CTE_FOUND_LOC) != 0) {
-        cr.RemoveTimeEvents(CTE_FOUND_LOC);
+    if (cr.CountTimeEvent(cte_ChooseTravelPoint) != 0) {
+        cr.StopTimeEvent(cte_ChooseTravelPoint);
     }
-    if (cr.GetTimeEvents(CTE_NEW_TRAVEL) != 0) {
-        cr.RemoveTimeEvents(CTE_NEW_TRAVEL);
+    if (cr.CountTimeEvent(cte_Travel) != 0) {
+        cr.StopTimeEvent(cte_Travel);
     }
 }
 
@@ -293,7 +293,7 @@ class Traveller
             return;
         }
         if (cr.GetTimeEvents(CTE_FOUND_LOC) == 0) {
-            cr.AddTimeEvent(cte_ChooseTravelPoint, 0, CTE_FOUND_LOC);
+            cr.StartTimeEvent( 0,cte_ChooseTravelPoint );
         }
     }
 
@@ -303,11 +303,11 @@ class Traveller
         if (!valid(cr)) {
             return;
         }
-        if (fromLoc && cr.GetTimeEvents(CTE_CHECK) != 0) {
-            cr.RemoveTimeEvents(CTE_CHECK); // В точку назначения прибыли, удаляем события проверки застрял/не застрял
+        if (fromLoc && cr.CountTimeEvent(cte_Check) != 0) {
+            cr.StopTimeEvent(cte_Check); // В точку назначения прибыли, удаляем события проверки застрял/не застрял
         }
         if (cr.GetTimeEvents(CTE_NEW_TRAVEL) == 0) {
-            cr.AddTimeEvent(cte_Travel, (fromLoc ? TimeWaitLocation : TimeWaitEncounter), CTE_NEW_TRAVEL);
+            cr.StartTimeEvent( (fromLoc ? TimeWaitLocation : TimeWaitEncounter),cte_Travel );
             TimeNextRoute = Game.GetServerTime() + (fromLoc ? TimeWaitLocation : TimeWaitEncounter);
             DL("time: " + TimeNextRoute + " or: " + Time::DateTimeToString(TimeNextRoute));
         }
@@ -347,7 +347,7 @@ class Traveller
         tick_t[] durations = {};
         uint[] rates = {};
         if (cr.GetTimeEvents(CTE_CHECK, indexes, durations, rates) == 0) {
-            cr.AddTimeEvent(cte_Check, TIME_CHECK, CTE_CHECK);
+            cr.StartTimeEvent( TIME_CHECK,cte_Check );
         }
         else {
             // Если событие уже существует, не отменяем
@@ -368,10 +368,10 @@ Traveller TravellerFromCritter(ident crId)
 }
 
 // Начало путешествия. Либо телепорт, либо переход по глобалу
-uint cte_Travel(Critter cr, any identifier, uint& rate)
+void cte_Travel(Critter cr) 
 {
     if (!NpcPlanes::IsNoPlanes(cr) || !valid(cr.GetMap())) {
-        return NEXT_TRY;
+        tick_t delayTicks =  NEXT_TRY; if(delayTicks > 0)  {  Game.RepeatCurrentTimeEvent(delayTicks); }
     }
 
     Traveller t = TravellerFromCritter(cr.Id);
@@ -380,7 +380,7 @@ uint cte_Travel(Critter cr, any identifier, uint& rate)
         if (t.TravelType == TYPE_TRANSIT) {
             if (!t.TransitToLocation()) {
                 DL("Error, can't transit to new location");
-                return NEXT_TRY;
+                tick_t delayTicks =  NEXT_TRY; if(delayTicks > 0)  {  Game.RepeatCurrentTimeEvent(delayTicks); }
             }
             else {
                 t.SheduleChooseLocation();
@@ -390,29 +390,29 @@ uint cte_Travel(Critter cr, any identifier, uint& rate)
         else {
             if (!t.BeginTravelToLocation()) {
                 DL("Error, can't begin travel to new location");
-                return NEXT_TRY;
+                tick_t delayTicks =  NEXT_TRY; if(delayTicks > 0)  {  Game.RepeatCurrentTimeEvent(delayTicks); }
             }
             else {
                 t.SetCheck();
             }
         }
     }
-    return 0;
+    return ;
 }
 
 // Проверка, достиг ли НПЦ последней точки назначения в отведенное время
 // если нет, переносится c  помощью TransitToMap
-uint cte_Check(Critter cr, any identifier, uint& rate)
+void cte_Check(Critter cr) 
 {
     Map map = cr.GetMap();
     if (valid(map) && valid(map.GetLocation()) && !map.GetLocation().AutoGarbage) {
-        return 0;
+        return ;
     }
     Traveller t = TravellerFromCritter(cr.Id);
     if (valid(t)) {
         if (!t.TransitToLocation()) {
             DL("Error, can't transit to new location");
-            return NEXT_TRY;
+            tick_t delayTicks =  NEXT_TRY; if(delayTicks > 0)  {  Game.RepeatCurrentTimeEvent(delayTicks); }
         }
         else {
             t.Followers.clear();
@@ -421,34 +421,34 @@ uint cte_Check(Critter cr, any identifier, uint& rate)
             t.SheduleTravel(true);
         }
     }
-    return 0;
+    return ;
 }
 
 // Поиск новой точки маршрута нпц, производится при заходе в локацию
-uint cte_ChooseTravelPoint(Critter cr, any identifier, uint& rate)
+void cte_ChooseTravelPoint(Critter cr) 
 {
     DL("Sheduled");
     Traveller t = TravellerFromCritter(cr.Id);
     if (valid(t)) {
         if (!t.TryFoundNewLocation()) {
             DL("cannot foun new location");
-            return NEXT_TRY;
+            tick_t delayTicks =  NEXT_TRY; if(delayTicks > 0)  {  Game.RepeatCurrentTimeEvent(delayTicks); }
         }
     }
-    return 0;
+    return ;
 }
 
-uint cte_ShowLoc(Critter cr, any identifier, uint& rate)
+void cte_ShowLoc(Critter cr) 
 {
     Map map = cr.GetMap();
     if (valid(map)) {
         Location loc = map.GetLocation();
         if (valid(loc) && loc.Hidden) {
             loc.Hidden = false;
-            return 0;
+            return ;
         }
     }
-    return TIME_SHOWLOC;
+    tick_t delayTicks =  TIME_SHOWLOC; if(delayTicks > 0)  {  Game.RepeatCurrentTimeEvent(delayTicks); }
 }
 
 // Обработка событий
@@ -502,8 +502,8 @@ bool _GlobalInvite(Critter cr, Item car, uint encounterDescriptor, int combatMod
     Traveller t = TravellerFromCritter(cr.Id);
     if (valid(t)) {
         t.SheduleTravel(false);
-        if (cr.GetTimeEvents(CTE_SHOW_LOC) == 0) {
-            cr.AddTimeEvent(cte_ShowLoc, TIME_SHOWLOC, CTE_SHOW_LOC);
+        if (cr.CountTimeEvent(cte_ShowLoc) == 0) {
+            cr.StartTimeEvent( TIME_SHOWLOC,cte_ShowLoc );
         }
     }
     return false;

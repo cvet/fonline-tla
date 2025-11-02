@@ -31,7 +31,7 @@ class GameEvent
     uint TimeOccur; // Время, через которое произойдет событие после того, как все условия соблюдены
     bool TimeIsAbsolute;         // Признак, что время является абсолютным
     bool FirstEventNoConditions; // Признак, для первого события не требуется выполнение условий
-    ident RunningEventId;        // Код тайм эвента, который уже запущен
+    uint RunningEventId;        // Код тайм эвента, который уже запущен
     uint NextEventIndex;         // Код следующего события, если предусмотрен
     uint ServerTime;             // Время, когда произойдет событие
 
@@ -113,8 +113,7 @@ class GameEvent
 
     void Run()
     {
-        uint time = TimeIsAbsolute ? TimeOccur : Game.GetServerTime() + TimeOccur;
-        DL(" Time to start event id " + DataIndex + ": " + time);
+        uint time = (TimeIsAbsolute ? TimeOccur : Time::Sum(Game.GetServerTime(), TimeOccur));
         Run(time);
     }
 
@@ -125,9 +124,7 @@ class GameEvent
             Game.Log("Cannot run event (id=" + DataIndex + "). Time is lost:" + time);
             return;
         }
-        RunningEventId = Game.SavedDeferredCall(GAME_SECOND_TO_TICK(time - Game.GetServerTime()), ProcessGameEvent, DataIndex);
-        DL("Event " + DataIndex + " running. TimeEventId = " + RunningEventId);
-        DL("Tostring::::" + ToString());
+        RunningEventId = Game.StartTimeEvent(GAME_SECOND_TO_TICK(time), ProcessGameEvent, DataIndex);//SavedDeferredCall
         Status = STATUS_RUNNING;
         Save();
     }
@@ -137,10 +134,10 @@ class GameEvent
         if (Status != STATUS_RUNNING) {
             return;
         }
-        if (RunningEventId != ZERO_IDENT) {
-            Game.CancelDeferredCall(RunningEventId);
+        if (RunningEventId != 0) {
+            Game.StopTimeEvent(ProcessGameEvent);
         }
-        RunningEventId = ZERO_IDENT;
+        RunningEventId = 0;
         Status = STATUS_ENDED;
         Save();
     }
@@ -194,7 +191,6 @@ class GameEventManager
                 return false;
             }
             if (event.FirstEventNoConditions && event.Status == STATUS_NEVER_OCCURED) {
-                DL("Can occured");
                 return true;
             }
             if (event.OccurConditions.length() == 0) {
@@ -202,7 +198,6 @@ class GameEventManager
             }
             for (uint j = 0, k = event.OccurConditions.length(); j < k; j++) {
                 GameEvent condition = GetGameEventByIndex(event.OccurConditions[j].GameEventIndex);
-                DL("condition!" + "status:" + condition.Status + "Occer condirion:" + event.OccurConditions[j].Status);
                 if (!valid(condition) || condition.Status != event.OccurConditions[j].Status) {
                     // не найден эвент, либо не удовлетворяет условиям
                     return false;
@@ -242,12 +237,11 @@ class GameEventManager
 
 void ProcessGameEvent(any value)
 {
-    DL("e_GameEvent");
     uint key = value;
     GameEventManager mng = GameEventManager();
     mng.Load();
     GameEvent event = mng.GetGameEventByIndex(key);
-    DL("valid event? status" + event.Status);
+	
     if (valid(event) && event.Status == STATUS_RUNNING) {
         event.Status = STATUS_OCCURED;
         event.Save();
@@ -300,7 +294,7 @@ void ProcessGameEvent(any value)
             @func = GameEventReplicator::StopEvent;
         }
 
-        Game.DeferredCall(0, func);
+        Game.StartTimeEvent(0, func);
         if (event.NextEventIndex == event.DataIndex && valid(nextEvent)) {
             event.Status = STATUS_RUNNING;
         }

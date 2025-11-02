@@ -1649,12 +1649,12 @@
 
   ...
 
-* `PrivateServer ident NcrDustyOneHourInvokeId`
+* `PrivateServer uint NcrDustyOneHourInvokeId`
 
   Author: cvet  
   Для квеста Вечеринка у Дасти.
 
-* `PrivateServer ident NcrDustyOneWeekInvokeId`
+* `PrivateServer uint NcrDustyOneWeekInvokeId`
 
   ...
 
@@ -5595,7 +5595,7 @@
 
   ...
 
-* `PrivateServer ident NcrCommonBeggarInvokeId`
+* `PrivateServer uint NcrCommonBeggarInvokeId`
 
   ...
 
@@ -5603,7 +5603,7 @@
 
   ...
 
-* `PrivateServer ident NcrCommonBeggarHideMoneyInvocation`
+* `PrivateServer int NcrCommonBeggarHideMoneyInvocation`
 
   ...
 
@@ -5696,11 +5696,11 @@
 
   ...
 
-* `PrivateServer ident NcrWestinEveryEveningInvokeId`
+* `PrivateServer uint NcrWestinEveryEveningInvokeId`
 
   ...
 
-* `PrivateServer ident NcrWestinEveryMorningInvokeId`
+* `PrivateServer uint NcrWestinEveryMorningInvokeId`
 
   ...
 
@@ -5745,7 +5745,7 @@
 
   ...
 
-* `PrivateServer ident QNrWriKidnapInvokeId`
+* `PrivateServer uint QNrWriKidnapInvokeId`
 
   ...
 
@@ -6001,7 +6001,7 @@
 
   ...
 
-* `PrivateServer ident SFCommonOneWeekInvokeId`
+* `PrivateServer uint SFCommonOneWeekInvokeId`
 
   ...
 
@@ -9602,7 +9602,7 @@
 
   ...
 
-* `PrivateServer ident ExplodeInvokeId`
+* `PrivateServer uint ExplodeInvokeId`
 
   Author: cvet, rifleman17
 
@@ -9639,7 +9639,7 @@
 
   ...
 
-* `PrivateServer ident GeigerTimeEvent`
+* `PrivateServer int GeigerTimeEvent`
 
   ...
 
@@ -9772,7 +9772,7 @@
 
   ...
 
-* `PrivateServer ident RatGrenadeInvokeId`
+* `PrivateServer uint RatGrenadeInvokeId`
 
   ...
 

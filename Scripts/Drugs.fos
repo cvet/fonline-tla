@@ -237,6 +237,80 @@ const int[] DrugEffects =
 
 // clang-format on
 
+class ActiveDrugEffect
+{
+    uint Id;
+    hstring DrugProtoId;
+    uint Stage;
+    uint Flags;
+    uint TimeEventId;
+}
+
+dict<ident, ActiveDrugEffect[]>
+    AllActiveDrugEffects = {};
+int LastDrugEffectId = 0;
+
+bool RemoveActiveDrugEffect(Critter cr, uint effectId)
+{
+    ActiveDrugEffect[] effects = AllActiveDrugEffects.get(cr.Id, null);
+    if (effects != null && !effects.isEmpty()) {
+        for (uint i = 0, l = effects.length(); i < l; i++) {
+            ActiveDrugEffect effect = effects[i];
+            if (effect != null) {
+                effects.removeAt(i);
+                AllActiveDrugEffects.set(cr.Id, effects);
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+ActiveDrugEffect GetActiveDrugEffect(Critter cr, uint effectId)
+{
+    ActiveDrugEffect[] effects = AllActiveDrugEffects.get(cr.Id, null);
+    if (effects != null && !effects.isEmpty()) {
+        for (int i = 0, l = effects.length(); i < l; i++) {
+            if (effects[i].Id == effectId) {
+                return effects[i];
+            }
+        }
+    }
+    return null;
+}
+
+int GetActiveDrugEffects(Critter cr, hstring protoId, ActiveDrugEffect[] & drugEffects)
+{
+    ActiveDrugEffect[] effects = AllActiveDrugEffects.get(cr.Id, null);
+    if (effects != null && !effects.isEmpty()) {
+        for (int i = 0, l = effects.length(); i < l; i++) {
+            ActiveDrugEffect effect = effects[i];
+            if (effect.DrugProtoId == protoId) {
+                drugEffects.insertLast(effect);
+            }
+        }
+    }
+
+    return drugEffects.length();
+}
+
+int CreateActiveDrugEffect(Critter cr, hstring protoId, uint flags)
+{
+    ActiveDrugEffect[] effects = {};
+    AllActiveDrugEffects.setIfNotExist(cr.Id, array<ActiveDrugEffect>());
+    effects = AllActiveDrugEffects.get(cr.Id, effects);
+
+    auto effect = ActiveDrugEffect();
+    effect.Id = LastDrugEffectId + 1;
+    effect.DrugProtoId = protoId;
+    effect.Stage = 1;
+    effect.Flags = flags;
+    effects.insertLast(effect);
+    LastDrugEffectId = effect.Id;
+
+    return effect.Id;
+}
+
 // Table offsets
 #define TABLE_DRUG_ADDICT (0)
 #define TABLE_DRUG_PROC   (1)
@@ -284,14 +358,13 @@ void SetDrug(Critter cr, hstring drugPid)
         }
     }
     else if (drugPid == Content::Item::jet_antidote) {
-        uint[] indexes = {};
-        tick_t[] durations = {};
-        uint[] rates = {};
-        uint count = cr.GetTimeEvents(Content::Item::jet.hash, indexes, durations, rates);
+        ActiveDrugEffect[] effects = {};
+        uint count = GetActiveDrugEffects(cr, Content::Item::jet, effects);
         for (uint i = 0; i < count; i++) {
-            DropDrug(cr, Content::Item::jet, RATE_TO_STAGE(rates[i]));
+            DropDrug(cr, Content::Item::jet, effects[i].Stage);
+            cr.StopTimeEvent(effects[i].TimeEventId);
+            RemoveActiveDrugEffect(cr, effects[i].Id);
         }
-        cr.RemoveTimeEvents(Content::Item::jet.hash);
         if (count > 0 && cr.Addictions[Addictions::Jet]) {
             bool[] addictions = cr.Addictions.clone();
             addictions[Addictions::Jet] = false;
@@ -314,10 +387,8 @@ void SetDrug(Critter cr, hstring drugPid)
     }
 
     // Other drugs
-    uint[] indexes = {};
-    tick_t[] durations = {};
-    uint[] rates = {};
-    uint count = cr.CountTimeEvent(cte_Drug);
+    ActiveDrugEffect[] effects;
+    uint count = GetActiveDrugEffects(cr, drugPid, effects);
     int index = GetDrugTableIndex(drugPid);
 
     // Check
@@ -326,7 +397,7 @@ void SetDrug(Critter cr, hstring drugPid)
         uint positive = 0;
         uint negative = 0;
         for (uint i = 0; i < count; i++) {
-            uint stage = RATE_TO_STAGE(rates[i]);
+            uint stage = effects[i].Stage;
             if (stage <= 1) {
                 positive++;
             }
@@ -359,16 +430,19 @@ void SetDrug(Critter cr, hstring drugPid)
     // Clear active addictions
     uint deleted = 0; // After erase indexes decrement on one position
     for (uint i = 0; i < count; i++) {
-        uint stage = RATE_TO_STAGE(rates[i]);
+        uint stage = effects[i].Stage;
         if (stage >= 3) {
             DropDrug(cr, drugPid, stage);
-            cr.RemoveTimeEvent(indexes[i] - deleted);
+            cr.StopTimeEvent(effects[i].TimeEventId);
+            RemoveActiveDrugEffect(cr, effects[i].Id);
             deleted++;
         }
     }
 
-    // Set critter time event
-    cr.StartTimeEvent(0, cte_Drug, FORM_RATE(0, flags));
+    int id = CreateActiveDrugEffect(cr, drugPid, flags);
+    uint eventId = cr.StartTimeEvent(0, cte_Drug, id);
+    auto effect = GetActiveDrugEffect(cr, id);
+    effect.TimeEventId = eventId;
 }
 
 int GetDrugTableIndex(hstring drugPid)
@@ -408,10 +482,15 @@ int GetDrugTableIndex(hstring drugPid)
     return index != -1 ? index * 30 : 0;
 }
 
-uint ProcessDrug(Critter cr, hstring drugPid, uint rate)
+uint ProcessDrug(Critter cr, uint effectId)
 {
-    uint stage = RATE_TO_STAGE(rate);
-    uint flags = RATE_TO_FLAGS(rate);
+    auto effect = GetActiveDrugEffect(cr, effectId);
+    if (effect == null) {
+        return 0;
+    }
+    hstring drugPid = effect.DrugProtoId;
+    uint stage = effect.Stage;
+    uint flags = effect.Flags;
 
     if (cr.IsDead()) {
         return Time::RealMinute(5); // Stop drug processing
@@ -497,13 +576,11 @@ uint ProcessDrug(Critter cr, hstring drugPid, uint rate)
         else if (stage == 2 && addict >= 0 && cr.Addictions[addict]) // To addiction
         {
             // Find already processed addiction
-            uint[] indexes = {};
-            tick_t[] durations = {};
-            uint[] rates = {};
-            uint count = cr.GetTimeEvents(drugPid.hash, indexes, durations, rates);
+            ActiveDrugEffect[] effects = {};
+            uint count = GetActiveDrugEffects(cr, drugPid, effects);
             bool isPresent = false;
             for (uint i = 0; i < count; i++) {
-                if (RATE_TO_STAGE(rates[i]) >= 3) {
+                if (effects[i].Stage >= 3) {
                     isPresent = true;
                     break;
                 }
@@ -531,7 +608,7 @@ uint ProcessDrug(Critter cr, hstring drugPid, uint rate)
     }
 
     stage++;
-    rate = FORM_RATE(stage, flags);
+    effect.Stage = stage;
     return duration * 60;
 }
 
@@ -565,9 +642,8 @@ void DropDrug(Critter cr, hstring drugPid, uint& stage)
 
 void cte_Drug(Critter cr, any rate)
 {
-    tick_t delayTicks = ProcessDrug(cr, hstring_fromHash(identifier), rate);
+    tick_t delayTicks = ProcessDrug(cr, rate);
     if (delayTicks > 0) {
-        Game.SetCurrentTimeEventData(rate);
         Game.RepeatCurrentTimeEvent(delayTicks);
     }
 }
@@ -595,9 +671,8 @@ void DropDrugEffects(Critter cr)
     cr.DrugEffects = drugEffects;
 
     // Erase all events
-    for (uint i = 0; i < DrugsIdentifiers.length(); i++) {
-        cr.RemoveTimeEvents(DrugsIdentifiers[i].hash);
-    }
+    cr.StopTimeEvent(cte_Drug);
+    AllActiveDrugEffects.set(cr.Id, null);
 
     // Unset addictions perks
     bool[] addictions = cr.Addictions.clone();

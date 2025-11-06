@@ -54,6 +54,9 @@ AddResources(BlackCombatArmor Resources/DataPacks/cablack.dat)
 AddResources(Lieutenant Resources/DataPacks/lieutenant.dat)
 AddResources(LongHairDude Resources/DataPacks/longhairdude.dat)
 
+# Baking options
+SetBakingOption(BakeLanguages "russ engl")
+
 # AddResources( FTRobots Resources/DataPacks/ftrobots.bos )
 AddResources(FOSound Resources/DataPacks/fo_sound.zip)
 AddResources(Music Resources/FOnlineMusic)

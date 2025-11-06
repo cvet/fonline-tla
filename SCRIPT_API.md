@@ -665,10 +665,6 @@
 
   ...
 
-* `const uint FloodSize = 2048`
-
-  ...
-
 * `const uint ArtificalLags = 0`
 
   ...
@@ -1527,7 +1523,7 @@
 
   ...
 
-* `PrivateServer uint LastGlobalMapTripId ReadOnly`
+* `PrivateServer uint LastGlobalMapTripId ReadOnly Temporary`
 
   ...
 
@@ -1985,6 +1981,10 @@
   ...
 
 * `OnCritterUnload(Critter cr)`
+
+  ...
+
+* `OnCritterSendInitialInfo(Critter cr)`
 
   ...
 
@@ -2710,11 +2710,19 @@
 
   ...
 
-* `Item MoveItem(Item item, Item toCont, ContainerItemStack stackId)`
+* `Item MoveItem(Item item, Item toCont)`
 
   ...
 
-* `Item MoveItem(Item item, uint count, Item toCont, ContainerItemStack stackId)`
+* `Item MoveItem(Item item, Item toCont, any stackId)`
+
+  ...
+
+* `Item MoveItem(Item item, uint count, Item toCont)`
+
+  ...
+
+* `Item MoveItem(Item item, uint count, Item toCont, any stackId)`
 
   ...
 
@@ -2726,7 +2734,11 @@
 
   ...
 
-* `void MoveItems(Item[] items, Item toCont, ContainerItemStack stackId)`
+* `void MoveItems(Item[] items, Item toCont)`
+
+  ...
+
+* `void MoveItems(Item[] items, Item toCont, any stackId)`
 
   ...
 
@@ -2818,7 +2830,7 @@
 
   ...
 
-* `Player GetPlayer(string name) ExcludeInSingleplayer PassOwnership`
+* `Player GetPlayer(string name) PassOwnership`
 
   ...
 
@@ -2906,11 +2918,11 @@
 
   ...
 
-* `Player[] GetOnlinePlayers() ExcludeInSingleplayer`
+* `Player[] GetOnlinePlayers()`
 
   ...
 
-* `ident[] GetRegisteredPlayerIds() ExcludeInSingleplayer`
+* `ident[] GetRegisteredPlayerIds()`
 
   ...
 
@@ -2972,35 +2984,35 @@
 
   ...
 
-* `uint GetDistance(Critter cr1, Critter cr2) ExcludeInSingleplayer`
+* `uint GetDistance(Critter cr1, Critter cr2)`
 
   ...
 
-* `uint GetDistance(Item item1, Item item2) ExcludeInSingleplayer`
+* `uint GetDistance(Item item1, Item item2)`
 
   ...
 
-* `uint GetDistance(Critter cr, Item item) ExcludeInSingleplayer`
+* `uint GetDistance(Critter cr, Item item)`
 
   ...
 
-* `uint GetDistance(Item item, Critter cr) ExcludeInSingleplayer`
+* `uint GetDistance(Item item, Critter cr)`
 
   ...
 
-* `uint GetDistance(Critter cr, mpos hex) ExcludeInSingleplayer`
+* `uint GetDistance(Critter cr, mpos hex)`
 
   ...
 
-* `uint GetDistance(mpos hex, Critter cr) ExcludeInSingleplayer`
+* `uint GetDistance(mpos hex, Critter cr)`
 
   ...
 
-* `uint GetDistance(mpos hex, Item item) ExcludeInSingleplayer`
+* `uint GetDistance(mpos hex, Item item)`
 
   ...
 
-* `uint GetDistance(Item item, mpos hex) ExcludeInSingleplayer`
+* `uint GetDistance(Item item, mpos hex)`
 
   ...
 
@@ -3016,23 +3028,23 @@
 
   ...
 
-* `Item GetItem(ident itemId) ExcludeInSingleplayer`
+* `Item GetItem(ident itemId)`
 
   ...
 
-* `Critter GetCritter(ident crId) ExcludeInSingleplayer`
+* `Critter GetCritter(ident crId)`
 
   ...
 
-* `Critter[] GetCritters(CritterFindType findType) ExcludeInSingleplayer`
+* `Critter[] GetCritters(CritterFindType findType)`
 
   ...
 
-* `Critter[] GetCritters(hstring pid, CritterFindType findType) ExcludeInSingleplayer`
+* `Critter[] GetCritters(hstring pid, CritterFindType findType)`
 
   ...
 
-* `Critter[] SortCrittersByDeep(Critter[] critters) ExcludeInSingleplayer`
+* `Critter[] SortCrittersByDeep(Critter[] critters)`
 
   ...
 
@@ -3228,7 +3240,15 @@
 
   ...
 
-* `void DrawSprite(uint sprId, ipos pos, isize size, ucolor color, bool zoom, bool offs)`
+* `void DrawSprite(uint sprId, fpos pos, ucolor color)`
+
+  ...
+
+* `void DrawSprite(uint sprId, fpos pos, fsize size, ucolor color)`
+
+  ...
+
+* `void DrawSprite(uint sprId, ipos pos, isize size, ucolor color, bool fit, bool offs)`
 
   ...
 
@@ -3240,7 +3260,7 @@
 
   ...
 
-* `void DrawPrimitive(int primitiveType, int[] data)`
+* `void DrawPrimitive(RenderPrimitiveType primitiveType, int[] data)`
 
   ...
 
@@ -3573,11 +3593,11 @@
 
 ### Player server methods
 
-* `void SwitchCritter(Critter cr) ExcludeInSingleplayer`
+* `void SwitchCritter(Critter cr)`
 
   ...
 
-* `Critter GetControlledCritter() ExcludeInSingleplayer`
+* `Critter GetControlledCritter()`
 
   ...
 
@@ -3598,10 +3618,6 @@
   ...
 
 * `void Message(TextPackName textPack, uint numStr, string lexems)`
-
-  ...
-
-* `bool IsWebConnected()`
 
   ...
 
@@ -4373,7 +4389,7 @@
 
   ...
 
-* `Item GetItem(ident itemId) ExcludeInSingleplayer`
+* `Item GetItem(ident itemId)`
 
   ...
 
@@ -4385,51 +4401,51 @@
 
   ...
 
-* `Critter GetCritter(ident critterId) ExcludeInSingleplayer`
+* `Critter GetCritter(ident critterId)`
 
   ...
 
-* `Critter[] GetCritters() ExcludeInSingleplayer`
+* `Critter[] GetCritters()`
 
   ...
 
-* `Critter[] GetCritters(CritterFindType findType) ExcludeInSingleplayer`
+* `Critter[] GetCritters(CritterFindType findType)`
 
   ...
 
-* `Critter[] GetCritters(hstring pid, CritterFindType findType) ExcludeInSingleplayer`
+* `Critter[] GetCritters(hstring pid, CritterFindType findType)`
 
   ...
 
-* `Critter[] GetCritters(mpos hex, uint radius, CritterFindType findType) ExcludeInSingleplayer`
+* `Critter[] GetCritters(mpos hex, uint radius, CritterFindType findType)`
 
   ...
 
-* `Critter[] GetCrittersInPath(mpos fromHex, mpos toHex, float angle, uint dist, CritterFindType findType) ExcludeInSingleplayer`
+* `Critter[] GetCrittersInPath(mpos fromHex, mpos toHex, float angle, uint dist, CritterFindType findType)`
 
   ...
 
-* `Critter[] GetCrittersWithBlockInPath(mpos fromHex, mpos toHex, float angle, uint dist, CritterFindType findType, mpos& preBlockHex, mpos& blockHex) ExcludeInSingleplayer`
+* `Critter[] GetCrittersWithBlockInPath(mpos fromHex, mpos toHex, float angle, uint dist, CritterFindType findType, mpos& preBlockHex, mpos& blockHex)`
 
   ...
 
-* `void GetHexInPath(mpos fromHex, mpos& toHex, float angle, uint dist) ExcludeInSingleplayer`
+* `void GetHexInPath(mpos fromHex, mpos& toHex, float angle, uint dist)`
 
   ...
 
-* `uint8[] GetPath(mpos fromHex, mpos toHex, uint cut) ExcludeInSingleplayer`
+* `uint8[] GetPath(mpos fromHex, mpos toHex, uint cut)`
 
   ...
 
-* `uint8[] GetPath(Critter cr, mpos toHex, uint cut) ExcludeInSingleplayer`
+* `uint8[] GetPath(Critter cr, mpos toHex, uint cut)`
 
   ...
 
-* `uint GetPathLength(mpos fromHex, mpos toHex, uint cut) ExcludeInSingleplayer`
+* `uint GetPathLength(mpos fromHex, mpos toHex, uint cut)`
 
   ...
 
-* `uint GetPathLength(Critter cr, mpos toHex, uint cut) ExcludeInSingleplayer`
+* `uint GetPathLength(Critter cr, mpos toHex, uint cut)`
 
   ...
 
@@ -4445,7 +4461,7 @@
 
   ...
 
-* `bool MoveHexByDir(mpos& hex, uint8 dir, uint steps) ExcludeInSingleplayer`
+* `bool MoveHexByDir(mpos& hex, uint8 dir, uint steps)`
 
   ...
 
@@ -8875,7 +8891,7 @@
 
   ...
 
-* `Player GetPlayer() ExcludeInSingleplayer`
+* `Player GetPlayer()`
 
   ...
 
@@ -9039,7 +9055,7 @@
 
   ...
 
-* `void Animate(CritterStateAnim stateAnim, CritterActionAnim actionAnim, AbstractItem contextItem, bool clearSequence, bool delayPlay) ExcludeInSingleplayer`
+* `void Animate(CritterStateAnim stateAnim, CritterActionAnim actionAnim, AbstractItem contextItem, bool clearSequence, bool delayPlay)`
 
   ...
 
@@ -9059,11 +9075,11 @@
 
   ...
 
-* `void Disconnect() ExcludeInSingleplayer`
+* `void Disconnect()`
 
   ...
 
-* `bool IsOnline() ExcludeInSingleplayer`
+* `bool IsOnline()`
 
   ...
 
@@ -9133,19 +9149,19 @@
 
   ...
 
-* `bool IsOffline() ExcludeInSingleplayer`
+* `bool IsOffline()`
 
   ...
 
-* `bool IsAlive() ExcludeInSingleplayer`
+* `bool IsAlive()`
 
   ...
 
-* `bool IsKnockout() ExcludeInSingleplayer`
+* `bool IsKnockout()`
 
   ...
 
-* `bool IsDead() ExcludeInSingleplayer`
+* `bool IsDead()`
 
   ...
 
@@ -9153,7 +9169,7 @@
 
   ...
 
-* `bool IsMoving() ExcludeInSingleplayer`
+* `bool IsMoving()`
 
   ...
 
@@ -9185,35 +9201,35 @@
 
   ...
 
-* `uint CountItem(hstring protoId) ExcludeInSingleplayer`
+* `uint CountItem(hstring protoId)`
 
   ...
 
-* `Item GetItem(ident itemId) ExcludeInSingleplayer`
+* `Item GetItem(ident itemId)`
 
   ...
 
-* `Item GetItem(hstring protoId) ExcludeInSingleplayer`
+* `Item GetItem(hstring protoId)`
 
   ...
 
-* `Item GetItem(ItemComponent component) ExcludeInSingleplayer`
+* `Item GetItem(ItemComponent component)`
 
   ...
 
-* `Item GetItem(ItemProperty property, int propertyValue) ExcludeInSingleplayer`
+* `Item GetItem(ItemProperty property, int propertyValue)`
 
   ...
 
-* `Item[] GetItems() ExcludeInSingleplayer`
+* `Item[] GetItems()`
 
   ...
 
-* `Item[] GetItems(ItemComponent component) ExcludeInSingleplayer`
+* `Item[] GetItems(ItemComponent component)`
 
   ...
 
-* `Item[] GetItems(ItemProperty property, int propertyValue) ExcludeInSingleplayer`
+* `Item[] GetItems(ItemProperty property, int propertyValue)`
 
   ...
 
@@ -9354,7 +9370,7 @@
 
   ...
 
-* `PrivateCommon ContainerItemStack ContainerStack ReadOnly`
+* `PrivateCommon any ContainerStack ReadOnly`
 
   ...
 
@@ -10551,11 +10567,19 @@
 
   ...
 
-* `Item AddItem(hstring pid, uint count, ContainerItemStack stackId)`
+* `Item AddItem(hstring pid, uint count)`
 
   ...
 
-* `Item[] GetItems(ContainerItemStack stackId)`
+* `Item AddItem(hstring pid, uint count, any stackId)`
+
+  ...
+
+* `Item[] GetItems()`
+
+  ...
+
+* `Item[] GetItems(any stackId)`
 
   ...
 
@@ -10567,7 +10591,7 @@
 
   ...
 
-* `void Animate(hstring animName, bool looped, bool reversed) ExcludeInSingleplayer`
+* `void Animate(hstring animName, bool looped, bool reversed)`
 
   ...
 
@@ -10581,7 +10605,7 @@
 
   ...
 
-* `void GetMapPos(mpos& hex) ExcludeInSingleplayer`
+* `void GetMapPos(mpos& hex)`
 
   ...
 
@@ -10597,7 +10621,7 @@
 
   ...
 
-* `Item[] GetInnerItems() ExcludeInSingleplayer`
+* `Item[] GetInnerItems()`
 
   ...
 
@@ -11300,14 +11324,6 @@
 
   - `Nowhere = 3`
 
-* `ContainerItemStack`
-
-  ...
-
-  - `Root = 0`
-
-  - `Any = 0xFFFFFFFF`
-
 * `CornerType`
 
   ...
@@ -11613,6 +11629,20 @@
   - `Ext3 = 8`
 
   - `Ext4 = 9`
+
+* `RenderPrimitiveType`
+
+  ...
+
+  - `PointList = 0`
+
+  - `LineList = 1`
+
+  - `LineStrip = 2`
+
+  - `TriangleList = 3`
+
+  - `TriangleStrip = 4`
 
 * `MovingState`
 

@@ -2496,6 +2496,10 @@
 
   ...
 
+* `uint GetDeltaTick()`
+
+  ...
+
 * `tick_t GetServerTime()`
 
   ...
@@ -2887,10 +2891,6 @@
   ...
 
 * `bool RunDialog(Critter cr, hstring dlgPack, mpos hex, bool ignoreDistance)`
-
-  ...
-
-* `int64 GetWorldItemCount(hstring pid)`
 
   ...
 

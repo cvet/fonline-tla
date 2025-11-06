@@ -14,20 +14,28 @@ struct ServerExtData
     vector<unique_ptr<ServerImage>> ServerImages {};
 };
 
+static auto GetServerExtData(FOServer* server) -> ServerExtData&
+{
+    return *reinterpret_cast<ServerExtData*>(server->UserData.get());
+}
+
 ///@ EngineHook
 FO_SCRIPT_API void InitServerEngine(FOServer* server)
 {
     STACK_TRACE_ENTRY();
 
-    server->UserData = unique_del_ptr<void>(new ServerExtData(), [](void* ptr) { delete static_cast<ServerExtData*>(ptr); });
+    server->UserData = unique_del_ptr<uint8>(reinterpret_cast<uint8*>(SafeAlloc::MakeRaw<ServerExtData>()), [](const uint8* ptr) {
+        const auto* ext_data_ptr = reinterpret_cast<const ServerExtData*>(ptr);
+        delete ext_data_ptr;
+    });
 }
 
 ///@ ExportMethod
-FO_SCRIPT_API void Server_Game_LoadImage(FOServer* self, int imageSlot, string_view imageName)
+FO_SCRIPT_API void Server_Game_LoadImage(FOServer* server, int imageSlot, string_view imageName)
 {
     STACK_TRACE_ENTRY();
 
-    auto&& ext_data = *static_cast<ServerExtData*>(self->UserData.get());
+    auto& ext_data = GetServerExtData(server);
 
     if (imageSlot >= ext_data.ServerImages.size()) {
         ext_data.ServerImages.resize(imageSlot + 1);
@@ -40,7 +48,7 @@ FO_SCRIPT_API void Server_Game_LoadImage(FOServer* self, int imageSlot, string_v
         return;
     }
 
-    auto&& file = self->Resources.ReadFile(imageName);
+    auto&& file = server->Resources.ReadFile(imageName);
 
     if (!file) {
         throw ScriptException("File not found", imageName);
@@ -93,11 +101,11 @@ FO_SCRIPT_API void Server_Game_LoadImage(FOServer* self, int imageSlot, string_v
 }
 
 ///@ ExportMethod
-FO_SCRIPT_API uint Server_Game_GetImageColor(FOServer* self, int imageSlot, int x, int y)
+FO_SCRIPT_API uint Server_Game_GetImageColor(FOServer* server, int imageSlot, int x, int y)
 {
     STACK_TRACE_ENTRY();
 
-    auto&& ext_data = *static_cast<ServerExtData*>(self->UserData.get());
+    auto& ext_data = GetServerExtData(server);
 
     if (imageSlot >= ext_data.ServerImages.size() || !ext_data.ServerImages[imageSlot]) {
         throw ScriptException("Image not loaded");
@@ -114,24 +122,24 @@ FO_SCRIPT_API uint Server_Game_GetImageColor(FOServer* self, int imageSlot, int 
 }
 
 ///@ ExportMethod
-FO_SCRIPT_API bool Server_Critter_IsFree(Critter* self)
+FO_SCRIPT_API bool Server_Critter_IsFree(Critter* server)
 {
-    UNUSED_VARIABLE(self);
+    UNUSED_VARIABLE(server);
 
     return true;
 }
 
 ///@ ExportMethod
-FO_SCRIPT_API bool Server_Critter_IsBusy(Critter* self)
+FO_SCRIPT_API bool Server_Critter_IsBusy(Critter* server)
 {
-    UNUSED_VARIABLE(self);
+    UNUSED_VARIABLE(server);
 
     return false;
 }
 
 ///@ ExportMethod
-FO_SCRIPT_API void Server_Critter_Wait(Critter* self, uint ms)
+FO_SCRIPT_API void Server_Critter_Wait(Critter* server, uint ms)
 {
-    UNUSED_VARIABLE(self);
+    UNUSED_VARIABLE(server);
     UNUSED_VARIABLE(ms);
 }

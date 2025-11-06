@@ -63,7 +63,9 @@
   - [MapSpriteData reference object](#mapspritedata-reference-object)
   - [SpritePattern reference object](#spritepattern-reference-object)
   - [ident value object](#ident-value-object)
-  - [tick_t value object](#tick_t-value-object)
+  - [timespan value object](#timespan-value-object)
+  - [nanotime value object](#nanotime-value-object)
+  - [synctime value object](#synctime-value-object)
   - [ucolor value object](#ucolor-value-object)
   - [isize value object](#isize-value-object)
   - [ipos value object](#ipos-value-object)
@@ -727,6 +729,10 @@
 
   ...
 
+* `const bool BypassCompatibilityCheck = false`
+
+  ...
+
 
 ### Audio
 
@@ -931,10 +937,6 @@
 
   ...
 
-* `uint FPS = 0`
-
-  ...
-
 * `int Sleep = -1`
 
   -1 to disable, Sleep has priority over FixedFPS if both enabled
@@ -1009,10 +1011,6 @@
 
 
 ### Timer
-
-  ...
-
-* `const int StartYear = 2000`
 
   ...
 
@@ -1475,11 +1473,11 @@
 
   ...
 
-* `PrivateServer tick_t[] TE_FireTime ReadOnly IsCommon`
+* `PrivateServer synctime[] TE_FireTime ReadOnly IsCommon`
 
   ...
 
-* `PrivateServer tick_t[] TE_RepeatDuration ReadOnly IsCommon`
+* `PrivateServer timespan[] TE_RepeatDuration ReadOnly IsCommon`
 
   ...
 
@@ -1487,31 +1485,7 @@
 
   ...
 
-* `PrivateCommon uint16 Year ReadOnly`
-
-  ...
-
-* `PrivateCommon uint16 Month ReadOnly`
-
-  ...
-
-* `PrivateCommon uint16 Day ReadOnly`
-
-  ...
-
-* `PrivateCommon uint16 Hour ReadOnly`
-
-  ...
-
-* `PrivateCommon uint16 Minute ReadOnly`
-
-  ...
-
-* `PrivateCommon uint16 Second ReadOnly`
-
-  ...
-
-* `PrivateCommon uint16 TimeMultiplier ReadOnly`
+* `PrivateCommon synctime SynchronizedTime ReadOnly`
 
   ...
 
@@ -1524,6 +1498,22 @@
   ...
 
 * `PrivateServer uint LastGlobalMapTripId ReadOnly Temporary`
+
+  ...
+
+* `PrivateCommon nanotime FrameTime ReadOnly Temporary`
+
+  ...
+
+* `PrivateCommon timespan FrameDeltaTime ReadOnly Temporary`
+
+  ...
+
+* `PrivateCommon int FramesPerSecond ReadOnly Temporary`
+
+  ...
+
+* `PrivateClient int GlobalDayTime`
 
   ...
 
@@ -2270,7 +2260,7 @@
 
   ...
 
-* `OnDialogData(ident talkerId, hstring dialogId, string text, string[] answers, tick_t dialogTime)`
+* `OnDialogData(ident talkerId, hstring dialogId, string text, string[] answers, uint dialogTime)`
 
   ...
 
@@ -2492,51 +2482,47 @@
 
   ...
 
-* `uint GetTick()`
+* `nanotime GetPrecisionTime()`
 
   ...
 
-* `uint GetDeltaTick()`
+* `nanotime PackTime(int year, int month, int day, int hour, int minute, int second, int millisecond, int microsecond, int nanosecond)`
 
   ...
 
-* `tick_t GetServerTime()`
+* `void UnpackTime(nanotime time, int& year, int& month, int& day, int& hour, int& minute, int& second, int& millisecond, int& microsecond, int& nanosecond)`
 
   ...
 
-* `tick_t DateToServerTime(uint16 year, uint16 month, uint16 day, uint16 hour, uint16 minute, uint16 second)`
+* `synctime PackSynchronizedTime(int year, int month, int day, int hour, int minute, int second, int millisecond)`
 
   ...
 
-* `void ServerToDateTime(tick_t serverTime, uint16& year, uint16& month, uint16& day, uint16& dayOfWeek, uint16& hour, uint16& minute, uint16& second)`
+* `void UnpackSynchronizedTime(synctime time, int& year, int& month, int& day, int& hour, int& minute, int& second, int& millisecond)`
 
   ...
 
-* `void GetCurDateTime(uint16& year, uint16& month, uint16& day, uint16& dayOfWeek, uint16& hour, uint16& minute, uint16& second, uint16& milliseconds)`
+* `uint StartTimeEvent(timespan delay, ScriptFuncName-void func)`
 
   ...
 
-* `uint StartTimeEvent(tick_t delay, ScriptFuncName-void func)`
+* `uint StartTimeEvent(timespan delay, ScriptFuncName-void, any func, any data)`
 
   ...
 
-* `uint StartTimeEvent(tick_t delay, ScriptFuncName-void, any func, any data)`
+* `uint StartTimeEvent(timespan delay, ScriptFuncName-void, any[] func, any[] data)`
 
   ...
 
-* `uint StartTimeEvent(tick_t delay, ScriptFuncName-void, any[] func, any[] data)`
+* `uint StartTimeEvent(timespan delay, timespan repeat, ScriptFuncName-void func)`
 
   ...
 
-* `uint StartTimeEvent(tick_t delay, tick_t repeat, ScriptFuncName-void func)`
+* `uint StartTimeEvent(timespan delay, timespan repeat, ScriptFuncName-void, any func, any data)`
 
   ...
 
-* `uint StartTimeEvent(tick_t delay, tick_t repeat, ScriptFuncName-void, any func, any data)`
-
-  ...
-
-* `uint StartTimeEvent(tick_t delay, tick_t repeat, ScriptFuncName-void, any[] func, any[] data)`
+* `uint StartTimeEvent(timespan delay, timespan repeat, ScriptFuncName-void, any[] func, any[] data)`
 
   ...
 
@@ -2572,19 +2558,19 @@
 
   ...
 
-* `void RepeatTimeEvent(ScriptFuncName-void func, tick_t repeat)`
+* `void RepeatTimeEvent(ScriptFuncName-void func, timespan repeat)`
 
   ...
 
-* `void RepeatTimeEvent(ScriptFuncName-void, any func, tick_t repeat)`
+* `void RepeatTimeEvent(ScriptFuncName-void, any func, timespan repeat)`
 
   ...
 
-* `void RepeatTimeEvent(ScriptFuncName-void, any[] func, tick_t repeat)`
+* `void RepeatTimeEvent(ScriptFuncName-void, any[] func, timespan repeat)`
 
   ...
 
-* `void RepeatTimeEvent(uint id, tick_t repeat)`
+* `void RepeatTimeEvent(uint id, timespan repeat)`
 
   ...
 
@@ -2608,7 +2594,7 @@
 
   ...
 
-* `void RepeatCurrentTimeEvent(tick_t repeat)`
+* `void RepeatCurrentTimeEvent(timespan repeat)`
 
   ...
 
@@ -2622,19 +2608,19 @@
 
 ### Game server methods
 
-* `void StartPersistentTimeEvent(tick_t delay, ScriptFuncName-void func)`
+* `void StartPersistentTimeEvent(timespan delay, ScriptFuncName-void func)`
 
   ...
 
-* `void StartPersistentTimeEvent(tick_t delay, ScriptFuncName-void, any func, any data)`
+* `void StartPersistentTimeEvent(timespan delay, ScriptFuncName-void, any func, any data)`
 
   ...
 
-* `void StartPersistentTimeEvent(tick_t delay, tick_t repeat, ScriptFuncName-void func)`
+* `void StartPersistentTimeEvent(timespan delay, timespan repeat, ScriptFuncName-void func)`
 
   ...
 
-* `void StartPersistentTimeEvent(tick_t delay, tick_t repeat, ScriptFuncName-void, any func, any data)`
+* `void StartPersistentTimeEvent(timespan delay, timespan repeat, ScriptFuncName-void, any func, any data)`
 
   ...
 
@@ -2934,7 +2920,7 @@
 
   ...
 
-* `void SetServerTime(uint16 multiplier, uint16 year, uint16 month, uint16 day, uint16 hour, uint16 minute, uint16 second)`
+* `void SetSynchronizedTime(synctime time)`
 
   ...
 
@@ -3048,15 +3034,15 @@
 
   ...
 
-* `void FadeScreen(ucolor fromColor, ucolor toColor, tick_t duration)`
+* `void FadeScreen(ucolor fromColor, ucolor toColor, timespan duration)`
 
   ...
 
-* `void FadeScreen(ucolor fromColor, ucolor toColor, tick_t duration, bool appendEffect)`
+* `void FadeScreen(ucolor fromColor, ucolor toColor, timespan duration, bool appendEffect)`
 
   ...
 
-* `void QuakeScreen(int noise, tick_t duration)`
+* `void QuakeScreen(int noise, timespan duration)`
 
   ...
 
@@ -3064,7 +3050,7 @@
 
   ...
 
-* `bool PlayMusic(string musicName, tick_t repeatTime)`
+* `bool PlayMusic(string musicName, timespan repeatTime)`
 
   ...
 
@@ -3537,11 +3523,11 @@
 
   ...
 
-* `PrivateServer tick_t[] TE_FireTime ReadOnly IsCommon`
+* `PrivateServer synctime[] TE_FireTime ReadOnly IsCommon`
 
   ...
 
-* `PrivateServer tick_t[] TE_RepeatDuration ReadOnly IsCommon`
+* `PrivateServer timespan[] TE_RepeatDuration ReadOnly IsCommon`
 
   ...
 
@@ -3646,11 +3632,11 @@
 
   ...
 
-* `PrivateServer tick_t[] TE_FireTime ReadOnly IsCommon`
+* `PrivateServer synctime[] TE_FireTime ReadOnly IsCommon`
 
   ...
 
-* `PrivateServer tick_t[] TE_RepeatDuration ReadOnly IsCommon`
+* `PrivateServer timespan[] TE_RepeatDuration ReadOnly IsCommon`
 
   ...
 
@@ -3852,11 +3838,11 @@
 
   ...
 
-* `PrivateServer tick_t[] TE_FireTime ReadOnly IsCommon`
+* `PrivateServer synctime[] TE_FireTime ReadOnly IsCommon`
 
   ...
 
-* `PrivateServer tick_t[] TE_RepeatDuration ReadOnly IsCommon`
+* `PrivateServer timespan[] TE_RepeatDuration ReadOnly IsCommon`
 
   ...
 
@@ -3900,11 +3886,11 @@
 
   Todo: exclude map properties from engine:
 
-* `PrivateCommon int CurDayTime`
+* `Public int FixedDayTime`
 
   ...
 
-* `PrivateCommon int[] DayTime`
+* `PrivateCommon int[] DayColorTime`
 
   ...
 
@@ -4377,7 +4363,7 @@
 
   ...
 
-* `void Message(string text, mpos hex, tick_t showTime, ucolor color, bool fade, ipos endOffset)`
+* `void Message(string text, mpos hex, timespan showTime, ucolor color, bool fade, ipos endOffset)`
 
   ...
 
@@ -4566,11 +4552,11 @@
 
   ...
 
-* `PrivateServer tick_t[] TE_FireTime ReadOnly IsCommon`
+* `PrivateServer synctime[] TE_FireTime ReadOnly IsCommon`
 
   ...
 
-* `PrivateServer tick_t[] TE_RepeatDuration ReadOnly IsCommon`
+* `PrivateServer timespan[] TE_RepeatDuration ReadOnly IsCommon`
 
   ...
 
@@ -5026,7 +5012,7 @@
 
   ...
 
-* `PrivateServer tick_t LastDialogBoxShownTick`
+* `PrivateServer synctime LastDialogBoxShownTick`
 
   ...
 
@@ -6411,7 +6397,7 @@
 
   ...
 
-* `PrivateServer tick_t LastSendEntrancesTick`
+* `PrivateServer synctime LastSendEntrancesTick`
 
   ...
 
@@ -9123,7 +9109,7 @@
 
   ...
 
-* `tick_t GetPlayerOfflineTime()`
+* `timespan GetPlayerOfflineTime()`
 
   ...
 
@@ -9322,11 +9308,11 @@
 
   ...
 
-* `PrivateServer tick_t[] TE_FireTime ReadOnly IsCommon`
+* `PrivateServer synctime[] TE_FireTime ReadOnly IsCommon`
 
   ...
 
-* `PrivateServer tick_t[] TE_RepeatDuration ReadOnly IsCommon`
+* `PrivateServer timespan[] TE_RepeatDuration ReadOnly IsCommon`
 
   ...
 
@@ -10762,12 +10748,26 @@
 * `Type: HardStrong`
 * `Flags: HasValueAccessor, Layout, =, int64, -, value`
 
-### tick_t value object
+### timespan value object
 
   ...
 
-* `Type: RelaxedStrong`
-* `Flags: HasValueAccessor, Layout, =, uint, -, value`
+* `Type: HardStrong`
+* `Flags: Layout, =, int64, -, value`
+
+### nanotime value object
+
+  ...
+
+* `Type: HardStrong`
+* `Flags: Layout, =, int64, -, value`
+
+### synctime value object
+
+  ...
+
+* `Type: HardStrong`
+* `Flags: Layout, =, int64, -, value`
 
 ### ucolor value object
 
@@ -13318,193 +13318,189 @@
 
   - `TE_Data = 5`
 
-  - `Year = 6`
+  - `SynchronizedTime = 6`
 
-  - `Month = 7`
+  - `LastEntityId = 7`
 
-  - `Day = 8`
+  - `HistoryRecordsId = 8`
 
-  - `Hour = 9`
+  - `LastGlobalMapTripId = 9`
 
-  - `Minute = 10`
+  - `FrameTime = 10`
 
-  - `Second = 11`
+  - `FrameDeltaTime = 11`
 
-  - `TimeMultiplier = 12`
+  - `FramesPerSecond = 12`
 
-  - `LastEntityId = 13`
+  - `GlobalDayTime = 13`
 
-  - `HistoryRecordsId = 14`
+  - `ArroyoMynocTimeout = 14`
 
-  - `LastGlobalMapTripId = 15`
+  - `BaseSierraRule = 15`
 
-  - `ArroyoMynocTimeout = 16`
+  - `BaseMariposaRule = 16`
 
-  - `BaseSierraRule = 17`
+  - `BaseCathedralRule = 17`
 
-  - `BaseMariposaRule = 18`
+  - `BaseSierraOrg = 18`
 
-  - `BaseCathedralRule = 19`
+  - `BaseMariposaOrg = 19`
 
-  - `BaseSierraOrg = 20`
+  - `BaseCathedralOrg = 20`
 
-  - `BaseMariposaOrg = 21`
+  - `BaseSierraTimeEventId = 21`
 
-  - `BaseCathedralOrg = 22`
+  - `BaseMariposaTimeEventId = 22`
 
-  - `BaseSierraTimeEventId = 23`
+  - `BaseCathedralTimeEventId = 23`
 
-  - `BaseMariposaTimeEventId = 24`
+  - `BaseEnclaveScore = 24`
 
-  - `BaseCathedralTimeEventId = 25`
+  - `BaseBosScore = 25`
 
-  - `BaseEnclaveScore = 26`
+  - `BulletinBoard = 26`
 
-  - `BaseBosScore = 27`
+  - `DenGhostIsDead = 27`
 
-  - `BulletinBoard = 28`
+  - `DenVirginIsAway = 28`
 
-  - `DenGhostIsDead = 29`
+  - `GameEventManagerData = 29`
 
-  - `DenVirginIsAway = 30`
+  - `GameEventData = 30`
 
-  - `GameEventManagerData = 31`
+  - `RacingWinnersFound = 31`
 
-  - `GameEventData = 32`
+  - `RacingWinner = 32`
 
-  - `RacingWinnersFound = 33`
+  - `LastGlobalMapTrip = 33`
 
-  - `RacingWinner = 34`
+  - `EndingV13DclawGenocide = 34`
 
-  - `LastGlobalMapTrip = 35`
+  - `KlamCowboy = 35`
 
-  - `EndingV13DclawGenocide = 36`
+  - `KlamCowboyLevel = 36`
 
-  - `KlamCowboy = 37`
+  - `KlamSmilyGeckoLocation = 37`
 
-  - `KlamCowboyLevel = 38`
+  - `KlamSmilyGeckoTimeout = 38`
 
-  - `KlamSmilyGeckoLocation = 39`
+  - `TribRaid = 39`
 
-  - `KlamSmilyGeckoTimeout = 40`
+  - `PrimalTribeQuestPlayers = 40`
 
-  - `TribRaid = 41`
+  - `MobWaveData = 41`
 
-  - `PrimalTribeQuestPlayers = 42`
+  - `NCRRanchBrahminIll = 42`
 
-  - `MobWaveData = 43`
+  - `NcrDustyOneHourInvokeId = 43`
 
-  - `NCRRanchBrahminIll = 44`
+  - `NcrDustyOneWeekInvokeId = 44`
 
-  - `NcrDustyOneHourInvokeId = 45`
+  - `NCRDustyPartyStatusGlobal = 45`
 
-  - `NcrDustyOneWeekInvokeId = 46`
+  - `NCRDustyRotgutCounter = 46`
 
-  - `NCRDustyPartyStatusGlobal = 47`
+  - `NCRDustyBeerGammaCounter = 47`
 
-  - `NCRDustyRotgutCounter = 48`
+  - `NCRInvasion = 48`
 
-  - `NCRDustyBeerGammaCounter = 49`
+  - `NCRKessStageGlobal = 49`
 
-  - `NCRInvasion = 50`
+  - `NcrSmitPosition = 50`
 
-  - `NCRKessStageGlobal = 51`
+  - `NcrSmitGateGuardAccessGranted = 51`
 
-  - `NcrSmitPosition = 52`
+  - `NcrWestinPositionGlobal = 52`
 
-  - `NcrSmitGateGuardAccessGranted = 53`
+  - `RegProperties = 53`
 
-  - `NcrWestinPositionGlobal = 54`
+  - `ReddMarionWanLocation = 54`
 
-  - `RegProperties = 55`
+  - `ReddMarionWanTimeout = 55`
 
-  - `ReddMarionWanLocation = 56`
+  - `ReddJohnsonBroadcast = 56`
 
-  - `ReddMarionWanTimeout = 57`
+  - `PermanentDeath = 57`
 
-  - `ReddJohnsonBroadcast = 58`
+  - `BestScores = 58`
 
-  - `PermanentDeath = 59`
+  - `BestScoreCritterIds = 59`
 
-  - `BestScores = 60`
+  - `BestScoreValues = 60`
 
-  - `BestScoreCritterIds = 61`
+  - `SFZax366StatusGlobal = 61`
 
-  - `BestScoreValues = 62`
+  - `SFDevinHired = 62`
 
-  - `SFZax366StatusGlobal = 63`
+  - `MissilesCanada = 63`
 
-  - `SFDevinHired = 64`
+  - `MissilesKishinev = 64`
 
-  - `MissilesCanada = 65`
+  - `MissilesBaku = 65`
 
-  - `MissilesKishinev = 66`
+  - `MissilesTokio = 66`
 
-  - `MissilesBaku = 67`
+  - `MissilesEburg = 67`
 
-  - `MissilesTokio = 68`
+  - `MissilesVladik = 68`
 
-  - `MissilesEburg = 69`
+  - `MissilesRay = 69`
 
-  - `MissilesVladik = 70`
+  - `MissilesFukusima = 70`
 
-  - `MissilesRay = 71`
+  - `BestEScores = 71`
 
-  - `MissilesFukusima = 72`
+  - `ArroyoRaidersCount = 72`
 
-  - `BestEScores = 73`
+  - `ArroyoLastDefenceGroup = 73`
 
-  - `ArroyoRaidersCount = 74`
+  - `ArroyoMynocMap = 74`
 
-  - `ArroyoLastDefenceGroup = 75`
+  - `EncOceanTraderAlive = 75`
 
-  - `ArroyoMynocMap = 76`
+  - `GameEventCaches = 76`
 
-  - `EncOceanTraderAlive = 77`
+  - `RacingEvent = 77`
 
-  - `GameEventCaches = 78`
+  - `GEReplStationStatus = 78`
 
-  - `RacingEvent = 79`
+  - `NCRSiegeCampsNum = 79`
 
-  - `GEReplStationStatus = 80`
+  - `SFBosArmourCounter = 80`
 
-  - `NCRSiegeCampsNum = 81`
+  - `SFInvasionStatus = 81`
 
-  - `SFBosArmourCounter = 82`
+  - `DenLeannaThief = 82`
 
-  - `SFInvasionStatus = 83`
+  - `DenCliffDealer = 83`
 
-  - `DenLeannaThief = 84`
+  - `DenAnanDollUse = 84`
 
-  - `DenCliffDealer = 85`
+  - `KlamSmilyGeckoCounter = 85`
 
-  - `DenAnanDollUse = 86`
+  - `EndingArroyoTodd = 86`
 
-  - `KlamSmilyGeckoCounter = 87`
+  - `EndingV13DclawRevival = 87`
 
-  - `EndingArroyoTodd = 88`
+  - `GeckSkitrHired = 88`
 
-  - `EndingV13DclawRevival = 89`
+  - `NRBbarmenHired = 89`
 
-  - `GeckSkitrHired = 90`
+  - `NcrIsCurfewActive = 90`
 
-  - `NRBbarmenHired = 91`
+  - `NcrMicGuaranteeCounter = 91`
 
-  - `NcrIsCurfewActive = 92`
+  - `SFImperatorMemory = 92`
 
-  - `NcrMicGuaranteeCounter = 93`
+  - `GCityGeckSold = 93`
 
-  - `SFImperatorMemory = 94`
+  - `VCBlackHired = 94`
 
-  - `GCityGeckSold = 95`
+  - `EndingV13DclawSaved = 95`
 
-  - `VCBlackHired = 96`
+  - `VCHartmanMarchStatus = 96`
 
-  - `EndingV13DclawSaved = 97`
-
-  - `VCHartmanMarchStatus = 98`
-
-  - `RaidersDead = 99`
+  - `RaidersDead = 97`
 
 * `PlayerProperty`
 
@@ -13658,9 +13654,9 @@
 
   - `SpritesZoom = 14`
 
-  - `CurDayTime = 15`
+  - `FixedDayTime = 15`
 
-  - `DayTime = 16`
+  - `DayColorTime = 16`
 
   - `DayColor = 17`
 

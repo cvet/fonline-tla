@@ -17,9 +17,6 @@ namespace BulletinBoard
 
 ///@ Property Game PrivateServer uint8[] BulletinBoard
 
-#define GAME_WEEK #(week)(week * 7 * 24 * 60 * 60)
-#define _Expired \
-    #(msg)(msg.ReaderId == ZERO_IDENT ? msg.WriteTime + GAME_WEEK(20) < Game.GetServerTime() : msg.WriteTime + GAME_WEEK(80) < Game.GetServerTime())
 
 // #define DL#(s) (Game.Log(s))
 #define DL #(s)
@@ -30,7 +27,7 @@ class BBMessage
     ident MapId;
     ident WriterId;
     ident ReaderId;
-    uint WriteTime;
+    synctime WriteTime;
     string Message;
 }
 
@@ -47,7 +44,7 @@ class BBMessenger
     void ClearExpiredMessages()
     {
         for (uint i = 0; i < MsgCount; i++) {
-            if (_Expired(Messages[i])) {
+            if (Expired(Messages[i])) {
                 Messages.removeAt(i);
                 MsgCount = Messages.length();
                 i--;
@@ -55,14 +52,14 @@ class BBMessenger
         }
     }
 
-    void AddMessage(ident mapId, ident writer, ident reader, uint when, string message)
+    void AddMessage(ident mapId, ident writer, ident reader, synctime when, string message)
     {
         BBMessage msg;
         msg.Idx = Messages.length();
         msg.MapId = mapId;
         msg.WriterId = writer;
         msg.ReaderId = reader;
-        msg.WriteTime = (when == 0 ? Game.GetServerTime() : when);
+        msg.WriteTime = (when == ZERO_SYNCTIME ? Game.SynchronizedTime : when);
         msg.Message = message;
         Messages.insertLast(msg);
         MsgCount = Messages.length();
@@ -82,59 +79,45 @@ class BBMessenger
     void Save()
     {
         ClearExpiredMessages();
-        ident[] maps = {};
-        ident[] writers = {};
-        ident[] readers = {};
-        uint[] writeTimes = {};
-        string[] messages = {};
 
         MsgCount = Messages.length();
-        DL("saving messages num " + MsgCount);
-
-        for (uint i = 0; i < MsgCount; i++) {
-            maps.insertLast(Messages[i].MapId);
-            writers.insertLast(Messages[i].WriterId);
-            readers.insertLast(Messages[i].ReaderId);
-            writeTimes.insertLast(Messages[i].WriteTime);
-            messages.insertLast(Messages[i].Message);
-        }
 
         auto save = Serializator::Serializator();
         save.Set(MsgCount);
-        save.Set(maps);
-        save.Set(writers);
-        save.Set(readers);
-        save.Set(writeTimes);
-        save.Set(messages);
+		
+        for (uint i = 0; i < MsgCount; i++) {
+            save.Set(Messages[i].MapId);
+            save.Set(Messages[i].WriterId);
+            save.Set(Messages[i].ReaderId);
+            save.Set(Messages[i].WriteTime);
+            save.Set(Messages[i].Message);
+        }
+
         Game.BulletinBoard = save.GetData();
     }
 
     void Load()
     {
+		ident mapId, writer, reader;
+		synctime when;
+		string message;
+		
         auto load = Serializator::Serializator();
         if (load.SetData(Game.BulletinBoard) == 0) {
             return;
         }
-
-        ident[] maps = {};
-        ident[] writers = {};
-        ident[] readers = {};
-        uint[] writeTimes = {};
-        string[] messages = {};
+        Messages.clear();
 
         load.Get(MsgCount);
-        load.Get(maps);
-        load.Get(writers);
-        load.Get(readers);
-        load.Get(writeTimes);
-        load.Get(messages);
-        DL("loading messages num " + MsgCount + " maps " + maps.length());
-
-        Messages.clear();
-        for (uint i = 0; i < maps.length(); i++) {
-            AddMessage(maps[i], writers[i], readers[i], writeTimes[i], messages[i]);
-        }
-        MsgCount = Messages.length();
+		for(uint i = 0; i < MsgCount; i++)
+		{
+			load.Get(mapId);
+			load.Get(writer);
+			load.Get(reader);
+			load.Get(when);
+			load.Get(message);
+			AddMessage(mapId, writer, reader, when, message);
+		}
         ClearExpiredMessages();
     }
 
@@ -224,6 +207,22 @@ class BBMessenger
         }
         return count;
     }
+	
+	bool Expired(BBMessage msg)
+	{
+		// Персональные сообщения хранятся дольше.
+		if(msg.ReaderId == ZERO_IDENT)
+		{
+			if(msg.WriteTime + Time::GameDays(20*7) < Game.SynchronizedTime)
+				return true;
+		}
+		else
+		{
+			if(msg.WriteTime + Time::GameDays(80*7) < Game.SynchronizedTime)
+				return true;
+		}
+		return false;
+	}
 }
 
 BBMessenger Messenger;
@@ -414,7 +413,7 @@ void r_MoveAldo(Critter player, Critter npc)
     npc.KlamAldoBusy = 1;
     npc.OnNpcPlaneEnd.Subscribe(_AldoPlaneEnd);
     if (npc.CountTimeEvent(cte_ClearVars) == 0) {
-        npc.StartTimeEvent(Time::RealMinute(10), cte_ClearVars);
+        npc.StartTimeEvent(Time::Minutes(10), cte_ClearVars);
     }
 }
 
@@ -426,9 +425,9 @@ bool _AldoPlaneEnd(Critter cr, int planeId, int reason, Critter someCr, Item som
         cr.KlamAldoBusy = 2;
         cr.SayMsg(SAY_NORM_ON_HEAD, TextPackName::Dialogs, DLGSTR(cr.DialogId, STR_IN_PLACE));
         Game.AddTextListener(SAY_NORM, KEYWORD, cr.GetMap().ProtoId.hash, listen_FirstMessage);
-        NpcPlanes::AddMiscPlane(cr, 0, Time::Sum(Game.GetServerTime(), Time::RealMinute(2)), BulletinBoard::plane_AldoFinished);
+        NpcPlanes::AddMiscPlane(cr, 0, Time::Sum(Game.SynchronizedTime, Time::Minutes(2)), BulletinBoard::plane_AldoFinished);
         if (cr.CountTimeEvent(cte_ClearVars) == 0) {
-            cr.StartTimeEvent(Time::RealMinute(10), cte_ClearVars);
+            cr.StartTimeEvent(Time::Minutes(10), cte_ClearVars);
         }
         // cr.SetEvent( CRITTER_EVENT_PLANE_END, "" );
         cr.OnNpcPlaneEnd.Unsubscribe(_AldoPlaneEnd);

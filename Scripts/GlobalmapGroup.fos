@@ -114,7 +114,7 @@ void LoadGlobalMapGroupData(Serializator::Serializator load)
 #if SERVER
 
 ///@ Setting Common uint GlobalMapGroupMaxCount = 6                     // Макс размер группы
-#define TIME_CAN_FOLLOW_GM (Time::RealSecond(5)) // Can less than Map timeout
+#define TIME_CAN_FOLLOW_GM (Time::Seconds(5)) // Can less than Map timeout
 
 ///@ Property Game PrivateServer int LastGlobalMapTrip // Индекс последней группы на глобальной карте
 
@@ -130,11 +130,11 @@ void LoadGlobalMapGroupData(Serializator::Serializator load)
 #define GM_FOG_HALF_EX         (2)
 #define GM_FOG_NONE            (3)
 #define GM_MAX_GROUP_COUNT     (6)
-#define GM_ANSWER_WAIT_TIME    (20000)
-#define GM_LIGHT_TIME          (5000)
+#define GM_ANSWER_WAIT_TIME    (Time::Seconds(20))
+#define GM_LIGHT_TIME          (Time::Seconds(5))
 #define GM_ZONE(x)             ((x) / GM_ZONE_LEN)
-#define GM_ENTRANCES_SEND_TIME (6000)
-#define GM_TRACE_TIME          (1000)
+#define GM_ENTRANCES_SEND_TIME (Time::Seconds(5))
+#define GM_TRACE_TIME          (Time::Seconds(1))
 
 // Follow
 #define FOLLOW_DIST  (10)
@@ -170,7 +170,7 @@ void ModuleInit()
 
 void OnCritterInit(Critter cr, bool firstTime)
 {
-    cr.StartTimeEvent(Time::RealMs(0), Time::RealMs(1000), OnCritterIdle);
+    cr.StartTimeEvent(Time::Milliseconds(0), Time::Milliseconds(1000), OnCritterIdle);
 }
 
 void OnCritterIdle(Critter cr)
@@ -711,10 +711,10 @@ class GlobalMapGroup
     float ToX, ToY;
     float Speed;
     bool IsSetMove;
-    uint TimeCanFollow;
-    uint ProcessLastTick;
+    synctime TimeCanFollow;
+    nanotime ProcessLastTick;
     uint EncounterDescriptor;
-    uint EncounterTick;
+    nanotime EncounterTick;
     bool EncounterForce;
 
     bool IsValid()
@@ -735,7 +735,7 @@ class GlobalMapGroup
         if (IsSetMove) { // ?? уже началось движение
             return false;
         }
-        if (Game.GetServerTime() >= TimeCanFollow) { // прошло время, пока криттер мог присоединиться в группу
+        if (Game.SynchronizedTime >= TimeCanFollow) { // прошло время, пока криттер мог присоединиться в группу
             return false;
         }
         if (valid(GetCritter(cr.Id))) { // криттер уже в группе
@@ -792,10 +792,10 @@ class GlobalMapGroup
     {
         CurX = CurY = ToX = ToY = 0.0f;
         IsSetMove = false;
-        TimeCanFollow = 0;
-        ProcessLastTick = Game.GetTick();
+        TimeCanFollow = ZERO_SYNCTIME;
+        ProcessLastTick = Game.GetPrecisionTime();
         EncounterDescriptor = 0;
-        EncounterTick = 0;
+        EncounterTick = ZERO_NANOTIME;
         EncounterForce = false;
     }
 
@@ -843,7 +843,7 @@ void GM_GroupStartMove(Critter cr)
     group.ToY = group.CurY;
     group.Speed = 0.0f;
 
-    group.TimeCanFollow = Time::Sum(Game.GetServerTime(), TIME_CAN_FOLLOW_GM);
+    group.TimeCanFollow = Game.SynchronizedTime + TIME_CAN_FOLLOW_GM;
 
     GlobalMapLocations::SetGlobalMapData(GM_INFO_ALL, cr);
 
@@ -975,11 +975,11 @@ void GM_GlobalProcess(Critter cr, GlobalMapGroup group, int type) // 13 hits
         }
         else {
             if (wait_for_answer) {
-                group.EncounterTick = Game.GetTick() + GM_ANSWER_WAIT_TIME;
+                group.EncounterTick = Game.GetPrecisionTime() + GM_ANSWER_WAIT_TIME;
                 group.EncounterForce = false;
             }
             else {
-                group.EncounterTick = Game.GetTick() + GM_LIGHT_TIME;
+                group.EncounterTick = Game.GetPrecisionTime() + GM_LIGHT_TIME;
                 group.EncounterForce = true;
             }
             group.SendGlobalData(GM_INFO_GROUP_PARAM);
@@ -1232,8 +1232,8 @@ void GM_GroupSetMove(GlobalMapGroup group, float to_x, float to_y, float speed) 
 
     GlobalMapLocations::SetGlobalMapData(GM_INFO_GROUP_PARAM, group.Rule);
     // group->Rule->SendA_GlobalInfo( group, GM_INFO_GROUP_PARAM );
-    if (Game.GetTick() - group.ProcessLastTick > Settings.GlobalMapMoveTime) {
-        group.ProcessLastTick = Game.GetTick();
+    if (Game.GetPrecisionTime() - group.ProcessLastTick > Settings.GlobalMapMoveTime) {
+        group.ProcessLastTick = Game.GetPrecisionTime();
     }
     if (!group.IsSetMove) {
         group.IsSetMove = true;
@@ -1243,7 +1243,7 @@ void GM_GroupSetMove(GlobalMapGroup group, float to_x, float to_y, float speed) 
 
 void GM_GroupMove(GlobalMapGroup group) // 3hits
 {
-    uint tick = Game.GetTick();
+    auto tick = Game.GetPrecisionTime();
     Critter rule = group.Rule;
 
     // Encounter
@@ -1273,7 +1273,7 @@ void GM_GroupMove(GlobalMapGroup group) // 3hits
 
     // Move
     if (group.IsMoving()) {
-        uint dtime = tick - group.ProcessLastTick;
+        auto dtime = tick - group.ProcessLastTick;
         if (dtime >= Settings.GlobalMapMoveTime) {
             if (dtime >= Settings.GlobalMapMoveTime * 2) {
                 dtime = 0;
@@ -1508,7 +1508,7 @@ void ProcessGlobalMapCommand(Player player, uint8 command, any param1, any param
             break;
         }
 
-        uint tick = Game.GetTick();
+        nanotime tick = Game.GetPrecisionTime();
         if (cl.LastSendEntrancesLocId == locId && tick < cl.LastSendEntrancesTick + GM_ENTRANCES_SEND_TIME) {
             Game.Log(" Client '%s' ignore send entrances timeout." + cl.Id);
             break;

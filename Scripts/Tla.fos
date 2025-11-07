@@ -500,22 +500,22 @@ const int CteAutokill = 5;
 
 // Timeouts in real seconds, generic values
 #define FIRST_AID_TIMEOUT \
-    #(cr)(Time::Sum(Game.GetServerTime(), \
+    #(cr)(Time::Sum(Game.SynchronizedTime, \
                     (Settings.TimeMultiplier * 100 / (((cr.SkillFirstAid) > 3 ? cr.SkillFirstAid : 3) * 100 / MAX_SKILL_VAL)) * \
                         60)) // Orig 3 time on day, 5 min - sk
 #define DOCTOR_TIMEOUT \
-    #(cr)(Time::Sum(Game.GetServerTime(), \
+    #(cr)(Time::Sum(Game.SynchronizedTime, \
                     (Settings.TimeMultiplier * 100 / (((cr.SkillDoctor) > 3 ? cr.SkillDoctor : 3) * 100 / MAX_SKILL_VAL) * 3) * \
                         60))                                                         // Orig 1 time on day, 20 min - sk
-#define REPAIR_TIMEOUT   #(cr)(Time::Sum(Game.GetServerTime(), Time::RealMinute(1))) // Orig 4 time on day, 1 min
-#define SCIENCE_TIMEOUT  #(cr)(Time::Sum(Game.GetServerTime(), Time::RealMinute(1))) // Orig 6 time on day, 1 min
-#define LOCKPICK_TIMEOUT #(cr)(Time::Sum(Game.GetServerTime(), Time::RealMinute(2))) // Orig 15 minutes, 2 min
-#define STEAL_TIMEOUT    #(cr)(Time::Sum(Game.GetServerTime(), Time::RealMinute(2))) // 2 minutes
-#define TRANSFER_TIMEOUT #(cr)(Time::Sum(Game.GetServerTime(), Time::RealSecond(Settings.TimeoutTransfer)))
-#define BATTLE_TIMEOUT   #(cr)(Time::Sum(Game.GetServerTime(), Time::RealSecond(MAX(Settings.TimeoutBattle - cr.ArmorClass, 12))))
-#define TRAPS_TIMEOUT    #(cr)(Time::Sum(Game.GetServerTime(), Time::RealMinute(1)))
-#define SNEAK_TIMEOUT    #(cr)(Time::Sum(Game.GetServerTime(), Time::RealSecond(MAX(34 - cr.Sequence, 3)))) // 34 second - sequence
-#define HEALING_TIMEOUT  #(cr)(Time::Sum(Game.GetServerTime(), Time::RealMinute(2)))                        // 2 minutes
+#define REPAIR_TIMEOUT   #(cr)(Time::Sum(Game.SynchronizedTime, Time::Minutes(1))) // Orig 4 time on day, 1 min
+#define SCIENCE_TIMEOUT  #(cr)(Time::Sum(Game.SynchronizedTime, Time::Minutes(1))) // Orig 6 time on day, 1 min
+#define LOCKPICK_TIMEOUT #(cr)(Time::Sum(Game.SynchronizedTime, Time::Minutes(2))) // Orig 15 minutes, 2 min
+#define STEAL_TIMEOUT    #(cr)(Time::Sum(Game.SynchronizedTime, Time::Minutes(2))) // 2 minutes
+#define TRANSFER_TIMEOUT #(cr)(Time::Sum(Game.SynchronizedTime, Time::Seconds(Settings.TimeoutTransfer)))
+#define BATTLE_TIMEOUT   #(cr)(Time::Sum(Game.SynchronizedTime, Time::Seconds(MAX(Settings.TimeoutBattle - cr.ArmorClass, 12))))
+#define TRAPS_TIMEOUT    #(cr)(Time::Sum(Game.SynchronizedTime, Time::Minutes(1)))
+#define SNEAK_TIMEOUT    #(cr)(Time::Sum(Game.SynchronizedTime, Time::Seconds(MAX(34 - cr.Sequence, 3)))) // 34 second - sequence
+#define HEALING_TIMEOUT  #(cr)(Time::Sum(Game.SynchronizedTime, Time::Minutes(2)))                        // 2 minutes
 
 const int MaxDeterioration = 10000;
 const int MaxBrokens = 10;
@@ -1627,7 +1627,7 @@ const int MaxReputationLevels = 7;
 
 // Timeouts in real seconds, generic values
 #define MAXIMUM_TIMEOUT     (Time::RealHour(5))
-#define IS_TIMEOUT          #(to)((to) > Game.GetServerTime())
+#define IS_TIMEOUT          #(to)((to) > Game.SynchronizedTime)
 
 #define IS_MORNING          #(hour)((hour) >= 7 && (hour) <= 11)  // 5 hours
 #define IS_AFTERNOON        #(hour)((hour) >= 12 && (hour) <= 21) // 10 hours
@@ -1669,7 +1669,7 @@ const int MaxReputationLevels = 7;
 // 671
 // 672
 // возможно это уже не потребуется
-#define IS_TURN_BASED_TIMEOUT #(cr)(cr.TimeoutBattle > Game.GetServerTime() && cr.TimeoutBattle - Game.GetServerTime() > 10000000)
+#define IS_TURN_BASED_TIMEOUT #(cr)(cr.TimeoutBattle > Game.SynchronizedTime && cr.TimeoutBattle - Game.SynchronizedTime > 10000000)
 
 // 672
 // Skills
@@ -1974,19 +1974,12 @@ void Animate(Critter cr, int stateAnim, int actionAnim, int)
 
 #endif
 
-tick_t GetTickDiff(tick_t from, tick_t delta)
+timespan GameSeconds(int value)
 {
-    tick_t r;
-    if (from.value > delta.value) {
-        r.value = from.value - delta.value;
-    }
-    else {
-        r.value = 0;
-    }
-    return r;
+    return timespan(value/ Settings.TimeMultiplier, SecondsPlace);
 }
 
-uint GetNearServerTime(uint16 year, uint16 month, uint16 day, uint16 hour, uint16 minute, uint16 second)
+synctime GetNearSynchronizedTime(int year, int month, int day, int hour, int minute, int second)
 {
     int jump = 0; // 1 - years, 2 - months, 3 - days
 
@@ -2003,12 +1996,12 @@ uint GetNearServerTime(uint16 year, uint16 month, uint16 day, uint16 hour, uint1
         jump = 3;
     }
 
-    uint time = Game.DateToServerTime(year, month, day, hour, minute, second);
+    synctime time = Game.PackSynchronizedTime(year, month, day, hour, minute, second, 0);
 
-    while (time <= Game.GetServerTime()) {
+    while (time <= Game.SynchronizedTime) {
         switch (jump) {
         case 0:
-            return Game.GetServerTime() + 1; // Time expired, call faster
+            return Game.SynchronizedTime + Time::Milliseconds(1); // Time expired, call faster
         case 1:
             year++;
             break;
@@ -2023,7 +2016,7 @@ uint GetNearServerTime(uint16 year, uint16 month, uint16 day, uint16 hour, uint1
         case 3:
             day++;
 
-            if (day > 28 && day > Time::GetDaysInMonth(year, month)) {
+            if (day > 28 && day > GetDaysInMonth(year, month)) {
                 day = 1;
                 month++;
 
@@ -2037,7 +2030,7 @@ uint GetNearServerTime(uint16 year, uint16 month, uint16 day, uint16 hour, uint1
             break;
         }
 
-        time = Game.DateToServerTime(year, month, day, hour, minute, second);
+        time = Game.PackSynchronizedTime(year, month, day, hour, minute, second, 0);
     }
 
     return time;

@@ -6029,11 +6029,11 @@
 
   ...
 
-* `Public uint TimeoutBattle Temporary`
+* `Public synctime TimeoutBattle Temporary`
 
   ...
 
-* `Protected uint TimeoutTransfer Temporary`
+* `Protected synctime TimeoutTransfer Temporary`
 
   ...
 
@@ -7349,59 +7349,59 @@
 
   ...
 
-* `Protected uint TimeoutSkFirstAid Group = Timeouts`
+* `Protected synctime TimeoutSkFirstAid Group = Timeouts`
 
   Timeouts
 
-* `Protected uint TimeoutSkDoctor Group = Timeouts`
+* `Protected synctime TimeoutSkDoctor Group = Timeouts`
 
   ...
 
-* `Protected uint TimeoutSkRepair Group = Timeouts`
+* `Protected synctime TimeoutSkRepair Group = Timeouts`
 
   ...
 
-* `Protected uint TimeoutSkScience Group = Timeouts`
+* `Protected synctime TimeoutSkScience Group = Timeouts`
 
   ...
 
-* `Protected uint TimeoutSkLockpick Group = Timeouts`
+* `Protected synctime TimeoutSkLockpick Group = Timeouts`
 
   ...
 
-* `Protected uint TimeoutSkSteal Group = Timeouts`
+* `Protected synctime TimeoutSkSteal Group = Timeouts`
 
   ...
 
-* `Protected uint TimeoutSkOutdoorsman Group = Timeouts`
+* `Protected synctime TimeoutSkOutdoorsman Group = Timeouts`
 
   ...
 
-* `Protected uint TimeoutRemoveFromGame Group = Timeouts`
+* `Protected synctime TimeoutRemoveFromGame Group = Timeouts`
 
   ...
 
-* `Protected uint TimeoutReplication Group = Timeouts`
+* `Protected synctime TimeoutReplication Group = Timeouts`
 
   ...
 
-* `Protected uint TimeoutKarmaVoting Group = Timeouts`
+* `Protected synctime TimeoutKarmaVoting Group = Timeouts`
 
   ...
 
-* `Protected uint TimeoutSneak Group = Timeouts`
+* `Protected synctime TimeoutSneak Group = Timeouts`
 
   ...
 
-* `Protected uint TimeoutHealing Group = Timeouts`
+* `Protected synctime TimeoutHealing Group = Timeouts`
 
   ...
 
-* `Protected uint TimeoutStealing Group = Timeouts`
+* `Protected synctime TimeoutStealing Group = Timeouts`
 
   ...
 
-* `Protected uint TimeoutAggressor Group = Timeouts`
+* `Protected synctime TimeoutAggressor Group = Timeouts`
 
   ...
 

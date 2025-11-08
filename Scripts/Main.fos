@@ -138,7 +138,7 @@ void critter_attack(Critter cr, Critter target, Item weapon, uint8 weaponMode, P
     if (cr.ControlledByPlayer && valid(ammo) && ammo.ProtoId == Content::Item::emp_rocket && target.BodyType == BodyTypes::Robot) {
         Navarro::CountEmpRocketTests(cr, target);
     }
-    cr.TimeoutAggressor = Time::Sum(Game.SynchronizedTime, Time::Minutes(1));
+    cr.TimeoutAggressor = Game.SynchronizedTime +  Time::Minutes(1);
     Combat::CombatAttack(cr, target, weapon, weaponMode, ammo);
 
     Critter[] other = cr.GetCritters(true, CritterFindType::NonDead);
@@ -247,9 +247,9 @@ void critter_attacked(Critter cr, Critter attacker)
 // Call on something critter steal another.
 bool critter_stealing(Critter cr, Critter thief, Item item, uint count)
 {
-    thief.TimeoutAggressor = Time::Sum(Game.SynchronizedTime, Time::Minutes(1));
+    thief.TimeoutAggressor = Game.SynchronizedTime +  Time::Minutes(1);
 
-    if (cr.IsDead() || IS_TIMEOUT(cr.TimeoutBattle) || IS_TIMEOUT(thief.TimeoutBattle)) {
+    if (cr.IsDead() || Time::IsTimeoutActive(cr.TimeoutBattle) || Time::IsTimeoutActive(thief.TimeoutBattle)) {
         thief.LastStealCrId = ZERO_IDENT;
         thief.StealCount = 0;
         return false;
@@ -291,7 +291,7 @@ bool critter_stealing(Critter cr, Critter thief, Item item, uint count)
     // Check time of stealing
     ident lastStealCrId = thief.LastStealCrId;
     uint stealCount = thief.StealCount;
-    if (lastStealCrId == cr.Id && IS_TIMEOUT(thief.TimeoutStealing)) {
+    if (lastStealCrId == cr.Id && Time::IsTimeoutActive(thief.TimeoutStealing)) {
         steal -= steal * stealCount * 9 / 100;
     }
 
@@ -304,7 +304,7 @@ bool critter_stealing(Critter cr, Critter thief, Item item, uint count)
         // Add experience     10,30,60,100,150,210,280,360,450,550,660,780
         const int[] stealExp = {10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120};
 
-        if (lastStealCrId == cr.Id && IS_TIMEOUT(thief.TimeoutStealing)) {
+        if (lastStealCrId == cr.Id && Time::IsTimeoutActive(thief.TimeoutStealing)) {
             stealCount++;
             if (stealCount > 11) {
                 stealCount = 11;
@@ -549,7 +549,7 @@ bool critter_use_skill(Critter cr, CritterProperty skill, Critter targetCr, Item
         return true;
     case SKILL_PUSH_CRITTER: // Push critter, only targetCr is valid
         cr.Action(CritterAction::PickCritter, 2, null);
-        if ((!IS_TIMEOUT(cr.TimeoutBattle) && !IS_TIMEOUT(targetCr.TimeoutBattle)) &&
+        if ((!Time::IsTimeoutActive(cr.TimeoutBattle) && !Time::IsTimeoutActive(targetCr.TimeoutBattle)) &&
             (targetCr.ControlledByPlayer || (NpcPlanes::IsNoPlanes(targetCr) && targetCr.GetTalkingCritters().length() == 0))) {
             MoveRandom::CritterMoveRandom(targetCr);
         }
@@ -584,7 +584,7 @@ bool critter_use_skill(Critter cr, CritterProperty skill, Critter targetCr, Item
             cr.InSneakMode = true;
         }
         else {
-            if (IS_TIMEOUT(cr.TimeoutSneak)) {
+            if (Time::IsTimeoutActive(cr.TimeoutSneak)) {
                 cr.SayMsg(SAY_NETMSG, TextPackName::Game, MsgStr::StrTimeoutSneakWait);
             }
             else {
@@ -604,7 +604,7 @@ bool critter_use_skill(Critter cr, CritterProperty skill, Critter targetCr, Item
             }
             // Steal
             else {
-                if (isPlayer && IS_TIMEOUT(cr.TimeoutSkSteal)) {
+                if (isPlayer && Time::IsTimeoutActive(cr.TimeoutSkSteal)) {
                     cr.SayMsg(SAY_NETMSG, TextPackName::Game, MsgStr::StrSkillWeariness);
                 }
                 else {
@@ -651,7 +651,7 @@ bool critter_use_skill(Critter cr, CritterProperty skill, Critter targetCr, Item
             break;
         }
 
-        if (isPlayer && IS_TIMEOUT(cr.TimeoutSkFirstAid)) {
+        if (isPlayer && Time::IsTimeoutActive(cr.TimeoutSkFirstAid)) {
             cr.SayMsg(SAY_NETMSG, TextPackName::Game, MsgStr::StrSkillWeariness);
             break;
         }
@@ -733,7 +733,7 @@ bool critter_use_skill(Critter cr, CritterProperty skill, Critter targetCr, Item
             break;
         }
 
-        if (isPlayer && IS_TIMEOUT(cr.TimeoutSkDoctor)) {
+        if (isPlayer && Time::IsTimeoutActive(cr.TimeoutSkDoctor)) {
             cr.SayMsg(SAY_NETMSG, TextPackName::Game, MsgStr::StrSkillWeariness);
             break;
         }
@@ -1021,13 +1021,13 @@ void critter_finish(Critter cr)
 void critter_idle(Critter cr)
 {
     // Replication
-    if (cr.IsDead() && cr.ReplicationTime >= 0 && !IS_TIMEOUT(cr.TimeoutReplication)) {
+    if (cr.IsDead() && cr.ReplicationTime >= 0 && !Time::IsTimeoutActive(cr.TimeoutReplication)) {
         Replication::ReplicateCritter(cr);
     }
 
     // Healing
-    if (!IS_TIMEOUT(cr.TimeoutHealing)) {
-        if (!cr.IsDead() && !cr.IsNoHeal && !IS_TIMEOUT(cr.TimeoutBattle) && cr.CurrentHp < cr.MaxLife) {
+    if (!Time::IsTimeoutActive(cr.TimeoutHealing)) {
+        if (!cr.IsDead() && !cr.IsNoHeal && !Time::IsTimeoutActive(cr.TimeoutBattle) && cr.CurrentHp < cr.MaxLife) {
             cr.CurrentHp += cr.HealingRate * (cr.PerkVampireRegeneration != 0 ? 2 : 1);
 
             if (cr.CurrentHp > cr.MaxLife) {
@@ -1077,7 +1077,7 @@ void critter_idle(Critter cr)
     }
 
     // Auto unload player critter
-    if (cr.ControlledByPlayer && cr.GetPlayer() == null && cr.GetPlayerOfflineTime() >= Settings.MinimumOfflineTime && !IS_TIMEOUT(cr.TimeoutRemoveFromGame)) {
+    if (cr.ControlledByPlayer && cr.GetPlayer() == null && cr.GetPlayerOfflineTime() >= Settings.MinimumOfflineTime && !Time::IsTimeoutActive(cr.TimeoutRemoveFromGame)) {
         Game.UnloadCritter(cr);
     }
 }
@@ -1303,7 +1303,7 @@ void karma_voting(Critter crFrom, Critter crTo, bool valUp)
 {
     // Players karma system (not used)
     crTo.PlayerKarma += (valUp ? int(5) : -10);
-    crFrom.TimeoutKarmaVoting = Time::Sum(Game.SynchronizedTime, Time::RealHour(4)); // 4 hours
+    crFrom.TimeoutKarmaVoting = Game.SynchronizedTime +  Time::RealHour(4); // 4 hours
 }
 
 // //////////////////////////////////////////////////////////////////////////////////////////////////
@@ -1490,9 +1490,9 @@ bool OnPlayerMoveCritter(Player player, Critter cr, uint& speed)
     }
 
     /*
-                if (!Settings.RunOnCombat && IS_TIMEOUT(chosen.TimeoutBattle))
+                if (!Settings.RunOnCombat && Time::IsTimeoutActive(chosen.TimeoutBattle))
                 isRun = false;
-            else if (!Settings.RunOnTransfer && IS_TIMEOUT(chosen.TimeoutTransfer))
+            else if (!Settings.RunOnTransfer && Time::IsTimeoutActive(chosen.TimeoutTransfer))
                 isRun = false;
             else if (chosen.IsDamagedRightLeg || chosen.IsDamagedLeftLeg || chosen.IsOverweight)
                 isRun = false;

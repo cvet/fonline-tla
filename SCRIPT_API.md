@@ -1517,7 +1517,7 @@
 
   ...
 
-* `PrivateServer uint ArroyoMynocTimeout`
+* `PrivateServer synctime ArroyoMynocTimeout`
 
   Name:	arroyo_mynoc_defence  
   Author:	Sufir
@@ -1614,7 +1614,7 @@
 
   ...
 
-* `PrivateServer uint KlamSmilyGeckoTimeout`
+* `PrivateServer synctime KlamSmilyGeckoTimeout`
 
   ...
 
@@ -1684,7 +1684,7 @@
 
   ...
 
-* `PrivateServer uint ReddMarionWanTimeout`
+* `PrivateServer synctime ReddMarionWanTimeout`
 
   ...
 
@@ -3709,7 +3709,7 @@
 
   ...
 
-* `PrivateServer uint LastLootTransfer`
+* `PrivateServer synctime LastLootTransfer`
 
   ...
 
@@ -3906,7 +3906,7 @@
 
   Author: cvet, rifleman17
 
-* `PrivateServer uint CasinoTimeRenew`
+* `PrivateServer synctime CasinoTimeRenew`
 
   ...
 
@@ -3938,7 +3938,7 @@
 
   ...
 
-* `PrivateServer uint=>uint FixBoyWorkBenchTimeout`
+* `PrivateServer uint=>synctime FixBoyWorkBenchTimeout`
 
   Таймаут на крафт для станка. Если равен = 0 значит истек.
 
@@ -3984,7 +3984,7 @@
 
   ...
 
-* `PrivateServer uint GeckCityTimeBroken`
+* `PrivateServer synctime GeckCityTimeBroken`
 
   ...
 
@@ -4021,7 +4021,7 @@
 
   Todo: добавить поддержку Map::NoLogOut
 
-* `PrivateServer uint VCLastBarDialog`
+* `PrivateServer synctime VCLastBarDialog`
 
   ...
 
@@ -4741,7 +4741,7 @@
 
   Переменная в которой хранится номер радиоканала
 
-* `PrivateServer int BehemothLastComand`
+* `PrivateServer synctime BehemothLastComand`
 
   Переменная в которой хранится время последней команды.
 
@@ -4884,7 +4884,7 @@
 
   ...
 
-* `PrivateCommon uint ApRegenerationTick Temporary`
+* `PrivateCommon nanotime ApRegenerationTick Temporary`
 
   ...
 
@@ -4892,7 +4892,7 @@
 
   ...
 
-* `PrivateServer uint CollectorTimeNextSearch`
+* `PrivateServer synctime CollectorTimeNextSearch`
 
   Author: rifleman17  
   Собиратель мусора  
@@ -4916,7 +4916,7 @@
 
   ...
 
-* `Protected uint WaitEndTick`
+* `Protected nanotime WaitEndTick Temporary`
 
   ...
 
@@ -4956,7 +4956,7 @@
 
   ...
 
-* `PrivateServer ident=>uint UniqTimeout`
+* `PrivateServer ident=>synctime UniqTimeout`
 
   Author: cvet, heX, Тринитротолуол, Tab10id
 
@@ -5012,7 +5012,7 @@
 
   ...
 
-* `PrivateServer synctime LastDialogBoxShownTick`
+* `PrivateServer nanotime LastDialogBoxShownTick`
 
   ...
 
@@ -5031,7 +5031,7 @@
   Электронный замок на контейнеры, двери  
   Свойства предмета
 
-* `PrivateServer uint EliTimeNextSing`
+* `PrivateServer synctime EliTimeNextSing`
 
   Author rifleman17  
   Странствующий путник, Илай.  
@@ -5209,7 +5209,7 @@
 
   ...
 
-* `PrivateServer uint GEReplLastOrder`
+* `PrivateServer synctime GEReplLastOrder`
 
   ...
 
@@ -5221,7 +5221,7 @@
 
   ...
 
-* `PrivateServer uint HellMineTimeoutEnd`
+* `PrivateServer synctime HellMineTimeoutEnd`
 
   ...
 
@@ -5288,11 +5288,11 @@
 
   ...
 
-* `PrivateServer uint ModHoughRatsFluteTimeout`
+* `PrivateServer synctime ModHoughRatsFluteTimeout`
 
   ...
 
-* `PrivateServer uint ModLourenceToxinTimeout`
+* `PrivateServer synctime ModLourenceToxinTimeout`
 
   ...
 
@@ -5300,7 +5300,7 @@
 
   ...
 
-* `PrivateServer uint ModLourenceLureActive`
+* `PrivateServer synctime ModLourenceLureActive`
 
   ...
 
@@ -5415,7 +5415,7 @@
 
   ...
 
-* `PrivateServer uint MapKlamathRobotTimeNextSay`
+* `PrivateServer synctime MapKlamathRobotTimeNextSay`
 
   Author: Тринитротолуол, heX, rifleman17  
   Для удобства последующей заскриптовки карты, квесты "Пасти браминов", "Сгубить браминов"  
@@ -5469,7 +5469,7 @@
 
   ...
 
-* `PrivateClient uint TextOnHeadEndTime Temporary`
+* `PrivateClient nanotime TextOnHeadEndTime Temporary`
 
   ...
 
@@ -5477,11 +5477,11 @@
 
   ...
 
-* `PrivateServer uint MirelurkCombatTimeNextStage`
+* `PrivateServer synctime MirelurkCombatTimeNextStage`
 
   ...
 
-* `PrivateServer uint MirelurkCombatLastBrokenBag`
+* `PrivateServer synctime MirelurkCombatLastBrokenBag`
 
   ...
 
@@ -5528,7 +5528,7 @@
 
   ...
 
-* `PrivateServer uint NavarroTimeOutScan`
+* `PrivateServer synctime NavarroTimeOutScan`
 
   ...
 
@@ -5581,7 +5581,7 @@
 
   ...
 
-* `PrivateServer uint NCRHubBookQuestTimeout`
+* `PrivateServer synctime NCRHubBookQuestTimeout`
 
   ...
 
@@ -5633,7 +5633,7 @@
 
   ...
 
-* `PrivateServer uint NcrMailTimeout`
+* `PrivateServer synctime NcrMailTimeout`
 
   ...
 
@@ -5694,11 +5694,11 @@
 
   ...
 
-* `Protected uint LastBagRefreshedTime`
+* `Protected synctime LastBagRefreshedTime`
 
   ...
 
-* `PrivateServer uint LastNpcDialog`
+* `PrivateServer synctime LastNpcDialog`
 
   ...
 
@@ -5727,7 +5727,7 @@
 
   ...
 
-* `PrivateServer int NRWriKidnapNotifyTime`
+* `PrivateServer synctime NRWriKidnapNotifyTime`
 
   ...
 
@@ -5743,7 +5743,7 @@
 
   ...
 
-* `PrivateServer uint NukeRestockTime`
+* `PrivateServer synctime NukeRestockTime`
 
   ...
 
@@ -5755,7 +5755,7 @@
 
   ...
 
-* `PrivateServer uint PetLifeTime`
+* `PrivateServer synctime PetLifeTime`
 
   ...
 
@@ -5775,11 +5775,11 @@
 
   ...
 
-* `PrivateServer ident=>uint PokerFraud`
+* `PrivateServer ident=>synctime PokerFraud`
 
   ...
 
-* `PrivateServer ident=>uint PokerManywins`
+* `PrivateServer ident=>synctime PokerManywins`
 
   ...
 
@@ -5875,7 +5875,7 @@
 
   ...
 
-* `PrivateServer ident=>uint RepairCompleteTime`
+* `PrivateServer ident=>synctime RepairCompleteTime`
 
   ...
 
@@ -6401,7 +6401,7 @@
 
   ...
 
-* `PrivateServer synctime LastSendEntrancesTick`
+* `PrivateServer nanotime LastSendEntrancesTick`
 
   ...
 
@@ -7437,7 +7437,7 @@
 
   Признак: если хозяин атакует цель мерк присоединяется к атаке
 
-* `PrivateServer uint MercCancelTime Group = Mercs`
+* `PrivateServer synctime MercCancelTime Group = Mercs`
 
   Время завершения службы
 
@@ -7897,7 +7897,7 @@
 
   ...
 
-* `PrivateServer uint DialogTimeout`
+* `PrivateServer synctime DialogTimeout`
 
   ...
 
@@ -8532,7 +8532,7 @@
 
   ...
 
-* `PrivateServer uint VCityCommonBarkusTimeSay`
+* `PrivateServer synctime VCityCommonBarkusTimeSay`
 
   ...
 
@@ -10385,7 +10385,7 @@
 
   ...
 
-* `PrivateServer uint LastUsedTime`
+* `PrivateServer synctime LastUsedTime`
 
   ...
 

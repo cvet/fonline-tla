@@ -122,13 +122,7 @@ void LoadGlobalMapGroupData(Serializator::Serializator load)
 #define GM_MAXX                (Settings.GlobalMapWidth * Settings.GlobalMapZoneLength)
 #define GM_MAXY                (Settings.GlobalMapHeight * Settings.GlobalMapZoneLength)
 #define GM_ZONE_LEN            (Settings.GlobalMapZoneLength) // Can be multiple to GM_MAXX and GM_MAXY
-#define GM__MAXZONEX           (100)
-#define GM__MAXZONEY           (100)
-#define GM_ZONES_FOG_SIZE      (((GM__MAXZONEX / 4) + ((GM__MAXZONEX % 4) ? 1 : 0)) * GM__MAXZONEY)
-#define GM_FOG_FULL            (0)
-#define GM_FOG_HALF            (1)
-#define GM_FOG_HALF_EX         (2)
-#define GM_FOG_NONE            (3)
+
 #define GM_MAX_GROUP_COUNT     (6)
 #define GM_ANSWER_WAIT_TIME    (Time::Seconds(20))
 #define GM_LIGHT_TIME          (Time::Seconds(5))
@@ -711,7 +705,7 @@ class GlobalMapGroup
     float ToX, ToY;
     float Speed;
     bool IsSetMove;
-    synctime TimeCanFollow;
+    nanotime TimeCanFollow;
     nanotime ProcessLastTick;
     uint EncounterDescriptor;
     nanotime EncounterTick;
@@ -735,7 +729,7 @@ class GlobalMapGroup
         if (IsSetMove) { // ?? уже началось движение
             return false;
         }
-        if (Game.SynchronizedTime >= TimeCanFollow) { // прошло время, пока криттер мог присоединиться в группу
+        if (Game.FrameTime >= TimeCanFollow) { // прошло время, пока криттер мог присоединиться в группу
             return false;
         }
         if (valid(GetCritter(cr.Id))) { // криттер уже в группе
@@ -792,7 +786,7 @@ class GlobalMapGroup
     {
         CurX = CurY = ToX = ToY = 0.0f;
         IsSetMove = false;
-        TimeCanFollow = ZERO_SYNCTIME;
+        TimeCanFollow = ZERO_NANOTIME;
         ProcessLastTick = Game.GetPrecisionTime();
         EncounterDescriptor = 0;
         EncounterTick = ZERO_NANOTIME;
@@ -843,7 +837,7 @@ void GM_GroupStartMove(Critter cr)
     group.ToY = group.CurY;
     group.Speed = 0.0f;
 
-    group.TimeCanFollow = Game.SynchronizedTime + TIME_CAN_FOLLOW_GM;
+    group.TimeCanFollow = Game.FrameTime + TIME_CAN_FOLLOW_GM;
 
     GlobalMapLocations::SetGlobalMapData(GM_INFO_ALL, cr);
 
@@ -1232,7 +1226,7 @@ void GM_GroupSetMove(GlobalMapGroup group, float to_x, float to_y, float speed) 
 
     GlobalMapLocations::SetGlobalMapData(GM_INFO_GROUP_PARAM, group.Rule);
     // group->Rule->SendA_GlobalInfo( group, GM_INFO_GROUP_PARAM );
-    if (Game.GetPrecisionTime() - group.ProcessLastTick > Settings.GlobalMapMoveTime) {
+    if (Game.GetPrecisionTime() > group.ProcessLastTick + Time::Milliseconds(Settings.GlobalMapMoveTime)) {
         group.ProcessLastTick = Game.GetPrecisionTime();
     }
     if (!group.IsSetMove) {
@@ -1274,11 +1268,11 @@ void GM_GroupMove(GlobalMapGroup group) // 3hits
     // Move
     if (group.IsMoving()) {
         auto dtime = tick - group.ProcessLastTick;
-        if (dtime >= Settings.GlobalMapMoveTime) {
-            if (dtime >= Settings.GlobalMapMoveTime * 2) {
-                dtime = 0;
+        if (dtime >= Time::Milliseconds(Settings.GlobalMapMoveTime)) {
+            if (dtime >= Time::Milliseconds(Settings.GlobalMapMoveTime * 2)) {
+                dtime = ZERO_TIMESPAN;
             }
-            group.ProcessLastTick = tick - dtime % Settings.GlobalMapMoveTime;
+            group.ProcessLastTick = tick - Time::Milliseconds(dtime.milliseconds % Settings.GlobalMapMoveTime);
 
             if (rule.ControlledByPlayer && rule.IsDead()) // && rule.IsOffline() )
             {

@@ -1,0 +1,410 @@
+namespace Messaging
+{
+
+///@ Setting Common int WhisperDist
+
+///@ Enum MessageBoxType Look
+///@ Enum MessageBoxType Talk
+///@ Enum MessageBoxType Combat
+
+///@ Enum SayType Normal
+///@ Enum SayType Shout
+///@ Enum SayType Whisper
+///@ Enum SayType Emote
+
+///@ RemoteCall Server ReceiveChosenSay(SayType sayType, string text)
+///@ RemoteCall Client ReceiveInfo(string text, TextPackName textPack, uint strNum, string lexems)
+///@ RemoteCall Client ReceiveSay(ident crId, SayType sayType, bool onHeadOnly, string text, TextPackName textPack, uint strNum, string lexems)
+
+///@ Property Player PrivateServer string LastSay Temporary
+///@ Property Player PrivateServer int LastSayEqualCount Temporary
+
+void ModuleInit()
+{
+#if SERVER
+#endif
+
+#if CLIENT
+    Game.OnConsoleMessage.Subscribe(OnConsoleMessage);
+#endif
+}
+
+#if SERVER
+
+void Info(Player player, string text)
+{
+    if (!text.isEmpty()) {
+        player.ClientCall.ReceiveInfo(text, TextPackName::Text, 0, "");
+    }
+}
+
+void Info(Player player, TextPackName textPack, uint strNum, string lexems = "")
+{
+    player.ClientCall.ReceiveInfo("", textPack, strNum, lexems);
+}
+
+void Info(Critter cr, string text)
+{
+    if (!text.isEmpty()) {
+        cr.PlayerClientCall.ReceiveInfo(text, TextPackName::Text, 0, "");
+    }
+}
+
+void Info(Critter cr, TextPackName textPack, uint strNum, string lexems = "")
+{
+    cr.PlayerClientCall.ReceiveInfo("", textPack, strNum, lexems);
+}
+
+void Say(Critter cr, string text)
+{
+    if (!text.isEmpty()) {
+        SayExt(cr, SayType::Normal, false, text, TextPackName::Text, 0, "");
+    }
+}
+
+void Say(Critter cr, TextPackName textPack, uint strNum, string lexems = "")
+{
+    SayExt(cr, SayType::Normal, false, "", textPack, strNum, lexems);
+}
+
+void SayWhisper(Critter cr, string text)
+{
+    if (!text.isEmpty()) {
+        SayExt(cr, SayType::Whisper, false, text, TextPackName::Text, 0, "");
+    }
+}
+
+void SayWhisper(Critter cr, TextPackName textPack, uint strNum, string lexems = "")
+{
+    SayExt(cr, SayType::Whisper, false, "", textPack, strNum, lexems);
+}
+
+void SayShout(Critter cr, string text)
+{
+    if (!text.isEmpty()) {
+        SayExt(cr, SayType::Shout, false, text, TextPackName::Text, 0, "");
+    }
+}
+
+void SayShout(Critter cr, TextPackName textPack, uint strNum, string lexems = "")
+{
+    SayExt(cr, SayType::Shout, false, "", textPack, strNum, lexems);
+}
+
+void SayEmote(Critter cr, string text)
+{
+    if (!text.isEmpty()) {
+        SayExt(cr, SayType::Emote, false, text, TextPackName::Text, 0, "");
+    }
+}
+
+void SayEmote(Critter cr, TextPackName textPack, uint strNum, string lexems = "")
+{
+    SayExt(cr, SayType::Emote, false, "", textPack, strNum, lexems);
+}
+
+void SayOnHead(Critter cr, string text)
+{
+    if (!text.isEmpty()) {
+        SayExt(cr, SayType::Normal, true, text, TextPackName::Text, 0, "");
+    }
+}
+
+void SayOnHead(Critter cr, TextPackName textPack, uint strNum, string lexems = "")
+{
+    SayExt(cr, SayType::Normal, true, "", textPack, strNum, lexems);
+}
+
+void SayWhisperOnHead(Critter cr, string text)
+{
+    if (!text.isEmpty()) {
+        SayExt(cr, SayType::Whisper, true, text, TextPackName::Text, 0, "");
+    }
+}
+
+void SayWhisperOnHead(Critter cr, TextPackName textPack, uint strNum, string lexems = "")
+{
+    SayExt(cr, SayType::Whisper, true, "", textPack, strNum, lexems);
+}
+
+void SayShoutOnHead(Critter cr, string text)
+{
+    if (!text.isEmpty()) {
+        SayExt(cr, SayType::Shout, true, text, TextPackName::Text, 0, "");
+    }
+}
+
+void SayShoutOnHead(Critter cr, TextPackName textPack, uint strNum, string lexems = "")
+{
+    SayExt(cr, SayType::Shout, true, "", textPack, strNum, lexems);
+}
+
+void SayEmoteOnHead(Critter cr, string text)
+{
+    if (!text.isEmpty()) {
+        SayExt(cr, SayType::Emote, true, text, TextPackName::Text, 0, "");
+    }
+}
+
+void SayEmoteOnHead(Critter cr, TextPackName textPack, uint strNum, string lexems = "")
+{
+    SayExt(cr, SayType::Emote, true, "", textPack, strNum, lexems);
+}
+
+// [[ServerRemoteCall]]
+void ReceiveChosenSay(Player player, SayType sayType, string text)
+{
+    text = text.trim();
+
+    if (text.isEmpty()) {
+        return;
+    }
+
+    // Todo: cleanup text from bad symbols
+    // Keyb.RemoveInvalidChars(str, KIF_NO_SPEC_SYMBOLS);
+
+    if (text == player.LastSay) {
+        player.LastSayEqualCount += 1;
+
+        if (player.LastSayEqualCount >= 5) {
+            Game.Log("Player " + player.Name + " send same text more than 5 times. Disconnect");
+            player.Disconnect();
+            return;
+        }
+    }
+    else {
+        player.LastSay = text;
+        player.LastSayEqualCount = 0;
+    }
+
+    Critter cr = player.GetControlledCritter();
+    SayExt(cr, sayType, false, text, TextPackName::Text, 0, "");
+}
+
+void SayExt(Critter cr, SayType sayType, bool onHeadOnly, string text, TextPackName textPack, uint strNum, string lexems)
+{
+    if (cr.IsDead()) {
+        return;
+    }
+
+    Critter[] receivers;
+    Map map = cr.GetMap();
+
+    if (map != null) {
+        if (sayType == SayType::Shout) {
+            receivers = map.GetCritters(CritterFindType::Players);
+        }
+        else if (sayType == SayType::Whisper) {
+            receivers = map.GetCritters(cr.Hex, Settings.WhisperDist, CritterFindType::Players);
+        }
+        else {
+            receivers = cr.GetCritters(true, CritterFindType::Players);
+            receivers.insertLast(cr);
+        }
+    }
+    else {
+        receivers = cr.GetGlobalMapGroupCritters(CritterFindType::Players);
+    }
+
+    for (uint i = 0; i < receivers.length(); i++) {
+        receivers[i].PlayerClientCall.ReceiveSay(cr.Id, sayType, onHeadOnly, text, textPack, strNum, lexems);
+    }
+}
+
+#endif
+
+#if CLIENT
+
+dict<MessageBoxType, ucolor> TextColors = {{MessageBoxType::Default, COLOR_TEXT},
+                                           {MessageBoxType::Look, COLOR_DGREEN},
+                                           {MessageBoxType::Talk, COLOR_DGREEN},
+                                           {MessageBoxType::Combat, COLOR_DRED}};
+
+void Info(MessageBoxType type, string text)
+{
+    Gui::MessageBox[] messageBoxes = Gui::CollectMessageBoxes();
+    ucolor color = TextColors.exists(type) ? TextColors[type] : COLOR_TEXT;
+
+    text = "|" + color + " " + Game.EncodeUtf8(0x2022) + " |" + COLOR_TEXT + " " + text;
+
+    for (uint i = 0; i < messageBoxes.length(); i++) {
+        messageBoxes[i].AddMessage(text, type);
+    }
+}
+
+void Info(string text)
+{
+    Info(MessageBoxType::Default, text);
+}
+
+void Info(TextPackName textPack, uint strNum, string lexems = "")
+{
+    Info(MessageBoxType::Default, textPack, strNum, lexems);
+}
+
+void Info(MessageBoxType type, TextPackName textPack, uint strNum, string lexems = "")
+{
+    if (!Game.IsTextPresent(textPack, strNum)) {
+        return;
+    }
+
+    string text = Game.GetText(textPack, strNum);
+    text = Game.FormatTags(text, lexems);
+
+    Info(type, text);
+}
+
+// [[Event]]
+void OnConsoleMessage(string text)
+{
+    text = text.trim();
+
+    if (text.isEmpty()) {
+        return;
+    }
+
+    if (text[0] == "~") {
+        text = text.substr(1).trim();
+
+        if (!text.isEmpty()) {
+            string result = Game.BuiltInCommand(text);
+            Info(result);
+        }
+    }
+    else {
+        SendSay(text);
+    }
+}
+
+void SendSay(string text)
+{
+    SayType sayType = SayType::Normal;
+
+    if (Input::IsShiftDown()) {
+        sayType = SayType::Shout;
+    }
+    else if (Input::IsCtrlDown()) {
+        sayType = SayType::Whisper;
+    }
+
+    if (sayType == SayType::Normal) {
+        if (text.length() >= 2 && (text[0] == "/" || text[0] == ".")) {
+            string ch = text[1];
+
+            if (ch == "к" || ch == "К" || ch == "s" || ch == "S") {
+                sayType = SayType::Shout;
+            }
+            else if (ch == "ш" || ch == "Ш" || ch == "w" || ch == "W") {
+                sayType = SayType::Whisper;
+            }
+            else if (ch == "э" || ch == "Э" || ch == "e" || ch == "E") {
+                sayType = SayType::Emote;
+            }
+            else if (ch == "р" || ch == "Р" || ch == "r" || ch == "R") {
+                text = text.substr(2).trim();
+                if (!text.isEmpty()) {
+                    Radio::SendRadioMessage(text);
+                }
+                return;
+            }
+
+            if (sayType != SayType::Normal) {
+                text = text.substr(2);
+            }
+        }
+        else if (text.length() >= 4 && text[0] == "*" && text[1] != "*" && text[text.length() - 2] != "*" &&
+                 text[text.length() - 1] == "*") { // RegExp: [*]([^*].*[^*])[*]
+            sayType = SayType::Emote;
+            text = text.substr(1, text.length() - 2);
+        }
+    }
+
+    text = text.trim();
+
+    if (!text.isEmpty() && CurPlayer != null) {
+        CurPlayer.ServerCall.ReceiveChosenSay(sayType, text);
+    }
+}
+
+void LocalSay(Critter cr, SayType sayType, bool onHeadOnly, string text, TextPackName textPack, uint strNum, string lexems)
+{
+    uint formatCrNum = 0;
+    uint formatMbNum = 0;
+
+    switch (sayType) {
+    case SayType::Normal:
+        formatMbNum = MsgStr::STR_MBNORM;
+        formatCrNum = MsgStr::STR_CRNORM;
+        break;
+    case SayType::Shout:
+        formatMbNum = MsgStr::STR_MBSHOUT;
+        formatCrNum = MsgStr::STR_CRSHOUT;
+        text = text.upper();
+        break;
+    case SayType::Whisper:
+        formatMbNum = MsgStr::STR_MBWHISP;
+        formatCrNum = MsgStr::STR_CRWHISP;
+        text = text.lower();
+        break;
+    case SayType::Emote:
+        formatMbNum = MsgStr::STR_MBEMOTE;
+        formatCrNum = MsgStr::STR_CREMOTE;
+        break;
+    default:
+        break;
+    }
+
+    if (onHeadOnly) {
+        formatMbNum = 0;
+    }
+
+    if (text.isEmpty()) {
+        if (!Game.IsTextPresent(textPack, strNum)) {
+            return;
+        }
+
+        text = Game.GetText(textPack, strNum);
+        text = Game.FormatTags(text, lexems);
+    }
+
+    if (formatCrNum != 0 && cr != null) {
+        cr.TextOnHead = FormatText(formatCrNum, text);
+        cr.TextOnHeadEndTime = Game.FrameTime + Time::Milliseconds(Settings.TextDelay + text.length() * 100);
+    }
+
+    if (formatMbNum != 0) {
+        string crName = cr != null ? cr.Name : "?";
+        Info(MessageBoxType::Default, FormatText(formatMbNum, text, crName));
+    }
+
+    Game.FlashUnfocusedWindow();
+}
+
+string FormatText(uint formatStrNum, string text1, string text2 = "")
+{
+    string formatStr = Game.GetText(TextPackName::Game, formatStrNum);
+    return formatStr.replace("%1", text1).replace("%2", text2);
+}
+
+// [[ClientRemoteCall]]
+void ReceiveInfo(string text, TextPackName textPack, uint strNum, string lexems)
+{
+    if (text.isEmpty()) {
+        Info(MessageBoxType::Default, textPack, strNum, lexems);
+    }
+    else {
+        Info(MessageBoxType::Default, text);
+    }
+}
+
+// [[ClientRemoteCall]]
+void ReceiveSay(ident crId, SayType sayType, bool onHeadOnly, string text, TextPackName textPack, uint strNum, string lexems)
+{
+    Critter cr = Game.GetCritter(crId);
+
+    LocalSay(cr, sayType, onHeadOnly, text, textPack, strNum, lexems);
+}
+
+#endif
+
+}

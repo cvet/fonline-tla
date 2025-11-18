@@ -1,25 +1,18 @@
-cmake_minimum_required(VERSION 3.16.3)
+cmake_minimum_required(VERSION 3.22)
 project(TLA)
 
 include(Engine/BuildTools/Init.cmake)
 
+SetOption(FO_MAIN_CONFIG "TLA.fomain")
 SetOption(FO_DEV_NAME "TLA")
 SetOption(FO_NICE_NAME "FOnlineTLA")
-SetOption(FO_AUTHOR_NAME "FODev")
-SetOption(FO_GAME_VERSION "0.1.7")
-SetOption(FO_SINGLEPLAYER NO)
-SetOption(FO_ENABLE_3D NO)
-SetOption(FO_ANGELSCRIPT_SCRIPTING YES)
-SetOption(FO_NATIVE_SCRIPTING NO)
-SetOption(FO_MONO_SCRIPTING NO)
-SetOption(FO_DEFAULT_CONFIG LocalTest)
-SetOption(FO_DEBUGGING_CONFIG Debugging)
-SetOption(FO_MAPPER_CONFIG Mapper)
-SetOption(FO_GENERATE_ANGELSCRIPT_CONTENT Scripts)
+SetOption(FO_ENABLE_3D OFF)
+SetOption(FO_ANGELSCRIPT_SCRIPTING ON)
+SetOption(FO_NATIVE_SCRIPTING OFF)
+SetOption(FO_MONO_SCRIPTING OFF)
 SetOption(FO_GEOMETRY HEXAGONAL)
 SetOption(FO_APP_ICON Resources/TLA.ico)
-SetOption(FO_MAKE_EXTERNAL_COMMANDS YES)
-SetOption(FO_INFO_MARKDOWN_OUTPUT ${CMAKE_CURRENT_SOURCE_DIR})
+SetOption(FO_MAKE_EXTERNAL_COMMANDS ON)
 
 SetOption(FO_BUILD_CLIENT ON)
 SetOption(FO_BUILD_SERVER ON)
@@ -36,37 +29,6 @@ include(Engine/BuildTools/StartGeneration.cmake)
 AddEngineSource(COMMON Scripts/Extension/ContentMigration.cpp)
 AddEngineSource(SERVER Scripts/Extension/ServerExtension.cpp)
 AddEngineSource(CLIENT Scripts/Extension/ClientExtension.cpp)
-
-# Content
-AddContent(Configs)
-AddContent(Scripts Scripts/Json)
-AddContent(Maps)
-AddContent(Critters Critters/Types)
-AddContent(Items Items/Static Items/Custom)
-AddContent(Dialogs)
-AddContent(Texts)
-
-# Resources
-AddResources(FOnline Resources/FOnline)
-AddResources(FOArt Resources/DataPacks/fo_art.zip Resources/DataPacks/fo_art_critters_h.zip)
-AddResources(FOArt Resources/DataPacks/fo_art_critters_m.zip Resources/DataPacks/fo_art_critters_n.zip)
-AddResources(BlackCombatArmor Resources/DataPacks/cablack.dat)
-AddResources(Lieutenant Resources/DataPacks/lieutenant.dat)
-AddResources(LongHairDude Resources/DataPacks/longhairdude.dat)
-
-# Baking options
-SetBakingOption(BakeLanguages "russ engl")
-
-# AddResources( FTRobots Resources/DataPacks/ftrobots.bos )
-AddResources(FOSound Resources/DataPacks/fo_sound.zip)
-AddResources(Music Resources/FOnlineMusic)
-AddResources(Video Resources/FOnlineVideo)
-AddResources(CommonData Resources/CommonData)
-AddResources(ServerData Resources/ServerData)
-AddResources(Mapper Resources/Mapper)
-
-# AddResources( VanBuren Resources/VanBuren )
-# AddRawResources( Resources/Mapper )
 
 # Test builds
 CreatePackage(Dev LocalTest)

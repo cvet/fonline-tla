@@ -2,21 +2,31 @@
 
 #include "StringUtils.h"
 
+FO_USING_NAMESPACE();
+
+FO_BEGIN_NAMESPACE();
 ///@ EngineHook
-FO_SCRIPT_API void ConfigSectionParseHook(const string& fname, string& section, map<string, string>& init_section_kv)
+FO_SCRIPT_API void ConfigSectionParseHook(const string& fname, string& section, map<string, string>& init_section_kv);
+///@ EngineHook
+FO_SCRIPT_API void ConfigEntryParseHook(const string& fname, const string& section, string& key, string& value);
+FO_END_NAMESPACE();
+
+void FO_NAMESPACE ConfigSectionParseHook(const string& fname, string& section, map<string, string>& init_section_kv)
 {
-    UNUSED_VARIABLE(fname);
-    UNUSED_VARIABLE(init_section_kv);
+    FO_STACK_TRACE_ENTRY();
+
+    ignore_unused(fname, init_section_kv);
 
     if (section == "Tile") {
         section = "Item";
     }
 }
 
-///@ EngineHook
-FO_SCRIPT_API void ConfigEntryParseHook(const string& fname, const string& section, string& key, string& value)
+void FO_NAMESPACE ConfigEntryParseHook(const string& fname, const string& section, string& key, string& value)
 {
-    UNUSED_VARIABLE(fname);
+    FO_STACK_TRACE_ENTRY();
+
+    ignore_unused(fname);
 
     if (section == "Tile") {
         if (key == "PicMap") {

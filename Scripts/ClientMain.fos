@@ -22,15 +22,12 @@ void ModuleInit()
     Game.OnItemInvChanged.Subscribe(item_inv_changed);
     Game.OnItemInvOut.Subscribe(item_inv_out);
     Game.OnContainerChanged.Subscribe(container_changed);
-    Game.OnMapMessage.Subscribe(map_message);
-    Game.OnInMessage.Subscribe(in_message);
-    Game.OnOutMessage.Subscribe(out_message);
-    Game.OnMessageBox.Subscribe(message_box);
     Game.OnCritterAction.Subscribe(critter_action);
     Game.OnCritterActionEx.Subscribe(critter_action);
     Game.OnCritterAnimationProcess.Subscribe(critter_animation_process);
     Game.OnItemsCollection.Subscribe(items_collection);
     Game.OnScreenSizeChanged.Subscribe(on_screen_size_changed);
+    Game.OnInfoMessage.Subscribe(OnInfoMessage);
 }
 
 // //////////////////////////////////////////////////////////////////////////////////////////////////
@@ -99,10 +96,10 @@ void loop()
         }
 
         if (item != null) {
-            Game.Message(item_description(item, ItemLookTypes::OnlyName));
+            Messaging::Info(item_description(item, ItemLookTypes::OnlyName));
         }
         else if (cr != null) {
-            Game.Message(critter_description(cr, CritterLookTypes::LookShort));
+            Messaging::Info(critter_description(cr, CritterLookTypes::LookShort));
         }
     }
 
@@ -133,18 +130,11 @@ void mouse_move(ipos offset)
 //    100 (over map), 101 (over all)
 void render_iface()
 {
-    bool needDrawMap = Gui::IsScreenActive(GuiScreen::Game) && CurMap != null;
-
-    if (needDrawMap) {
+    if (Gui::IsScreenActive(GuiScreen::Game) && CurMap != null) {
         CurMap.DrawMap();
     }
 
     Game.OnPreRenderIface.Fire();
-
-    if (needDrawMap) {
-        CurMap.DrawMapTexts();
-    }
-
     ChosenTabs::DrawChosenTabs();
     CritterIcons::DrawIcons();
     Gui::EngineCallback_Draw();
@@ -154,7 +144,7 @@ void render_iface()
     // Help info
     if (Settings.HelpInfo) {
         // About
-        string aboutText = "FOnline " + (Settings.Singleplayer ? "Singleplayer" : "") + "\n" + "by Gamers for Gamers\n" + "version " + Game.GetGameVersion() +
+        string aboutText = "FOnline " + (Settings.Singleplayer ? "Singleplayer" : "") + "\n" + "by Gamers for Gamers\n" + "version " + Settings.GameVersion +
                            "\n" + "\n" + "Traffic, bytes:\n" + "Send: " + Game.CustomCall("BytesSend") + "\n" + "Receive: " + Game.CustomCall("BytesReceive") +
                            "\n" + "Sum: " + (Game.CustomCall("BytesSend").toInt() + Game.CustomCall("BytesReceive").toInt()) + "\n" + "\n" +
                            "FPS: " + Settings.FixedFPS + " (" + (!Settings.VSync ? "" + math::abs(Settings.FixedFPS) : "VSync") +
@@ -221,9 +211,6 @@ void render_map()
 // Called on something critter in/out game.
 void critter_in(Critter cr)
 {
-    // Default colors
-    cr.NameColor = COLOR_CRITTER_NAME;
-
     if (cr.ControlledByPlayer) {
         cr.SetName(cr.DisplayName);
         cr.ContourColor = COLOR_CONTOUR_YELLOW;
@@ -242,10 +229,6 @@ void critter_in(Critter cr)
     if (cr.IsChosen) {
         Gui::EngineCallback_ItemChanged(false);
     }
-
-    // Karma voting
-    int highlight = cr.PlayerKarma / 10;
-    cr.NameColor = ucolor(COLOR_CRITTER_NAME.red + highlight, COLOR_CRITTER_NAME.green + highlight, COLOR_CRITTER_NAME.blue + highlight);
 
     // For correct dialog formatting (male/female)
     cr.SexTagFemale = cr.Gender == GenderType::Female;
@@ -293,185 +276,6 @@ void item_inv_out(Item item)
 void container_changed()
 {
     Gui::EngineCallback_ItemChanged(false);
-}
-
-// //////////////////////////////////////////////////////////////////////////////////////////////////
-// Call on receive message on map.
-// By default delay == [TextDelay + message length * 100] ms
-bool map_message(string& message, mpos& hex, ucolor& color, uint& delay)
-{
-    // Detect radio
-    if (color == 0xFFFFFFFE) {
-        message = ".." + message + "..";
-    }
-    return true;
-}
-
-// //////////////////////////////////////////////////////////////////////////////////////////////////
-// Call on receive message.
-void in_message(string text, int sayType, ident crId)
-{
-    uint formatCrNum = 0;
-    uint formatMbNum = 0;
-
-    switch (sayType) {
-    case SAY_NORM:
-        formatMbNum = MsgStr::STR_MBNORM;
-        formatCrNum = MsgStr::STR_CRNORM;
-        break;
-    case SAY_NORM_ON_HEAD:
-        formatCrNum = MsgStr::STR_CRNORM;
-        break;
-    case SAY_SHOUT:
-        formatMbNum = MsgStr::STR_MBSHOUT;
-        formatCrNum = MsgStr::STR_CRSHOUT;
-        text = text.upper();
-        break;
-    case SAY_SHOUT_ON_HEAD:
-        formatCrNum = MsgStr::STR_CRSHOUT;
-        text = text.upper();
-        break;
-    case SAY_EMOTE:
-        formatMbNum = MsgStr::STR_MBEMOTE;
-        formatCrNum = MsgStr::STR_CREMOTE;
-        break;
-    case SAY_EMOTE_ON_HEAD:
-        formatCrNum = MsgStr::STR_CREMOTE;
-        break;
-    case SAY_WHISP:
-        formatMbNum = MsgStr::STR_MBWHISP;
-        formatCrNum = MsgStr::STR_CRWHISP;
-        text = text.lower();
-        break;
-    case SAY_WHISP_ON_HEAD:
-        formatCrNum = MsgStr::STR_CRWHISP;
-        text = text.lower();
-        break;
-    case SAY_SOCIAL:
-        formatCrNum = MsgStr::STR_CRSOCIAL;
-        formatMbNum = MsgStr::STR_MBSOCIAL;
-        break;
-    case SAY_RADIO:
-        formatMbNum = MsgStr::STR_MBRADIO;
-        break;
-    case SAY_NETMSG:
-        formatMbNum = MsgStr::STR_MBNET;
-        break;
-    default:
-        break;
-    }
-
-    Critter cr = Game.GetCritter(crId);
-
-    if (formatCrNum != 0 && cr != null) {
-        cr.TextOnHead = FormatText(formatCrNum, text);
-        cr.TextOnHeadEndTime = Game.FrameTime + Time::Milliseconds(Settings.TextDelay + text.length());
-    }
-
-    if (formatMbNum != 0) {
-        if (sayType == SAY_NETMSG) {
-            Game.Message(FOMB_GAME, FormatText(formatMbNum, text));
-        }
-        else if (sayType == SAY_RADIO) {
-            uint16 channel = 0;
-            Game.Message(FOMB_GAME, FormatText(formatMbNum, text, "" + channel));
-        }
-        else {
-            string crName = cr != null ? cr.Name : "?";
-            Game.Message(FOMB_GAME, FormatText(formatMbNum, text, crName));
-        }
-    }
-
-    if (sayType == SAY_DIALOG) {
-        Gui::Screen screen = Gui::GetActiveScreen(GuiScreen::Barter);
-        if (screen != null) {
-            auto barterScreen = cast<GuiScreens::Barter::Barter>(screen);
-            barterScreen.SetDialogText(text);
-        }
-        screen = Gui::GetActiveScreen(GuiScreen::Dialog);
-        if (screen != null) {
-            auto dialogScreen = cast<GuiScreens::Dialog::Dialog>(screen);
-            dialogScreen.SetDialogText(text);
-        }
-    }
-
-    Game.FlashUnfocusedWindow();
-}
-
-string FormatText(uint formatStrNum, string text1, string text2 = "")
-{
-    string formatStr = Game.GetText(TextPackName::Game, formatStrNum);
-    return formatStr.replace("%1", text1).replace("%2", text2);
-}
-
-// //////////////////////////////////////////////////////////////////////////////////////////////////
-// Call on send message.
-bool out_message(string& message, int& sayType)
-{
-    if (message[0] == "~") {
-        message = message.substr(1).trim();
-
-        if (Test::ParseMessage(message)) {
-            return false;
-        }
-
-        if (message == "globalmap") {
-            CurPlayer.ServerCall.Rpc_CritterToGlobal();
-            return false;
-        }
-
-        string error = Game.BuiltInCommand(message);
-
-        if (!error.isEmpty()) {
-            Game.Message(error);
-        }
-
-        return false;
-    }
-
-    if (sayType == SAY_NORM) {
-        if (message.length() > 2 && (message[0] == "/" || message[0] == ".")) {
-            string ch = message[1];
-            if (ch == "к" || ch == "К" || ch == "s" || ch == "S") {
-                sayType = SAY_SHOUT;
-            }
-            else if (ch == "э" || ch == "Э" || ch == "e" || ch == "E") {
-                sayType = SAY_EMOTE;
-            }
-            else if (ch == "ш" || ch == "Ш" || ch == "w" || ch == "W") {
-                sayType = SAY_WHISP;
-            }
-            else if (ch == "с" || ch == "С" || ch == "$") {
-                sayType = SAY_SOCIAL;
-            }
-            else if (ch == "р" || ch == "Р" || ch == "r" || ch == "R") {
-                sayType = SAY_RADIO;
-            }
-
-            if (sayType != SAY_NORM) {
-                message[0] = "";
-                message[0] = "";
-                while (message[0] == " ") {
-                    message[0] = "";
-                }
-            }
-        }
-        else if ( // RegExp: [*]([^*].*[^*])[*]
-            message.length() >= 4 && message[0] == "*" && message[1] != "*" && message[message.length() - 2] != "*" && message[message.length() - 1] == "*") {
-            sayType = SAY_EMOTE;
-            message = message.substr(1, message.length() - 2);
-        }
-    }
-
-    bool result = false;
-    for (uint i = 0, j = message.length(); i < j; i++) {
-        if (message[i] != " ") {
-            result = true;
-            break;
-        }
-    }
-
-    return result;
 }
 
 // //////////////////////////////////////////////////////////////////////////////////////////////////
@@ -931,20 +735,17 @@ void CombatResult(any[] data)
 
         result += ".";
 
-        Game.Message(FOMB_COMBAT_RESULT, result);
+        Messaging::Info(MessageBoxType::Combat, result);
 
         if (8 <= mode && mode <= 11 && isVerbose && message != -1) {
-            Game.Message(FOMB_COMBAT_RESULT, name + " " + Game.GetText(TextPackName::Combat, offset + 7 - 306) + ".");
+            Messaging::Info(MessageBoxType::Combat, name + " " + Game.GetText(TextPackName::Combat, offset + 7 - 306) + ".");
         }
 
         // On head indication
         if (Settings.DamageHitDelay > 0 && damage > 0) {
-            CurMap.Message("-" + damage,
-                           cr.Hex,
-                           (Settings.DamageHitDelay == 0 ? ZERO_TIMESPAN : Time::Milliseconds(Settings.DamageHitDelay)),
-                           0xFFC80000,
-                           true,
-                           ipos(Game.Random(-5, 5), -20));
+            mpos hex = cr.Hex;
+            Yield(Settings.DamageHitDelay);
+            MapText::AddFlyingText(hex, 0xFFC80000, "-" + damage);
         }
     }
 }
@@ -1408,15 +1209,6 @@ string critter_description(Critter& cr, CritterLookTypes lookType)
 }
 
 // //////////////////////////////////////////////////////////////////////////////////////////////////
-// Call to determine cost of single item.
-// To allow function set Settings.CustomItemCost to true.
-// Don't forgot specify this function in client script.
-uint item_cost(Item item, Critter& chosen, Critter& npc, bool sell)
-{
-    return sell ? 1 : 2;
-}
-
-// //////////////////////////////////////////////////////////////////////////////////////////////////
 // Call to determine available timeouts.
 void get_available_timeouts(CritterProperty[] & timeouts)
 {
@@ -1668,17 +1460,6 @@ void items_collection(int collection, Item[] items)
 }
 
 // //////////////////////////////////////////////////////////////////////////////////////////////////
-// Call on message added to message box.
-// Parameters messageText and messageType can be changed for engine handler.
-void message_box(int messageType, string messageText)
-{
-    Gui::MessageBox[] messageBoxes = Gui::CollectMessageBoxes();
-    for (uint i = 0; i < messageBoxes.length(); i++) {
-        messageBoxes[i].AddMessage(messageText, messageType);
-    }
-}
-
-// //////////////////////////////////////////////////////////////////////////////////////////////////
 // Called to check interface hit.
 bool check_interface_hit(int x, int y)
 {
@@ -1844,6 +1625,19 @@ bool lmenu_node_select(int nodeType, Critter cr, Item item)
 void on_screen_size_changed()
 {
     Gui::Callback_OnResolutionChanged();
+}
+
+void OnInfoMessage(EngineInfoMessage infoMessage, string extraText)
+{
+    if (infoMessage == EngineInfoMessage::ServerLog) {
+        Messaging::Info(extraText);
+    }
+    else if (Game.IsTextPresent(TextPackName::Game, int(infoMessage))) {
+        Messaging::Info(Game.GetText(TextPackName::Game, int(infoMessage)));
+    }
+    else {
+        Messaging::Info(Enum::ToString(infoMessage));
+    }
 }
 
 #endif

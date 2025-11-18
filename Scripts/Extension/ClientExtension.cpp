@@ -2,25 +2,36 @@
 
 #include "Client.h"
 
-///@ ExportMethod
-[[maybe_unused]] bool Client_Critter_IsFree(CritterView* self)
-{
-    UNUSED_VARIABLE(self);
+FO_USING_NAMESPACE();
 
+FO_BEGIN_NAMESPACE();
+///@ ExportMethod
+[[maybe_unused]] bool Client_Critter_IsFree(CritterView* self);
+///@ ExportMethod
+[[maybe_unused]] bool Client_Critter_IsBusy(CritterView* self);
+///@ ExportMethod
+[[maybe_unused]] void Client_Critter_Wait(CritterView* self, uint ms);
+FO_END_NAMESPACE();
+
+bool FO_NAMESPACE Client_Critter_IsFree(CritterView* self)
+{
+    FO_STACK_TRACE_ENTRY();
+
+    ignore_unused(self);
     return true;
 }
 
-///@ ExportMethod
-[[maybe_unused]] bool Client_Critter_IsBusy(CritterView* self)
+bool FO_NAMESPACE Client_Critter_IsBusy(CritterView* self)
 {
-    UNUSED_VARIABLE(self);
+    FO_STACK_TRACE_ENTRY();
 
+    ignore_unused(self);
     return false;
 }
 
-///@ ExportMethod
-[[maybe_unused]] void Client_Critter_Wait(CritterView* self, uint ms)
+void FO_NAMESPACE Client_Critter_Wait(CritterView* self, uint ms)
 {
-    UNUSED_VARIABLE(self);
-    UNUSED_VARIABLE(ms);
+    FO_STACK_TRACE_ENTRY();
+
+    ignore_unused(self, ms);
 }

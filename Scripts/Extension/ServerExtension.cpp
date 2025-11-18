@@ -2,6 +2,23 @@
 
 #include "Server.h"
 
+FO_USING_NAMESPACE();
+
+FO_BEGIN_NAMESPACE();
+///@ EngineHook
+FO_SCRIPT_API void InitServerEngine(FOServer* server);
+///@ ExportMethod
+FO_SCRIPT_API void Server_Game_LoadImage(FOServer* server, int imageSlot, string_view imageName);
+///@ ExportMethod
+FO_SCRIPT_API uint Server_Game_GetImageColor(FOServer* server, int imageSlot, int x, int y);
+///@ ExportMethod
+FO_SCRIPT_API bool Server_Critter_IsFree(Critter* server);
+///@ ExportMethod
+FO_SCRIPT_API bool Server_Critter_IsBusy(Critter* server);
+///@ ExportMethod
+FO_SCRIPT_API void Server_Critter_Wait(Critter* server, uint ms);
+FO_END_NAMESPACE();
+
 struct ServerImage
 {
     vector<uint> Data {};
@@ -19,10 +36,9 @@ static auto GetServerExtData(FOServer* server) -> ServerExtData&
     return *reinterpret_cast<ServerExtData*>(server->UserData.get());
 }
 
-///@ EngineHook
-FO_SCRIPT_API void InitServerEngine(FOServer* server)
+void FO_NAMESPACE InitServerEngine(FOServer* server)
 {
-    STACK_TRACE_ENTRY();
+    FO_STACK_TRACE_ENTRY();
 
     server->UserData = unique_del_ptr<uint8>(reinterpret_cast<uint8*>(SafeAlloc::MakeRaw<ServerExtData>()), [](const uint8* ptr) {
         const auto* ext_data_ptr = reinterpret_cast<const ServerExtData*>(ptr);
@@ -30,10 +46,9 @@ FO_SCRIPT_API void InitServerEngine(FOServer* server)
     });
 }
 
-///@ ExportMethod
-FO_SCRIPT_API void Server_Game_LoadImage(FOServer* server, int imageSlot, string_view imageName)
+void FO_NAMESPACE Server_Game_LoadImage(FOServer* server, int imageSlot, string_view imageName)
 {
-    STACK_TRACE_ENTRY();
+    FO_STACK_TRACE_ENTRY();
 
     auto& ext_data = GetServerExtData(server);
 
@@ -48,48 +63,49 @@ FO_SCRIPT_API void Server_Game_LoadImage(FOServer* server, int imageSlot, string
         return;
     }
 
-    auto&& file = server->Resources.ReadFile(imageName);
+    const auto file = server->Resources.ReadFile(imageName);
 
     if (!file) {
         throw ScriptException("File not found", imageName);
     }
 
-    const auto check_number = file.GetUChar();
+    auto reader = file.GetReader();
+    const auto check_number = reader.GetUChar();
 
     if (check_number != 42) {
         throw ScriptException("File is not image", imageName);
     }
 
-    const auto frames_count = file.GetLEUShort();
+    const auto frames_count = reader.GetLEUShort();
 
     if (frames_count != 1) {
         throw ScriptException("File must contain only one frame", imageName);
     }
 
-    [[maybe_unused]] const auto ticks = file.GetLEUShort();
+    [[maybe_unused]] const auto ticks = reader.GetLEUShort();
 
-    const auto dirs = file.GetUChar();
+    const auto dirs = reader.GetUChar();
 
     if (dirs != 1) {
         throw ScriptException("File must contain only one dir", imageName);
     }
 
-    [[maybe_unused]] const auto ox = file.GetLEShort();
-    [[maybe_unused]] const auto oy = file.GetLEShort();
+    [[maybe_unused]] const auto ox = reader.GetLEShort();
+    [[maybe_unused]] const auto oy = reader.GetLEShort();
 
-    const auto is_spr_ref = file.GetUChar();
-    RUNTIME_ASSERT(is_spr_ref == 0);
+    const auto is_spr_ref = reader.GetUChar();
+    FO_RUNTIME_ASSERT(is_spr_ref == 0);
 
-    const auto width = file.GetLEUShort();
-    const auto height = file.GetLEUShort();
-    [[maybe_unused]] const auto nx = file.GetLEShort();
-    [[maybe_unused]] const auto ny = file.GetLEShort();
-    const auto* data = file.GetCurBuf();
+    const auto width = reader.GetLEUShort();
+    const auto height = reader.GetLEUShort();
+    [[maybe_unused]] const auto nx = reader.GetLEShort();
+    [[maybe_unused]] const auto ny = reader.GetLEShort();
+    const auto* data = reader.GetCurBuf();
 
-    file.GoForward(static_cast<size_t>(width) * height * 4);
+    reader.GoForward(static_cast<size_t>(width) * height * 4);
 
-    const auto check_number2 = file.GetUChar();
-    RUNTIME_ASSERT(check_number2 == 42);
+    const auto check_number2 = reader.GetUChar();
+    FO_RUNTIME_ASSERT(check_number2 == 42);
 
     auto&& simg = std::make_unique<ServerImage>();
     simg->Width = width;
@@ -100,10 +116,9 @@ FO_SCRIPT_API void Server_Game_LoadImage(FOServer* server, int imageSlot, string
     ext_data.ServerImages[imageSlot] = std::move(simg);
 }
 
-///@ ExportMethod
-FO_SCRIPT_API uint Server_Game_GetImageColor(FOServer* server, int imageSlot, int x, int y)
+uint FO_NAMESPACE Server_Game_GetImageColor(FOServer* server, int imageSlot, int x, int y)
 {
-    STACK_TRACE_ENTRY();
+    FO_STACK_TRACE_ENTRY();
 
     auto& ext_data = GetServerExtData(server);
 
@@ -121,25 +136,25 @@ FO_SCRIPT_API uint Server_Game_GetImageColor(FOServer* server, int imageSlot, in
     return result;
 }
 
-///@ ExportMethod
-FO_SCRIPT_API bool Server_Critter_IsFree(Critter* server)
+bool FO_NAMESPACE Server_Critter_IsFree(Critter* server)
 {
-    UNUSED_VARIABLE(server);
+    FO_STACK_TRACE_ENTRY();
 
+    ignore_unused(server);
     return true;
 }
 
-///@ ExportMethod
-FO_SCRIPT_API bool Server_Critter_IsBusy(Critter* server)
+bool FO_NAMESPACE Server_Critter_IsBusy(Critter* server)
 {
-    UNUSED_VARIABLE(server);
+    FO_STACK_TRACE_ENTRY();
 
+    ignore_unused(server);
     return false;
 }
 
-///@ ExportMethod
-FO_SCRIPT_API void Server_Critter_Wait(Critter* server, uint ms)
+void FO_NAMESPACE Server_Critter_Wait(Critter* server, uint ms)
 {
-    UNUSED_VARIABLE(server);
-    UNUSED_VARIABLE(ms);
+    FO_STACK_TRACE_ENTRY();
+
+    ignore_unused(server, ms);
 }

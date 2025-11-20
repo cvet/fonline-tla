@@ -8,22 +8,22 @@ FO_BEGIN_NAMESPACE();
 ///@ EngineHook
 FO_SCRIPT_API void InitServerEngine(FOServer* server);
 ///@ ExportMethod
-FO_SCRIPT_API void Server_Game_LoadImage(FOServer* server, int imageSlot, string_view imageName);
+FO_SCRIPT_API void Server_Game_LoadImage(FOServer* server, int32 imageSlot, string_view imageName);
 ///@ ExportMethod
-FO_SCRIPT_API uint Server_Game_GetImageColor(FOServer* server, int imageSlot, int x, int y);
+FO_SCRIPT_API ucolor Server_Game_GetImageColor(FOServer* server, int32 imageSlot, int32 x, int32 y);
 ///@ ExportMethod
 FO_SCRIPT_API bool Server_Critter_IsFree(Critter* server);
 ///@ ExportMethod
 FO_SCRIPT_API bool Server_Critter_IsBusy(Critter* server);
 ///@ ExportMethod
-FO_SCRIPT_API void Server_Critter_Wait(Critter* server, uint ms);
+FO_SCRIPT_API void Server_Critter_Wait(Critter* server, int32 ms);
 FO_END_NAMESPACE();
 
 struct ServerImage
 {
-    vector<uint> Data {};
-    int Width {};
-    int Height {};
+    vector<ucolor> Data {};
+    int32 Width {};
+    int32 Height {};
 };
 
 struct ServerExtData
@@ -46,13 +46,13 @@ void FO_NAMESPACE InitServerEngine(FOServer* server)
     });
 }
 
-void FO_NAMESPACE Server_Game_LoadImage(FOServer* server, int imageSlot, string_view imageName)
+void FO_NAMESPACE Server_Game_LoadImage(FOServer* server, int32 imageSlot, string_view imageName)
 {
     FO_STACK_TRACE_ENTRY();
 
     auto& ext_data = GetServerExtData(server);
 
-    if (imageSlot >= ext_data.ServerImages.size()) {
+    if (imageSlot < 0 || imageSlot >= static_cast<int32>(ext_data.ServerImages.size())) {
         ext_data.ServerImages.resize(imageSlot + 1);
     }
     if (ext_data.ServerImages[imageSlot]) {
@@ -70,59 +70,59 @@ void FO_NAMESPACE Server_Game_LoadImage(FOServer* server, int imageSlot, string_
     }
 
     auto reader = file.GetReader();
-    const auto check_number = reader.GetUChar();
+    const auto check_number = reader.GetUInt8();
 
     if (check_number != 42) {
         throw ScriptException("File is not image", imageName);
     }
 
-    const auto frames_count = reader.GetLEUShort();
+    const auto frames_count = reader.GetLEUInt16();
 
     if (frames_count != 1) {
         throw ScriptException("File must contain only one frame", imageName);
     }
 
-    [[maybe_unused]] const auto ticks = reader.GetLEUShort();
+    [[maybe_unused]] const auto ticks = reader.GetLEUInt16();
 
-    const auto dirs = reader.GetUChar();
+    const auto dirs = reader.GetUInt8();
 
     if (dirs != 1) {
         throw ScriptException("File must contain only one dir", imageName);
     }
 
-    [[maybe_unused]] const auto ox = reader.GetLEShort();
-    [[maybe_unused]] const auto oy = reader.GetLEShort();
+    [[maybe_unused]] const auto ox = reader.GetLEUInt16();
+    [[maybe_unused]] const auto oy = reader.GetLEUInt16();
 
-    const auto is_spr_ref = reader.GetUChar();
+    const auto is_spr_ref = reader.GetUInt8();
     FO_RUNTIME_ASSERT(is_spr_ref == 0);
 
-    const auto width = reader.GetLEUShort();
-    const auto height = reader.GetLEUShort();
-    [[maybe_unused]] const auto nx = reader.GetLEShort();
-    [[maybe_unused]] const auto ny = reader.GetLEShort();
+    const auto width = reader.GetLEUInt16();
+    const auto height = reader.GetLEUInt16();
+    [[maybe_unused]] const auto nx = reader.GetLEUInt16();
+    [[maybe_unused]] const auto ny = reader.GetLEUInt16();
     const auto* data = reader.GetCurBuf();
 
     reader.GoForward(static_cast<size_t>(width) * height * 4);
 
-    const auto check_number2 = reader.GetUChar();
+    const auto check_number2 = reader.GetUInt8();
     FO_RUNTIME_ASSERT(check_number2 == 42);
 
     auto&& simg = std::make_unique<ServerImage>();
     simg->Width = width;
     simg->Height = height;
     simg->Data.resize(static_cast<size_t>(width) * height);
-    std::memcpy(simg->Data.data(), data, simg->Data.size() * sizeof(uint));
+    std::memcpy(simg->Data.data(), data, simg->Data.size() * sizeof(ucolor));
 
     ext_data.ServerImages[imageSlot] = std::move(simg);
 }
 
-uint FO_NAMESPACE Server_Game_GetImageColor(FOServer* server, int imageSlot, int x, int y)
+ucolor FO_NAMESPACE Server_Game_GetImageColor(FOServer* server, int32 imageSlot, int32 x, int32 y)
 {
     FO_STACK_TRACE_ENTRY();
 
     auto& ext_data = GetServerExtData(server);
 
-    if (imageSlot >= ext_data.ServerImages.size() || !ext_data.ServerImages[imageSlot]) {
+    if (imageSlot < 0 || imageSlot >= static_cast<int32>(ext_data.ServerImages.size()) || !ext_data.ServerImages[imageSlot]) {
         throw ScriptException("Image not loaded");
     }
 
@@ -152,7 +152,7 @@ bool FO_NAMESPACE Server_Critter_IsBusy(Critter* server)
     return false;
 }
 
-void FO_NAMESPACE Server_Critter_Wait(Critter* server, uint ms)
+void FO_NAMESPACE Server_Critter_Wait(Critter* server, int32 ms)
 {
     FO_STACK_TRACE_ENTRY();
 

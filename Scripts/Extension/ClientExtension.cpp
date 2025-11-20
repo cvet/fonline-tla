@@ -10,7 +10,7 @@ FO_BEGIN_NAMESPACE();
 ///@ ExportMethod
 [[maybe_unused]] bool Client_Critter_IsBusy(CritterView* self);
 ///@ ExportMethod
-[[maybe_unused]] void Client_Critter_Wait(CritterView* self, uint ms);
+[[maybe_unused]] void Client_Critter_Wait(CritterView* self, int32 ms);
 FO_END_NAMESPACE();
 
 bool FO_NAMESPACE Client_Critter_IsFree(CritterView* self)
@@ -29,7 +29,7 @@ bool FO_NAMESPACE Client_Critter_IsBusy(CritterView* self)
     return false;
 }
 
-void FO_NAMESPACE Client_Critter_Wait(CritterView* self, uint ms)
+void FO_NAMESPACE Client_Critter_Wait(CritterView* self, int32 ms)
 {
     FO_STACK_TRACE_ENTRY();
 

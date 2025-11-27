@@ -59,8 +59,7 @@ void _AddStep(int waveNum, int type, int radius, int timeNext, int timeRepeat, b
     ws.Type = type;
     ws.Radius = radius;
     wp.Entry = entry;
-    wp.HexX = x;
-    wp.HexY = y;
+    wp.Hex = mpos(x, y);
     wp.Type = (entry == 0 ? POINT_TYPE_COORDS : POINT_TYPE_ENTRY);
     DL("wp.Type:=" + wp.Type);
     ws.Point = wp;
@@ -213,21 +212,19 @@ class WavePoint
 {
     int Type;  // Тип указания координатной точки волны через прямые координаты или через гекс
     int Entry; // Номер гекса
-    uint16 HexX; // Координата по оси икс
-    uint16 HexY; // Координата по оси игрек
+	mpos Hex; // Координаты
 
-    void GetCoords(Map map, uint16 hX, uint16 hY)
+    void GetCoords(Map map, mpos& hex)
     {
         if (Type == POINT_TYPE_ENTRY) {
             if (!valid(map)) {
                 return;
             }
             int entNum = Entrance::MapCountEntry(map, Entry);
-            Entrance::MapGetEntryCoords(map, Entry, Game.Random(0, entNum - 1), hX, hY);
+            Entrance::MapGetEntryCoords(map, Entry, Game.Random(0, entNum - 1), hex);
         }
         else {
-            hX = HexX;
-            hY = HexY;
+            hex = Hex;
         }
     }
 
@@ -235,16 +232,18 @@ class WavePoint
     {
         save.Set(Type);
         save.Set(Entry);
-        save.Set(HexX);
-        save.Set(HexY);
+        save.Set(Hex.x);
+		save.Set(Hex.y);
     }
 
     void Load(Serializator::Serializator load)
     {
         load.Get(Type);
         load.Get(Entry);
-        load.Get(HexX);
-        load.Get(HexY);
+		int x = 0, y = 0;
+        load.Get(x);
+		load.Get(y);
+		Hex = mpos(x, y);
     }
 };
 
@@ -296,13 +295,12 @@ class WaveStep
     void _DoActionSpawn(MobInfo mi, Map map) // Спавн мобов в нужном месте
     {
         DL("_DoActionSpawn called");
-        uint16 x = 0;
-        uint16 y = 0;
-        Point.GetCoords(map, x, y);
+        mpos hex;
+        Point.GetCoords(map, hex);
         Critter mob;
-        DL("Triing get mob. radius =" + Radius + "x" + x + "Pid =" + mi.Pid);
-        if (Caravan::GetFreeHex(map, Radius, x, y) && mi.Pid != EMPTY_HSTRING) {
-            mob = map.AddNpc(mi.Pid, mpos(x, y), 6, Tla::GetCritPropsDict(mi.MobParams));
+        DL("Triing get mob. radius =" + Radius + "x" + hex.x + "Pid =" + mi.Pid);
+        if (Entrance::GetFreeHex(map, Radius, hex) && mi.Pid != EMPTY_HSTRING) {
+            mob = map.AddNpc(mi.Pid, hex, 6, Tla::GetCritPropsDict(mi.MobParams));
             if (mi.Script !is null) {
                 mob.SetupScript(mi.Script);
             }
@@ -324,19 +322,18 @@ class WaveStep
         if (!valid(mob)) {
             return;
         }
-        uint16 x = mob.Hex.x;
-        uint16 y = mob.Hex.y;
-        Point.GetCoords(map, x, y);
+		auto hex = mob.Hex;
+        Point.GetCoords(map, hex);
         int tries = 0;
         while (tries < 20) {
             tries++;
-            if (Caravan::GetFreeHex(map, Radius, x, y)) {
-                if (map.GetPathLength(mob, mpos(x, y), 1) > 0) {
+            if (Entrance::GetFreeHex(map, Radius, hex)) {
+                if (map.GetPathLength(mob, hex, 1) > 0) {
                     break;
                 }
             }
         }
-        NpcPlanes::AddWalkPlane(mob, 0, x, y, 6, true, 1);
+        NpcPlanes::AddWalkPlane(mob, 0, hex.x, hex.y, 6, true, 1);
 
         mob.IsNoHome = true;
         DL("plan move added");
@@ -350,13 +347,11 @@ class WaveStep
             return;
         }
         mob.IsNoHome = false;
-        uint16 x = mob.Hex.x;
-        uint16 y = mob.Hex.y;
-        Point.GetCoords(map, x, y);
-        if (Caravan::GetFreeHex(map, Radius, x, y)) {
+        auto hex = mob.Hex;
+        Point.GetCoords(map, hex);
+        if (Entrance::GetFreeHex(map, Radius, hex)) {
             mob.HomeMapId = map.Id;
-            mob.HomeHexX = x;
-            mob.HomeHexY = y;
+            mob.HomeHex = hex;
             mob.HomeDir = Game.Random(0, 5);
         }
     }
@@ -385,7 +380,6 @@ class WaveStep
 
     void _DoActionTransitToMap(MobInfo mi)
     {
-        DL("_DoActionTransitToMap called");
         Map map = Game.GetMap(ident(Param));
         if (!valid(map)) {
             return;
@@ -394,11 +388,9 @@ class WaveStep
         if (!valid(mob)) {
             return;
         }
-        uint16 x = 0;
-        uint16 y = 0;
-        Point.GetCoords(map, x, y);
-        Obsolete::CritterTransitToMapCoords(mob, map.Id, x, y, Game.Random(0, 5));
-        DL("Mob transit success");
+        mpos hex;
+        Point.GetCoords(map, hex);
+		mob.TransitToMap(map, hex, Game.Random(0, 5));
     }
 
     void Save(Serializator::Serializator save)
@@ -601,14 +593,13 @@ class MobWave
 
         if (ws.SearchForTargetsBefore) {
             Critter[] critters = {};
-            uint16 x = 0;
-            uint16 y = 0;
-            ws.Point.GetCoords(map, x, x);
+            mpos hex;
+            ws.Point.GetCoords(map, hex);
             if (AttackPlayers) {
-                critters.insertLast(map.GetCritters(mpos(x, y), ws.Radius, CritterFindType::NonDeadPlayers));
+                critters.insertLast(map.GetCritters(hex, ws.Radius, CritterFindType::NonDeadPlayers));
             }
             if (AttackNpc) {
-                critters.insertLast(map.GetCritters(mpos(x, y), ws.Radius, CritterFindType::NonDeadNpc));
+                critters.insertLast(map.GetCritters(hex, ws.Radius, CritterFindType::NonDeadNpc));
             }
             for (int i = 0; i < critters.length(); i++) {
                 Critter target = critters[i];
@@ -644,14 +635,13 @@ class MobWave
 
         if (ws.SearchForTargetsBefore) {
             Critter[] critters = {};
-            uint16 x = 0;
-            uint16 y = 0;
-            ws.Point.GetCoords(map, x, y);
+            mpos hex;
+            ws.Point.GetCoords(map, hex);
             if (AttackPlayers) {
-                critters.insertLast(map.GetCritters(mpos(x, y), ws.Radius, CritterFindType::NonDeadPlayers));
+                critters.insertLast(map.GetCritters(hex, ws.Radius, CritterFindType::NonDeadPlayers));
             }
             if (AttackNpc) {
-                critters.insertLast(map.GetCritters(mpos(x, y), ws.Radius, CritterFindType::NonDeadNpc));
+                critters.insertLast(map.GetCritters(hex, ws.Radius, CritterFindType::NonDeadNpc));
             }
             for (int i = 0; i < critters.length(); i++) {
                 Critter target = critters[i];

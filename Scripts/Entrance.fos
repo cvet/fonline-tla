@@ -6,8 +6,7 @@ namespace Entrance
 class Entry
 {
     hstring Name;
-    uint16 HexX;
-    uint16 HexY;
+    mpos Hex;
 };
 
 Entry GetEntry(Map map, int entry, int skip)
@@ -18,7 +17,7 @@ Entry GetEntry(Map map, int entry, int skip)
 Entry GetEntry(Map map, hstring entry, int skip)
 {
     Entry ent = Entry();
-    if (!MapGetEntryCoords(map, entry, skip, ent.HexX, ent.HexY)) {
+    if (!MapGetEntryCoords(map, entry, skip, ent.Hex)) {
         return null;
     }
 
@@ -38,36 +37,62 @@ Entry[] ParseEntries(Map map, hstring entry)
     for (int i = 0; i < count; i++) {
         Entry ent = Entry();
         ent.Name = entry;
-        MapGetEntryCoords(map, entry, i, ent.HexX, ent.HexY);
+        MapGetEntryCoords(map, entry, i, ent.Hex);
         entries.insertLast(ent);
     }
     return entries;
 }
 
-bool GetEntryFreeHex(Map map, int entry, uint16& hx, uint16& hy)
+bool GetEntryFreeHex(Map map, int entry, mpos& hex)
 {
-    return GetEntryFreeHex(map, hstring("" + entry), hx, hy);
+    return GetEntryFreeHex(map, hstring("" + entry), hex);
 }
 
-bool GetEntryFreeHex(Map map, hstring entry, uint16& hx, uint16& hy)
+// ищет свободный гекс рядом с указанными координатами
+// если найдет - возвращает true
+// иначе - false
+// карта - где ищем гекс
+// радиус на котором нужно искать
+// hex координаты нового гекса
+bool GetFreeHex(Map map, int radius, mpos& hex)
+{
+    if (hex.x == 0 || hex.y == 0 || hex.x + radius >= int(map.Size.width)|| hex.y + radius >= int(map.Size.height)) {
+        return false; // Check borders
+    }
+    int numTry = 10; // число попыток найти свободный гекс
+    int xDelta = 0;
+    int yDelta = 0;
+
+    for (int i = 0; i < numTry; i++) {
+        xDelta = Game.Random(0, radius * 2) - radius;
+        yDelta = Game.Random(0, radius * 2) - radius;
+        if (map.IsHexMovable(mpos(hex.x + xDelta, hex.y + yDelta))) {
+            hex = mpos(hex.x + xDelta, hex.y + yDelta);
+            return true;
+        }
+    }
+    return false;
+}
+
+bool GetEntryFreeHex(Map map, hstring entry, mpos& hex)
 {
     int count = MapCountEntry(map, entry);
 
     // Fisrt check direct coords
     for (int i = 0; i < count; i++) {
-        if (MapGetEntryCoords(map, entry, i, hx, hy) && map.IsHexMovable(mpos(hx, hy))) {
+        if (MapGetEntryCoords(map, entry, i, hex) && map.IsHexMovable(hex)) {
             return true;
         }
     }
 
     // Check borders
-    if (hx == 0 || hy == 0 || hx >= map.Size.width - 1 || hy >= map.Size.height - 1) {
+    if (hex.x == 0 || hex.y == 0 || hex.x >= map.Size.width - 1 || hex.y >= map.Size.height - 1) {
         return false;
     }
 
     // Second check coords with offsets
     for (int i = 0; i < count; i++) {
-        if (MapGetEntryCoords(map, entry, i, hx, hy)) {
+        if (MapGetEntryCoords(map, entry, i, hex)) {
             for (int x = -1; x <= 1; x++) {
                 for (int y = -1; y <= 1; y++) {
                     if (x == 0 && y == 0) {
@@ -75,17 +100,16 @@ bool GetEntryFreeHex(Map map, hstring entry, uint16& hx, uint16& hy)
                     }
 
                     if (Settings.MapHexagonal) {
-                        if ((hx % 2) == 1 && ((x == -1 && y == 1) || (x == 1 && y == 1))) {
+                        if ((hex.x % 2) == 1 && ((x == -1 && y == 1) || (x == 1 && y == 1))) {
                             continue;
                         }
-                        if ((hx % 2) == 0 && ((x == -1 && y == -1) || (x == 1 && y == -1))) {
+                        if ((hex.x % 2) == 0 && ((x == -1 && y == -1) || (x == 1 && y == -1))) {
                             continue;
                         }
                     }
 
-                    if (map.IsHexMovable(mpos(hx + x, hy + y))) {
-                        hx += x;
-                        hy += y;
+                    if (map.IsHexMovable(mpos(hex.x + x, hex.y + y))) {
+                        hex = mpos(hex.x + x, hex.y + y);
                         return true;
                     }
                 }
@@ -95,28 +119,25 @@ bool GetEntryFreeHex(Map map, hstring entry, uint16& hx, uint16& hy)
     return false;
 }
 
-bool GetNearEntry(Map map, int entry, uint16& hx, uint16& hy)
+bool GetNearEntry(Map map, int entry, mpos& hex)
 {
-    return GetNearEntry(map, hstring("" + entry), hx, hy);
+    return GetNearEntry(map, hstring("" + entry), hex);
 }
 
-bool GetNearEntry(Map map, hstring entry, uint16& hx, uint16& hy)
+bool GetNearEntry(Map map, hstring entry, mpos& hex)
 {
-    uint16 hxBase = hx;
-    uint16 hyBase = hy;
+    auto hexBase = hex;
 
     Entry[] entries = ParseEntries(map, entry);
     if (entries.isEmpty()) {
         return false;
     }
 
-    hx = entries[0].HexX;
-    hy = entries[0].HexY;
+    hex = entries[0].Hex;
     for (int i = 1; i < entries.length(); i++) {
         Entry ent = entries[i];
-        if (Game.GetDistance(mpos(hxBase, hyBase), mpos(ent.HexX, ent.HexY)) < Game.GetDistance(mpos(hxBase, hyBase), mpos(hx, hy))) {
-            hx = ent.HexX;
-            hy = ent.HexY;
+        if (Game.GetDistance(hexBase, ent.Hex) < Game.GetDistance(hexBase, hex)) {
+            hex = ent.Hex;
         }
     }
 
@@ -143,7 +164,7 @@ bool IsCritterInDeadZone(Critter cr, Map map, uint8 dir, int hexFirst, int hexEn
 {
     int crossNum = 0; // число пересечений луча и ломанных, ограничивающих многоугольник мертвой зоны
     for (int i = hexFirst; i <= hexEnd; i++) {
-        if (BeamCrossing2Section(map, i, i == hexEnd ? hexFirst : i + 1, cr.Hex.x, cr.Hex.y, dir)) {
+        if (BeamCrossing2Section(map, i, i == hexEnd ? hexFirst : i + 1, cr.Hex, dir)) {
             crossNum++;
         }
     }
@@ -154,46 +175,39 @@ bool IsCritterInDeadZone(Critter cr, Map map, uint8 dir, int hexFirst, int hexEn
 // map - карта
 // hexNum1 - начальный гекс отрезка
 // hexNum2 - конечный гекс отрезка
-// beamX - координата начала луча по оси x
-// beamY - координата начала луча по оси у
+// beamHex - координата начала луча
 // dir - направление луча
 // если не найдены гексы, или нет пересечения луча и отрезка между гексами - вернет false
 // если луч пересекает отрезок - вернет true
-bool BeamCrossing2Section(Map map, int hexNum1, int hexNum2, uint16 beamX, uint16 beamY, uint8 dir)
+bool BeamCrossing2Section(Map map, int hexNum1, int hexNum2, mpos beamHex, uint8 dir)
 {
     // 1. вычисляем координаты конечной точки луча
-    uint16 hx0 = beamX;
-    uint16 beamX2 = hx0;
-    uint16 hy0 = beamY;
-    uint16 beamY2 = hy0;
+	mpos hex0 = beamHex;
+	mpos beamHex2 = beamHex;
     int steps = 0;
 
-    while (hx0 != beamX2 || hy0 != beamY2 || steps == 0) {
+    while (hex0.x != beamHex2.x || hex0.y != beamHex2.y || steps == 0) {
         steps += 1;
-        hx0 = beamX2;
-        hy0 = beamY2;
-        map.MoveHexByDir(mpos(beamX2, beamY2), dir, steps);
+		hex0 = beamHex2;
+        map.MoveHexByDir(beamHex2, dir, steps);
     }
 
-    // координаты конечной точки высчитаны beamX2, beamY2
-    uint16 hx1 = 0;
-    uint16 hx2 = 0;
-    uint16 hy1 = 0;
-    uint16 hy2 = 0;
+    // координаты конечной точки высчитаны beamHex2
+    mpos hex1, hex2;
     // координаты начальной и конечной точки отрезка между двумя гексами
-    if (!MapGetEntryCoords(map, hexNum1, 0, hx1, hy1)) {
+    if (!MapGetEntryCoords(map, hexNum1, 0, hex1)) {
         return false;
     }
-    if (!MapGetEntryCoords(map, hexNum2, 0, hx2, hy2)) {
+    if (!MapGetEntryCoords(map, hexNum2, 0, hex2)) {
         return false;
     }
 
     // Знаменатель
-    float z = (int(hx1) - int(hx2)) * (int(beamY2) - int(beamY)) - (int(hy1) - int(hy2)) * (int(beamX2) - int(beamX));
+    float z = (hex1.x - hex2.x) * (beamHex2.y - beamHex.y) - (hex1.y - hex2.y) * (beamHex2.x - beamHex.x);
     // числитель 1
-    float ch = (int(hx1) - int(beamX)) * (int(beamY2) - int(beamY)) - (int(hy1) - int(beamY)) * (int(beamX2) - int(beamX));
+    float ch = (hex1.x - beamHex.x) * (beamHex2.y - beamHex.y) - (hex1.y - beamHex.y) * (beamHex2.x - beamHex.x);
     // числитель 2
-    float cbeam = (int(hx1) - int(hx2)) * (int(hy1) - int(beamY)) - (int(hy1) - int(hy2)) * (int(hx1) - int(beamX));
+    float cbeam = (hex1.x - hex2.x) * (hex1.y - beamHex.y) - (hex1.y - hex2.y) * (hex1.x - beamHex.x);
     // если числители и знаменатель = 0, прямые совпадают, считаем что это не пересечение
     if (z == 0 && ch == 0 && cbeam == 0) {
         return false;
@@ -243,12 +257,12 @@ bool EntryMatch(hstring entry, StaticItem entrance)
     return false;
 }
 
-bool MapGetEntryCoords(Map map, int entry, int skip, uint16& hexX, uint16& hexY)
+bool MapGetEntryCoords(Map map, int entry, int skip, mpos& hex)
 {
-    return MapGetEntryCoords(map, hstring("" + entry), skip, hexX, hexY);
+    return MapGetEntryCoords(map, hstring("" + entry), skip, hex);
 }
 
-bool MapGetEntryCoords(Map map, hstring entry, int skip, uint16& hexX, uint16& hexY)
+bool MapGetEntryCoords(Map map, hstring entry, int skip, mpos& hex)
 {
     if (valid(map)) {
         auto staticItems = map.GetStaticItems();
@@ -257,8 +271,7 @@ bool MapGetEntryCoords(Map map, hstring entry, int skip, uint16& hexX, uint16& h
             StaticItem staticItem = staticItems[i];
             if (EntryMatch(entry, staticItem)) {
                 if (skipped == skip) {
-                    hexX = staticItem.Hex.x;
-                    hexY = staticItem.Hex.y;
+                    hex = staticItem.Hex;
                     return true;
                 }
                 skipped++;

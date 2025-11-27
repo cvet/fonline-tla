@@ -599,15 +599,15 @@ void global_process(int processType, Critter cr, Item car, float& curX, float& c
 // //////////////////////////////////////////////////////////////////////////////////////////////////
 // Call on invite to encaunter.
 // If mapId != 0 than group enter to it.
-void global_invite(Critter leader, Item car, int encounterDescriptor, int combatMode, ident& mapId, uint16& hexX, uint16& hexY, uint8& dir)
+void global_invite(Critter leader, Item car, int encounterDescriptor, int combatMode, ident& mapId, mpos& hex, int& dir)
 {
     // Enter to map under group
     if (encounterDescriptor == int(-1)) {
-        Location[] locations = Location::GetLocationsInRadius(ipos(leader.WorldPos.x, leader.WorldPos.y), 0);
+        Location[] locations = Location::GetLocationsInRadius(leader.WorldPos, 0);
         if (locations.length() != 0) {
             Location loc = locations[0];
             Map map = loc.GetMapByIndex(0);
-            if (valid(map) && Entrance::MapGetEntryCoords(map, 0, 0, hexX, hexY)) {
+            if (valid(map) && Entrance::MapGetEntryCoords(map, 0, 0, hex)) {
                 mapId = map.Id;
                 dir = 0xFF;
             }
@@ -616,7 +616,7 @@ void global_invite(Critter leader, Item car, int encounterDescriptor, int combat
     }
 
     // Find encounter
-    Worldmap::InviteToEncounter(GlobalmapGroupExtended::GetGlobalGroup(leader), car, encounterDescriptor, combatMode, mapId, hexX, hexY, dir);
+    Worldmap::InviteToEncounter(GlobalmapGroupExtended::GetGlobalGroup(leader), car, encounterDescriptor, combatMode, mapId, hex, dir);
 }
 
 void ScanZone(Critter[] group, int zx, int zy)
@@ -677,7 +677,7 @@ void CheckForLocationWithoutParking(Critter cr, Item car, float& curX, float& cu
         bool placeFounded = false;
         Entrance::Entry[] entries = Entrance::ParseEntries(map, car.Car_Entrance);
         for (int i = 0; i < entries.length(); i++) {
-            if (map.CheckPlaceForItem(mpos(entries[i].HexX, entries[i].HexY), car.ProtoId)) {
+            if (map.CheckPlaceForItem(entries[i].Hex, car.ProtoId)) {
                 placeFounded = true;
                 break;
             }
@@ -1003,7 +1003,7 @@ void GM_StopGroup(Critter cr) // 3hits
     GM_GlobalProcess(cr, group, GLOBAL_PROCESS_STOPPED);
 }
 
-bool GM_GroupToMap(GlobalMapGroup group, Map map, hstring entry, uint16 mx, uint16 my, uint8 mdir) // 6hits
+bool GM_GroupToMap(GlobalMapGroup group, Map map, hstring entry, mpos hexMap, int mdir) // 6hits
 {
     if (!valid(map)) {
         Game.Log("Map null ptr");
@@ -1011,9 +1011,8 @@ bool GM_GroupToMap(GlobalMapGroup group, Map map, hstring entry, uint16 mx, uint
     }
 
     Critter rule = group.Rule;
-    uint16 hx, hy;
     uint8 dir;
-    uint16 car_hx = 0, car_hy = 0;
+    mpos hex, car_hex;
     Item car = group.GetCar();
     Critter car_owner;
 
@@ -1024,16 +1023,16 @@ bool GM_GroupToMap(GlobalMapGroup group, Map map, hstring entry, uint16 mx, uint
         }
     }
 
-    if (mx >= map.Size.width || my >= map.Size.height || mdir >= 6) {
+    if (hexMap.x >= map.Size.width || hexMap.y >= map.Size.height || mdir >= 6) {
         if (valid(car)) {
             int entries = Entrance::MapCountEntry(map, ENTRY_CAR);
             int entriesPass = Entrance::MapCountEntry(map, ENTRY_CAR_CRITTERS);
             int entryNum = -1;
 
             for (int i = 0; i < entries && i < entriesPass; i++) {
-                Entrance::MapGetEntryCoords(map, ENTRY_CAR, i, car_hx, car_hy);
-                if (map.CheckPlaceForItem(mpos(car_hx, car_hy), car.ProtoId)) {
-                    Entrance::MapGetEntryCoords(map, ENTRY_CAR_CRITTERS, i, hx, hx);
+                Entrance::MapGetEntryCoords(map, ENTRY_CAR, i, car_hex);
+                if (map.CheckPlaceForItem(car_hex, car.ProtoId)) {
+                    Entrance::MapGetEntryCoords(map, ENTRY_CAR_CRITTERS, i, hex);
                     entryNum = i;
                     break;
                 }
@@ -1044,8 +1043,8 @@ bool GM_GroupToMap(GlobalMapGroup group, Map map, hstring entry, uint16 mx, uint
                 return false;
             }
 
-            Entrance::MapGetEntryCoords(map, ENTRY_CAR, entryNum, hx, hy);
-            if (!map.CheckPlaceForItem(mpos(car_hx, car_hy), car.ProtoId)) {
+            Entrance::MapGetEntryCoords(map, ENTRY_CAR, entryNum, hex);
+            if (!map.CheckPlaceForItem(car_hex, car.ProtoId)) {
                 Messaging::Info(rule, TextPackName::Game, STR_GLOBAL_CAR_PLACE_NOT_FOUND);
                 return false;
             }
@@ -1054,15 +1053,14 @@ bool GM_GroupToMap(GlobalMapGroup group, Map map, hstring entry, uint16 mx, uint
             }
         }
         else {
-            if (!Entrance::GetEntryFreeHex(map, ENTRY_DEFAULT, hx, hy)) {
+            if (!Entrance::GetEntryFreeHex(map, ENTRY_DEFAULT, hex)) {
                 Messaging::Info(rule, TextPackName::Game, STR_GLOBAL_PLACE_NOT_FOUND);
                 return false;
             }
         }
     }
     else {
-        hx = mx;
-        hy = my;
+        hex = hexMap;
         dir = mdir;
         if (valid(car)) {
             int entries = Entrance::MapCountEntry(map, ENTRY_CAR);
@@ -1070,9 +1068,9 @@ bool GM_GroupToMap(GlobalMapGroup group, Map map, hstring entry, uint16 mx, uint
             int entryNum = -1;
 
             for (int i = 0; i < entries && i < entriesPass; i++) {
-                Entrance::MapGetEntryCoords(map, ENTRY_CAR, i, car_hx, car_hy);
-                if (map.CheckPlaceForItem(mpos(car_hx, car_hy), car.ProtoId)) {
-                    Entrance::MapGetEntryCoords(map, ENTRY_CAR_CRITTERS, i, hx, hx);
+                Entrance::MapGetEntryCoords(map, ENTRY_CAR, i, car_hex);
+                if (map.CheckPlaceForItem(car_hex, car.ProtoId)) {
+                    Entrance::MapGetEntryCoords(map, ENTRY_CAR_CRITTERS, i, hex);
                     entryNum = i;
                     break;
                 }
@@ -1090,10 +1088,10 @@ bool GM_GroupToMap(GlobalMapGroup group, Map map, hstring entry, uint16 mx, uint
     // Transit rule
     rule.WorldPos = ipos(int(group.CurX), int(group.CurY));
     if (valid(car)) {
-        ItemMovement::MoveItem(car, 1, map, car_hx, car_hy);
+        ItemMovement::MoveItem(car, 1, map, car_hex);
     }
 
-    rule.TransitToMap(map, mpos(hx, hy), Game.Random(0, 5));
+    rule.TransitToMap(map, hex, Game.Random(0, 5));
 
     // Transit other
     for (int i = 0, l = transitCr.length(); i < l; i++) {
@@ -1104,7 +1102,7 @@ bool GM_GroupToMap(GlobalMapGroup group, Map map, hstring entry, uint16 mx, uint
 
         cr1.WorldPos = ipos(int(group.CurX), int(group.CurY));
 
-        cr1.TransitToMap(map, mpos(hx, hy), Game.Random(0, 5));
+        cr1.TransitToMap(map, hex, Game.Random(0, 5));
         if (!valid(cr1.GetMap())) // Проверить, что криттер успеет сюда попасть
         // if( !Transit( cr, map, hx, hy, dir, valid( car ) ? 3 : 2, true ) )
         {
@@ -1199,7 +1197,7 @@ bool GM_GroupToLoc(Critter rule, ident locId, int entrance, bool force = false) 
         return false;
     }
 
-    return GM_GroupToMap(group, map, entry, uint16(-1), uint16(-1), uint8(-1));
+    return GM_GroupToMap(group, map, entry, mpos(), 0);
 }
 
 int DistSqrt(int x1, int y1, int x2, int y2)
@@ -1292,19 +1290,17 @@ void GM_GlobalInvite(GlobalMapGroup group, int combat_mode) // 5hits
     group.EncounterDescriptor = 0;
 
     ident map_id;
-    uint16 hx = 0;
-    uint16 hy = 0;
-    uint8 dir = 0;
+    mpos hex;
+    int dir = 0;
     Critter rule = group.Rule;
     bool global_invite = true;
 
-    if (rule.OnGlobalMapInvite.Fire(group.GetCar(), encounter_descriptor, combat_mode, map_id, hx, hy, dir)) {
+    if (rule.OnGlobalMapInvite.Fire(group.GetCar(), encounter_descriptor, combat_mode, map_id, hex, dir)) {
         global_invite = false;
     }
     else {
         map_id = ZERO_IDENT;
-        hx = 0;
-        hy = 0;
+        hex = mpos();
         dir = 0;
     }
 
@@ -1312,7 +1308,10 @@ void GM_GlobalInvite(GlobalMapGroup group, int combat_mode) // 5hits
         return;
     }
 
-    GlobalmapGroup::global_invite(rule, group.GetCar(), encounter_descriptor, combat_mode, map_id, hx, hy, dir);
+	if(global_invite)
+	{
+		GlobalmapGroup::global_invite(rule, group.GetCar(), encounter_descriptor, combat_mode, map_id, hex, dir);
+	}
 
     if (!group.IsValid()) {
         return;
@@ -1320,7 +1319,7 @@ void GM_GlobalInvite(GlobalMapGroup group, int combat_mode) // 5hits
     if (map_id != ZERO_IDENT) {
         Map map = Game.GetMap(map_id);
         if (valid(map)) {
-            GM_GroupToMap(group, map, hstring("0"), hx, hy, (dir < 6 ? dir : rule.Dir));
+            GM_GroupToMap(group, map, hstring("0"), hex, (dir < 6 ? dir : rule.Dir));
         }
     }
     else {
@@ -1557,15 +1556,15 @@ void ProcessGlobalMapCommand(Player player, int command, any param1, any param2)
         Map map = loc.GetMap(mapProto);
 
         uint8 dir;
-        uint16 hx = 0, hy = 0;
+        mpos hex;
         // if( !map->GetStartCoord( hx, hy, dir, loc->Proto->Entrance[ entrance ].second ) )
-        if (!Entrance::GetEntryFreeHex(map, entry, hx, hy)) {
+        if (!Entrance::GetEntryFreeHex(map, entry, hex)) {
             break;
         }
 
         int look = 0; // 0? cr.LookDistance
 
-        cl.ViewMap(map, 0, mpos(hx, hy), 0);
+        cl.ViewMap(map, 0, hex, 0);
         cl.PlayerClientCall.ShowTownView(locId, entrance);
 
     } break;

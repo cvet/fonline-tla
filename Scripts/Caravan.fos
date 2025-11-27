@@ -181,22 +181,20 @@ int GetQuestState(Critter player, int idCaravan)
 class NpcPosition
 {
     // конструктор
-    NpcPosition(hstring locPid, hstring mapPid, uint16 hX, uint16 hY)
+    NpcPosition(hstring locPid, hstring mapPid, mpos hex)
     {
         MapProtoId = mapPid;
-        HexX = hX;
-        HexY = hY;
+        Hex = Hex;
         LocPid = locPid;
     }
 
     hstring LocPid;     //
     hstring MapProtoId; // код прототипа карты
-    uint16 HexX;        // позиция нпц на карте по оси X
-    uint16 HexY;        // позиция нпц на карте по оси У
+    mpos Hex;        // позиция нпц на карте 
 
     NpcPosition Copy()
     {
-        return NpcPosition(LocPid, MapProtoId, HexX, HexY);
+        return NpcPosition(LocPid, MapProtoId, Hex);
     }
 
     Map GetMap()
@@ -212,13 +210,11 @@ void SwitchNpcPosition(NpcPosition posA, NpcPosition posB)
 
     posA.LocPid = posB.LocPid;
     posA.MapProtoId = posB.MapProtoId;
-    posA.HexX = posB.HexX;
-    posA.HexY = posB.HexY;
+    posA.Hex = posB.Hex;
 
     posB.LocPid = pos.LocPid;
     posB.MapProtoId = pos.MapProtoId;
-    posB.HexX = pos.HexX;
-    posB.HexY = pos.HexY;
+    posB.Hex = pos.Hex;;
 }
 
 // проводник каравана
@@ -263,7 +259,7 @@ class CaravanLeaderInfo
             return false;
         }
         // проверяем насколько далеко проводник от контрольных координат
-        return (Game.GetDistance(leader.Hex, mpos(pos.HexX, pos.HexY)) <= LEADER_SEARCH_RADIUS);
+        return (Game.GetDistance(leader.Hex, pos.Hex) <= LEADER_SEARCH_RADIUS);
     }
 
     bool TransitToPos(bool startPos)
@@ -276,12 +272,8 @@ class CaravanLeaderInfo
         if (!valid(leader)) {
             return false;
         }
-        DL("Transit leader to position:" + (startPos ? "1" : "2"));
-        return Obsolete::CritterTransitToMapCoords(leader,
-                                                   map.Id,
-                                                   (startPos ? StartPos.HexX : EndPos.HexX),
-                                                   (startPos ? StartPos.HexY : EndPos.HexY),
-                                                   Game.Random(0, 5));
+        leader.TransitToMap(map, (startPos ? StartPos.Hex : EndPos.Hex), Game.Random(0, 5));
+		return true;
     }
 
     Critter GetLeader()
@@ -297,9 +289,8 @@ class CaravanLeaderInfo
             return false;
         }
 
-        uint16 x = pos.HexX;
-        uint16 y = pos.HexY;
-        if (!GetFreeHex(map, 2, x, y)) {
+        mpos hex = pos.Hex;
+        if (!Entrance::GetFreeHex(map, 2, hex)) {
             return false;
         }
 
@@ -313,7 +304,7 @@ class CaravanLeaderInfo
                        BagId,
                        CritterProperty::Level,
                        Level};
-        Critter leader = map.AddNpc(NpcPid, mpos(x, y), Game.Random(0, 5), Tla::GetCritPropsDict(props));
+        Critter leader = map.AddNpc(NpcPid, hex, Game.Random(0, 5), Tla::GetCritPropsDict(props));
         if (!valid(leader)) {
             return false;
         }
@@ -397,21 +388,21 @@ class CaravanCabInfo
     }
 
     // размещение повозки с лутом на энкаунтере
-    Item PlaceCabOnMap(Map map, int x, int y, bool isReveresed)
+    Item PlaceCabOnMap(Map map, mpos hex, bool isReveresed)
     {
         DL("trying place cab");
-        Item cab = map.AddItem(mpos(x, y), CabPid, 1);
+        Item cab = map.AddItem(hex, CabPid, 1);
         if (!valid(cab)) {
             return null;
         }
         cab.NoBlock = false;
         DL("try place brahmins");
         // брамины: 1ый х=х0 у=у+1, второй ч х = х-1 у= у-3? dir=1
-        if (map.IsHexMovable(mpos(x, y + 1))) {
-            map.AddNpc(Content::Critter::Brahmin, mpos(x, y + 1), 1);
+        if (map.IsHexMovable(mpos(hex.x, hex.y + 1))) {
+            map.AddNpc(Content::Critter::Brahmin, mpos(hex.x, hex.y + 1), 1);
         }
-        if (map.IsHexMovable(mpos(x - 1, y - 3))) {
-            map.AddNpc(Content::Critter::Brahmin, mpos(x - 1, y - 3), 1);
+        if (map.IsHexMovable(mpos(hex.x - 1, hex.y - 3))) {
+            map.AddNpc(Content::Critter::Brahmin, mpos(hex.x - 1, hex.y - 3), 1);
         }
         int num = 0;
         DL("cab items:" + CabItems.length());
@@ -552,9 +543,8 @@ class CaravanGuardInfo
             return null;
         }
 
-        uint16 hX = leader.Hex.x;
-        uint16 hY = leader.Hex.y;
-        if (!GetFreeHex(map, 4, hX, hY)) {
+        mpos hex = leader.Hex;
+        if (!Entrance::GetFreeHex(map, 4, hex)) {
             return null;
         }
 
@@ -572,7 +562,7 @@ class CaravanGuardInfo
                        ReactionNum,
                        CritterProperty::CaravanNervosityLvl,
                        IsNervous};
-        Critter guard = map.AddNpc(Pid, mpos(hX, hY), Game.Random(0, 5), Tla::GetCritPropsDict(props));
+        Critter guard = map.AddNpc(Pid, hex, Game.Random(0, 5), Tla::GetCritPropsDict(props));
         guard.SetupScript(InitScript);
         if (!valid(guard)) {
             return null;
@@ -604,14 +594,13 @@ class CaravanNpcFollowerInfo
     // добавление нпц рядом с итемом
     bool _AddNpcNearItem(Map map, Item item, int dist)
     {
-        uint16 hX = item.Hex.x;
-        uint16 hY = item.Hex.y;
-        if (!GetFreeHex(map, dist, hX, hY)) {
+        mpos hex = item.Hex;
+        if (!Entrance::GetFreeHex(map, dist, hex)) {
             return false;
         }
 
         int[] props = {CritterProperty::DialogId, DialogId.hash};
-        return valid(map.AddNpc(Pid, mpos(hX, hY), Game.Random(0, 5), Tla::GetCritPropsDict(props)));
+        return valid(map.AddNpc(Pid, hex, Game.Random(0, 5), Tla::GetCritPropsDict(props)));
     }
 
     // добавление нпц рядом с криттером
@@ -622,14 +611,13 @@ class CaravanNpcFollowerInfo
 
     Critter AddNpcNearCritter(Map map, Critter cr, int dist)
     {
-        uint16 hX = cr.Hex.x;
-        uint16 hY = cr.Hex.y;
-        if (!GetFreeHex(map, dist, hX, hY)) {
+        mpos hex = cr.Hex;
+        if (!Entrance::GetFreeHex(map, dist, hex)) {
             return null;
         }
 
         int[] props = {CritterProperty::DialogId, DialogId.hash};
-        return map.AddNpc(Pid, mpos(hX, hY), Game.Random(0, 5), Tla::GetCritPropsDict(props));
+        return map.AddNpc(Pid, hex, Game.Random(0, 5), Tla::GetCritPropsDict(props));
     }
 };
 
@@ -769,32 +757,6 @@ class CaravanInfo
 };
 
 /* ******************************** вспомогательные функции ******************************** */
-// ищет свободный гекс рядом с указанными координатами
-// если найдет - возвращает true
-// иначе - false
-// карта - где ищем гекс
-// радиус на котором нужно искать
-// hx, hy координаты нового гекса
-bool GetFreeHex(Map map, int radius, uint16 hx, uint16 hy)
-{
-    if (hx == 0 || hy == 0 || int(hx) >= (map.Size.width - radius) || int(hy) >= (map.Size.height - radius)) {
-        return false; // Check borders
-    }
-    int numTry = 10; // число попыток найти свободный гекс
-    int xDelta = 0;
-    int yDelta = 0;
-
-    for (int i = 0; i < numTry; i++) {
-        xDelta = Game.Random(0, radius * 2) - radius;
-        yDelta = Game.Random(0, radius * 2) - radius;
-        if (map.IsHexMovable(mpos(hx + xDelta, hy + yDelta))) {
-            hx += xDelta;
-            hy += yDelta;
-            return true;
-        }
-    }
-    return false;
-}
 
 // ищет на указанной карте криттера с нужным диалогом и прототипом
 // ищет только нпц
@@ -858,19 +820,18 @@ bool _SayNervous(Critter guard, int msgID, int boost)
 // охранник подходит к проводнику
 void _MoveToCaravanLeader(Critter guard, Critter leader, int radius)
 {
-    uint16 hx = leader.Hex.x;
-    uint16 hy = leader.Hex.y;
+    auto hex = leader.Hex;
     Map map = guard.GetMap();
     if (!valid(map)) {
         return;
     }
 
-    if (GetFreeHex(map, radius, hx, hy)) {
+    if (Entrance::GetFreeHex(map, radius, hex)) {
         bool run = false;
         if ((Game.Random(1, 3)) == 1) {
             run = true;
         }
-        NpcPlanes::AddWalkPlane(guard, AI_PLANE_WALK_PRIORITY, PLANE_GOTO_HOME, 0, hx, hy, Game.Random(1, 5), run, 1);
+        NpcPlanes::AddWalkPlane(guard, AI_PLANE_WALK_PRIORITY, PLANE_GOTO_HOME, 0, hex.x, hex.y, Game.Random(1, 5), run, 1);
     }
 }
 
@@ -929,8 +890,7 @@ bool _GuardPlaneEnd(Critter guard, int planeId, int reason, Critter someCr, Item
 
     // нпц без проблем дошел до домашней позиции
     if (plane.Identifier == PLANE_GOTO_HOME && reason == REASON_SUCCESS) {
-        guard.HomeHexX = guard.Hex.x;
-        guard.HomeHexY = guard.Hex.y;
+        guard.HomeHex= guard.Hex;
         guard.HomeDir = Game.Random(1, 5);
     }
 
@@ -1027,8 +987,6 @@ void _DefaultGuardInit(Critter guard, bool firstTime)
 
     if (!firstTime) {
         if (!valid(guard.GetMap())) {
-            DL("Critter on global. Trying transit to home pos");
-            Obsolete::CritterTransitToMapCoords(guard, guard.HomeMapId, guard.HomeHexX, guard.HomeHexY, guard.HomeDir);
             Game.DestroyCritter(guard);
             return;
         }
@@ -1323,12 +1281,11 @@ bool e_CowardAttacked(Critter cr, Critter attacker)
     // если здоровье нпц <95%
     // Messaging::SayOnHead(cr,"my health = "+ cr.CurrentHp + " max hp = "+cr.MaxLifeBase);
     if (cr.MaxLifeBase * 75 > cr.CurrentHp * 100) {
-        uint16 hx = cr.Hex.x;
-        uint16 hy = cr.Hex.y;
+        auto hex = cr.Hex;
         _NpcEraseAllPlanes(cr);
 
-        if (GetFreeHex(cr.GetMap(), 25, hx, hy)) {
-            NpcPlanes::AddWalkPlane(cr, AI_PLANE_WALK_PRIORITY * 10, hx, hy, Game.Random(1, 5), true, 1);
+        if (Entrance::GetFreeHex(cr.GetMap(), 25, hex)) {
+            NpcPlanes::AddWalkPlane(cr, AI_PLANE_WALK_PRIORITY * 10, hex.x, hex.y, Game.Random(1, 5), true, 1);
             NpcPlanes::AddMiscPlane(cr,
                                     AI_PLANE_WALK_PRIORITY * 10 - 1,
                                     Game.SynchronizedTime + Time::GameMinutes(Game.Random(0, 1)),
@@ -2733,10 +2690,10 @@ void _SetupCaravanLiderPosition(int idCaravan, hstring locPid, hstring mapPid, u
     }
 
     if (isStartPos) {
-        ci.Leader.StartPos = NpcPosition(locPid, mapPid, x, y);
+        ci.Leader.StartPos = NpcPosition(locPid, mapPid,mpos(x, y));
     }
     else {
-        ci.Leader.EndPos = NpcPosition(locPid, mapPid, x, y);
+        ci.Leader.EndPos = NpcPosition(locPid, mapPid, mpos(x, y));
     }
 }
 
@@ -3013,15 +2970,14 @@ const int[] entries = {
     243,
     244,
     0}; // гексы на которых можно поставить, в первую очередь пробуем поставить на точках входа нпц, чтобы игроки были на некотором расстоянии от повозок
-void FindCabPlace(Map map, int[] x, int[] y, int maxCabs)
+void FindCabPlace(Map map, int maxCabs, mpos[] hexes)
 {
-    uint16 hX = 0;
-    uint16 hY = 0;
-    uint16 oX1 = 0; // координаты объекта, повозка№1
-    uint16 oY1 = 0;
-    uint16 oX2 = 0; // координаты объекта повозка№2
-    uint16 oY2 = 0;
+    int oX1 = 0; // координаты объекта, повозка№1
+    int oY1 = 0;
+    int oX2 = 0; // координаты объекта повозка№2
+    int oY2 = 0;
 
+	mpos hex, hex1, hex2;
     // i - индекс номер гекса в массиве entries
     // j = индекс гекса среди найденных на карте
     // l - число гексов данного номера
@@ -3029,24 +2985,23 @@ void FindCabPlace(Map map, int[] x, int[] y, int maxCabs)
     // tries - число попыток найти место для кабов
     for (int i = 0, j = 0, tries = 0, l = Entrance::MapCountEntry(map, entries[j]), ents = entries.length(); i < l && j < ents && tries < 30; i++) {
         tries++;
-        if (Entrance::MapGetEntryCoords(map, entries[j], i, hX, hY)) {
+        if (Entrance::MapGetEntryCoords(map, entries[j], i, hex)) {
             // координаты гекса нашли
             // находим позицию в половинном расстоянии
-            oX1 = int(hX - (MIN_DIST_CABS_DIST / 2));                               // смещение по оси х на запад
-            oY1 = int(hY + (MIN_DIST_CABS_DIST / 2) * (1 - Game.Random(0, 1) * 2)); // смещение по оси y на юг или на север
-            if (GetFreeHex(map, 1, oX1, oY1)) {
+            oX1 = int(hex.x - (MIN_DIST_CABS_DIST / 2));                               // смещение по оси х на запад
+            oY1 = int(hex.y + (MIN_DIST_CABS_DIST / 2) * (1 - Game.Random(0, 1) * 2)); // смещение по оси y на юг или на север
+			hex1 = mpos(oX1, oY1);
+            if (Entrance::GetFreeHex(map, 1, hex1)) {
                 // считаем, что первая точка найдена
-                oX2 = int(hX + (MIN_DIST_CABS_DIST / 2));                               // смещение по оси х на запад
-                oY2 = int(hY + (MIN_DIST_CABS_DIST / 2) * (1 - Game.Random(0, 1) * 2)); // смещение по оси y на юг или на север
-
-                if (GetFreeHex(map, 1, oX2, oY2)) {
+                oX2 = int(hex.x + (MIN_DIST_CABS_DIST / 2));                               // смещение по оси х на запад
+                oY2 = int(hex.y + (MIN_DIST_CABS_DIST / 2) * (1 - Game.Random(0, 1) * 2)); // смещение по оси y на юг или на север
+				hex2 = mpos(oX2, oY2);
+                if (Entrance::GetFreeHex(map, 1, hex2)) {
                     // вторая точка тоже найдена
                     // помещаем координаты в массивы
-                    x.insertLast(oX1);
-                    y.insertLast(oY1);
-                    x.insertLast(oX2);
-                    y.insertLast(oY2);
-                    if (maxCabs > 0 && x.length() > maxCabs) {
+                    hexes.insertLast(hex1);
+                    hexes.insertLast(hex2);
+                    if (maxCabs > 0 && hexes.length() > maxCabs) {
                         break;
                     }
                 }
@@ -3071,10 +3026,10 @@ void _CaravanLeaderOnMessage(Critter leader, Critter fromCr, int message, any va
 }
 
 // вход на энкаунтер
-bool _CaravanLeaderOnInvite(Critter leader, Item car, int encounterDescriptor, int combatMode, ident mapId, uint16 hexX, uint16 hexY, uint8 dir)
+bool _CaravanLeaderOnInvite(Critter leader, Item car, int encounterDescriptor, int combatMode, ident mapId, mpos hex, int dir)
 {
     Critter[] group = GlobalmapGroupExtended::GetGlobalGroup(leader);
-    Worldmap::InviteToEncounter(group, null, encounterDescriptor, combatMode, mapId, hexX, hexY, dir);
+    Worldmap::InviteToEncounter(group, null, encounterDescriptor, combatMode, mapId, hex, dir);
     CaravanInfo ci = _GetCaravan(leader.CaravanCrvId);
     if (!valid(ci)) {
         return true;
@@ -3102,13 +3057,13 @@ bool _CaravanLeaderOnInvite(Critter leader, Item car, int encounterDescriptor, i
     // кладем по две повозки
     // находим место, где можно поставить 2 повозки
     // между повозками расстояние должно быть 7..8 гексов
-    int[] x = {};
-    int[] y = {};
-    FindCabPlace(map, x, y, 100); // TODO: поставить нормальное ограничение, сейчас использую для проверки, сколько точек будет найдено
+    mpos[] hexes = {};
+    
+    FindCabPlace(map, 100, hexes); // TODO: поставить нормальное ограничение, сейчас использую для проверки, сколько точек будет найдено
 
     Item[] cabItems = {};
-    for (int i = 0, lx = x.length(), ly = y.length(), lc = ci.Cabs.length(); i < lx && i < ly && i < lc; i++) {
-        Item cab = ci.Cabs[i].PlaceCabOnMap(map, x[i], y[i], ci.IsReversed);
+    for (int i = 0, lx = hexes.length(), lc = ci.Cabs.length(); i < lx && i < lc; i++) {
+        Item cab = ci.Cabs[i].PlaceCabOnMap(map, hexes[i], ci.IsReversed);
 
         if (valid(cab)) {
             cabItems.insertLast(cab);
@@ -3174,10 +3129,9 @@ void _CaravanLeaderIdleOnEncounter(Critter leader)
         if (!cabs.isEmpty()) {
             leader.CaravanIdleCount = 0;
             int idx = Game.Random(0, cabs.length() - 1);
-            uint16 hx = cabs[idx].Hex.x;
-            uint16 hy = cabs[idx].Hex.y;
-            if (GetFreeHex(map, 4, hx, hy)) {
-                NpcPlanes::AddWalkPlane(leader, AI_PLANE_WALK_PRIORITY, hx, hy, Game.Random(0, 5), (Game.Random(0, 5) == 1 ? true : false), 1);
+			mpos hex =  cabs[idx].Hex;
+            if (Entrance::GetFreeHex(map, 4, hex)) {
+                NpcPlanes::AddWalkPlane(leader, AI_PLANE_WALK_PRIORITY, hex.x, hex.y, Game.Random(0, 5), (Game.Random(0, 5) == 1 ? true : false), 1);
             }
         }
     }
@@ -3544,9 +3498,8 @@ bool _EndCaravan(Critter leader)
         return false;
     }
 
-    uint16 hx = ci.Leader.EndPos.HexX;
-    uint16 hy = ci.Leader.EndPos.HexY;
-    if (!GetFreeHex(map, 3, hx, hy)) {
+    auto hex = ci.Leader.EndPos.Hex;
+    if (!Entrance::GetFreeHex(map, 3, hex)) {
         return false;
     }
     if (!Obsolete::CritterTransitToMapEntry(leader, map.Id, hstring("0"))) {
@@ -3554,8 +3507,7 @@ bool _EndCaravan(Critter leader)
     }
 
     leader.HomeMapId = map.Id;
-    leader.HomeHexX = hx;
-    leader.HomeHexY = hy;
+    leader.HomeHex = hex;
     leader.HomeDir = leader.Dir;
     ci.CaravanStatus = CRV_STATUS_END;
 

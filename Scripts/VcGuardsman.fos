@@ -23,10 +23,9 @@ namespace VcGuardsman // Sort 2
 class MarchOrder // Вспомогательный класс. Приказ криттеру на выполнение некоторых действий
 {
     int Type;      // Тип приказа
-    uint16 HexX;   // Точка, в которой должен стоять игрок. Ось икс
-    uint16 HexY;   // Точка, в которой должен стоять игрок. Ось игрек
+    mpos Hex;   // Точка, в которой должен стоять игрок. 
     int Steps;     // Число шагов, которые нужно сделать
-    uint8 Dir;     // Направление, в котором должен смотреть игрок
+    int Dir;     // Направление, в котором должен смотреть игрок
     bool Armed;    // Вооружен
     bool Run;      // Бежать во время перемещения
     int TimeCheck; // Относительное время проверки, когда игрок должен выполнить приказ TODO: Удалить это время
@@ -35,8 +34,8 @@ class MarchOrder // Вспомогательный класс. Приказ кр
     void Save(Serializator::Serializator save)
     {
         save.Set(Type);
-        save.Set(HexX);
-        save.Set(HexY);
+        save.Set(Hex.x);
+        save.Set(Hex.y);
         save.Set(Steps);
         save.Set(Dir);
         save.Set(Armed);
@@ -48,8 +47,10 @@ class MarchOrder // Вспомогательный класс. Приказ кр
     void Load(Serializator::Serializator load)
     {
         load.Get(Type);
-        load.Get(HexX);
-        load.Get(HexY);
+		mpos hex = mpos();
+        load.Get(hex.x);
+        load.Get(hex.y);
+		Hex = hex;
         load.Get(Steps);
         load.Get(Dir);
         load.Get(Armed);
@@ -64,8 +65,8 @@ class MarchOrder // Вспомогательный класс. Приказ кр
         s += "\n type     : " + (Type == ORDER_TYPE_POS ?
                                      "ORDER_TYPE_POS" :
                                      (Type == ORDER_TYPE_MOVE ? "ORDER_TYPE_MOVE" : (Type == ORDER_TYPE_DIR ? "ORDER_TYPE_DIR" : "ORDER_TYPE_ARM")));
-        s += "\n HexX     : " + HexX;
-        s += "\n HexY     : " + HexY;
+        s += "\n HexX     : " + Hex.x;
+        s += "\n HexY     : " + Hex.y;
         s += "\n Steps    : " + Steps;
         s += "\n Dir      : " + Dir;
         s += "\n Armed    : " + (Armed ? "true" : "false");
@@ -78,12 +79,11 @@ class MarchOrder // Вспомогательный класс. Приказ кр
 
 // Формулировки приказов
 // Приказ ЗАНЯТЬ ПОЗИЦИЮ
-MarchOrder DefineSetPosition(uint16 hexX, uint16 hexY, uint8 dir, bool run, int timeCheck, int timeNext)
+MarchOrder DefineSetPosition(mpos hex, int dir, bool run, int timeCheck, int timeNext)
 {
     MarchOrder order = MarchOrder();
     order.Type = ORDER_TYPE_POS;
-    order.HexX = hexX;
-    order.HexY = hexY;
+    order.Hex = hex;
     order.Dir = dir;
     order.Run = run;
     order.TimeCheck = timeCheck;
@@ -92,7 +92,7 @@ MarchOrder DefineSetPosition(uint16 hexX, uint16 hexY, uint8 dir, bool run, int 
 }
 
 // Приказ ПЕРЕМЕСТИТЬСЯ
-MarchOrder DefineMove(uint8 steps, uint8 dir, bool run, int timeCheck, int timeNext)
+MarchOrder DefineMove(int steps, int dir, bool run, int timeCheck, int timeNext)
 {
     MarchOrder order = MarchOrder();
     order.Type = ORDER_TYPE_MOVE;
@@ -105,7 +105,7 @@ MarchOrder DefineMove(uint8 steps, uint8 dir, bool run, int timeCheck, int timeN
 }
 
 // Приказ ПОВОРОТ
-MarchOrder DefineDirection(uint8 dir, int timeCheck, int timeNext)
+MarchOrder DefineDirection(int dir, int timeCheck, int timeNext)
 {
     MarchOrder order = MarchOrder();
     order.Type = ORDER_TYPE_DIR;
@@ -146,7 +146,7 @@ class MarchQueue
 
     bool Auto;                // Признак: все приказы назначаются автоматически, с помощью time_events
     ident CritterId;          // Исполнитель приказа
-    int8 OrderCurrent;        // Текущий номер приказа
+    int OrderCurrent;        // Текущий номер приказа
     MarchOrder[] Orders = {}; // Приказы в порядке выполнения
 
     void AddOrder(MarchOrder order)
@@ -220,8 +220,7 @@ class MarchQueue
         if (!valid(order)) {
             return;
         }
-        order.HexX = cr.Hex.x;
-        order.HexY = cr.Hex.y;
+        order.Hex = cr.Hex;
         order.Dir = cr.Dir;
         Save();
     }
@@ -243,7 +242,7 @@ class MarchQueue
         Item weapon;
         switch (order.Type) {
         case ORDER_TYPE_POS:
-            return (cr.Hex.x == order.HexX && cr.Hex.y == cr.Hex.y);
+            return (cr.Hex == order.Hex);
         case ORDER_TYPE_MOVE:
             if (OrderCurrent == 0) // первый шаг, исходная координата неизвестна
             {
@@ -254,17 +253,16 @@ class MarchQueue
                 if (!valid(orderPrev)) {
                     return true;
                 }
-                uint16 hx = orderPrev.HexX;
-                uint16 hy = orderPrev.HexY;
+                mpos hex = orderPrev.Hex;
                 Map map = cr.GetMap();
                 if (!valid(map)) {
                     return true;
                 }
-                map.MoveHexByDir(mpos(hx, hy), order.Dir, order.Steps);
-                return (cr.Hex.x == hx && cr.Hex.y == hy);
+                map.MoveHexByDir(hex, order.Dir, order.Steps);
+                return (cr.Hex == hex);
             }
         case ORDER_TYPE_DIR:
-            return (cr.Dir == order.Dir);
+            return (int(cr.Dir) == order.Dir);
         case ORDER_TYPE_ARM:
             weapon = _CritGetItemHand(cr);
             if (valid(weapon)) {
@@ -301,14 +299,13 @@ class MarchQueue
 
         Item weapon = null;
         ProtoItem proto = null;
-        uint16 hx = 0;
-        uint16 hy = 0;
+        mpos hex;
         hstring pid1;
         hstring pid2;
 
         switch (order.Type) {
         case ORDER_TYPE_POS:
-            NpcPlanes::AddWalkPlane(cr, 0, order.HexX, order.HexY, order.Dir, order.Run, 0);
+            NpcPlanes::AddWalkPlane(cr, 0, order.Hex.x, order.Hex.y, order.Dir, order.Run, 0);
             break;
         case ORDER_TYPE_MOVE:
             if (OrderCurrent == 0) // первый шаг, исходная координата неизвестна
@@ -320,10 +317,9 @@ class MarchQueue
                 if (!valid(orderPrev)) {
                     return;
                 }
-                hx = orderPrev.HexX;
-                hy = orderPrev.HexY;
-                map.MoveHexByDir(mpos(hx, hy), order.Dir, order.Steps);
-                NpcPlanes::AddWalkPlane(cr, 0, hx, hy, order.Dir, order.Run, 0);
+                hex = orderPrev.Hex;
+                map.MoveHexByDir(hex, order.Dir, order.Steps);
+                NpcPlanes::AddWalkPlane(cr, 0, hex.x, hex.y, order.Dir, order.Run, 0);
                 break;
             }
         case ORDER_TYPE_DIR:
@@ -498,8 +494,6 @@ class SquadCommander
     }
 };
 
-// //Old script name: VcGuardsman.fos. Patched 01.10 21:59:42
-// //// FOS Server
 // Author: rifleman17
 // Скрипты для квестовой линии "Гвардеец Города-Убежища"
 

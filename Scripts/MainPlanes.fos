@@ -126,17 +126,16 @@ bool npc_plane_end(Critter npc, int planeId, int reason, Critter someCr, Item so
         if (valid(map) && valid(cr)) {
             int awayDir = Game.GetDirection(cr.Hex, npc.Hex);
             int awayDist = Game.Random(30, 50); // Todo: resolve correct distantion
-            uint16 baseHx = npc.Hex.x;
-            uint16 baseHy = npc.Hex.y;
-            map.MoveHexByDir(mpos(baseHx, baseHy), awayDir, 1);
+            mpos hexBase = npc.Hex;
+            map.MoveHexByDir(hexBase, awayDir, 1);
 
             float angle = 0.0f;
             int reverse = Game.Random(0, 1);
             for (int i = 0; i < 5; i++) {
-                uint16 hx = baseHx, hy = baseHy;
-                map.GetHexInPath(npc.Hex, mpos(hx, hy), angle, awayDist);
-                if (Game.GetDistance(npc.Hex, mpos(hx, hy)) > 1) {
-                    NpcPlanes::AddWalkPlane(npc, 100, hx, hy, 6, true, 0);
+				mpos hex = hexBase;
+                map.GetHexInPath(npc.Hex, hex, angle, awayDist);
+                if (Game.GetDistance(npc.Hex, hex) > 1) {
+                    NpcPlanes::AddWalkPlane(npc, 100, hex.x, hex.y, 6, true, 0);
                     break;
                 }
                 angle += float(i + 1) * 45.0f * ((i % 2) == reverse ? 1.0f : -1.0f);
@@ -735,13 +734,11 @@ class CTraceFirstCritter : LineTracer::ITraceContext
 {
     Critter Cr;
     int MinDist;
-    uint16 Gx;
-    uint16 Gy;
+    mpos GHex;
 
-    CTraceFirstCritter(uint16 gx, uint16 gy, uint16 minDist)
+    CTraceFirstCritter(mpos hex, uint16 minDist)
     {
-        Gx = gx;
-        Gy = gy;
+        GHex = hex;
         Cr = null;
         MinDist = minDist;
     }
@@ -757,7 +754,7 @@ class CTraceFirstCritter : LineTracer::ITraceContext
             Cr = Game.GetCritter(cr.Id);
         }
 
-        return valid(Cr) && Cr.Condition == CritterCondition::Alive && Game.GetDistance(mpos(Gx, Gy), Cr.Hex) >= MinDist;
+        return valid(Cr) && Cr.Condition == CritterCondition::Alive && Game.GetDistance(GHex, Cr.Hex) >= MinDist;
     }
 
     void StartExec(Map map, mpos hexFrom, mpos hexTo, int maxDist) override
@@ -771,10 +768,10 @@ class CTraceFirstCritter : LineTracer::ITraceContext
     }
 };
 
-Critter TraceFirstCritter(uint16 hx, uint16 hy, uint16 tx, uint16 ty, Map map, int dist, uint16 gx, uint16 gy, int mindist)
+Critter TraceFirstCritter(mpos hexFrom, mpos hexTo, Map& map, int dist, mpos hexCr, int mindist)
 {
-    CTraceFirstCritter Tracer = CTraceFirstCritter(gx, gy, mindist);
-    LineTracer::LineTracerHex(mpos(hx, hy), mpos(tx, ty), map, dist, Tracer);
+    CTraceFirstCritter Tracer = CTraceFirstCritter(hexCr, mindist);
+    LineTracer::LineTracerHex(hexFrom, hexTo, map, dist, Tracer);
     return Tracer.Cr;
 }
 
@@ -807,37 +804,31 @@ bool ValidateBurst(Critter cr, Critter target, AbstractItem weapon, int mode)
 
     int maxDist = _WeaponMaxDist(weapon, mode);
 
-    uint16 hx = cr.Hex.x;
-    uint16 hy = cr.Hex.y;
-    uint16 tx = target.Hex.x;
-    uint16 ty = target.Hex.y;
-    Critter blocker = TraceFirstCritter(hx, hy, tx, ty, Game.GetMap(map.Id), maxDist, hx, hy, 0);
+    mpos hex = cr.Hex;
+    mpos hexTarget = target.Hex;
+    Critter blocker = TraceFirstCritter(hex, hexTarget, Game.GetMap(map.Id), maxDist, hex, 0);
+    if (valid(blocker) && !IsCurrentEnemy(cr, blocker.Id)) {
+        /*Messaging::Say(blocker, "I blocked the burst check");*/
+        return false;
+    }
+	mpos hexStart = hex;
+	mpos hexEnd = hexTarget;
+
+    int dir = Game.GetDirection(hex, hexTarget, 89.0f);
+    map.MoveHexByDir(hexStart, dir, 1);
+    map.MoveHexByDir(hexEnd, dir, 1);
+    blocker = TraceFirstCritter(hexStart, hexEnd, Game.GetMap(map.Id), maxDist, hex, 3);
     if (valid(blocker) && !IsCurrentEnemy(cr, blocker.Id)) {
         /*Messaging::Say(blocker, "I blocked the burst check");*/
         return false;
     }
 
-    uint16 sx = hx;
-    uint16 sy = hy;
-    uint16 ex = tx;
-    uint16 ey = hy;
-    uint8 dir = Game.GetDirection(mpos(hx, hy), mpos(tx, ty), 89.0f);
-    map.MoveHexByDir(mpos(sx, sy), dir, 1);
-    map.MoveHexByDir(mpos(ex, ey), dir, 1);
-    blocker = TraceFirstCritter(sx, sy, ex, ey, Game.GetMap(map.Id), maxDist, hx, hy, 3);
-    if (valid(blocker) && !IsCurrentEnemy(cr, blocker.Id)) {
-        /*Messaging::Say(blocker, "I blocked the burst check");*/
-        return false;
-    }
-
-    sx = hx;
-    sy = hy;
-    ex = tx;
-    ey = hy;
-    dir = Game.GetDirection(mpos(hx, hy), mpos(tx, ty), -89.0f);
-    map.MoveHexByDir(mpos(sx, sy), dir, 1);
-    map.MoveHexByDir(mpos(ex, ey), dir, 1);
-    blocker = TraceFirstCritter(sx, sy, ex, ey, Game.GetMap(map.Id), maxDist, hx, hy, 3);
+    hexStart = hex;
+	hexEnd = hexTarget;
+    dir = Game.GetDirection(hex, hexTarget, -89.0f);
+    map.MoveHexByDir(hexStart, dir, 1);
+    map.MoveHexByDir(hexEnd, dir, 1);
+    blocker = TraceFirstCritter(hexStart, hexEnd, Game.GetMap(map.Id), maxDist, hex, 3);
     if (valid(blocker) && !IsCurrentEnemy(cr, blocker.Id)) {
         /*Messaging::Say(blocker, "I blocked the burst check");*/
         return false;

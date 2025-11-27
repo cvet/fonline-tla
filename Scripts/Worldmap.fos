@@ -823,8 +823,7 @@ class CFoundedEncounter
     bool OwnerGroup;
     ident LocationId;
     bool IsWater;
-    uint16 StartHexX;
-    uint16 StartHexY;
+    mpos StartHex;
     bool[] DirBusy = {};
     int AskChance;
 
@@ -840,8 +839,7 @@ class CFoundedEncounter
         OwnerGroup = false;
         LocationId = ZERO_IDENT;
         IsWater = false;
-        StartHexX = 0;
-        StartHexY = 0;
+        StartHex = mpos();
         DirBusy.resize(6);
     }
 }
@@ -962,7 +960,7 @@ void RotatePosition(int toDir, int[] positionsDirs)
     }
 }
 
-void MovePositionPoint(Map map, uint16 pointX, uint16 pointY, int[] positionDirs, int pathIndex, int count, int spacing)
+void MovePositionPoint(Map map, mpos& hex, int[] positionDirs, int pathIndex, int count, int spacing)
 {
     int steps = positionDirs[0];
     int pathLen = (positionDirs.length() - 1) / 2;
@@ -972,20 +970,20 @@ void MovePositionPoint(Map map, uint16 pointX, uint16 pointY, int[] positionDirs
         for (int i = 0; i < spacing; i++) {
             for (int j = 0; j < steps; j++) {
                 int dir = positionDirs[1 + pathLen * pathIndex + count + j];
-                map.MoveHexByDir(mpos(pointX, pointY), dir, 1);
+                map.MoveHexByDir(hex, dir, 1);
             }
         }
     }
     else {
         int dir = positionDirs[1 + pathLen * pathIndex + count];
-        map.MoveHexByDir(mpos(pointX, pointY), dir, spacing);
+        map.MoveHexByDir(hex, dir, spacing);
     }
 }
 
-void ParseEncounterObject(CEncounterObject obj, Map map, uint16 posX, uint16 posY, uint8 reversDir, Critter[] crittersGrouop, int teamId)
+void ParseEncounterObject(CEncounterObject obj, Map map, mpos hex, uint8 reversDir, Critter[] crittersGrouop, int teamId)
 {
     if (obj.ObjectType == ENCOUNTER_OBJECT_CRITTER) {
-        if (not map.IsHexMovable(mpos(posX, posY))) {
+        if (not map.IsHexMovable(hex)) {
             return;
         }
 
@@ -997,7 +995,7 @@ void ParseEncounterObject(CEncounterObject obj, Map map, uint16 posX, uint16 pos
                        teamId,
                        CritterProperty::ReplicationTime,
                        -1};
-        Critter npc = map.AddNpc(obj.Pid, mpos(posX, posY), reversDir, Tla::GetCritPropsDict(props));
+        Critter npc = map.AddNpc(obj.Pid, hex, reversDir, Tla::GetCritPropsDict(props));
         npc.SetupScript(obj.ScriptName);
         if (not valid(npc)) {
             return;
@@ -1022,7 +1020,7 @@ void ParseEncounterObject(CEncounterObject obj, Map map, uint16 posX, uint16 pos
         }
     }
     else if (obj.ObjectType == ENCOUNTER_OBJECT_ITEM) {
-        Item item = map.AddItem(mpos(posX, posY), obj.Pid, 1);
+        Item item = map.AddItem(hex, obj.Pid, 1);
         if (not valid(item)) {
             return;
         }
@@ -1101,13 +1099,12 @@ Map GenerateEncounter(CFoundedEncounter fe, Critter[] critters)
         return null;
     }
 
-    uint16 startX = 0, startY = 0;
-    if (not Entrance::MapGetEntryCoords(map, 0, 0, startX, startY)) {
+    mpos hexStart;
+    if (not Entrance::MapGetEntryCoords(map, 0, 0, hexStart)) {
         Game.Log("Default entry not found.");
         return null;
     }
-    fe.StartHexX = startX;
-    fe.StartHexY = startY;
+    fe.StartHex = hexStart;
 
     if (not valid(encounter)) // Empty map
     {
@@ -1170,15 +1167,13 @@ Map GenerateEncounter(CFoundedEncounter fe, Critter[] critters)
         }
 
         // Get start point for group
-        uint16[] pointX = {startX, startY};
-        uint16[] pointY = {startX, startY};
+		mpos[] points = {hexStart, hexStart};
         if (position != POSITION_NONE) {
-            uint16 hx = pointX[0], hy = pointY[0];
-            map.MoveHexByDir(mpos(pointX[0], pointY[0]), freeDir, position != POSITION_SURROUNDING ? distance : spacing);
-            map.GetHexInPath(mpos(hx, hy), mpos(pointX[0], pointY[0]), 0.0f, 0); // Check for barrier
-            pointX[1] = pointX[0];
-            pointY[1] = pointY[0];
-            MovePositionPoint(map, pointX[1], pointY[1], positionDirs, 1, 0, spacing);
+			mpos hex = points[0];
+            map.MoveHexByDir(points[0], freeDir, position != POSITION_SURROUNDING ? distance : spacing);
+            map.GetHexInPath(hex, points[0], 0.0f, 0); // Check for barrier
+            points[1] = points[0];
+            MovePositionPoint(map, points[1], positionDirs, 1, 0, spacing);
         }
 
         for (int k = 0, l = group.Objects.length(); k < l; k++) {
@@ -1194,29 +1189,31 @@ Map GenerateEncounter(CFoundedEncounter fe, Critter[] critters)
                 count = 1;
             }
 
-            uint16 oldPosX = startX, oldPosY = startY;
-            for (int n = 0; n < count; n++) {
-                uint16 posX, posY;
+			mpos hexOldPos = hexStart;
+            for (int n = 0; n < count; n++) {			
+                int posX, posY;
+                mpos hexPos;
                 if (otherDistance > 0 || position == POSITION_NONE) {
-                    posX = startX + Game.Random(-5, 5);
-                    posY = startY + Game.Random(-5, 5);
-                    map.MoveHexByDir(mpos(posX, posY), freeDir, otherDistance > 0 ? otherDistance : distance);
+                    posX = hexStart.x + Game.Random(-5, 5);
+                    posY = hexStart.y + Game.Random(-5, 5);
+					hexPos = mpos(posX, posY);
+                    map.MoveHexByDir(hexPos, freeDir, otherDistance > 0 ? otherDistance : distance);
                 }
                 else {
                     int pathIndex = dirsCount % 2;
-                    posX = pointX[pathIndex] + (position == POSITION_SURROUNDING ? Game.Random(-3, 0) : 0);
-                    posY = pointY[pathIndex] + (position == POSITION_SURROUNDING ? Game.Random(-3, 0) : 0);
-                    MovePositionPoint(map, pointX[pathIndex], pointY[pathIndex], positionDirs, pathIndex, dirsCount, spacing);
+                    posX = points[pathIndex].x + (position == POSITION_SURROUNDING ? Game.Random(-3, 0) : 0);
+                    posY = points[pathIndex].y + (position == POSITION_SURROUNDING ? Game.Random(-3, 0) : 0);
+					hexPos = mpos(posX, posY);
+                    MovePositionPoint(map, points[pathIndex], positionDirs, pathIndex, dirsCount, spacing);
                     dirsCount++;
                 }
 
-                map.GetHexInPath(mpos(oldPosX, oldPosY), mpos(posX, posY), 0.0f, 0); // Check for barrier
-                oldPosX = posX;
-                oldPosY = posY;
+                map.GetHexInPath(hexOldPos, hexPos, 0.0f, 0); // Check for barrier
+                hexOldPos = hexPos;
                 if (crittersGrouops[i] == null) {
                     crittersGrouops[i] = array<Critter>();
                 }
-                ParseEncounterObject(obj, map, posX, posY, reversDir, crittersGrouops[i], teamId);
+                ParseEncounterObject(obj, map, hexPos, reversDir, crittersGrouops[i], teamId);
             }
         }
     }
@@ -1420,7 +1417,7 @@ void FindEncounter(Critter[] group, Item car, int x, int y, int& encounterDescri
     }
 }
 
-void InviteToEncounter(Critter[] group, Item car, int encounterDescriptor, int combatMode, ident& mapId, uint16& hexX, uint16& hexY, uint8& dir)
+void InviteToEncounter(Critter[] group, Item car, int encounterDescriptor, int combatMode, ident& mapId, mpos& hex, int& dir)
 {
     mapId = ZERO_IDENT;
 
@@ -1452,17 +1449,15 @@ void InviteToEncounter(Critter[] group, Item car, int encounterDescriptor, int c
 
     Critter leader = group[0];
     mapId = map.Id;
-    hexX = fe.StartHexX;
-    hexY = fe.StartHexY;
+    hex = fe.StartHex;
     if (isGenerated) {
         if (valid(car)) {
             // Place critters near his car
-            hexX = uint16(-1);
-            hexY = uint16(-1);
+            hex = mpos();
         }
         else {
             dir = GetFreeDir(fe.DirBusy);
-            map.MoveHexByDir(mpos(hexX, hexY), dir, leader.Perception + leader.PerkCautiousNature * 3);
+            map.MoveHexByDir(hex, dir, leader.Perception + leader.PerkCautiousNature * 3);
             dir += 3;
             if (dir > 5) {
                 dir -= 6;
@@ -1472,8 +1467,9 @@ void InviteToEncounter(Critter[] group, Item car, int encounterDescriptor, int c
     else {
         if (valid(car)) {
             // Place critters near his car
-            hexX = uint16(-1);
-            hexY = uint16(-1);
+            //hexX = uint16(-1);
+            //hexY = uint16(-1);
+			hex = mpos();
         }
 
         dir = Game.Random(0, 5);

@@ -1,0 +1,830 @@
+namespace Dialogs
+{
+
+// Todo: ввести в работу MaxTalkers
+
+///@ Setting Common int32 TalkDistance
+///@ Setting Common int32 TalkMaxTime
+///@ Setting Common int32 MaxTalkers
+
+///@ Property Critter Public hstring DialogId
+///@ Property Critter PrivateCommon int8 TalkDistance
+///@ Property Critter PrivateServer int8 MaxTalkers
+
+///@ PropertyComponent Critter DialogContext
+///@ Property Critter Public bool DialogContext.Talking Temporary
+///@ Property Critter PrivateServer hstring DialogContext.DialogId Temporary
+///@ Property Critter PrivateServer ident DialogContext.TalkerId Temporary
+///@ Property Critter PrivateServer ident DialogContext.MapId Temporary
+///@ Property Critter PrivateServer mpos DialogContext.MapHex Temporary
+///@ Property Critter PrivateServer bool DialogContext.IgnoreDistance Temporary
+///@ Property Critter PrivateServer int32 DialogContext.CurSpeech Temporary
+///@ Property Critter PrivateServer int32 DialogContext.PrevSpeech Temporary
+///@ Property Critter PrivateServer int32[] DialogContext.SpeechAnswers Temporary
+///@ Property Critter PrivateServer nanotime DialogContext.StartTime Temporary
+///@ Property Critter PrivateServer timespan DialogContext.Duration Temporary
+///@ Property Critter PrivateServer string DialogContext.Lexems Temporary
+
+///@ Event Server Game OnCritterTalk(Critter cr)
+
+///@ Enum TextPackName Dialogs = 15
+
+///@ RemoteCall Server SpeechAnswer(int32 answerIndex)
+///@ RemoteCall Client ReceiveDialogContext(hstring dialogId, ident talkerId, uint32 textId, uint32[] answerTextIds, string lexems, timespan duration)
+
+// [[ModuleInit]]
+void ModuleInit()
+{
+#if SERVER
+    Game.OnCritterSendInitialInfo.Subscribe(OnCritterSendInitialInfo);
+    Game.OnCritterKnockout.Subscribe(OnCritterKnockout);
+    Game.OnCritterDead.Subscribe(OnCritterDead);
+    Game.OnCritterFinish.Subscribe(OnCritterFinish);
+#endif
+}
+
+#if SERVER
+
+void RunDialog(Critter cr, Critter talker, bool ignoreDistance)
+{
+    if (talker.DialogId == EMPTY_HSTRING) {
+        ThrowException("Critter is not talkable", cr);
+    }
+    if (!IsCrittersCanTalk(cr, talker)) {
+        ThrowException("Critters can't talk now", cr, talker);
+    }
+
+    RunDialog(cr, talker.DialogId, talker, ignoreDistance);
+}
+
+void RunDialog(Critter cr, hstring dialogId, bool ignoreDistance)
+{
+    RunDialog(cr, dialogId, null, ignoreDistance);
+}
+
+void RunDialog(Critter cr, hstring dialogId, Critter talker, bool ignoreDistance)
+{
+    if (cr.DialogContext == null) {
+        ThrowException("Critter can't start dialog", cr, dialogId);
+    }
+
+    DialogPack dialogPack = Game.GetDialogPack(dialogId);
+
+    if (dialogPack == null) {
+        ThrowException("Dialog pack not found", cr, dialogId);
+    }
+
+    CloseDialog(cr);
+
+    if (cr.IsMoving()) {
+        cr.StopMoving();
+    }
+
+    // Определяем первый диалог
+    const int initSpeechIndex = 0;
+    int[] answerIndices = GetSpeechAnswers(cr, talker, dialogPack, initSpeechIndex, findFirst : true);
+
+    if (answerIndices.isEmpty()) {
+        return;
+    }
+
+    DialogSpeech initSpeech = dialogPack.GetSpeech(initSpeechIndex);
+    DialogAnswer initAnswer = initSpeech.GetAnswer(answerIndices.first());
+    uint firstSpeechId = UseAnswerResults(cr, talker, initAnswer);
+    int firstSpeechIndex = FindSpeech(dialogPack, firstSpeechId);
+
+    if (firstSpeechIndex == -1) {
+        ThrowException("First speech not found", cr, dialogId, firstSpeechId);
+    }
+
+    int[] firstAnswerIndices = GetSpeechAnswers(cr, talker, dialogPack, firstSpeechIndex);
+    DialogSpeech firstSpeech = dialogPack.GetSpeech(firstSpeechIndex);
+
+    // Нет ответов, просто текст над головой
+    if (firstAnswerIndices.isEmpty()) {
+        if (talker != null) {
+            Messaging::Say(talker, TextPackName::Dialogs, firstSpeech.TextId);
+        }
+        else {
+            Messaging::Info(cr, TextPackName::Dialogs, firstSpeech.TextId);
+        }
+        return;
+    }
+
+    string lexems = Game.RunSpeechScript(firstSpeech, cr, talker);
+
+    if (lexems == "!") {
+        ThrowException("Speech script error", cr, dialogId, firstSpeech.Id);
+    }
+
+    // Диалог запустили где-то в скриптовых вызовах GetSpeechAnswers/UseAnswerResults/RunSpeechScript
+    if (cr.DialogContext.Talking) {
+        return;
+    }
+
+    // Контекст диалога готов
+    cr.DialogContext.Talking = true;
+    cr.DialogContext.DialogId = dialogId;
+    cr.DialogContext.TalkerId = talker != null ? talker.Id : ZERO_IDENT;
+    cr.DialogContext.MapId = cr.MapId;
+    cr.DialogContext.MapHex = cr.Hex;
+    cr.DialogContext.IgnoreDistance = ignoreDistance;
+    cr.DialogContext.StartTime = Game.FrameTime;
+    cr.DialogContext.Duration = Time::Milliseconds(Settings.TalkMaxTime);
+    cr.DialogContext.PrevSpeech = -1;
+    cr.DialogContext.CurSpeech = firstSpeechIndex;
+    cr.DialogContext.SpeechAnswers = firstAnswerIndices;
+    cr.DialogContext.Lexems = lexems;
+
+    cr.StartTimeEvent(Time::Milliseconds(1000), Time::Milliseconds(1000), ProcessDialog);
+    SendDialogContext(cr);
+
+    Game.OnCritterTalk.Fire(cr);
+}
+
+// [[ServerRemoteCall]]
+void SpeechAnswer(Player player, int answerIndex)
+{
+    Critter cr = player.GetControlledCritter();
+
+    if (cr == null || cr.DialogContext == null || !cr.DialogContext.Talking) {
+        ThrowException("SpeechAnswer - Critter is not talking", player);
+        return;
+    }
+
+    Critter talker = Game.GetCritter(cr.DialogContext.TalkerId);
+
+    // Специальные индексы ответа
+    switch (answerIndex) {
+    case -1:
+    case 0xF1: // Закрыть диалог
+        CloseDialog(cr);
+        return;
+    case -2:
+    case 0xF2: // Бартер
+        if (talker != null) {
+            CloseDialog(cr);
+            Barter::StartNpcBarter(cr, talker);
+        }
+        return;
+    default:
+        break;
+    }
+
+    if (IsDialogMustBeClosed(cr)) {
+        CloseDialog(cr);
+        return;
+    }
+
+    hstring dialogId = cr.DialogContext.DialogId;
+    auto answerIndices = cr.DialogContext.SpeechAnswers;
+
+    if (answerIndex < 0 || answerIndex >= answerIndices.length()) {
+        CloseDialog(cr);
+        ThrowException("Invalid answer index", cr, dialogId, answerIndex);
+    }
+
+    DialogPack dialogPack = Game.GetDialogPack(dialogId);
+    int[] recheckedAnswerIndices = GetSpeechAnswers(cr, talker, dialogPack, cr.DialogContext.CurSpeech, recheck : true);
+
+    if (recheckedAnswerIndices.find(answerIndex) == -1) {
+        CloseDialog(cr);
+        ThrowException("Answer is not pass second check", cr, dialogId, answerIndex);
+    }
+
+    DialogSpeech dialogSpeech = dialogPack.GetSpeech(cr.DialogContext.CurSpeech);
+    DialogAnswer dialogAnswer = dialogSpeech.GetAnswer(answerIndices[answerIndex]);
+
+    uint nextSpeechId = UseAnswerResults(cr, talker, dialogAnswer);
+
+    // Специальные обработчики
+    switch (nextSpeechId) {
+    case 0:
+    case uint(-1): { // Закрываем
+        CloseDialog(cr);
+        return;
+    }
+    case 0xFFE2:
+    case uint(-3): { // Бартер
+        if (talker != null) {
+            CloseDialog(cr);
+            Barter::StartNpcBarter(cr, talker);
+        }
+        return;
+    }
+    case 0xFFE1:
+    case uint(-2): { // К предыдущей речи
+        DialogSpeech prevSpeech = dialogPack.GetSpeech(cr.DialogContext.PrevSpeech);
+        nextSpeechId = prevSpeech.Id;
+        break;
+    }
+    default: {
+        break;
+    }
+    }
+
+    int nextSpeechIndex = FindSpeech(dialogPack, nextSpeechId);
+
+    if (nextSpeechIndex == -1) {
+        CloseDialog(cr);
+        ThrowException("Next speech not found", cr, dialogId, dialogAnswer.Link);
+    }
+
+    int[] nextAnswerIndices = GetSpeechAnswers(cr, talker, dialogPack, nextSpeechIndex);
+
+    DialogSpeech nextSpeech = dialogPack.GetSpeech(nextSpeechIndex);
+    string lexems = Game.RunSpeechScript(nextSpeech, cr, talker);
+
+    if (lexems == "!") {
+        CloseDialog(cr);
+        ThrowException("Speech script error", cr, dialogId, nextSpeech.Id);
+    }
+
+    // Диалог изменился в вызовах GetSpeechAnswers/UseAnswerResults/RunSpeechScript
+    if (!cr.DialogContext.Talking || cr.DialogContext.DialogId != dialogId) {
+        return;
+    }
+
+    cr.DialogContext.StartTime = Game.FrameTime;
+    cr.DialogContext.PrevSpeech = cr.DialogContext.CurSpeech;
+    cr.DialogContext.CurSpeech = nextSpeechIndex;
+    cr.DialogContext.SpeechAnswers = nextAnswerIndices;
+    cr.DialogContext.Lexems = lexems;
+
+    SendDialogContext(cr);
+}
+
+void CloseDialog(Critter cr)
+{
+    if (cr.DialogContext != null && cr.DialogContext.Talking) {
+        cr.StopTimeEvent(ProcessDialog);
+        cr.DialogContext.DialogId = EMPTY_HSTRING;
+        cr.DialogContext.Talking = false;
+        SendDialogContext(cr);
+    }
+}
+
+void RefreshDialogTime(Critter cr)
+{
+    if (cr.DialogContext != null && cr.DialogContext.Talking) {
+        cr.DialogContext.StartTime = Game.FrameTime;
+    }
+}
+
+bool IsTalking(Critter cr)
+{
+    if (cr.DialogContext != null && cr.DialogContext.Talking) {
+        return true;
+    }
+
+    Critter[] otherCritters = cr.GetCritters(true, CritterFindType::Any);
+
+    for (int i = 0; i < otherCritters.length(); i++) {
+        Critter otherCr = otherCritters[i];
+
+        if (otherCr.DialogContext != null && otherCr.DialogContext.Talking && otherCr.DialogContext.TalkerId == cr.Id) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+// [[TimeEvent]]
+void ProcessDialog(Critter cr)
+{
+    if (IsDialogMustBeClosed(cr)) {
+        CloseDialog(cr);
+    }
+}
+
+bool IsDialogMustBeClosed(Critter cr)
+{
+    if (cr.DialogContext == null || !cr.DialogContext.Talking) {
+        return true;
+    }
+
+    timespan elapsed = Game.FrameTime - cr.DialogContext.StartTime;
+
+    if (elapsed >= Time::Milliseconds(Settings.TalkMaxTime)) {
+        return true;
+    }
+
+    if (!cr.DialogContext.IgnoreDistance) {
+        if (cr.DialogContext.TalkerId != ZERO_IDENT) {
+            Critter talker = Game.GetCritter(cr.DialogContext.TalkerId);
+
+            if (talker == null || !IsCrittersCanTalk(cr, talker)) {
+                return true;
+            }
+        }
+        else {
+            int talkDistance = cr.TalkDistance != 0 ? cr.TalkDistance : Settings.TalkDistance;
+
+            if (cr.MapId != cr.DialogContext.MapId || Game.GetDistance(cr, cr.DialogContext.MapHex) > talkDistance) {
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
+
+bool IsCrittersCanTalk(Critter cr, Critter talker)
+{
+    if (!cr.IsAlive() || !talker.IsAlive()) {
+        return false;
+    }
+    if (cr.MapId != talker.MapId) {
+        return false;
+    }
+    if (Game.GetDistance(cr, talker) > (cr.TalkDistance != 0 ? cr.TalkDistance : Settings.TalkDistance)) {
+        return false;
+    }
+    if (!talker.IsSee(cr) || !cr.IsSee(talker)) {
+        return false;
+    }
+
+    return true;
+}
+
+// [[Event]]
+void OnCritterSendInitialInfo(Critter cr)
+{
+    if (cr.DialogContext != null && cr.DialogContext.Talking) {
+        SendDialogContext(cr);
+    }
+}
+
+// [[Event]]
+void OnCritterKnockout(Critter cr)
+{
+    CloseDialog(cr);
+}
+
+// [[Event]]
+void OnCritterDead(Critter cr, Critter killer)
+{
+    CloseDialog(cr);
+}
+
+// [[Event]]
+void OnCritterFinish(Critter cr)
+{
+    CloseDialog(cr);
+}
+
+void SendDialogContext(Critter cr)
+{
+    Assert(cr.DialogContext != null);
+
+    if (cr.DialogContext.Talking) {
+        hstring dialogId = cr.DialogContext.DialogId;
+        DialogPack dialogPack = Game.GetDialogPack(dialogId);
+        DialogSpeech dialogSpeech = dialogPack.GetSpeech(cr.DialogContext.CurSpeech);
+
+        uint textId = dialogSpeech.TextId;
+        uint[] answerTextIds = {};
+        auto speechAnswers = cr.DialogContext.SpeechAnswers;
+
+        for (int i = 0; i < speechAnswers.length(); i++) {
+            DialogAnswer dialogAnswer = dialogSpeech.GetAnswer(speechAnswers[i]);
+            answerTextIds.insertLast(dialogAnswer.TextId);
+        }
+
+        ident talkerId = cr.DialogContext.TalkerId;
+        string lexems = cr.DialogContext.Lexems;
+        timespan duration = Time::Milliseconds(Settings.TalkMaxTime) - (Game.FrameTime - cr.DialogContext.StartTime);
+
+        cr.PlayerClientCall.ReceiveDialogContext(dialogId, talkerId, textId, answerTextIds, lexems, duration);
+    }
+    else {
+        cr.PlayerClientCall.ReceiveDialogContext(EMPTY_HSTRING, ZERO_IDENT, 0, array<uint> = {}, "", timespan());
+    }
+}
+
+int[] GetSpeechAnswers(Critter cr, Critter talker, DialogPack dialogPack, int speechIndex, bool recheck = false, bool findFirst = false)
+{
+    DialogSpeech speech = dialogPack.GetSpeech(speechIndex);
+
+    int[] answerIndices = {};
+
+    for (int i = 0; i < speech.AnswersCount; i++) {
+        DialogAnswer answer = speech.GetAnswer(i);
+
+        if (CheckAnswerDemands(cr, talker, answer, recheck)) {
+            answerIndices.insertLast(i);
+
+            if (findFirst) {
+                break;
+            }
+        }
+    }
+
+    return answerIndices;
+}
+
+const uint8 DR_NONE = 0;
+const uint8 DR_PROP_GLOBAL = 1;
+const uint8 DR_PROP_CRITTER = 2;
+const uint8 DR_PROP_ITEM = 4;
+const uint8 DR_PROP_LOCATION = 5;
+const uint8 DR_PROP_MAP = 6;
+const uint8 DR_ITEM = 7;
+const uint8 DR_SCRIPT = 8;
+const uint8 DR_NO_RECHECK = 9;
+const uint8 DR_OR = 10;
+
+const uint8 DR_WHO_NONE = 0;
+const uint8 DR_WHO_PLAYER = 1;
+const uint8 DR_WHO_NPC = 2;
+
+bool CheckAnswerDemands(Critter cr, Critter talker, DialogAnswer answer, bool recheck)
+{
+    for (int i = 0; i < answer.DemandsCount; i++) {
+        DialogAnswerReq demand = answer.GetDemand(i);
+
+        if (recheck && !demand.NoRecheck) {
+            continue;
+        }
+
+        Critter master;
+        Critter slave;
+
+        switch (demand.Who) {
+        case DR_WHO_PLAYER:
+            master = cr;
+            slave = talker;
+            break;
+        case DR_WHO_NPC:
+            master = talker;
+            slave = cr;
+            break;
+        default:
+            continue;
+        }
+
+        if (master == null) {
+            continue;
+        }
+
+        switch (demand.Type) {
+        case DR_PROP_GLOBAL:
+        case DR_PROP_CRITTER:
+        case DR_PROP_ITEM:
+        case DR_PROP_LOCATION:
+        case DR_PROP_MAP: {
+            int value;
+
+            if (demand.Type == DR_PROP_GLOBAL) {
+                value = Game.GetAsInt(GameProperty(demand.ParamIndex));
+            }
+            else if (demand.Type == DR_PROP_CRITTER) {
+                value = master.GetAsInt(CritterProperty(demand.ParamIndex));
+            }
+            else if (demand.Type == DR_PROP_ITEM) {
+                Item item = master.GetItem(ItemProperty::CritterSlot, CritterItemSlot::Main);
+
+                if (item == null) {
+                    continue;
+                }
+
+                value = item.GetAsInt(ItemProperty(demand.ParamIndex));
+            }
+            else if (demand.Type == DR_PROP_LOCATION) {
+                Map map = master.GetMap();
+
+                if (map == null) {
+                    continue;
+                }
+
+                value = map.GetLocation().GetAsInt(LocationProperty(demand.ParamIndex));
+            }
+            else if (demand.Type == DR_PROP_MAP) {
+                Map map = master.GetMap();
+
+                if (map == null) {
+                    continue;
+                }
+
+                value = map.GetAsInt(MapProperty(demand.ParamIndex));
+            }
+
+            switch (demand.Op) {
+            case '>':
+                if (value > demand.Value) {
+                    continue;
+                }
+                break;
+            case '<':
+                if (value < demand.Value) {
+                    continue;
+                }
+                break;
+            case '=':
+                if (value == demand.Value) {
+                    continue;
+                }
+                break;
+            case '!':
+                if (value != demand.Value) {
+                    continue;
+                }
+                break;
+            case '}':
+                if (value >= demand.Value) {
+                    continue;
+                }
+                break;
+            case '{':
+                if (value <= demand.Value) {
+                    continue;
+                }
+                break;
+            default:
+                break;
+            }
+            break;
+        }
+        case DR_ITEM: {
+            hstring pid = demand.ParamHash;
+
+            switch (demand.Op) {
+            case '>':
+                if (master.CountItem(pid) > demand.Value) {
+                    continue;
+                }
+                break;
+            case '<':
+                if (master.CountItem(pid) < demand.Value) {
+                    continue;
+                }
+                break;
+            case '=':
+                if (master.CountItem(pid) == demand.Value) {
+                    continue;
+                }
+                break;
+            case '!':
+                if (master.CountItem(pid) != demand.Value) {
+                    continue;
+                }
+                break;
+            case '}':
+                if (master.CountItem(pid) >= demand.Value) {
+                    continue;
+                }
+                break;
+            case '{':
+                if (master.CountItem(pid) <= demand.Value) {
+                    continue;
+                }
+                break;
+            default:
+                break;
+            }
+        } break;
+        case DR_SCRIPT: {
+            if (Game.DialogScriptDemand(demand, master, slave)) {
+                continue;
+            }
+            break;
+        }
+        case DR_OR: {
+            return true;
+        }
+        default: {
+            continue;
+        }
+        }
+
+        bool orMod = false;
+
+        for (; i < answer.DemandsCount; ++i) {
+            if (answer.GetDemand(i).Type == DR_OR) {
+                orMod = true;
+                break;
+            }
+        }
+
+        if (!orMod) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+uint UseAnswerResults(Critter cr, Critter talker, DialogAnswer answer)
+{
+    uint linkId = answer.Link;
+
+    Critter master;
+    Critter slave;
+
+    for (int i = 0; i < answer.ResultsCount; i++) {
+        DialogAnswerReq result = answer.GetResult(i);
+
+        switch (result.Who) {
+        case DR_WHO_PLAYER:
+            master = cr;
+            slave = talker;
+            break;
+        case DR_WHO_NPC:
+            master = talker;
+            slave = cr;
+            break;
+        default:
+            continue;
+        }
+
+        if (master == null) {
+            continue;
+        }
+
+        switch (result.Type) {
+        case DR_PROP_GLOBAL:
+        case DR_PROP_CRITTER:
+        case DR_PROP_ITEM:
+        case DR_PROP_LOCATION:
+        case DR_PROP_MAP: {
+            int value;
+
+            if (result.Type == DR_PROP_GLOBAL) {
+                value = Game.GetAsInt(GameProperty(result.ParamIndex));
+            }
+            else if (result.Type == DR_PROP_CRITTER) {
+                value = master.GetAsInt(CritterProperty(result.ParamIndex));
+            }
+            else if (result.Type == DR_PROP_ITEM) {
+                Item item = master.GetItem(ItemProperty::CritterSlot, CritterItemSlot::Main);
+
+                if (item == null) {
+                    continue;
+                }
+
+                value = item.GetAsInt(ItemProperty(result.ParamIndex));
+            }
+            else if (result.Type == DR_PROP_LOCATION) {
+                Map map = master.GetMap();
+
+                if (map == null) {
+                    continue;
+                }
+
+                value = map.GetLocation().GetAsInt(LocationProperty(result.ParamIndex));
+            }
+            else if (result.Type == DR_PROP_MAP) {
+                Map map = master.GetMap();
+
+                if (map == null) {
+                    continue;
+                }
+
+                value = map.GetAsInt(MapProperty(result.ParamIndex));
+            }
+
+            switch (result.Op) {
+            case '+':
+                value += result.Value;
+                break;
+            case '-':
+                value -= result.Value;
+                break;
+            case '*':
+                value *= result.Value;
+                break;
+            case '/':
+                value /= result.Value;
+                break;
+            case '=':
+                value = result.Value;
+                break;
+            default:
+                break;
+            }
+
+            if (result.Type == DR_PROP_GLOBAL) {
+                Game.SetAsInt(GameProperty(result.ParamIndex), value);
+            }
+            else if (result.Type == DR_PROP_CRITTER) {
+                master.SetAsInt(CritterProperty(result.ParamIndex), value);
+            }
+            else if (result.Type == DR_PROP_ITEM) {
+                Item item = master.GetItem(ItemProperty::CritterSlot, CritterItemSlot::Main);
+                item.SetAsInt(ItemProperty(result.ParamIndex), value);
+            }
+            else if (result.Type == DR_PROP_LOCATION) {
+                Map map = master.GetMap();
+                map.GetLocation().SetAsInt(LocationProperty(result.ParamIndex), value);
+            }
+            else if (result.Type == DR_PROP_MAP) {
+                Map map = master.GetMap();
+                map.SetAsInt(MapProperty(result.ParamIndex), value);
+            }
+            continue;
+        }
+        case DR_ITEM: {
+            hstring pid = result.ParamHash;
+            int curCount = master.CountItem(pid);
+            int needCount = curCount;
+
+            switch (result.Op) {
+            case '+':
+                needCount += result.Value;
+                break;
+            case '-':
+                needCount -= result.Value;
+                break;
+            case '*':
+                needCount *= result.Value;
+                break;
+            case '/':
+                needCount /= result.Value;
+                break;
+            case '=':
+                needCount = result.Value;
+                break;
+            default:
+                continue;
+            }
+
+            needCount = Math::Max(needCount, 0);
+
+            if (needCount < curCount) {
+                master.DestroyItem(pid, curCount - needCount);
+            }
+            else {
+                master.AddItem(pid, needCount - curCount);
+            }
+            continue;
+        }
+        case DR_SCRIPT: {
+            uint newLinkId = Game.DialogScriptResult(result, master, slave);
+
+            if (newLinkId != 0) {
+                linkId = newLinkId;
+            }
+            continue;
+        }
+        default: {
+            continue;
+        }
+        }
+    }
+
+    return linkId;
+}
+
+int FindSpeech(DialogPack dialogPack, uint speechId)
+{
+    for (int i = 0; i < dialogPack.SpeechesCount; i++) {
+        DialogSpeech speech = dialogPack.GetSpeech(i);
+
+        if (speech.Id == speechId) {
+            return i;
+        }
+    }
+
+    return -1;
+}
+
+#endif
+
+#if CLIENT
+
+// [[ClientRemoteCall]]
+void ReceiveDialogContext(hstring dialogId, ident talkerId, uint textId, uint[] answerTextIds, string lexems, timespan duration)
+{
+    if (dialogId != EMPTY_HSTRING) {
+        string text = Game.GetText(TextPackName::Dialogs, textId);
+        Critter talker = talkerId != ZERO_IDENT ? Game.GetCritter(talkerId) : null;
+        text = Game.FormatTags(text, lexems, talker);
+
+        string answersOneLine;
+
+        for (int i = 0; i < answerTextIds.length(); i++) {
+            string answerText = Game.GetText(TextPackName::Dialogs, answerTextIds[i]);
+            answerText = Game.FormatTags(answerText, lexems, talker);
+
+            answersOneLine += answerText;
+            answersOneLine += i < answerTextIds.length() - 1 ? "\n" : "";
+        }
+
+        dict<string, any> params = {};
+        params["TalkerIsNpc"] = talkerId != ZERO_IDENT;
+        params["TalkerId"] = talkerId != ZERO_IDENT ? any(talkerId) : any();
+        params["Text"] = text;
+        params["Answers"] = answersOneLine;
+        params["TalkTime"] = duration;
+
+        Gui::ShowScreen(GuiScreen::Dialog, params);
+    }
+    else {
+        Gui::HideScreen(GuiScreen::Dialog);
+    }
+}
+
+#endif
+
+}

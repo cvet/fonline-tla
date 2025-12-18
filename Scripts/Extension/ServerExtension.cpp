@@ -1,5 +1,6 @@
 #include "Common.h"
 
+#include "Dialogs.h"
 #include "Server.h"
 
 FO_USING_NAMESPACE();
@@ -11,6 +12,14 @@ FO_SCRIPT_API void InitServerEngine(FOServer* server);
 FO_SCRIPT_API void Server_Game_LoadImage(FOServer* server, int32 imageSlot, string_view imageName);
 ///@ ExportMethod
 FO_SCRIPT_API ucolor Server_Game_GetImageColor(FOServer* server, int32 imageSlot, int32 x, int32 y);
+///@ ExportMethod
+FO_SCRIPT_API DialogPack* Server_Game_GetDialogPack(FOServer* server, hstring packId);
+///@ ExportMethod
+FO_SCRIPT_API string Server_Game_RunSpeechScript(FOServer* server, DialogSpeech* speech, Critter* cr, Critter* talker);
+///@ ExportMethod
+FO_SCRIPT_API bool Server_Game_DialogScriptDemand(FOServer* server, DialogAnswerReq* demand, Critter* master, Critter* slave);
+///@ ExportMethod
+FO_SCRIPT_API uint32 Server_Game_DialogScriptResult(FOServer* server, DialogAnswerReq* result, Critter* master, Critter* slave);
 ///@ ExportMethod
 FO_SCRIPT_API bool Server_Critter_IsFree(Critter* server);
 ///@ ExportMethod
@@ -29,6 +38,7 @@ struct ServerImage
 struct ServerExtData
 {
     vector<unique_ptr<ServerImage>> ServerImages {};
+    unique_ptr<DialogManager> DialogMngr {};
 };
 
 static auto GetServerExtData(FOServer* server) -> ServerExtData&
@@ -44,6 +54,10 @@ void FO_NAMESPACE InitServerEngine(FOServer* server)
         const auto* ext_data_ptr = reinterpret_cast<const ServerExtData*>(ptr);
         delete ext_data_ptr;
     });
+
+    auto& ext_data = GetServerExtData(server);
+    ext_data.DialogMngr = SafeAlloc::MakeUnique<DialogManager>(*server);
+    ext_data.DialogMngr->LoadFromResources(server->Resources);
 }
 
 void FO_NAMESPACE Server_Game_LoadImage(FOServer* server, int32 imageSlot, string_view imageName)
@@ -134,6 +148,146 @@ ucolor FO_NAMESPACE Server_Game_GetImageColor(FOServer* server, int32 imageSlot,
 
     const auto result = simg->Data[y * simg->Width + x];
     return result;
+}
+
+DialogPack* FO_NAMESPACE Server_Game_GetDialogPack(FOServer* server, hstring packId)
+{
+    FO_STACK_TRACE_ENTRY();
+
+    auto& ext_data = GetServerExtData(server);
+    auto* pack = ext_data.DialogMngr->GetDialog(packId);
+
+    if (pack == nullptr) {
+        BreakIntoDebugger();
+        return nullptr;
+    }
+
+    return pack;
+}
+
+string FO_NAMESPACE Server_Game_RunSpeechScript(FOServer* server, DialogSpeech* speech, Critter* cr, Critter* talker)
+{
+    FO_STACK_TRACE_ENTRY();
+
+    string lexems;
+
+    if (speech->DlgScriptFuncName) {
+        bool failed = false;
+
+        if (auto func = server->ScriptSys.FindFunc<void, Critter*, Critter*, string*>(speech->DlgScriptFuncName)) {
+            failed = true;
+        }
+        if (auto func = server->ScriptSys.FindFunc<uint32, Critter*, Critter*, string*>(speech->DlgScriptFuncName); func && !func(cr, talker, &lexems)) {
+            failed = true;
+        }
+
+        if (failed) {
+            return "!";
+        }
+    }
+
+    return lexems;
+}
+
+bool FO_NAMESPACE Server_Game_DialogScriptDemand(FOServer* server, DialogAnswerReq* demand, Critter* master, Critter* slave)
+{
+    FO_STACK_TRACE_ENTRY();
+
+    bool result = false;
+
+    switch (demand->ValuesCount) {
+    case 0:
+        return server->ScriptSys.CallFunc<bool, Critter*, Critter*>(demand->AnswerScriptFuncName, master, slave, result) && result;
+    case 1:
+        return server->ScriptSys.CallFunc<bool, Critter*, Critter*, int32>(demand->AnswerScriptFuncName, master, slave, demand->ValueExt0, result) && result;
+    case 2:
+        return server->ScriptSys.CallFunc<bool, Critter*, Critter*, int32, int32>(demand->AnswerScriptFuncName, master, slave, demand->ValueExt0, demand->ValueExt1, result) && result;
+    case 3:
+        return server->ScriptSys.CallFunc<bool, Critter*, Critter*, int32, int32, int32>(demand->AnswerScriptFuncName, master, slave, demand->ValueExt0, demand->ValueExt1, demand->ValueExt2, result) && result;
+    case 4:
+        return server->ScriptSys.CallFunc<bool, Critter*, Critter*, int32, int32, int32, int32>(demand->AnswerScriptFuncName, master, slave, demand->ValueExt0, demand->ValueExt1, demand->ValueExt2, demand->ValueExt3, result) && result;
+    case 5:
+        return server->ScriptSys.CallFunc<bool, Critter*, Critter*, int32, int32, int32, int32, int32>(demand->AnswerScriptFuncName, master, slave, demand->ValueExt0, demand->ValueExt1, demand->ValueExt2, demand->ValueExt3, demand->ValueExt4, result) && result;
+    default:
+        FO_UNREACHABLE_PLACE();
+    }
+}
+
+uint32 FO_NAMESPACE Server_Game_DialogScriptResult(FOServer* server, DialogAnswerReq* result, Critter* master, Critter* slave)
+{
+    FO_STACK_TRACE_ENTRY();
+
+    switch (result->ValuesCount) {
+    case 0:
+        if (auto func = server->ScriptSys.FindFunc<uint32, Critter*, Critter*>(result->AnswerScriptFuncName)) {
+            return func(master, slave) ? func.GetResult() : 0;
+        }
+        break;
+    case 1:
+        if (auto func = server->ScriptSys.FindFunc<uint32, Critter*, Critter*, int32>(result->AnswerScriptFuncName)) {
+            return func(master, slave, result->ValueExt0) ? func.GetResult() : 0;
+        }
+        break;
+    case 2:
+        if (auto func = server->ScriptSys.FindFunc<uint32, Critter*, Critter*, int32, int32>(result->AnswerScriptFuncName)) {
+            return func(master, slave, result->ValueExt0, result->ValueExt1) ? func.GetResult() : 0;
+        }
+        break;
+    case 3:
+        if (auto func = server->ScriptSys.FindFunc<uint32, Critter*, Critter*, int32, int32, int32>(result->AnswerScriptFuncName)) {
+            return func(master, slave, result->ValueExt0, result->ValueExt1, result->ValueExt2) ? func.GetResult() : 0;
+        }
+        break;
+    case 4:
+        if (auto func = server->ScriptSys.FindFunc<uint32, Critter*, Critter*, int32, int32, int32, int32>(result->AnswerScriptFuncName)) {
+            return func(master, slave, result->ValueExt0, result->ValueExt1, result->ValueExt2, result->ValueExt3) ? func.GetResult() : 0;
+        }
+        break;
+    case 5:
+        if (auto func = server->ScriptSys.FindFunc<uint32, Critter*, Critter*, int32, int32, int32, int32, int32>(result->AnswerScriptFuncName)) {
+            return func(master, slave, result->ValueExt0, result->ValueExt1, result->ValueExt2, result->ValueExt3, result->ValueExt4) ? func.GetResult() : 0;
+        }
+        break;
+    default:
+        FO_UNREACHABLE_PLACE();
+    }
+
+    switch (result->ValuesCount) {
+    case 0:
+        if (!server->ScriptSys.CallFunc<void, Critter*, Critter*>(result->AnswerScriptFuncName, master, slave)) {
+            return 0;
+        }
+        break;
+    case 1:
+        if (!server->ScriptSys.CallFunc<void, Critter*, Critter*, int32>(result->AnswerScriptFuncName, master, slave, result->ValueExt0)) {
+            return 0;
+        }
+        break;
+    case 2:
+        if (!server->ScriptSys.CallFunc<void, Critter*, Critter*, int32, int32>(result->AnswerScriptFuncName, master, slave, result->ValueExt0, result->ValueExt1)) {
+            return 0;
+        }
+        break;
+    case 3:
+        if (!server->ScriptSys.CallFunc<void, Critter*, Critter*, int32, int32, int32>(result->AnswerScriptFuncName, master, slave, result->ValueExt0, result->ValueExt1, result->ValueExt2)) {
+            return 0;
+        }
+        break;
+    case 4:
+        if (!server->ScriptSys.CallFunc<void, Critter*, Critter*, int32, int32, int32, int32>(result->AnswerScriptFuncName, master, slave, result->ValueExt0, result->ValueExt1, result->ValueExt2, result->ValueExt3)) {
+            return 0;
+        }
+        break;
+    case 5:
+        if (!server->ScriptSys.CallFunc<void, Critter*, Critter*, int32, int32, int32, int32, int32>(result->AnswerScriptFuncName, master, slave, result->ValueExt0, result->ValueExt1, result->ValueExt2, result->ValueExt3, result->ValueExt4)) {
+            return 0;
+        }
+        break;
+    default:
+        FO_UNREACHABLE_PLACE();
+    }
+
+    return 0;
 }
 
 bool FO_NAMESPACE Server_Critter_IsFree(Critter* server)

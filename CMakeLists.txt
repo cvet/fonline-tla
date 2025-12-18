@@ -25,10 +25,26 @@ SetOption(FO_OUTPUT_PATH ${CMAKE_CURRENT_SOURCE_DIR})
 
 include(Engine/BuildTools/StartGeneration.cmake)
 
+# SHA
+include_directories("Scripts/Extension/SHA")
+add_library(SHA STATIC EXCLUDE_FROM_ALL
+    "Scripts/Extension/SHA/sha1.h"
+    "Scripts/Extension/SHA/sha1.c"
+    "Scripts/Extension/SHA/sha2.h"
+    "Scripts/Extension/SHA/sha2.c")
+DisableLibWarnings(SHA)
+list(APPEND FO_COMMON_LIBS SHA)
+
 # Native code
+AddEngineSource(COMMON Scripts/Extension/CommonExtension.cpp)
 AddEngineSource(COMMON Scripts/Extension/ContentMigration.cpp)
 AddEngineSource(SERVER Scripts/Extension/ServerExtension.cpp)
 AddEngineSource(CLIENT Scripts/Extension/ClientExtension.cpp)
+AddEngineSource(COMMON Scripts/Extension/Dialogs.h)
+AddEngineSource(COMMON Scripts/Extension/Dialogs.cpp)
+AddEngineSource(BAKER Scripts/Extension/BakerExtension.cpp)
+AddEngineSource(BAKER Scripts/Extension/DialogBaker.h)
+AddEngineSource(BAKER Scripts/Extension/DialogBaker.cpp)
 
 # Test builds
 CreatePackage(Dev LocalTest)

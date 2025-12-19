@@ -91,7 +91,7 @@ static auto GetPropEnumIndex(const EngineData* engine, string_view str, bool is_
     if (prop->IsDisabled()) {
         throw DialogParseException("DR property is disabled", str);
     }
-    if (!is_demand && prop->IsReadOnly()) {
+    if (!is_demand && !prop->IsMutable()) {
         throw DialogParseException("DR property is read only", str);
     }
 

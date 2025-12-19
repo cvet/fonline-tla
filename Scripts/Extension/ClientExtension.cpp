@@ -53,7 +53,7 @@ string FormatTags(FOClient* client, string_view text, string_view lexems, Critte
         } break;
         case '|': {
             if (sex_tags) {
-                tag = strex(new_text.substr(i + 1)).substringUntil('|');
+                tag = strex(new_text.substr(i + 1)).substring_until('|');
                 new_text.erase(i, tag.length() + 2);
 
                 if (sex != 0) {
@@ -74,7 +74,7 @@ string FormatTags(FOClient* client, string_view text, string_view lexems, Critte
                 continue;
             }
 
-            tag = strex(new_text.substr(i + 1)).substringUntil('@');
+            tag = strex(new_text.substr(i + 1)).substring_until('@');
             new_text.erase(i, tag.length() + 2);
 
             if (tag.empty()) {
@@ -82,21 +82,21 @@ string FormatTags(FOClient* client, string_view text, string_view lexems, Critte
             }
 
             // Player name
-            if (strex(tag).compareIgnoreCase("pname")) {
+            if (strex(tag).compare_ignore_case("pname")) {
                 tag = chosen != nullptr ? chosen->GetName() : "";
             }
             // Npc name
-            else if (strex(tag).compareIgnoreCase("nname")) {
+            else if (strex(tag).compare_ignore_case("nname")) {
                 tag = talker != nullptr ? talker->GetName() : "";
             }
             // Sex
-            else if (strex(tag).compareIgnoreCase("sex")) {
+            else if (strex(tag).compare_ignore_case("sex")) {
                 sex = chosen != nullptr && chosen->GetSexTagFemale() ? 2 : 1;
                 sex_tags = true;
                 continue;
             }
             // Random
-            else if (strex(tag).compareIgnoreCase("rnd")) {
+            else if (strex(tag).compare_ignore_case("rnd")) {
                 auto first = new_text.find_first_of('|', i);
                 auto last = new_text.find_last_of('|', i);
                 auto rnd = strex(new_text.substr(first, last - first + 1)).split('|');
@@ -113,7 +113,7 @@ string FormatTags(FOClient* client, string_view text, string_view lexems, Critte
 
                 if (pos != string::npos) {
                     pos += lex.length();
-                    tag = strex(lexems.substr(pos)).substringUntil('$').trim();
+                    tag = strex(lexems.substr(pos)).substring_until('$').trim();
                 }
                 else {
                     tag = "<lexem not found>";
@@ -149,7 +149,7 @@ string FormatTags(FOClient* client, string_view text, string_view lexems, Critte
             }
             // Script
             else if (tag.length() > 7 && tag[0] == 's' && tag[1] == 'c' && tag[2] == 'r' && tag[3] == 'i' && tag[4] == 'p' && tag[5] == 't' && tag[6] == ' ') {
-                string func_name = strex(tag.substr(7)).substringUntil('$');
+                string func_name = strex(tag.substr(7)).substring_until('$');
 
                 if (!client->ScriptSys.CallFunc<string, string>(client->Hashes.ToHashedString(func_name), string(lexems), tag)) {
                     tag = "<script function not found>";

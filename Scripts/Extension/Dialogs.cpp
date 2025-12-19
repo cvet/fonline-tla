@@ -221,7 +221,7 @@ auto DialogManager::ParseDialog(string_view pack_name, string_view data) const -
         throw DialogParseException("Lang app not found", pack_name);
     }
 
-    if (pack->PackId.asUInt() <= 0xFFFF) {
+    if (pack->PackId.as_uint32() <= 0xFFFF) {
         throw DialogParseException("Invalid hash for dialog name", pack_name);
     }
 
@@ -256,7 +256,7 @@ auto DialogManager::ParseDialog(string_view pack_name, string_view data) const -
 
         while ((str_num = temp_msg.GetStrNumUpper(str_num)) != 0) {
             const size_t count = temp_msg.GetStrCount(str_num);
-            const uint32 new_str_num = pack->PackId.asUInt() + (str_num < 100000000 ? str_num / 10 : str_num - 100000000 + 12000);
+            const uint32 new_str_num = pack->PackId.as_uint32() + (str_num < 100000000 ? str_num / 10 : str_num - 100000000 + 12000);
 
             for (size_t n = 0; n < count; n++) {
                 string str = strex(temp_msg.GetStr(str_num, n)).replace("\n\\[", "\n[");
@@ -296,7 +296,7 @@ auto DialogManager::ParseDialog(string_view pack_name, string_view data) const -
             throw DialogParseException("Bad text link", pack_name);
         }
 
-        speech->TextId = pack->PackId.asUInt() + text_id / 10;
+        speech->TextId = pack->PackId.as_uint32() + text_id / 10;
 
         string script;
         input >> script;
@@ -354,7 +354,7 @@ auto DialogManager::ParseDialog(string_view pack_name, string_view data) const -
                 throw DialogParseException("Bad text link in answer", pack_name);
             }
 
-            answer->TextId = pack->PackId.asUInt() + text_id / 10;
+            answer->TextId = pack->PackId.as_uint32() + text_id / 10;
 
             while (!input.eof()) {
                 input >> tok;
@@ -463,7 +463,7 @@ auto DialogManager::LoadDemandResult(istringstream& input, bool is_demand) const
         input >> svalue;
 
         if (is_hash) {
-            ivalue = _engine->Hashes.ToHashedString(svalue).asInt();
+            ivalue = _engine->Hashes.ToHashedString(svalue).as_int32();
         }
         else {
             ivalue = _engine->ResolveGenericValue(svalue);

@@ -121,7 +121,7 @@ void FO_NAMESPACE Server_Game_LoadImage(FOServer* server, int32 imageSlot, strin
     const auto check_number2 = reader.GetUInt8();
     FO_RUNTIME_ASSERT(check_number2 == 42);
 
-    auto&& simg = std::make_unique<ServerImage>();
+    auto simg = SafeAlloc::MakeUnique<ServerImage>();
     simg->Width = width;
     simg->Height = height;
     simg->Data.resize(static_cast<size_t>(width) * height);

@@ -31,7 +31,7 @@ void FO_NAMESPACE ConfigEntryParseHook(const string& fname, const string& sectio
     if (section == "Tile") {
         if (key == "PicMap") {
             key = "$Proto";
-            value = "tile_" + strex(value).extractFileName().eraseFileExtension().str();
+            value = "tile_" + strex(value).extract_file_name().erase_file_extension().str();
         }
         else if (key == "IsRoof") {
             key = "IsRoofTile";

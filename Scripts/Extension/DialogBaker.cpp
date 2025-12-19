@@ -66,7 +66,7 @@ void DialogBaker::BakeFiles(const FileCollection& files, string_view target_path
 
     if (target_path.empty()) {
         for (const auto& file_header : files) {
-            if (strex(file_header.GetPath()).getFileExtension() != "fodlg") {
+            if (strex(file_header.GetPath()).get_file_extension() != "fodlg") {
                 continue;
             }
             if (_bakeChecker && !_bakeChecker(file_header.GetPath(), file_header.GetWriteTime())) {
@@ -77,7 +77,7 @@ void DialogBaker::BakeFiles(const FileCollection& files, string_view target_path
         }
     }
     else {
-        if (strex(target_path).getFileExtension() != "fodlg") {
+        if (strex(target_path).get_file_extension() != "fodlg") {
             return;
         }
 
@@ -204,7 +204,7 @@ void DialogTextBaker::BakeFiles(const FileCollection& files, string_view target_
     if (_skipBaking) {
         return;
     }
-    if (!target_path.empty() && !strex(target_path).getFileExtension().startsWith("fotxt")) {
+    if (!target_path.empty() && !strex(target_path).get_file_extension().starts_with("fotxt")) {
         return;
     }
 
@@ -213,7 +213,7 @@ void DialogTextBaker::BakeFiles(const FileCollection& files, string_view target_
     uint64 max_write_time = 0;
 
     for (const auto& file_header : files) {
-        if (strex(file_header.GetPath()).getFileExtension() != "fodlg") {
+        if (strex(file_header.GetPath()).get_file_extension() != "fodlg") {
             continue;
         }
 

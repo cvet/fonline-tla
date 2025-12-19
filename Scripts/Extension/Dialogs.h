@@ -100,8 +100,8 @@ struct DialogAnswer
 
     FO_SCRIPTABLE_OBJECT_END();
 
-    uniq_ptr<vector<refcount_ptr<DialogAnswerReq>>> Demands {SafeAlloc::MakeUniq<vector<refcount_ptr<DialogAnswerReq>>>()};
-    uniq_ptr<vector<refcount_ptr<DialogAnswerReq>>> Results {SafeAlloc::MakeUniq<vector<refcount_ptr<DialogAnswerReq>>>()};
+    unique_ptr<vector<refcount_ptr<DialogAnswerReq>>> Demands {SafeAlloc::MakeUnique<vector<refcount_ptr<DialogAnswerReq>>>()};
+    unique_ptr<vector<refcount_ptr<DialogAnswerReq>>> Results {SafeAlloc::MakeUnique<vector<refcount_ptr<DialogAnswerReq>>>()};
 };
 static_assert(std::is_standard_layout_v<DialogAnswer>);
 
@@ -119,7 +119,7 @@ struct DialogSpeech
 
     FO_SCRIPTABLE_OBJECT_END();
 
-    uniq_ptr<vector<refcount_ptr<DialogAnswer>>> Answers {SafeAlloc::MakeUniq<vector<refcount_ptr<DialogAnswer>>>()};
+    unique_ptr<vector<refcount_ptr<DialogAnswer>>> Answers {SafeAlloc::MakeUnique<vector<refcount_ptr<DialogAnswer>>>()};
 };
 static_assert(std::is_standard_layout_v<DialogSpeech>);
 
@@ -135,9 +135,9 @@ struct DialogPack
 
     FO_SCRIPTABLE_OBJECT_END();
 
-    uniq_ptr<vector<refcount_ptr<DialogSpeech>>> Speeches {SafeAlloc::MakeUniq<vector<refcount_ptr<DialogSpeech>>>()};
-    uniq_ptr<vector<pair<string, TextPack>>> Texts {SafeAlloc::MakeUniq<vector<pair<string, TextPack>>>()};
-    uniq_ptr<string> Comment {SafeAlloc::MakeUniq<string>()};
+    unique_ptr<vector<refcount_ptr<DialogSpeech>>> Speeches {SafeAlloc::MakeUnique<vector<refcount_ptr<DialogSpeech>>>()};
+    unique_ptr<vector<pair<string, TextPack>>> Texts {SafeAlloc::MakeUnique<vector<pair<string, TextPack>>>()};
+    unique_ptr<string> Comment {SafeAlloc::MakeUnique<string>()};
 };
 static_assert(std::is_standard_layout_v<DialogPack>);
 

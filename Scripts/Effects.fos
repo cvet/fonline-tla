@@ -6,6 +6,7 @@ namespace Effects
 ///@ RemoteCall Client DoRunEffect(hstring effectPid, mpos hex, int32 radius)
 ///@ RemoteCall Client DoRunFlyEffect(hstring effectPid, ident crId, ident targetId, mpos hex, mpos targetHex)
 ///@ RemoteCall Client DoPlaySound(hstring soundName)
+///@ RemoteCall Client DoAnimate(ident crId, CritterStateAnim state, CritterActionAnim action)
 
 #if SERVER
 
@@ -137,7 +138,7 @@ void PlaySound(Critter cr, hstring soundName)
 {
     cr.PlayerClientCall.DoPlaySound(soundName);
 
-    Critter[] critters = cr.GetCritters(true, CritterFindType::Players);
+    Critter[] critters = cr.GetCritters(CritterSeeType::WhoSeeMe, CritterFindType::Players);
 
     for (int i = 0; i < critters.length(); i++) {
         critters[i].PlayerClientCall.DoPlaySound(soundName);
@@ -147,6 +148,15 @@ void PlaySound(Critter cr, hstring soundName)
 void PlaySound(Critter cr, string soundName)
 {
     PlaySound(cr, hstring(soundName));
+}
+
+void Animate(Critter cr, CritterStateAnim state, CritterActionAnim action)
+{
+    Critter[] critters = cr.GetCritters(CritterSeeType::WhoSeeMe, CritterFindType::Players);
+
+    for (int i = 0; i < critters.length(); i++) {
+        critters[i].PlayerClientCall.DoAnimate(cr.Id, state, action);
+    }
 }
 
 #endif
@@ -165,7 +175,9 @@ void DoQuakeScreen(int noise, timespan time)
 
 void DoRunEffect(hstring effectPid, mpos hex, int radius)
 {
-    CurMap.RunEffect(effectPid, hex);
+    Item effect = CurMap.CreateLocalItem(effectPid, hex);
+    effect.PlayAnim(EMPTY_HSTRING, false, false);
+    effect.StartTimeEvent(Time::Milliseconds(100), Time::Milliseconds(100), EffectDeferredDestroy);
 
     for (int i = 0; i < radius; i++) {
         for (uint8 dir = 0; dir < 6; dir++) {
@@ -176,13 +188,23 @@ void DoRunEffect(hstring effectPid, mpos hex, int radius)
             }
 
             for (int j = 0; j < i + 1; j++) {
-                CurMap.RunEffect(effectPid, hex2);
+                effect = CurMap.CreateLocalItem(effectPid, hex2);
+                effect.PlayAnim(EMPTY_HSTRING, false, false);
+                effect.StartTimeEvent(Time::Milliseconds(100), Time::Milliseconds(100), EffectDeferredDestroy);
 
                 if (!CurMap.MoveHexByDir(hex2, (dir + 2) % 6)) {
                     break;
                 }
             }
         }
+    }
+}
+
+void EffectDeferredDestroy(Item item)
+{
+    if (!item.IsAnimPlaying()) {
+        item.Finish();
+        Game.StopCurrentTimeEvent();
     }
 }
 
@@ -194,12 +216,32 @@ void DoRunFlyEffect(hstring effectPid, ident crId, ident targetId, mpos hex, mpo
     hex = cr != null ? cr.Hex : hex;
     targetHex = target != null ? target.Hex : targetHex;
 
-    CurMap.RunEffect(effectPid, hex, targetHex, 1.0f);
+    Item effect = CurMap.CreateLocalItem(effectPid, hex);
+    effect.SetAnimDir(Game.GetDirection(hex, targetHex));
+    effect.MoveToHex(targetHex, 1.0f);
+    effect.StartTimeEvent(Time::Milliseconds(100), Time::Milliseconds(100), FlyEffectDeferredDestroy);
+}
+
+void FlyEffectDeferredDestroy(Item item)
+{
+    if (!item.IsMoving()) {
+        item.Finish();
+        Game.StopCurrentTimeEvent();
+    }
 }
 
 void DoPlaySound(hstring soundName)
 {
     Game.PlaySound(soundName);
+}
+
+void DoAnimate(ident crId, CritterStateAnim state, CritterActionAnim action)
+{
+    Critter cr = Game.GetCritter(crId);
+
+    if (cr != null) {
+        cr.Animate(state, action);
+    }
 }
 
 #endif

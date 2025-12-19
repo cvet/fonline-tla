@@ -5,13 +5,66 @@ namespace Animation
 
 void ModuleInit()
 {
-    Game.OnCritterAnimation.Subscribe(OnCritterAnimation);
+    Game.OnCritterAnimationInit.Subscribe(OnCritterAnimationInit);
+    Game.OnCritterAnimationProcess.Subscribe(OnCritterAnimationProcess);
+    Game.OnCritterAnimationFrames.Subscribe(OnCritterAnimationFrames);
     Game.OnCritterAnimationSubstitute.Subscribe(OnCritterAnimationSubstitute);
     Game.OnCritterAnimationFallout.Subscribe(OnCritterAnimationFallout);
 }
 
-void OnCritterAnimation(hstring modelName, CritterStateAnim stateAnim, CritterActionAnim actionAnim, int& pass, uint& flags, int& ox, int& oy,
-                        string& animation)
+CritterStateAnim GetStateAnim(Critter cr)
+{
+    if (cr.Condition == CritterCondition::Alive) {
+        AbstractItem activeItem = CritterItem::GetActive(cr);
+        return activeItem.Type == ItemType::Weapon ? activeItem.Weapon_StateAnim : CritterStateAnim::Unarmed;
+    }
+
+    return CritterStateAnim::Unarmed;
+}
+
+CritterActionAnim GetIdleActionAnim(Critter cr)
+{
+    if (cr.Condition == CritterCondition::Alive) {
+        return CritterActionAnim::Idle;
+    }
+    else if (cr.Condition == CritterCondition::Knockout) {
+        return cr.KnockoutActionAnim != CritterActionAnim::None ? cr.KnockoutActionAnim : CritterActionAnim::IdleProneFront;
+    }
+    else if (cr.Condition == CritterCondition::Dead) {
+        return cr.DeadActionAnim != CritterActionAnim::None ? cr.DeadActionAnim : CritterActionAnim::DeadFront;
+    }
+
+    ThrowException("Invalid critter condition", cr.Condition);
+    return CritterActionAnim::Idle;
+}
+
+void OnCritterAnimationInit(Critter cr, CritterStateAnim& stateAnim, CritterActionAnim& actionAnim, AbstractItem contextItem)
+{
+    if (stateAnim == CritterStateAnim::None) {
+        if (contextItem != null) {
+            stateAnim = contextItem.Type == ItemType::Weapon ? contextItem.Weapon_StateAnim : CritterStateAnim::Unarmed;
+        }
+        else {
+            stateAnim = GetStateAnim(cr);
+        }
+    }
+
+    if (actionAnim == CritterActionAnim::None) {
+        actionAnim = GetIdleActionAnim(cr);
+    }
+}
+
+void OnCritterAnimationProcess(Critter cr, CritterStateAnim stateAnim, CritterActionAnim actionAnim, AbstractItem contextItem, bool refreshAnim)
+{
+#if CLIENT
+    if (!refreshAnim) {
+        PlayAnimSound(cr.ModelName, cr.Gender, stateAnim, actionAnim);
+    }
+#endif
+}
+
+void OnCritterAnimationFrames(hstring modelName, CritterStateAnim stateAnim, CritterActionAnim actionAnim, int& pass, uint& flags, int& ox, int& oy,
+                              string& animation)
 {
     if (modelName == CRTYPE_TACTICS_RHUMANOID) {
         animation = ProcessTactics(modelName, stateAnim, actionAnim, pass, flags, ox, oy);

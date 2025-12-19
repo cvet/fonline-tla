@@ -174,7 +174,7 @@ string FO_NAMESPACE Server_Game_RunSpeechScript(FOServer* server, DialogSpeech* 
     if (speech->DlgScriptFuncName) {
         bool failed = false;
 
-        if (auto func = server->ScriptSys.FindFunc<void, Critter*, Critter*, string*>(speech->DlgScriptFuncName)) {
+        if (auto func = server->ScriptSys.FindFunc<void, Critter*, Critter*, string*>(speech->DlgScriptFuncName); func && !func(cr, talker, &lexems)) {
             failed = true;
         }
         if (auto func = server->ScriptSys.FindFunc<uint32, Critter*, Critter*, string*>(speech->DlgScriptFuncName); func && !func(cr, talker, &lexems)) {

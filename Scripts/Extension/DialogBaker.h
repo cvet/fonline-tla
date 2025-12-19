@@ -52,9 +52,7 @@ public:
     auto operator=(DialogBaker&&) noexcept = delete;
     ~DialogBaker() override;
 
-    [[nodiscard]] auto IsExtSupported(string_view ext) const -> bool override { return ext == "fodlg"; }
-
-    void BakeFiles(FileCollection files) override;
+    void BakeFiles(const FileCollection& files, string_view target_path) const override;
 
 private:
     bool _skipBaking {};
@@ -70,9 +68,7 @@ public:
     auto operator=(DialogTextBaker&&) noexcept = delete;
     ~DialogTextBaker() override;
 
-    [[nodiscard]] auto IsExtSupported(string_view ext) const -> bool override { return ext == "fodlg"; }
-
-    void BakeFiles(FileCollection files) override;
+    void BakeFiles(const FileCollection& files, string_view target_path) const override;
 
 private:
     bool _skipBaking {};

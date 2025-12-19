@@ -32,7 +32,6 @@
 //
 
 #include "DialogBaker.h"
-#include "Application.h"
 #include "Dialogs.h"
 #include "ScriptSystem.h"
 #include "TextPack.h"
@@ -46,7 +45,7 @@ DialogBaker::DialogBaker(BakerData& data) :
 {
     FO_STACK_TRACE_ENTRY();
 
-    _skipBaking = !std::ranges::find_if(App->Settings.GetResourcePacks(), [&](auto&& pack) { return pack.Name == data.PackName; })->ServerOnly;
+    _skipBaking = !std::ranges::find_if(_settings->GetResourcePacks(), [&](auto&& pack) { return pack.Name == _resPackName; })->ServerOnly;
 }
 
 DialogBaker::~DialogBaker()
@@ -54,7 +53,7 @@ DialogBaker::~DialogBaker()
     FO_STACK_TRACE_ENTRY();
 }
 
-void DialogBaker::BakeFiles(FileCollection files)
+void DialogBaker::BakeFiles(const FileCollection& files, string_view target_path) const
 {
     FO_STACK_TRACE_ENTRY();
 
@@ -65,18 +64,33 @@ void DialogBaker::BakeFiles(FileCollection files)
     // Collect dialog files
     vector<File> filtered_files;
 
-    while (files.MoveNext()) {
-        auto file_header = files.GetCurFileHeader();
-        const string ext = strex(file_header.GetPath()).getFileExtension();
+    if (target_path.empty()) {
+        for (const auto& file_header : files) {
+            if (strex(file_header.GetPath()).getFileExtension() != "fodlg") {
+                continue;
+            }
+            if (_bakeChecker && !_bakeChecker(file_header.GetPath(), file_header.GetWriteTime())) {
+                continue;
+            }
 
-        if (!IsExtSupported(ext)) {
-            continue;
+            filtered_files.emplace_back(File::Load(file_header));
         }
-        if (_bakeChecker && !_bakeChecker(file_header.GetPath(), file_header.GetWriteTime())) {
-            continue;
+    }
+    else {
+        if (strex(target_path).getFileExtension() != "fodlg") {
+            return;
         }
 
-        filtered_files.emplace_back(files.GetCurFile());
+        auto file = files.FindFileByPath(target_path);
+
+        if (!file) {
+            return;
+        }
+        if (_bakeChecker && !_bakeChecker(target_path, file.GetWriteTime())) {
+            return;
+        }
+
+        filtered_files.emplace_back(std::move(file));
     }
 
     if (filtered_files.empty()) {
@@ -85,19 +99,19 @@ void DialogBaker::BakeFiles(FileCollection files)
 
     // Load dialogs
     auto server_engine = BakerEngine(PropertiesRelationType::ServerRelative);
-    auto dialog_mngr = DialogManager(server_engine);
-    auto script_sys = BakerScriptSystem(server_engine, *_bakedFiles);
+    const auto dialog_mngr = DialogManager(server_engine);
+    const auto script_sys = BakerScriptSystem(server_engine, *_bakedFiles);
 
     size_t errors = 0;
     vector<refcount_ptr<DialogPack>> dialog_packs;
 
     for (const auto& file : filtered_files) {
         try {
-            auto pack = dialog_mngr.ParseDialog(file.GetName(), file.GetStr());
+            auto pack = dialog_mngr.ParseDialog(file.GetNameNoExt(), file.GetStr());
             dialog_packs.emplace_back(std::move(pack));
         }
         catch (const DialogParseException& ex) {
-            ReportExceptionAndContinue(ex);
+            WriteLog("Dialog baking error: {}", ex.what());
             errors++;
         }
     }
@@ -175,7 +189,7 @@ DialogTextBaker::DialogTextBaker(BakerData& data) :
 {
     FO_STACK_TRACE_ENTRY();
 
-    _skipBaking = std::ranges::find_if(App->Settings.GetResourcePacks(), [&](auto&& pack) { return pack.Name == data.PackName; })->ServerOnly;
+    _skipBaking = std::ranges::find_if(_settings->GetResourcePacks(), [&](auto&& pack) { return pack.Name == _resPackName; })->ServerOnly;
 }
 
 DialogTextBaker::~DialogTextBaker()
@@ -183,11 +197,14 @@ DialogTextBaker::~DialogTextBaker()
     FO_STACK_TRACE_ENTRY();
 }
 
-void DialogTextBaker::BakeFiles(FileCollection files)
+void DialogTextBaker::BakeFiles(const FileCollection& files, string_view target_path) const
 {
     FO_STACK_TRACE_ENTRY();
 
     if (_skipBaking) {
+        return;
+    }
+    if (!target_path.empty() && !strex(target_path).getFileExtension().startsWith("fotxt")) {
         return;
     }
 
@@ -195,23 +212,20 @@ void DialogTextBaker::BakeFiles(FileCollection files)
     vector<File> filtered_files;
     uint64 max_write_time = 0;
 
-    while (files.MoveNext()) {
-        auto file_header = files.GetCurFileHeader();
-        const string ext = strex(file_header.GetPath()).getFileExtension();
-
-        if (!IsExtSupported(ext)) {
+    for (const auto& file_header : files) {
+        if (strex(file_header.GetPath()).getFileExtension() != "fodlg") {
             continue;
         }
 
         max_write_time = std::max(max_write_time, file_header.GetWriteTime());
-        filtered_files.emplace_back(files.GetCurFile());
+        filtered_files.emplace_back(File::Load(file_header));
     }
 
     bool something_changed = false;
 
     if (!filtered_files.empty()) {
         for (const auto& lang_name : _settings->BakeLanguages) {
-            if (!_bakeChecker || _bakeChecker(strex("Dialogs.{}.fotxtb", lang_name), max_write_time)) {
+            if (!_bakeChecker || _bakeChecker(strex("{}.Dialogs.{}.fotxt-bin", _resPackName, lang_name), max_write_time)) {
                 something_changed = true;
             }
         }
@@ -223,18 +237,18 @@ void DialogTextBaker::BakeFiles(FileCollection files)
 
     // Load dialogs
     auto server_engine = BakerEngine(PropertiesRelationType::ServerRelative);
-    auto dialog_mngr = DialogManager(server_engine);
+    const auto dialog_mngr = DialogManager(server_engine);
 
     size_t errors = 0;
     vector<refcount_ptr<DialogPack>> dialog_packs;
 
     for (const auto& file : filtered_files) {
         try {
-            auto pack = dialog_mngr.ParseDialog(file.GetName(), file.GetStr());
+            auto pack = dialog_mngr.ParseDialog(file.GetNameNoExt(), file.GetStr());
             dialog_packs.emplace_back(std::move(pack));
         }
         catch (const DialogParseException& ex) {
-            ReportExceptionAndContinue(ex);
+            WriteLog("Dialog text baking error: {}", ex.what());
             errors++;
         }
     }
@@ -281,7 +295,7 @@ void DialogTextBaker::BakeFiles(FileCollection files)
     // Write data
     for (auto&& [lang_name, text_packs] : lang_packs) {
         auto text_pack_data = text_packs.at("Dialogs").GetBinaryData();
-        _writeData(strex("Dialogs.{}.fotxtb", lang_name), text_pack_data);
+        _writeData(strex("{}.Dialogs.{}.fotxt-bin", _resPackName, lang_name), text_pack_data);
     }
 }
 

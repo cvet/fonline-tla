@@ -156,10 +156,10 @@ void DialogManager::LoadFromResources(const FileSystem& resources)
     size_t errors = 0;
     auto files = resources.FilterFiles("fodlg");
 
-    while (files.MoveNext()) {
+    for (const auto& file_header : files) {
         try {
-            auto file = files.GetCurFile();
-            auto pack = ParseDialog(file.GetName(), file.GetStr());
+            auto file = File::Load(file_header);
+            auto pack = ParseDialog(file.GetNameNoExt(), file.GetStr());
             AddDialog(std::move(pack));
         }
         catch (const DialogParseException& ex) {

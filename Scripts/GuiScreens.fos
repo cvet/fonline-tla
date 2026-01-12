@@ -2399,7 +2399,7 @@ namespace Game
             any[] actions = {};
             ChosenActions::GetChosenActions(actions);
             bool isMoveAction = (actions.length() > 0 && actions[0] == Tla::ChosenMove);
-            int milliseconds = int(actions[6]);
+            int milliseconds = (actions.length() > 6 ? int(actions[6]) : 0);
             if (isMoveAction &&
                 (Game.FrameTime - (milliseconds == 0 ? ZERO_TIMESPAN : Time::Milliseconds(milliseconds))).milliseconds < Settings.DoubleClickTime) {
                 actions[3] = (Settings.AlwaysRun ? 0 : 1);
@@ -2497,7 +2497,7 @@ namespace Game
 
         void OnGlobalMouseDown(MouseButton button) override
         {
-            if (Settings.MapZoomEnabled) {
+            if (Settings.MapZoomEnabled && Settings.MapZoomInProgress) {
                 if (button == MouseButton::WheelUp) {
                     CurMap.ChangeZoom(CurMap.SpritesZoom - 0.01);
                 }
@@ -2602,19 +2602,11 @@ namespace Game
     {
         void FiltersChanged()
         {
-            MessageBoxType[] messageTypes = {};
-            if (cast<Gui::CheckBox>(Parent.Find("Filter1")).IsChecked) {
-                messageTypes.insertLast(MessageBoxType::Talk);
-            }
-            if (cast<Gui::CheckBox>(Parent.Find("Filter2")).IsChecked) {
-                messageTypes.insertLast(MessageBoxType::Combat);
-            }
+            bool filter1Checked = cast<Gui::CheckBox>(Parent.Find("Filter1")).IsChecked;
+            bool filter2Checked = cast<Gui::CheckBox>(Parent.Find("Filter2")).IsChecked;
 
-            if (messageTypes.length() == 0) {
-                messageTypes.insertLast(MessageBoxType::All);
-            }
-
-            SetDisplayedMessages(messageTypes);
+            ChangeDisplayedMessage(MessageBoxType::Talk, filter1Checked);
+            ChangeDisplayedMessage(MessageBoxType::Combat, filter2Checked);
         }
 
         void OnConstruct() override
@@ -2622,6 +2614,7 @@ namespace Game
             SetPosition(34, 28);
             SetSize(306, 76);
             SetAnchor(AnchorStyle(AnchorStyle::Top));
+            SetDisplayedMessages(array<MessageBoxType> = {MessageBoxType::Default, MessageBoxType::Combat, MessageBoxType::Look});
         }
     };
 
@@ -3234,7 +3227,7 @@ namespace Game
         void OnDrawItem(Item item, Gui::Object cell, int cellIndex) override
         {
             Critter @chosen = Game.GetChosen();
-            int mode = 0;
+            uint8 mode = 0;
             if (item !is null) {
                 mode = item.Mode;
             }
@@ -5511,7 +5504,7 @@ namespace Options
 
         void OnLMouseClick() override
         {
-            Game.CustomCall("SwitchFullscreen");
+            Game.ToggleFullscreen();
             SaveOptions();
         }
     };
@@ -9294,14 +9287,20 @@ namespace Dialog
 
         void OnLMouseClick() override
         {
-            Dialog @dialog = cast<Dialog>(Screen);
-            Game.CustomCall("DialogAnswer " + dialog.TalkerIsNpc + " " + dialog.TalkerId + " " + CellIndex);
+            //Dialog@ dialog = cast< Dialog >( Screen );
+            //Game.CustomCall( "DialogAnswer " + dialog.TalkerIsNpc + " " + dialog.TalkerId + " " + CellIndex );
+
+            if (!GuiScreensExt::IsPingInProgress()) {
+                CurPlayer.ServerCall.SpeechAnswer(CellIndex);
+                GuiScreensExt::Ping();
+            }
         }
 
         void OnResizeGrid(Gui::Object cell, int cellIndex) override
         {
             Dialog @dialog = cast<Dialog>(Screen);
             string text = Game.EncodeUtf8(TEXT_SYMBOL_DOT) + dialog.Answers[CellIndex];
+            Game.Log("dText " + CellIndex + " : " + dialog.Answers[CellIndex]);
             int lines = 0;
             isize box;
             Game.GetTextInfo(text, isize(Size.width, 1000), TextFont, TextFlags, box, lines);
@@ -10811,9 +10810,9 @@ namespace PipBoy
     class ShowMaps
     {
         hstring ProtoId;
-        int MapIndex;
+        int8 MapIndex;
 
-        ShowMaps(hstring protoId, int mapIndex)
+        ShowMaps(hstring protoId, int8 mapIndex)
         {
             ProtoId = protoId;
             MapIndex = mapIndex;
@@ -11016,7 +11015,7 @@ namespace PipBoy
     class DrawMapPanel : Gui::Panel
     {
         hstring LocProtoId;
-        int MapIndex;
+        uint8 MapIndex;
 
         void OnConstruct() override
         {
@@ -15912,7 +15911,6 @@ namespace Cursor
             }
 
             int cursor = Settings.Cursor;
-
             // Game scroll
             bool hasMouseScroll = true;
             if (Settings.ScrollMouseLeft && Settings.ScrollMouseUp) {
@@ -16005,7 +16003,6 @@ namespace Cursor
                 if (chosen is null) {
                     return;
                 }
-
                 // CurMap.SetCursorPos(chosen, Settings.MousePos, Input::IsShiftDown(), true);
 
                 if (!CurMap.GetHexAtScreenPos(Settings.MousePos, targetHex)) {
@@ -16103,8 +16100,8 @@ namespace SayExtended
         int HeaderMessageID;
         int InputMessageID = 0;
         hstring ProtoID;
-        int HexX;
-        int HexY;
+        uint16 HexX;
+        uint16 HexY;
         bool FromScenery;
 
         void OnConstruct() override

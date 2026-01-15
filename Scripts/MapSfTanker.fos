@@ -1,4 +1,7 @@
-// FOS Server
+namespace MapSfTanker
+{
+
+#if SERVER
 
 // Author: rifleman17
 // Mобы на нижнем уровне танкера. Унаследованный мобскрипт, за исключением того, что мобы не атакуют персонажа, у которого нет убийств гуманоидов, чужих,
@@ -13,11 +16,11 @@
 #define KILL_CENTAUR (269)
 #define KILL_ALIEN   (276)
 
-///@ Property Critter Protected     uint8 SFRonKillBeasts Group = Quests Quest = 4416 Max = 4
-///@ Property Critter Protected     uint8 SFRonFindbodies Group = Quests Quest = 4417 Max = 6
-///@ Property Critter PrivateServer uint8 SFTankerCentaurNoticed Max = 1
-///@ Property Critter PrivateServer uint8 SFTankerFloaterNoticed Max = 1
-///@ Property Critter PrivateServer ident MapSFTankerBicycleId
+///@ Property Critter Common uint8 SFRonKillBeasts Mutable OwnerSync Persistent Group = Quests Quest = 4416 Max = 4
+///@ Property Critter Common uint8 SFRonFindbodies Mutable OwnerSync Persistent Group = Quests Quest = 4417 Max = 6
+///@ Property Critter Server uint8 SFTankerCentaurNoticed Mutable Persistent Max = 1
+///@ Property Critter Server uint8 SFTankerFloaterNoticed Mutable Persistent Max = 1
+///@ Property Critter Server ident MapSFTankerBicycleId Mutable Persistent
 
 void TankerMapInit(Map map, bool firstTime)
 {
@@ -28,7 +31,7 @@ void _TankerMobInit(Critter cr, bool firstTime)
 {
     Mob::_MobInit(cr, firstTime);
     cr.OnCritterAppearedDist1.Subscribe(_TankerShowCritter1);
-    cr.OnIdle.Subscribe(_TankerIdle);
+    cr.StartTimeEvent(Time::Asap(), Time::Seconds(1), _TankerIdle);
     cr.OnDead.Subscribe(_TankerDead);
     cr.OnSomeCritterDead.Subscribe(_TankerDeath);
     // Aтака, вне зависимости от того, чистюля персонаж или нет
@@ -38,7 +41,7 @@ void _TankerMobInit(Critter cr, bool firstTime)
 
 void _TankerShowCritter2(Critter cr, Critter player)
 {
-    if (not player.IsControlledByPlayer) {
+    if (not player.ControlledByPlayer) {
         return;
     }
     if (cr.MapSFTankerBicycleId == ZERO_IDENT) {
@@ -56,7 +59,7 @@ void _TankerDeath(Critter cr, Critter fromCrit, Critter killer)
 
 void _TankerShowCritter1(Critter cr, Critter player)
 {
-    if (!player.IsControlledByPlayer) {
+    if (!player.ControlledByPlayer) {
         return;
     }
     if (player.Id == cr.MapSFTankerBicycleId && IsCleanMan(player)) {
@@ -69,7 +72,7 @@ void _TankerShowCritter1(Critter cr, Critter player)
 void _TankerDead(Critter cr, Critter killer)
 {
     Mob::_MyDeath(cr, killer);
-    if (valid(killer) && killer.IsControlledByPlayer && killer.SFRonKillBeasts == 1) {
+    if (valid(killer) && killer.ControlledByPlayer && killer.SFRonKillBeasts == 1) {
         killer.SFRonKillBeasts = 2;
     }
 
@@ -79,8 +82,8 @@ void _TankerDead(Critter cr, Critter killer)
     }
 
     // Остались живые мобы? TODO: сделать фильтр по бодитайпам нужным.
-    Critter[] players = map.GetCritters(CritterFindType::AlivePlayers);
-    for (uint i = 0; i < players.length(); i++) {
+    Critter[] players = map.GetCritters(CritterFindType::NonDeadPlayers);
+    for (int i = 0; i < players.length(); i++) {
         Critter player = players[i];
         if (player.SFRonKillBeasts == 2) {
             player.SFRonKillBeasts = 3;
@@ -103,10 +106,9 @@ void _TankerIdle(Critter cr)
                 if (cr.IsSee(player) && Game.GetDistance(cr, player) < 8) {
                     Map map = cr.GetMap();
                     if (valid(map)) {
-                        uint16 hX = player.HexX;
-                        uint16 hY = player.HexY;
-                        if (Caravan::GetFreeHex(map, 2, hX, hY)) {
-                            NpcPlanes::AddWalkPlane(cr, 0, hX, hY, 6, false, 0);
+                        mpos hex = player.Hex;
+                        if (Entrance::GetFreeHex(map, 2, hex)) {
+                            NpcPlanes::AddWalkPlane(cr, 0, hex, 6, false, 0);
                         }
                     }
                 }
@@ -120,7 +122,7 @@ void _TankerIdle(Critter cr)
 
 void _TankerInCritter(Map map, Critter cr)
 {
-    if (!cr.IsControlledByPlayer) {
+    if (!cr.ControlledByPlayer) {
         return;
     }
     if (!IsCleanMan(cr)) {
@@ -128,7 +130,7 @@ void _TankerInCritter(Map map, Critter cr)
     }
 
     Critter[] critters = map.GetCritters(CritterFindType::Npc);
-    for (uint i = 0; i < critters.length(); i++) {
+    for (int i = 0; i < critters.length(); i++) {
         Critter mob = critters[i];
         mob.MapSFTankerBicycleId = cr.Id;
     }
@@ -137,11 +139,11 @@ void _TankerInCritter(Map map, Critter cr)
 // Проверка - персонаж не подлежит атаке.
 bool IsCleanMan(Critter player)
 {
-    if (!player.IsControlledByPlayer) {
+    if (!player.ControlledByPlayer) {
         return false;
     }
 
-    uint[] kills = player.Kills.clone();
+    int[] kills = player.Kills.clone();
     return player.Level > 10 && kills[BodyTypes::Men] == 0 && kills[BodyTypes::Women] == 0 && kills[BodyTypes::Floater] == 0 &&
            kills[BodyTypes::Centaur] == 0 && kills[BodyTypes::Alien] == 0;
 }
@@ -149,8 +151,8 @@ bool IsCleanMan(Critter player)
 // ДИАЛОГ: Динамическая награда, зависит от уровня игрока
 void r_GrantPlayer(Critter player, Critter npc)
 {
-    uint lvl = player.Level;
-    uint koef = lvl % 10 + 1;
+    int lvl = player.Level;
+    int koef = lvl % 10 + 1;
     player.Experience += (koef * 100) * player.Level; // 1 ур = 100, 50 ур = 30 000
 }
 
@@ -166,7 +168,7 @@ void _DeadsInit(Critter cr, bool firstTime)
 
 void _SmthUseSkill(Critter cr, Critter fromCr, CritterProperty skill, Critter onCritter, Item onItem, StaticItem onScenery)
 {
-    if (!fromCr.IsControlledByPlayer || skill != CritterProperty::SkillScience || not valid(onCritter) || onCritter.Id != cr.Id) {
+    if (!fromCr.ControlledByPlayer || skill != CritterProperty::SkillScience || not valid(onCritter) || onCritter.Id != cr.Id) {
         return;
     }
 
@@ -185,4 +187,8 @@ void _SmthUseSkill(Critter cr, Critter fromCr, CritterProperty skill, Critter on
             }
         }
     }
+}
+
+#endif
+
 }

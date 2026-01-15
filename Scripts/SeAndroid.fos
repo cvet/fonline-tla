@@ -1,24 +1,28 @@
-// FOS Server Sort 2
+namespace SeAndroid // Sort 2
+{
+
+#if SERVER
+
 // Author: rifleman17
 // Квест-специальный энкаунтер. Две последовательные локации
 // На первой игрок находит труп нпц с рацией, если он возьмет рацию, может услышать сообщение о том, что где-то в Пустоши найден военный склад. На самом деле
 // это - ловушка, в которой его поджидает сумасшедший ученый. При заходе на вторую локацию персонаж попадает на хирургический стол, где его оперируют и персонаж
 // превращается в андроида.
 
-///@ Property Critter PrivateServer bool SEAndroidMonologEnd
+///@ Property Critter Server bool SEAndroidMonologEnd Mutable Persistent
 
-///@ Property Item PrivateServer bool SeAndroidRadioListened
-///@ Property Item PrivateServer LocationProperty SeAndroidVarNum
+///@ Property Item Server bool SeAndroidRadioListened Mutable Persistent
+///@ Property Item Server LocationProperty SeAndroidVarNum Mutable Persistent
 
-///@ Property Location PrivateServer bool SeAndroidPlayerIn
-///@ Property Location PrivateServer ident SeAndroidPlayerId
-///@ Property Location PrivateServer bool SeAndroidMinesTriggered
-///@ Property Location PrivateServer uint SeAndroidTFounded
-///@ Property Location PrivateServer uint SeAndroidLFounded
-///@ Property Location PrivateServer uint SeAndroidDFounded
-///@ Property Location PrivateServer uint SeAndroidRFounded
-///@ Property Location PrivateServer uint SeAndroidPFounded
-///@ Property Location PrivateServer uint SeAndroidCFounded
+///@ Property Location Server bool SeAndroidPlayerIn Mutable Persistent
+///@ Property Location Server ident SeAndroidPlayerId Mutable Persistent
+///@ Property Location Server bool SeAndroidMinesTriggered Mutable Persistent
+///@ Property Location Server int32 SeAndroidTFounded Mutable Persistent
+///@ Property Location Server int32 SeAndroidLFounded Mutable Persistent
+///@ Property Location Server int32 SeAndroidDFounded Mutable Persistent
+///@ Property Location Server int32 SeAndroidRFounded Mutable Persistent
+///@ Property Location Server int32 SeAndroidPFounded Mutable Persistent
+///@ Property Location Server int32 SeAndroidCFounded Mutable Persistent
 
 const LocationProperty[] SeAndroidFoundeds = {LocationProperty::SeAndroidTFounded,
                                               LocationProperty::SeAndroidLFounded,
@@ -59,8 +63,8 @@ void _RadioInit(Item item, bool firstTime)
 {
     DL("RadioInit");
     if (firstTime) {
-        item.RadioChannel = Game.Random(1000, 9999);
-        DL("Channel: " + item.RadioChannel);
+        item.Radio.Channel = Game.Random(1000, 9999);
+        DL("Channel: " + item.Radio.Channel);
     }
     item.OnCritterUseSkill.Subscribe(_RadioSkill);
 }
@@ -70,8 +74,8 @@ bool _RadioSkill(Item item, Critter cr, CritterProperty skill)
     DL("Radio skill " + skill);
     if (skill == CritterProperty::SpecialSkillPickOnGround) {
         if (!item.SeAndroidRadioListened) {
-            any[] values = {item.Id, 0, cr.Id, item.RadioChannel};
-            Game.DeferredCall(0, AndroidRadio, values);
+            any[] values = {item.Id, 0, cr.Id, item.Radio.Channel};
+            Game.StartTimeEvent(ZERO_TIMESPAN, AndroidRadio, values);
             item.SeAndroidRadioListened = true;
         }
     }
@@ -84,16 +88,16 @@ void AndroidRadio(any[] values)
     Item item = Game.GetItem(values[0]);
     if (valid(item)) {
         if (item.SeAndroidRadioListened) {
-            Game.RadioMessageMsg(values[3], TextPackName::Text, STR_RADIO_MESSAGE);
+            Radio::SendChannelRadioMessage(values[3], TextPackName::Text, STR_RADIO_MESSAGE);
             values[1] = values[1] + 1;
             DL("count radio messages:" + values[1]);
             Critter cr = Game.GetCritter(item.CritterId);
-            if (cr.SpecialAndroid < 2 && item.RadioChannel == values[3]) { // Про локацию пока не известно, радио на нужной волне
+            if (cr.SpecialAndroid < 2 && item.Radio.Channel == values[3]) { // Про локацию пока не известно, радио на нужной волне
                 cr.SpecialAndroid = 2;
             }
             DL("seAndroidValue: " + cr.SpecialAndroid);
             if (values[1] < 5) { // Максимум 5 повторов раз в 20 секунд на нужной радиоволне
-                Game.DeferredCall(20000, AndroidRadio, values);
+                Game.StartTimeEvent(Tla::GameSeconds(20), AndroidRadio, values);
             }
         }
     }
@@ -111,12 +115,12 @@ void AndroidRadio(any[] values)
 void _GroundDoorInit(Item item, bool firstTime)
 {
     item.OnCritterUseSkill.Subscribe(_UseGroundDoor);
-    item.IsAlwaysView = true;
+    item.AlwaysView = true;
 }
 
 void _OuterDoorInit(Item item, bool firstTime)
 {
-    item.IsAlwaysView = true;
+    item.AlwaysView = true;
 }
 
 bool _UseGroundDoor(Item door, Critter cr, CritterProperty skill)
@@ -132,40 +136,38 @@ bool _UseGroundDoor(Item door, Critter cr, CritterProperty skill)
     return loc.SeAndroidPlayerIn;
 }
 
-void t_TransitPlayer(Critter player, StaticItem trigger, bool entered, uint8)
+void t_TransitPlayer(Critter player, StaticItem trigger, bool entered, uint8 dir)
 {
     Map map = player.GetMap();
     Location loc = map.GetLocation();
     if (not loc.SeAndroidPlayerIn) {
         // Переносим игрока в подвал, кладем в нокаут
         Map basement = loc.GetMapByIndex(1);
-        uint16 x = 0;
-        uint16 y = 0;
-        uint8 dir = 0;
+        mpos hex;
         if (valid(basement)) {
-            Entrance::MapGetEntryCoords(basement, ENTRY_KNOCKOUT, 0, x, y);
-            Effects::FlushScreen(player, COLOR_BLACK, COLOR_BLACK, 5000);
-            Obsolete::CritterTransitToMapCoords(player, basement.Id, x, y, 3);
-            Effects::FlushScreen(player, COLOR_BLACK, COLOR_BLACK, 1000);
+            Entrance::MapGetEntryCoords(basement, ENTRY_KNOCKOUT, 0, hex);
+            Effects::FadeScreen(player, COLOR_BLACK, COLOR_BLACK, Time::Milliseconds(5000));
+            player.TransferToMap(basement, hex, 3);
+            Effects::FadeScreen(player, COLOR_BLACK, COLOR_BLACK, Time::Milliseconds(1000));
             loc.SeAndroidPlayerId = player.Id;
-            player.AddTimeEvent(cte_CheckPlayerKnockOut, Settings.TimeMultiplier * 60 * 30, 0); // Подстраховка
-            CritterState::ToKnockout(player, KNOCKOUT_ACTION_ANIM_DEFAULT(true), 100000, player.HexX, player.HexY);
+            player.StartTimeEvent(Time::Minutes(30), cte_CheckPlayerKnockOut); // Подстраховка
+            CritterState::ToKnockout(player, KNOCKOUT_ACTION_ANIM_DEFAULT(true), 100000, player.Hex);
             // Все вещи игрока перекладываем в разные ящики
             Item[] items = player.GetItems();
             if (!items.isEmpty()) {
-                if (Entrance::MapGetEntryCoords(basement, ENTRY_CONTAINER, 0, x, y)) {
-                    Item cont = basement.GetItem(x, y, Content::Item::locker_rusty_right);
+                if (Entrance::MapGetEntryCoords(basement, ENTRY_CONTAINER, 0, hex)) {
+                    Item cont = basement.GetItem(hex, Content::Item::locker_rusty_right);
                     if (valid(cont)) {
-                        ItemMovement::MoveItems(items, cont, ContainerItemStack::Root);
-                        items = cont.GetItems(ContainerItemStack::Root);
-                        for (uint i = 0; i < items.length(); i++) {
+                        ItemMovement::MoveItems(items, cont, ROOT_CONTAINER_STACK);
+                        items = cont.GetItems(ROOT_CONTAINER_STACK);
+                        for (int i = 0; i < items.length(); i++) {
                             auto pid = items[i].ProtoId;
                             if (Pids.exists(pid) || pid == Content::Item::pot) {
                                 Game.DestroyItem(items[i]);
                             }
                         }
-                        Item item = cont.AddItem(Content::Item::pot, 1, ContainerItemStack::Root);
-                        item.Lexems = "$text" + Obsolete::GetPlayerName(player.Id);
+                        Item item = cont.AddItem(Content::Item::pot, 1, ROOT_CONTAINER_STACK);
+                        item.Lexems = "$text" + PlayerRegistration::GetPlayerName(player.Id);
                     }
                 }
             }
@@ -174,19 +176,19 @@ void t_TransitPlayer(Critter player, StaticItem trigger, bool entered, uint8)
         // Игрок внутри, больше никто туда не попадет
         loc.SeAndroidPlayerIn = true;
         // Закрываем дверь
-        Entrance::MapGetEntryCoords(map, ENTRY_DOOR_GROUND, 0, x, y);
-        Item door = map.GetItem(x, y, Content::Item::door_2421);
+        Entrance::MapGetEntryCoords(map, ENTRY_DOOR_GROUND, 0, hex);
+        Item door = map.GetItem(hex, Content::Item::door_2421);
         if (valid(door) && door.Opened) {
             Lockers::SwitchLocker(door, false);
         }
         return;
     }
     else if (loc.SeAndroidPlayerIn) {
-        player.SayMsg(SAY_NETMSG, TextPackName::Text, STR_LIFT_BROKEN);
+        Messaging::Info(player, TextPackName::Text, STR_LIFT_BROKEN);
     }
 }
 
-uint cte_CheckPlayerKnockOut(Critter cr, any identifier, uint& rate)
+void cte_CheckPlayerKnockOut(Critter cr)
 {
     DL("CheckKnockout");
 
@@ -200,7 +202,7 @@ uint cte_CheckPlayerKnockOut(Critter cr, any identifier, uint& rate)
             }
         }
     }
-    return 0;
+    return;
 }
 
 // Внешний уровень
@@ -216,7 +218,7 @@ void _GroundInit(Map map, bool firstTime)
 
 void _GroundInCritter(Map map, Critter cr)
 {
-    cr.SayMsg(SAY_NETMSG, TextPackName::Text, STR_MAP_IN);
+    Messaging::Info(cr, TextPackName::Text, STR_MAP_IN);
 }
 
 // Монолог хирурга
@@ -225,7 +227,7 @@ void _GroundInCritter(Map map, Critter cr)
 void _DoctorInit(Critter cr, bool firstTime)
 {
     DL("Doctor init");
-    cr.OnIdle.Subscribe(_DoctorIdle);
+    cr.StartTimeEvent(Time::Asap(), Time::Seconds(1), _DoctorIdle);
     if (firstTime) {
         Item key = cr.AddItem(Content::Item::nuke_key, 1);
         if (valid(key)) {
@@ -254,11 +256,11 @@ void _DoctorIdle(Critter cr)
 
 void RunDoctorMonologue(Map map)
 {
-    Critter cr = map.GetCritter(CritterProperty::NpcRole, ROLE_DOCTOR, CritterFindType::AliveNpc);
+    Critter cr = map.GetCritter(CritterProperty::NpcRole, ROLE_DOCTOR, CritterFindType::NonDeadNpc);
     if (!valid(cr)) {
         return;
     }
-    Monologue::SetMonologue(cr, 70073, 70090, Settings.TimeMultiplier * 10, 0, SAY_NORM); // 70090
+    Monologue::SetMonologue(cr, 70073, 70090, Time::Seconds(10), ZERO_TIMESPAN, SayType::Normal); // 70090
     cr.SEAndroidMonologEnd = false;
 }
 
@@ -271,27 +273,26 @@ void RunDoctorMonologue(Map map)
 void TransformPlayer(Map map, Critter player, Critter doctor)
 {
     DL("TRANSFORM");
-    Effects::FlushScreen(player, COLOR_BLACK, COLOR_BLACK, 5000);
+    Effects::FadeScreen(player, COLOR_BLACK, COLOR_BLACK, Time::Milliseconds(5000));
     if (player.NextCrType == EMPTY_HSTRING) {
         player.NextCrType = player.ModelName;
     }
     // player.ChangeCrType( CRTYPE_TACTICS_RHUMANOID );
     player.ModelNameBase = CRTYPE_TACTICS_RHUMANOID;
-    uint16 hX = 0, hY = 0;
+    mpos hex;
     uint8 dir = 0;
-    if (!Entrance::MapGetEntryCoords(map, ENTRY_DOC_POS, 0, hX, hY)) {
+    if (!Entrance::MapGetEntryCoords(map, ENTRY_DOC_POS, 0, hex)) {
         return;
     }
-    Obsolete::CritterTransitToMapCoords(doctor, map.Id, hX, hY, 0);
+    doctor.TransferToMap(map, hex, 0);
     doctor.HomeMapId = map.Id;
-    doctor.HomeHexX = hX;
-    doctor.HomeHexY = hY;
+    doctor.HomeHex = hex;
     doctor.HomeDir = 0;
-    if (Entrance::MapGetEntryCoords(map, ENTRY_PLAYER_POS, 0, hX, hY)) {
-        Obsolete::CritterTransitToMapCoords(player, map.Id, hX, hY, 3);
+    if (Entrance::MapGetEntryCoords(map, ENTRY_PLAYER_POS, 0, hex)) {
+        player.TransferToMap(map, hex, 3);
     }
     any[] values = {player.Id, doctor.Id, map.Id};
-    Game.SavedDeferredCall(6000, AwakePlayer, values);
+    Game.StartTimeEvent(Tla::GameSeconds(60), AwakePlayer, values); //SavedDeferredCall
 }
 
 void AwakePlayer(any[] values)
@@ -300,11 +301,11 @@ void AwakePlayer(any[] values)
     Critter doctor = Game.GetCritter(values[1]);
     if (valid(player) && valid(doctor)) {
         player.Experience += 4000;
-        player.SayMsg(SAY_NETMSG, TextPackName::Text, STR_AWAKE);
+        Messaging::Info(player, TextPackName::Text, STR_AWAKE);
         CritterState::ToDead(player, CritterActionAnim::DeadBack, null); // TODO: убрать
         player.CurrentAp = 0;
         CritterState::ToAlive(player);
-        Game.RunDialog(player, doctor, true);
+        Dialogs::RunDialog(player, doctor, true);
     }
 }
 
@@ -314,13 +315,11 @@ void r_SendDoctorHome(Critter player, Critter npc)
     if (!valid(npc)) {
         return;
     }
-    uint16 hX = 0, hY = 0;
+    mpos hex;
     Map map = npc.GetMap();
-    if (valid(map) && Entrance::MapGetEntryCoords(map, ENTRY_DOC_HOME, 0, hX, hY)) {
-        DL("New home");
+    if (valid(map) && Entrance::MapGetEntryCoords(map, ENTRY_DOC_HOME, 0, hex)) {
         npc.HomeMapId = map.Id;
-        npc.HomeHexX = hX;
-        npc.HomeHexY = hY;
+        npc.HomeHex = hex;
         npc.HomeDir = 3;
     }
 }
@@ -335,10 +334,10 @@ void t_Warn(Critter player, StaticItem trigger, bool entered, uint8 dir)
     Location loc = map.GetLocation();
     if (not loc.SeAndroidMinesTriggered) {
         CritterState::Wait(player, 0);
-        player.SayMsg(SAY_NETMSG, TextPackName::Text, STR_OUT);
+        Messaging::Info(player, TextPackName::Text, STR_OUT);
         loc.SeAndroidMinesTriggered = true;
-        Game.SavedDeferredCall(1000, DeferredExplode, map.Id);
-        Game.SavedDeferredCall(20000, DeferredDestroyMap, map.Id);
+        Game.StartTimeEvent(Tla::GameSeconds(1), DeferredExplode, map.Id);     //SavedDeferredCall
+        Game.StartTimeEvent(Tla::GameSeconds(20), DeferredDestroyMap, map.Id); //SavedDeferredCall
     }
 }
 
@@ -352,15 +351,15 @@ void DeferredExplode(any value)
     DL("DeferredExplode called");
     Entrance::Entry[] entries = Entrance::ParseEntries(map, ENTRY_EXPLODE);
     if (entries.length() > 0) {
-        for (uint i = 0; i < 3; i++) {
+        for (int i = 0; i < 3; i++) {
             Entrance::Entry entry = entries[Game.Random(0, entries.length() - 1)];
             if (valid(entry)) {
-                Explode::ExplodeEx(map, entry.HexX, entry.HexY, Content::Item::explode_rocket, 3, 666, DamageTypes::Explode, 3, ZERO_IDENT);
+                Explode::ExplodeEx(map, entry.Hex, Content::Item::explode_rocket, 3, 666, DamageTypes::Explode, 3, ZERO_IDENT);
             }
         }
     }
 
-    Game.SavedDeferredCall(1000, DeferredExplode, value);
+    Game.StartTimeEvent(Tla::GameSeconds(1), DeferredExplode, value); //SavedDeferredCall
 }
 
 void DeferredDestroyMap(any value)
@@ -406,7 +405,7 @@ void _PotInit(Item item, bool firstTime)
 
     item.Lexems = lexems;
     item.IsCanUse = true;
-    Game.SavedDeferredCall(HOUR_TICKS(2), DefferedDestroyItem, item.Id);
+    Game.StartTimeEvent(Time::Hours(2), DefferedDestroyItem, item.Id); //SavedDeferredCall
     item.OnCritterUse.Subscribe(_PotUse);
 }
 
@@ -418,18 +417,18 @@ void DefferedDestroyItem(any value)
     }
 }
 
-bool _PotUse(Item item, Critter cr, uint param)
+bool _PotUse(Item item, Critter cr, int param)
 {
     Game.DestroyItem(item);
     Item newItem = cr.AddItem(Pids[Game.Random(0, Pids.length() - 1)], 1);
     if (valid(newItem)) {
         newItem.Info = 2;
     }
-    cr.SayMsg(SAY_NETMSG, TextPackName::Text, STR_OPEN_POT);
+    Messaging::Info(cr, TextPackName::Text, STR_OPEN_POT);
     return true;
 }
 
-bool s_Boxes(Critter player, StaticItem scenery, Item itemUse, int skill)
+bool s_Boxes(Critter player, StaticItem scenery, Item itemUse, any skill)
 {
     if (skill != CritterProperty::SpecialSkillPickOnGround) {
         return false;
@@ -440,22 +439,22 @@ bool s_Boxes(Critter player, StaticItem scenery, Item itemUse, int skill)
     Location loc = map.GetLocation();
     // Проверяем, что в этом контейнере еще не нашли ничего.
     // Заодно запоминаем последнюю незаполненную переменную
-    int id = scenery.HexX * scenery.HexY;
-    LocationProperty varNum = LocationProperty::Invalid;
-    for (uint i = 0, j = SeAndroidFoundeds.length(); i <= j; i++) {
-        if (loc.GetAsInt(SeAndroidFoundeds[i]) == 0 && varNum == LocationProperty::Invalid) {
+    int id = scenery.Hex.x * scenery.Hex.y;
+    LocationProperty varNum = LocationProperty::None;
+    for (int i = 0, j = SeAndroidFoundeds.length(); i <= j; i++) {
+        if (loc.GetAsInt(SeAndroidFoundeds[i]) == 0 && varNum == LocationProperty::None) {
             varNum = SeAndroidFoundeds[i];
         }
         if (loc.GetAsInt(SeAndroidFoundeds[i]) == id || varNum == SeAndroidFoundeds.last()) // Эти ящики уже обыскивали, либо найдены все предметы
         {
-            player.SayMsg(SAY_NETMSG, TextPackName::Text, STR_EMPTY);
+            Messaging::Info(player, TextPackName::Text, STR_EMPTY);
             return true;
         }
     }
     CritterState::Wait(player, 1000);
     chance = chance - SeAndroidFoundeds.find(varNum) * 10; // Каждый последующий предмет найти сложнее
     if (Game.Random(5, 95) > chance || Game.Random(1, 2) == 1) {
-        player.SayMsg(SAY_NETMSG, TextPackName::Text, STR_UNLUCK);
+        Messaging::Info(player, TextPackName::Text, STR_UNLUCK);
         return true;
     }
     DL("VarNum =" + varNum);
@@ -464,7 +463,11 @@ bool s_Boxes(Critter player, StaticItem scenery, Item itemUse, int skill)
     if (valid(item)) {
         item.SeAndroidVarNum = varNum;
         item.SetupScript(_PotInit);
-        player.SayMsg(SAY_NETMSG, TextPackName::Text, STR_FOUND);
+        Messaging::Info(player, TextPackName::Text, STR_FOUND);
     }
     return true;
+}
+
+#endif
+
 }

@@ -1,10 +1,14 @@
-// FOS Server Sort 2
+namespace Item // Sort 2
+{
+
+#if SERVER
+
 // Author: rifleman17
 
-///@ Property Critter PrivateServer ident=>uint8 GuardedItemSkill
+///@ Property Critter Server ident=>int32 GuardedItemSkill Mutable Persistent
 
-///@ Property Item PrivateServer uint DoorAutoCloseTime
-///@ Property Item PrivateServer hstring DoorAutoDialog
+///@ Property Item Server int32 DoorAutoCloseTime Mutable Persistent
+///@ Property Item Server hstring DoorAutoDialog Mutable Persistent
 
 // Дверь, которая зпкроется через 2 игровые минуты илии через некоторое число реальных секунд , указанное в DoorAutoCloseTime
 void _DoorAutoCloseInit(Item door, bool firstTime)
@@ -17,7 +21,7 @@ void _DoorAutoCloseInit(Item door, bool firstTime)
 
 bool e_UseAutoCloseDoor(Item door, Critter cr, CritterProperty skill)
 {
-    Game.SavedDeferredCall((door.DoorAutoCloseTime == 0 ? 2 : door.DoorAutoCloseTime) * 1000, AutoCloseDoor, door.Id);
+    Game.StartTimeEvent(Time::Seconds(door.DoorAutoCloseTime == 0 ? 2 * 60 : door.DoorAutoCloseTime), AutoCloseDoor, door.Id); //SavedDeferredCall
     return false;
 }
 
@@ -30,27 +34,27 @@ void AutoCloseDoor(any value)
     if (!door.Opened) {
         return;
     }
-    uint16 x = 0;
-    uint16 y = 0;
-    Map map = door.GetMapPosition(x, y);
+
+    mpos hex;
+    Map map = door.GetMapPosition(hex);
     if (not valid(map)) {
         return;
     }
 
-    Critter cr = map.GetCritter(x, y);
+    Critter cr = map.GetCritter(hex);
     if (valid(cr)) {
         if (cr.IsAlive()) {
-            Game.SavedDeferredCall(3000, AutoCloseDoor, value);
+            Game.StartTimeEvent(Time::Seconds(3), AutoCloseDoor, value); //SavedDeferredCall
             return;
         }
         else {
             // Попытка сдвинуть труп. Если не получится, дверь поверх трупа закроется
-            Obsolete::CritterTransitToMapCoords(cr, map.Id, x - 1, y, cr.Dir);
+            cr.TransferToMap(map, mpos(hex.x - 1, hex.y), cr.Dir);
         }
     }
 
     if (!Lockers::SwitchLocker(door, false)) {
-        Game.SavedDeferredCall(3000, AutoCloseDoor, value);
+        Game.StartTimeEvent(Time::Seconds(3), AutoCloseDoor, value); //SavedDeferredCall
     }
 }
 
@@ -76,7 +80,7 @@ void _DialogDoorInit(Item door, bool firstTime)
 
 bool _UseDialogDoor(Item door, Critter cr, CritterProperty skill)
 {
-    Game.RunDialog(cr, door.DoorAutoDialog, door.HexX, door.HexY, false);
+    Dialogs::RunDialog(cr, door.DoorAutoDialog, false);
     return true;
 }
 
@@ -91,9 +95,9 @@ void _HoloInit(Item item, bool firstTime)
 }
 
 // Настройка автоматического удаления предмета через икс часов
-void SetDestroyItem(Item item, uint delHours)
+void SetDestroyItem(Item item, int delHours)
 {
-    Game.SavedDeferredCall(GAME_HOUR_TO_TICK(delHours), DeferredDestroyItem, item.Id);
+    Game.StartTimeEvent(Time::GameHours(delHours), DeferredDestroyItem, item.Id); //SavedDeferredCall
 }
 
 void DeferredDestroyItem(any value)
@@ -125,8 +129,8 @@ bool _GuardedItemSkill(Item item, Critter cr, CritterProperty skill)
 
     int role = item.Val1;
     bool reset = (item.Val2 > 0 ? true : false);
-    if (cr.IsControlledByPlayer) {
-        Critter[] guards = map.GetCritters(CritterProperty::NpcRole, role, CritterFindType::AliveNpc);
+    if (cr.ControlledByPlayer) {
+        Critter[] guards = map.GetCritters(CritterProperty::NpcRole, role, CritterFindType::NonDeadNpc);
         if (guards.isEmpty()) {
             if (reset) {
                 item.OnCritterUseSkill.Unsubscribe(_GuardedItemSkill);
@@ -135,7 +139,7 @@ bool _GuardedItemSkill(Item item, Critter cr, CritterProperty skill)
 
             if (item.Type == ItemType::Door || item.Type == ItemType::Container) {
                 if (item.Val0 > 0) {
-                    Game.SavedDeferredCall((item.Val0 == 0 ? 2 : item.Val0) * 1000, AutoCloseDoor, item.Id);
+                    Game.StartTimeEvent(Time::Seconds(item.Val0 == 0 ? 2 * 60 : item.Val0), AutoCloseDoor, item.Id); //SavedDeferredCall
                 }
             }
 
@@ -148,7 +152,7 @@ bool _GuardedItemSkill(Item item, Critter cr, CritterProperty skill)
         if (guardedItemSkill[cr.Id] < 2) {
             NpcPlanes::NpcPlane[] planes = {};
             if (NpcPlanes::GetPlanes(guard, AI_PLANE_ATTACK, planes) > 0) {
-                for (uint i = 0, l = planes.length(); i < l; i++) {
+                for (int i = 0, l = planes.length(); i < l; i++) {
                     if (planes[i].Attack_TargId == cr.Id) {
                         if (reset) {
                             item.OnCritterUseSkill.Unsubscribe(_GuardedItemSkill);
@@ -162,7 +166,7 @@ bool _GuardedItemSkill(Item item, Critter cr, CritterProperty skill)
 
             guardedItemSkill[cr.Id] = guardedItemSkill[cr.Id] + 1;
             guard.GuardedItemSkill = guardedItemSkill;
-            guard.SayMsg(SAY_SHOUT, TextPackName::Text, STR_DONTOUCH, "$pname" + Obsolete::GetPlayerName(cr.Id));
+            Messaging::SayShout(guard, TextPackName::Text, STR_DONTOUCH, "$pname" + PlayerRegistration::GetPlayerName(cr.Id));
         }
         else {
             guardedItemSkill[cr.Id] = 0;
@@ -182,4 +186,8 @@ Item ChangeProto(Item item, hstring newProto)
 {
     // Todo: improve changing proto by deletion old item and create new
     return item;
+}
+
+#endif
+
 }

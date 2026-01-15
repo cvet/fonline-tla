@@ -1,12 +1,14 @@
-// FOS Server Client
+namespace NoPvpMaps
+{
+
 // Author: rifleman17
 // NoPvp режим для некоторых карт на сервере
 // Если включен при первом запуске, нежелательно отключать без вайпа, иначе смешаются пвп и нопвп персонажи
 
 ///@ RemoteCall Server Rpc_CritterToGlobal()
-///@ Property Map PrivateServer bool IsNoPvPMap
+///@ Property Map Server bool IsNoPvPMap Mutable Persistent
 
-#ifdef __SERVER
+#if SERVER
 
 // игрок с включенным NoPvp режимом может телепортироваться на глобал
 void Rpc_CritterToGlobal(Player player)
@@ -15,17 +17,17 @@ void Rpc_CritterToGlobal(Player player)
 
     CritterState::Wait(cr, 1000); // Антиспам
 
-    if (IS_TIMEOUT(cr.TimeoutBattle)) {
-        cr.SayMsg(SAY_NETMSG, TextPackName::Game, MsgStr::StrTimeoutBattleWait);
+    if (Time::IsTimeoutActive(cr.TimeoutBattle)) {
+        Messaging::Info(cr, TextPackName::Game, MsgStr::StrTimeoutBattleWait);
         return;
     }
 
     Map map = cr.GetMap();
     if (valid(map) && IsNoPvpMap(map) && cr.IsNoPvp && cr.IsAlive()) {
-        cr.TransitToGlobal();
+        cr.TransferToGlobal();
     }
     else {
-        cr.SayMsg(SAY_NETMSG, TextPackName::Game, MsgStr::StrUseNothing);
+        Messaging::Info(cr, TextPackName::Game, MsgStr::StrUseNothing);
     }
 }
 
@@ -88,34 +90,37 @@ const hstring[] ExcludeDialogs = {
     Content::Dialog::ncr_hate,          Content::Dialog::vc_shrim,        Content::Dialog::vc_guard_fighter, Content::Dialog::den_ghost};
 const int[] btInvul = {BodyTypes::Men, BodyTypes::Women, BodyTypes::Children, BodyTypes::SuperMutant, BodyTypes::Ghoul};
 
-#define CTE_NOPVP_OFF (42)                  // Идентификатор события "очистить нопвп режим"
-#define TIME_CHECK    (Time::RealMinute(1)) // Время проверки, не вышел ли игрок с нопвп зоны
+#define CTE_NOPVP_OFF (42)               // Идентификатор события "очистить нопвп режим"
+#define TIME_CHECK    (Time::Minutes(1)) // Время проверки, не вышел ли игрок с нопвп зоны
 
 void OnCitterMapIn(Critter cr, Map map)
 {
     cr.IsNoPvp = false; // перестраховка, по идее это присваивание не нужно, но на всякий случай...
-    if (cr.IsControlledByPlayer && IsNoPvpMap(map)) {
+    if (cr.ControlledByPlayer && IsNoPvpMap(map)) {
         cr.IsNoPvp = true;
-        cr.SayMsg(SAY_NETMSG, TextPackName::Text, 1);
-        if (cr.GetTimeEvents(CTE_NOPVP_OFF) == 0) {
-            cr.AddTimeEvent(cte_NoPvpOff, TIME_CHECK, CTE_NOPVP_OFF);
+        Messaging::Info(cr, TextPackName::Text, 1);
+        if (cr.CountTimeEvent(cte_NoPvpOff) == 0) {
+            cr.StartTimeEvent(TIME_CHECK, cte_NoPvpOff);
         }
     }
 }
 
-uint cte_NoPvpOff(Critter cr, any identifier, uint& rate)
+void cte_NoPvpOff(Critter cr)
 {
     if (!cr.IsNoPvp) {
-        return 0;
+        return;
     }
 
     Map map = cr.GetMap();
     if (valid(map) && IsNoPvpMap(map)) { // если карта с включенным НоПвп, откладываем снятие режима
-        return TIME_CHECK;
+        timespan delayTicks = TIME_CHECK;
+        if (delayTicks != ZERO_TIMESPAN) {
+            Game.RepeatCurrentTimeEvent(delayTicks);
+        }
     }
 
     cr.IsNoPvp = false;
-    return 0;
+    return;
 }
 
 void OnCritterMapOut(Critter cr, Map map)
@@ -125,10 +130,10 @@ void OnCritterMapOut(Critter cr, Map map)
         return;
     }
 
-    if (Settings.NoPvpMaps && cr.IsControlledByPlayer && cr.IsNoPvp) // если но пвп карты не включены, персонаж получил нопвп режим другим способом, не отменяем
+    if (Settings.NoPvpMaps && cr.ControlledByPlayer && cr.IsNoPvp) // если но пвп карты не включены, персонаж получил нопвп режим другим способом, не отменяем
     {
         cr.IsNoPvp = false;
-        cr.SayMsg(SAY_NETMSG, TextPackName::Text, 2);
+        Messaging::Info(cr, TextPackName::Text, 2);
     }
 }
 
@@ -146,7 +151,7 @@ void SetNoPvp()
         return;
     }
 
-    for (uint i = 0, l = NoPvpMaps.length(); i < l; i++) {
+    for (int i = 0, l = NoPvpMaps.length(); i < l; i++) {
         Map map = Game.GetMap(NoPvpMaps[i]);
         if (valid(map)) {
             SetNoPvp(map, true);
@@ -167,14 +172,14 @@ void SetNoPvp(Map map, bool firstTime)
             map.IsNoPvPMap = true;
 
             Critter[] critters = map.GetCritters(CritterFindType::Npc);
-            for (uint i = 0; i < critters.length(); i++) {
+            for (int i = 0; i < critters.length(); i++) {
                 Critter cr = critters[i];
 
                 if (ExcludeDialogs.exists(cr.DialogId)) {
                     continue;
                 }
 
-                uint bt = cr.BodyType;
+                int bt = cr.BodyType;
                 if (btInvul.exists(bt)) {
                     cr.IsInvulnerable = true; // God Mode On
                 }
@@ -184,3 +189,5 @@ void SetNoPvp(Map map, bool firstTime)
 }
 
 #endif
+
+}

@@ -1,4 +1,7 @@
-// FOS Server Sort 2
+namespace KlamCowboy // Sort 2
+{
+
+#if SERVER
 
 // Author: Тринитротолуол
 
@@ -16,13 +19,12 @@
 // кол-ва ентаеров. После окончания квеста мобы убегают с карты.
 // Скрипт полностью адаптирован к рестартам.
 
-///@ Property Critter Protected     uint8  KlamTorrCowboy Group = Quests Quest = 3213 Max = 9
-///@ Property Critter PrivateServer uint8  KlamCowboyCountGav
-///@ Property Critter PrivateServer uint16 KlamCowboyMobHx
-///@ Property Critter PrivateServer uint16 KlamCowboyMobHy
+///@ Property Critter Common uint8 KlamTorrCowboy Mutable OwnerSync Persistent Group = Quests Quest = 3213 Max = 9
+///@ Property Critter Server uint8 KlamCowboyCountGav Mutable Persistent
+///@ Property Critter Server mpos KlamCowboyMobHex Mutable Persistent
 
-///@ Property Game PrivateServer ident KlamCowboy
-///@ Property Game PrivateServer uint16 KlamCowboyLevel
+///@ Property Game Server ident KlamCowboy Mutable Persistent
+///@ Property Game Server int16 KlamCowboyLevel Mutable Persistent
 
 // Время (в часах) начала/конца атак. Нумерация часов от 1 до 24 (24 часа == 0 часов).
 #define QUEST_TIME_START (24)
@@ -42,51 +44,51 @@
 #define DEF_PLAYER_LEVEL         (5) // уровень по умолчанию
 
 // Для удобства ребалансировки
-uint GetTimeSpawn()
+int GetTimeSpawn()
 {
     return Game.Random(30, 40) * 60;
 }
 
 // Время между атаками (это время и еще +10)
-uint GetMobLevel(uint playerLevel)
+int GetMobLevel(int playerLevel)
 {
-    playerLevel = uint(float(playerLevel) * 0.5);
+    playerLevel = int(float(playerLevel) * 0.5);
     return CLAMP(playerLevel, 2, 30);
 }
 
 // Уровень мобов
-uint GetMobCount(uint playerLevel)
+int GetMobCount(int playerLevel)
 {
     return playerLevel / 3 + 3;
 }
 
 // Количество мобов за одну атаку
-uint GetExp(uint cowDead) // Опыта за выполнение
+int GetExp(int cowDead) // Опыта за выполнение
 {
-    uint bonus = 0;
+    int bonus = 0;
     if (cowDead == 0) {
         bonus = 200;
     }
-    return uint(500 * (1 - double(cowDead) / double(COW_COUNT))) + bonus;
+    return int(500 * (1 - double(cowDead) / double(COW_COUNT))) + bonus;
 }
 
 // В случае рестарта значения восcтанавливаются
-uint MobsCount;      // Общее количество живых мобов на карте
-uint8 CowsDeadCount; // Количество умерших браминов
+int MobsCount;     // Общее количество живых мобов на карте
+int CowsDeadCount; // Количество умерших браминов
 
 // Номер события, которое завершает квест. Потеря значения в случае рестарта не критично.
-ident FinishInvokeId;
+int FinishInvokeId;
 
 // ------------------------- Скриптовые функции --------------------------------
 void InitCowboy(Map map, bool firstTime)
 {
-    Game.DeferredCall(GAME_SECOND_TO_TICK(Time::GetNearFullSecond(0, 0, 0, QUEST_TIME_START, 0, 0) - Game.GetFullSecond()), StartAtack, map.Id);
+    Game.StartTimeEvent((Tla::GetNearSynchronizedTime(0, 0, 0, QUEST_TIME_START, 0, 0) - Game.SynchronizedTime), StartAtack, map.Id);
 
-    FinishInvokeId = ZERO_IDENT;
+    FinishInvokeId = 0;
     CowsDeadCount = 0;
 
     Critter[] cows = map.GetCritters(CritterProperty::NpcRole, MapKlamath::RoleCows, CritterFindType::Npc);
-    for (uint i = 0; i < cows.length(); i++) {
+    for (int i = 0; i < cows.length(); i++) {
         cows[i].OnDead.Subscribe(_CowDead);
         if (cows[i].IsDead()) {
             CowsDeadCount++;
@@ -94,13 +96,13 @@ void InitCowboy(Map map, bool firstTime)
     }
 
     Critter[] dogs = map.GetCritters(CritterProperty::NpcRole, MapKlamath::RoleDogs, CritterFindType::Npc);
-    for (uint i = 0; i < dogs.length(); i++) {
+    for (int i = 0; i < dogs.length(); i++) {
         dogs[i].OnCritterAppeared.Subscribe(_DogSeeMob);
     }
 
     Critter[] mobs = map.GetCritters(CritterProperty::NpcRole, ROLE_MOBS, CritterFindType::Npc);
-    for (uint i = 0; i < mobs.length(); i++) {
-        mobs[i].OnIdle.Subscribe(_MobIdle);
+    for (int i = 0; i < mobs.length(); i++) {
+        mobs[i].StartTimeEvent(Time::Asap(), Time::Seconds(1), _MobIdle);
         mobs[i].OnDead.Subscribe(_MobDead);
         mobs[i].OnCritterAppeared.Subscribe(_MobSeeCritter);
     }
@@ -113,7 +115,7 @@ void InitCowboy(Map map, bool firstTime)
 void StartAtack(any value)
 {
     if (GetQuestGlobalState() == ZERO_IDENT) {
-        Game.DeferredCall(GAME_SECOND_TO_TICK(Time::GetNearFullSecond(0, 0, 0, QUEST_TIME_START, 0, 0) - Game.GetFullSecond()), StartAtack, value);
+        Game.StartTimeEvent((Tla::GetNearSynchronizedTime(0, 0, 0, QUEST_TIME_START, 0, 0) - Game.SynchronizedTime), StartAtack, value);
         return;
     }
 
@@ -126,17 +128,17 @@ void StartAtack(any value)
     // К началу квеста воскрешаем мертвых браминов.
     CowsDeadCount = 0;
     Critter[] cows = map.GetCritters(CritterProperty::NpcRole, MapKlamath::RoleCows, CritterFindType::DeadNpc);
-    for (uint i = 0; i < cows.length(); i++) {
+    for (int i = 0; i < cows.length(); i++) {
         any[] param = {cows[i].Id, 0};
-        Game.SavedDeferredCall(GAME_SECOND_TO_TICK(60), CowToAlive, param);
+        Game.StartTimeEvent(Tla::GameSeconds(60), CowToAlive, param); //SavedDeferredCall
     }
 
-    FinishInvokeId =
-        Game.SavedDeferredCall(GAME_SECOND_TO_TICK(Time::GetNearFullSecond(0, 0, 0, QUEST_TIME_END, 0, 0) - Game.GetFullSecond()), DeferredFinishQuest);
-    Game.SavedDeferredCall(GAME_SECOND_TO_TICK(GetTimeSpawn()), SpawnMobsLoop, value);
+    FinishInvokeId = Game.StartTimeEvent(Tla::GetNearSynchronizedTime(0, 0, 0, QUEST_TIME_END, 0, 0) - Game.SynchronizedTime,
+                                         DeferredFinishQuest);                   //SavedDeferredCall
+    Game.StartTimeEvent(Tla::GameSeconds(GetTimeSpawn()), SpawnMobsLoop, value); //SavedDeferredCall
     SetQuestState(2);
 
-    Game.DeferredCall(GAME_SECOND_TO_TICK(Time::GetNearFullSecond(0, 0, 0, QUEST_TIME_START, 0, 0) - Game.GetFullSecond()), StartAtack, value);
+    Game.StartTimeEvent((Tla::GetNearSynchronizedTime(0, 0, 0, QUEST_TIME_START, 0, 0) - Game.SynchronizedTime), StartAtack, value);
 }
 
 // Отвечает за начало спавна мобов
@@ -154,13 +156,13 @@ void SpawnMobsLoop(any value)
     }
 
     // Собаки предупреждают о начале атаки
-    Critter[] dogs = map.GetCritters(CritterProperty::NpcRole, MapKlamath::RoleDogs, CritterFindType::AliveNpc);
-    for (uint i = 0; i < dogs.length(); i++) {
+    Critter[] dogs = map.GetCritters(CritterProperty::NpcRole, MapKlamath::RoleDogs, CritterFindType::NonDeadNpc);
+    for (int i = 0; i < dogs.length(); i++) {
         dogs[i].KlamCowboyCountGav = 0;
-        Game.DeferredCall(GAME_SECOND_TO_TICK(Game.Random(1, 3) * 60), DogAlert, dogs[i].Id);
+        Game.StartTimeEvent(Tla::GameSeconds(Game.Random(1, 3) * 60), DogAlert, dogs[i].Id);
     }
 
-    uint16 playerLevel = GetPlayerLevel();
+    int playerLevel = GetPlayerLevel();
 
     // Случайно выбираем тип мобов и стартовые точки, и запускаем процесс спавна
     any[] params = {value};
@@ -170,9 +172,9 @@ void SpawnMobsLoop(any value)
     params[params.length() - 3] = GetMobCount(playerLevel);
     params[params.length() - 2] = 0;
     params[params.length() - 1] = 0;
-    Game.SavedDeferredCall(GAME_SECOND_TO_TICK(10 * 60), SpawnMobs, params);
+    Game.StartTimeEvent(Tla::GameSeconds(10 * 60), SpawnMobs, params); //SavedDeferredCall
 
-    Game.SavedDeferredCall(GAME_SECOND_TO_TICK(GetTimeSpawn()), SpawnMobsLoop, value);
+    Game.StartTimeEvent(Tla::GameSeconds(GetTimeSpawn()), SpawnMobsLoop, value); //SavedDeferredCall
 }
 
 // Событие - создает мобов на каждом енте заданой группы, событие откладывается на 2 минуты
@@ -191,16 +193,16 @@ void SpawnMobs(any[] values)
         return;
     }
 
-    uint entGroup = values[1];
+    int entGroup = values[1];
     hstring npcPid = values[2];
     hstring dialogId = values[3];
-    uint mobLevel = values[4];
-    uint maxCount = values[5];
-    uint mobsSpawnCount = values[6]; // мобов созданно
-    uint limit = values[7];          // всего попыток создания мобов (что-бы не зациклилось)
+    int mobLevel = values[4];
+    int maxCount = values[5];
+    int mobsSpawnCount = values[6]; // мобов созданно
+    int limit = values[7];          // всего попыток создания мобов (что-бы не зациклилось)
 
-    uint entCount = Entrance::MapCountEntry(map, entGroup);
-    for (uint i = 0; i < entCount; i++) {
+    int entCount = Entrance::MapCountEntry(map, entGroup);
+    for (int i = 0; i < entCount; i++) {
         limit++;
         if (limit >= maxCount * 2) {
             return;
@@ -223,7 +225,7 @@ void SpawnMobs(any[] values)
     values[6] = mobsSpawnCount;
     values[7] = limit;
 
-    Game.SavedDeferredCall(GAME_SECOND_TO_TICK(60), SpawnMobs, values);
+    Game.StartTimeEvent(Tla::GameSeconds(60), SpawnMobs, values); //SavedDeferredCall
 }
 
 // Собаки начинают гавкать
@@ -236,21 +238,21 @@ void DogAlert(any value)
         return;
     }
     if (not NpcPlanes::IsNoPlanes(dog)) {
-        Game.DeferredCall(GAME_SECOND_TO_TICK(Game.Random(1, 3) * 60), DogAlert, value);
+        Game.StartTimeEvent(Tla::GameSeconds(Game.Random(1, 3) * 60), DogAlert, value);
         return;
     }
 
     MoveRandom::CritterMoveRandom(dog);
     CritterState::Wait(dog, Game.Random(2000, 4000));
-    uint[] msg = {2500, 2501, 2502, 2503, 2504, 2505, 2506, 2507};
-    dog.SayMsg(SAY_NORM_ON_HEAD, TextPackName::Text, msg[Game.Random(0, msg.length() - 1)]);
+    int[] msg = {2500, 2501, 2502, 2503, 2504, 2505, 2506, 2507};
+    Messaging::SayOnHead(dog, TextPackName::Text, msg[Game.Random(0, msg.length() - 1)]);
 
     dog.KlamCowboyCountGav += 1;
     if (dog.KlamCowboyCountGav >= 3) {
         return;
     }
 
-    Game.DeferredCall(GAME_SECOND_TO_TICK(Game.Random(1, 3) * 60), DogAlert, value);
+    Game.StartTimeEvent(Tla::GameSeconds(Game.Random(1, 3) * 60), DogAlert, value);
 }
 
 // Завершает квест.
@@ -295,7 +297,7 @@ void CowToAlive(any[] values)
         return;
     }
 
-    if (map.IsHexMovable(cow.HexX, cow.HexY)) {
+    if (map.IsHexMovable(cow.Hex)) {
         CritterState::ToAlive(cow);
         return;
     }
@@ -308,13 +310,13 @@ void CowToAlive(any[] values)
         return;
     }
 
-    Game.SavedDeferredCall(GAME_SECOND_TO_TICK(60), CowToAlive, values);
+    Game.StartTimeEvent(Tla::GameSeconds(60), CowToAlive, values); //SavedDeferredCall
 }
 
 // ------------------------ Обработчики событий -------------------------------
 void _MobDead(Critter mob, Critter killer)
 {
-    Game.SavedDeferredCall(GAME_SECOND_TO_TICK(GetTimeSpawn()), DeleteMobs, mob.Id);
+    Game.StartTimeEvent(Tla::GameSeconds(GetTimeSpawn()), DeleteMobs, mob.Id); //SavedDeferredCall
     MobsCount--;
 }
 
@@ -322,8 +324,8 @@ void _MobDead(Critter mob, Critter killer)
 void _MobIdle(Critter mob)
 {
     if (GetQuestGlobalState() == ZERO_IDENT) {
-        NpcPlanes::AddWalkPlane(mob, AI_PLANE_WALK_PRIORITY, mob.KlamCowboyMobHx, mob.KlamCowboyMobHy, Game.Random(0, 5), true, Game.Random(0, 1));
-        NpcPlanes::AddMiscPlane(mob, AI_PLANE_MISC_PRIORITY, 0, KlamCowboy::plane_GoodByeMob);
+        NpcPlanes::AddWalkPlane(mob, AI_PLANE_WALK_PRIORITY, mob.KlamCowboyMobHex, Game.Random(0, 5), true, Game.Random(0, 1));
+        NpcPlanes::AddMiscPlane(mob, AI_PLANE_MISC_PRIORITY, ZERO_TIMESPAN, KlamCowboy::plane_GoodByeMob);
     }
     else {
         Map map = mob.GetMap();
@@ -387,7 +389,7 @@ void r_StartQuest(Critter master, Critter slave, int val)
     if (not valid(slave)) {
         return;
     }
-    if (!master.IsControlledByPlayer) {
+    if (!master.ControlledByPlayer) {
         return;
     }
 
@@ -398,7 +400,7 @@ void r_StartQuest(Critter master, Critter slave, int val)
 
 void r_AddExperience(Critter master, Critter slave)
 {
-    if (not valid(slave) || !master.IsControlledByPlayer) {
+    if (not valid(slave) || !master.ControlledByPlayer) {
         return;
     }
 
@@ -424,38 +426,29 @@ void plane_GoodByeMob(Critter mob)
 
 // --------------------------- Инструментарий ---------------------------------
 // Добавляет и посылает на убой указанного моба.
-Critter SpawnMob(Map map, uint8 entGroup, uint8 entNum, hstring npcPid, uint8 dir, hstring dialog, uint level)
+Critter SpawnMob(Map map, int entGroup, int entNum, hstring npcPid, uint8 dir, hstring dialog, int level)
 {
-    uint16 x = 0, y = 0;
-    if (not Entrance::MapGetEntryCoords(map, entGroup, entNum, x, y)) {
+    mpos hex;
+    if (not Entrance::MapGetEntryCoords(map, entGroup, entNum, hex)) {
         Game.Log("ERROR: GetEntryCoords " + entGroup + ":" + entNum);
         return null;
     }
 
-    int[] props = {CritterProperty::DialogId,
-                   dialog.hash,
-                   CritterProperty::TeamId,
-                   Teams::Mob0,
-                   CritterProperty::BagId,
-                   Bags::Empty,
-                   CritterProperty::Level,
-                   level,
-                   CritterProperty::KlamCowboyMobHx,
-                   x,
-                   CritterProperty::KlamCowboyMobHy,
-                   y,
-                   CritterProperty::NpcRole,
-                   ROLE_MOBS,
-                   CritterProperty::ReplicationTime,
-                   -1};
-    Critter mob = map.AddNpc(npcPid, x, y, dir, Tla::GetCritPropsDict(props));
+    dict<CritterProperty, any> props = {{CritterProperty::DialogId, dialog},
+                                        {CritterProperty::TeamId, Teams::Mob0},
+                                        {CritterProperty::BagId, Bags::Empty},
+                                        {CritterProperty::Level, level},
+                                        {CritterProperty::KlamCowboyMobHex, hex},
+                                        {CritterProperty::NpcRole, ROLE_MOBS},
+                                        {CritterProperty::ReplicationTime, -1}};
+    Critter mob = map.AddCritter(npcPid, hex, dir, props);
     if (not valid(mob)) {
         Game.Log("ERROR: critter not valid");
         return null;
     }
 
     MobSetAtackPlane(map, mob);
-    mob.OnIdle.Subscribe(_MobIdle);
+    mob.StartTimeEvent(Time::Asap(), Time::Seconds(1), _MobIdle);
     mob.OnDead.Subscribe(_MobDead);
     mob.OnCritterAppeared.Subscribe(_MobSeeCritter);
     MobsCount++;
@@ -466,7 +459,7 @@ Critter SpawnMob(Map map, uint8 entGroup, uint8 entNum, hstring npcPid, uint8 di
 // Агрит моба
 void MobSetAtackPlane(Map map, Critter mob)
 {
-    Critter[] cows = map.GetCritters(CritterProperty::NpcRole, MapKlamath::RoleCows, CritterFindType::AliveNpc);
+    Critter[] cows = map.GetCritters(CritterProperty::NpcRole, MapKlamath::RoleCows, CritterFindType::NonDeadNpc);
     if (cows.isEmpty()) {
         FinishQuest(FINISH_FAIL_ALL_COW_DEAD);
         return;
@@ -480,10 +473,10 @@ void MobSetAtackPlane(Map map, Critter mob)
 any[] SelectEntsAndMobs(any[] arr)
 {
     arr.resize(arr.length() + 3);
-    uint8[] ent = {10, 11, 12, 13};
+    int[] ent = {10, 11, 12, 13};
     hstring[] pid = {Content::Critter::WildDog, Content::Critter::Molerat, Content::Critter::LargeRadscorpion, Content::Critter::ToughSilverGecko};
     hstring[] dialog = {Content::Dialog::mob_dog, Content::Dialog::mob_mole_rat, Content::Dialog::mob_large_scorp, Content::Dialog::mob_silver_gecko};
-    uint mobsTypeNum = Game.Random(0, pid.length() - 1);
+    int mobsTypeNum = Game.Random(0, pid.length() - 1);
     arr[arr.length() - 3] = ent[Game.Random(0, ent.length() - 1)];
     arr[arr.length() - 2] = pid[mobsTypeNum];
     arr[arr.length() - 1] = dialog[mobsTypeNum];
@@ -491,7 +484,7 @@ any[] SelectEntsAndMobs(any[] arr)
 }
 
 // Проверяет текущий час, он между заданым временем или нет
-bool VerifyTime(uint8 timeStart, uint8 timeFinish)
+bool VerifyTime(int timeStart, int timeFinish)
 {
     if (timeStart == timeFinish) {
         return true;
@@ -502,7 +495,8 @@ bool VerifyTime(uint8 timeStart, uint8 timeFinish)
     if (timeFinish == 24) {
         timeFinish = 0;
     }
-    uint8 hour = GameTime::GetHour();
+
+    int hour = GameTime::GetHour();
     if (timeStart > timeFinish) {
         timeFinish += 24;
         if (timeStart > hour) {
@@ -518,7 +512,7 @@ bool VerifyTime(uint8 timeStart, uint8 timeFinish)
 }
 
 // Вызывается при окончании квеста.
-void FinishQuest(uint8 state)
+void FinishQuest(int state)
 {
     if (GetQuestGlobalState() == ZERO_IDENT) {
         return;
@@ -526,8 +520,8 @@ void FinishQuest(uint8 state)
 
     switch (state) {
     case FINISH_FAIL_ALL_COW_DEAD:
-        if (FinishInvokeId != ZERO_IDENT) {
-            Game.CancelDeferredCall(FinishInvokeId);
+        if (FinishInvokeId != 0) {
+            Game.StopTimeEvent(FinishInvokeId);
         }
         SetQuestState(3);
         break;
@@ -536,7 +530,7 @@ void FinishQuest(uint8 state)
         break;
     }
 
-    FinishInvokeId = ZERO_IDENT;
+    FinishInvokeId = 0;
     SetQuestGlobalState(ZERO_IDENT);
 }
 
@@ -550,7 +544,7 @@ ident GetQuestGlobalState()
     return Game.KlamCowboy;
 }
 
-void SetQuestState(uint state)
+void SetQuestState(int state)
 {
     ident playerId = GetQuestGlobalState();
     if (playerId == ZERO_IDENT) {
@@ -565,12 +559,16 @@ void SetQuestState(uint state)
     player.KlamTorrCowboy = state;
 }
 
-void SetPlayerLevel(uint16 level)
+void SetPlayerLevel(int level)
 {
     Game.KlamCowboyLevel = level;
 }
 
-uint16 GetPlayerLevel()
+int GetPlayerLevel()
 {
     return Game.KlamCowboyLevel != 0 ? Game.KlamCowboyLevel : DEF_PLAYER_LEVEL;
+}
+
+#endif
+
 }

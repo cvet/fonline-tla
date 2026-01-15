@@ -1,29 +1,42 @@
-// FOS Common
+namespace Lockers
+{
+
 // Author: cvet
 // Doors and keys stuff.
 
 // Lockers and doors
-///@ Property Item Protected         uint    LockerId
-///@ Property Item PrivateServer     uint16  LockerComplexity
-///@ Property Item Public            bool    Locker_Locked
-///@ Property Item Public            bool    Locker_Jammed
-///@ Property Item Public            bool    Locker_Broken
-///@ Property Item Public            bool    Locker_NoOpen
-///@ Property Item Public            bool    Locker_IsElectro
-///@ Property Item Public            bool    Door_NoBlockMove
-///@ Property Item Public            bool    Door_NoBlockShoot
-///@ Property Item Public            bool    Door_NoBlockLight
-///@ Property Item Public            uint    Container_Volume
-///@ Property Item Public            bool    Container_Changeble
-///@ Property Item Public            bool    Container_CannotPickUp
+///@ Property Item Common bool Opened Mutable PublicSync Persistent
+///@ Property Item Common bool IsCanOpen
+///@ Property Item Common int64 LockerId Mutable OwnerSync Persistent
+///@ Property Item Server int32 LockerComplexity Mutable Persistent
+///@ Property Item Common bool Locker_Locked Mutable PublicSync Persistent
+///@ Property Item Common bool Locker_Jammed Mutable PublicSync Persistent
+///@ Property Item Common bool Locker_Broken Mutable PublicSync Persistent
+///@ Property Item Common bool Locker_NoOpen Mutable PublicSync Persistent
+///@ Property Item Common bool Locker_IsElectro Mutable PublicSync Persistent
+///@ Property Item Common bool Door_NoBlockMove Mutable PublicSync Persistent
+///@ Property Item Common bool Door_NoBlockShoot Mutable PublicSync Persistent
+///@ Property Item Common bool Door_NoBlockLight Mutable PublicSync Persistent
+///@ Property Item Common int32 Container_Volume Mutable PublicSync Persistent
+///@ Property Item Common bool Container_Changeble Mutable PublicSync Persistent
+///@ Property Item Common bool Container_CannotPickUp Mutable PublicSync Persistent
 
 // MultihexDoors не используется нигде.
-///@ Property Item PrivateServer bool Door_IsMultyHex
-///@ Property Item PrivateServer uint8[] Door_MultyHexLine1
-///@ Property Item PrivateServer uint8[] Door_MultyHexLine2
-///@ Property Item PrivateServer uint[] Door_BlockerIds
+///@ Property Item Server bool Door_IsMultyHex Mutable Persistent
+///@ Property Item Server uint8[] Door_MultyHexLine1 Mutable Persistent
+///@ Property Item Server uint8[] Door_MultyHexLine2 Mutable Persistent
+///@ Property Item Server int32[] Door_BlockerIds Mutable Persistent
 
-#ifdef __SERVER
+// [[ModuleInit]]
+void ModuleInit()
+{
+#if CLIENT
+    Game.OnItemMapIn.Subscribe(OnItemMapIn);
+    Game.AddPropertySetter(ItemProperty::Opened, ItemSetOpened);
+#endif
+}
+
+#if SERVER
 
 bool UseItemOnLocker(Critter cr, Item locker, Item item)
 {
@@ -34,7 +47,7 @@ bool UseSkillOnLocker(Critter cr, Item locker, CritterProperty skill)
 {
     Map map = cr.GetMap();
     if (not valid(map)) {
-        cr.SayMsg(SAY_NETMSG, TextPackName::Game, MsgStr::StrUseNothing);
+        Messaging::Info(cr, TextPackName::Game, MsgStr::StrUseNothing);
         return true;
     }
 
@@ -42,19 +55,19 @@ bool UseSkillOnLocker(Critter cr, Item locker, CritterProperty skill)
         if (locker.Type == ItemType::Door) {
             // NoOpen
             if (locker.Locker_NoOpen) {
-                cr.SayMsg(SAY_NETMSG, TextPackName::Game, MsgStr::StrUseNothing);
+                Messaging::Info(cr, TextPackName::Game, MsgStr::StrUseNothing);
                 return true;
             }
 
             // Critter on hex
-            if (locker.Opened && map.GetCritter(locker.HexX, locker.HexY) !is null) {
-                cr.SayMsg(SAY_NETMSG, TextPackName::Game, MsgStr::StrUseNothing);
+            if (locker.Opened && map.GetCritter(locker.Hex) !is null) {
+                Messaging::Info(cr, TextPackName::Game, MsgStr::StrUseNothing);
                 return true;
             }
 
             // Check key
             if (!locker.Opened && locker.LockerId != 0 && !locker.Locker_Broken && !IsKeyAvailable(cr, locker.LockerId)) {
-                cr.SayMsg(SAY_NETMSG, TextPackName::Game, MsgStr::StrItemLockerNeedKey);
+                Messaging::Info(cr, TextPackName::Game, MsgStr::StrItemLockerNeedKey);
                 return true;
             }
 
@@ -64,13 +77,13 @@ bool UseSkillOnLocker(Critter cr, Item locker, CritterProperty skill)
         else if (locker.Type == ItemType::Container) {
             // NoOpen
             if (locker.Locker_NoOpen) {
-                cr.SayMsg(SAY_NETMSG, TextPackName::Game, MsgStr::StrUseNothing);
+                Messaging::Info(cr, TextPackName::Game, MsgStr::StrUseNothing);
                 return true;
             }
 
             // Check key
             if (!locker.Opened && locker.LockerId != 0 && !locker.Locker_Broken && !IsKeyAvailable(cr, locker.LockerId)) {
-                cr.SayMsg(SAY_NETMSG, TextPackName::Game, MsgStr::StrItemLockerNeedKey);
+                Messaging::Info(cr, TextPackName::Game, MsgStr::StrItemLockerNeedKey);
                 return true;
             }
 
@@ -96,22 +109,22 @@ bool UseSkillOnLocker(Critter cr, Item locker, CritterProperty skill)
             ShowContainer(cr, null, locker, locker.GroundLevel ? TransferTypes::HexContDown : TransferTypes::HexContUp);
         }
         else {
-            cr.SayMsg(SAY_NETMSG, TextPackName::Game, MsgStr::StrUseNothing);
+            Messaging::Info(cr, TextPackName::Game, MsgStr::StrUseNothing);
         }
     }
     else if (skill == CritterProperty::SkillLockpick) {
         // NoOpen
         if (locker.Locker_NoOpen) {
-            cr.SayMsg(SAY_NETMSG, TextPackName::Game, MsgStr::StrUseNothing);
+            Messaging::Info(cr, TextPackName::Game, MsgStr::StrUseNothing);
             return true;
         }
-        if (IS_TIMEOUT(cr.TimeoutSkLockpick)) {
-            cr.SayMsg(SAY_NETMSG, TextPackName::Game, MsgStr::StrSkillWeariness);
+        if (Time::IsTimeoutActive(cr.TimeoutSkLockpick)) {
+            Messaging::Info(cr, TextPackName::Game, MsgStr::StrSkillWeariness);
             return true;
         }
 
         if (locker.LockerId == 0 || locker.Opened) {
-            cr.SayMsg(SAY_NETMSG, TextPackName::Game, MsgStr::StrUseNothing);
+            Messaging::Info(cr, TextPackName::Game, MsgStr::StrUseNothing);
             return true;
         }
         int base = cr.SkillLockpick - locker.LockerComplexity;
@@ -143,7 +156,7 @@ bool UseSkillOnLocker(Critter cr, Item locker, CritterProperty skill)
             Scores::AddScore(cr, EScores::Cracker, 1);
         }
         else {
-            cr.SayMsg(SAY_NETMSG, TextPackName::Game, MsgStr::StrSkillLockpickFail);
+            Messaging::Info(cr, TextPackName::Game, MsgStr::StrSkillLockpickFail);
         }
 
         cr.TimeoutSkLockpick = LOCKPICK_TIMEOUT(cr);
@@ -152,12 +165,12 @@ bool UseSkillOnLocker(Critter cr, Item locker, CritterProperty skill)
         return false;
     }
     else {
-        cr.SayMsg(SAY_NETMSG, TextPackName::Game, MsgStr::StrUseNothing);
+        Messaging::Info(cr, TextPackName::Game, MsgStr::StrUseNothing);
     }
     return true;
 }
 
-bool IsKeyAvailable(Critter cr, uint lockerId)
+bool IsKeyAvailable(Critter cr, int lockerId)
 {
     if (lockerId == 0) {
         return true;
@@ -168,7 +181,7 @@ bool IsKeyAvailable(Critter cr, uint lockerId)
     }
 
     Item[] keys = cr.GetItems(ItemProperty::Type, ItemType::Key);
-    for (uint i = 0; i < keys.length(); i++) {
+    for (int i = 0; i < keys.length(); i++) {
         if (keys[i].LockerId == lockerId) {
             return true;
         }
@@ -177,14 +190,14 @@ bool IsKeyAvailable(Critter cr, uint lockerId)
     return false;
 }
 
-ident GetKeyId(Critter cr, uint lockerId)
+ident GetKeyId(Critter cr, int lockerId)
 {
     if (lockerId == 0 || _CritFingersDoorId(cr.Id) == lockerId || _CritEyesDoorId(cr.Id) == lockerId) {
         return ZERO_IDENT;
     }
 
     Item[] keys = cr.GetItems(ItemProperty::Type, ItemType::Key);
-    for (uint i = 0; i < keys.length(); i++) {
+    for (int i = 0; i < keys.length(); i++) {
         if (keys[i].LockerId == lockerId) {
             return keys[i].Id;
         }
@@ -197,9 +210,9 @@ bool SwitchLocker(Item locker, bool toOpen)
 {
     locker.Opened = toOpen;
     if (locker.Type == ItemType::Door) {
-        locker.IsShootThru = toOpen;
-        locker.IsLightThru = toOpen;
-        locker.IsNoBlock = toOpen;
+        locker.ShootThru = toOpen;
+        locker.LightThru = toOpen;
+        locker.NoBlock = toOpen;
         locker.IsGag = !toOpen;
     }
     return toOpen;
@@ -210,9 +223,9 @@ void ShowContainer(Critter cr, Critter crFrom, Item container, TransferTypes typ
     /*	// Заглушка, требует реализации (просмотр контейнера или трупа)
                 // Show open animation for all who view container
         Critter[] players = crTo.GetCritters( true, CritterFindType::Players );
-        if( crTo.IsControlledByPlayer )
+        if( crTo.ControlledByPlayer )
             players.insertFirst( crTo );
-        for( uint i = 0; i < players.length(); i++ )
+        for( int i = 0; i < players.length(); i++ )
             players[ i ].PlayerClientCall.ShowOpenCloseAnimation( container.Id );
      */
     // Start container operation
@@ -221,8 +234,8 @@ void ShowContainer(Critter cr, Critter crFrom, Item container, TransferTypes typ
         Map mapCrFrom = crFrom.GetMap();
         Map mapCr = cr.GetMap();
         if (valid(mapCr) && valid(mapCrFrom) && mapCr.Id == mapCrFrom.Id) {
-            uint dist = Game.GetDistance(cr.HexX, cr.HexY, crFrom.HexX, crFrom.HexY);
-            uint useDist = 1 + cr.Multihex;
+            int dist = Game.GetDistance(cr.Hex, crFrom.Hex);
+            int useDist = 1 + cr.Multihex;
             if (dist <= useDist) {
                 items = crFrom.GetItems(ItemProperty::CritterSlot, CritterItemSlot::Inventory);
                 cr.TransferType = typeShow;
@@ -232,8 +245,8 @@ void ShowContainer(Critter cr, Critter crFrom, Item container, TransferTypes typ
         }
     }
     if (valid(container)) {
-        items = container.GetItems(ContainerItemStack::Root);
-        if (cr.IsControlledByPlayer) {
+        items = container.GetItems(ROOT_CONTAINER_STACK);
+        if (cr.ControlledByPlayer) {
             cr.TransferType = (container.GroundLevel ? TransferTypes::HexContDown : TransferTypes::HexContUp);
             cr.TransferContainerId = container.Id;
             cr.SendItems(items);
@@ -245,3 +258,32 @@ void ShowContainer(Critter cr, Critter crFrom, Item container, TransferTypes typ
 }
 
 #endif
+
+#if CLIENT
+
+// [[Event]]
+void OnItemMapIn(Item item)
+{
+    if (item.Type != ItemType::Door && item.Type != ItemType::Container) {
+        return;
+    }
+
+    item.StopAnim();
+
+    if (item.IsCanOpen && item.Opened) {
+        item.SetAnimTime(1.0);
+    }
+    else {
+        item.SetAnimTime(0.0);
+    }
+}
+
+// [[PropertySetter]]
+void ItemSetOpened(Item item, bool& opened)
+{
+    item.PlayAnim(EMPTY_HSTRING, false, !opened);
+}
+
+#endif
+
+}

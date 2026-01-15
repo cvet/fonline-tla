@@ -1,21 +1,25 @@
-// FOS Server Sort 2
+namespace Casino // Sort 2
+{
+
+#if SERVER
+
 // Author: cvet, rifleman17
 
-///@ Property Map PrivateServer uint CasinoLimit
-///@ Property Map PrivateServer uint CasinoTimeRenew
+///@ Property Map Server int32 CasinoLimit Mutable Persistent
+///@ Property Map Server synctime CasinoTimeRenew Mutable Persistent
 
 #define START_BET           (5)
 #define MIN_BET             (1)
 #define MAX_BET             (50)
 #define STR_ONEHANDED_RING  (2000)
-#define RENEW_TIME          (60 * 60 * 24 * 7) // Обновление лимитов карты на автоматы раз в неделю
+#define RENEW_TIME          (Time::GameDays(7)) // Обновление лимитов карты на автоматы раз в неделю
 #define MAX_ONEHANDED_LIMIT (8000) // Максимальная сумма, которую можно выжать из автоматов(без учета джекпотов)
 #define STR_EMPTY           (2001) // Реплика "деньги в автомате закончились"
 
-bool s_Onehanded(Critter cr, StaticItem onehanded, Item item, int skill)
+bool s_Onehanded(Critter cr, StaticItem onehanded, Item item, any skill)
 {
     if (skill != CritterProperty::SpecialSkillPickOnGround || (valid(item) && item.ProtoId != Content::Item::bottle_caps)) {
-        cr.SayMsg(SAY_NETMSG, TextPackName::Game, MsgStr::StrUseNothing);
+        Messaging::Info(cr, TextPackName::Game, MsgStr::StrUseNothing);
         return true;
     }
 
@@ -25,19 +29,19 @@ bool s_Onehanded(Critter cr, StaticItem onehanded, Item item, int skill)
         return true;
     }
 
-    if (map.CasinoTimeRenew < Game.GetFullSecond()) {
+    if (map.CasinoTimeRenew < Game.SynchronizedTime) {
         map.CasinoLimit = MAX_ONEHANDED_LIMIT;
-        map.CasinoTimeRenew = Game.GetFullSecond() + RENEW_TIME;
+        map.CasinoTimeRenew = Game.SynchronizedTime + RENEW_TIME;
     }
 
     int onehandedMoney = map.CasinoLimit;
     if (onehandedMoney <= 0) {
-        cr.SayMsg(SAY_NETMSG, TextPackName::Text, STR_EMPTY);
+        Messaging::Info(cr, TextPackName::Text, STR_EMPTY);
         return true;
     }
 
     // Count bet
-    uint bet = START_BET;
+    int bet = START_BET;
     if (valid(item)) {
         // Set all money
         bet = item.Count;
@@ -46,7 +50,7 @@ bool s_Onehanded(Critter cr, StaticItem onehanded, Item item, int skill)
         // Check money
         bet = cr.CountItem(Content::Item::bottle_caps);
         if (bet < MIN_BET) {
-            cr.SayMsg(SAY_NETMSG, TextPackName::Game, MsgStr::StrUseNothing);
+            Messaging::Info(cr, TextPackName::Game, MsgStr::StrUseNothing);
             return true;
         }
         if (bet > START_BET) {
@@ -61,7 +65,7 @@ bool s_Onehanded(Critter cr, StaticItem onehanded, Item item, int skill)
 
     // Set text
     if (valid(map)) {
-        map.SetTextMsg(onehanded.HexX, onehanded.HexY, COLOR_GRAY, TextPackName::Text, STR_ONEHANDED_RING);
+        MapText::AddText(map, onehanded.Hex, COLOR_GRAY, TextPackName::Text, STR_ONEHANDED_RING);
     }
 
     // Calculate
@@ -87,19 +91,23 @@ bool s_Onehanded(Critter cr, StaticItem onehanded, Item item, int skill)
         // Add money
         cr.AddItem(Content::Item::bottle_caps, bet);
         if (bet > MAX_BET) {
-            cr.Say(SAY_NETMSG, "***JACKPOT***");
+            Messaging::Info(cr, "***JACKPOT***");
         }
-        cr.Say(SAY_NETMSG, "+" + bet + "$");
+        Messaging::Info(cr, "+" + bet + "$");
         onehandedMoney -= bet;
     }
     // Loose
     else {
         // Sub money
         cr.DestroyItem(Content::Item::bottle_caps, bet);
-        cr.Say(SAY_NETMSG, "-" + bet + "$");
+        Messaging::Info(cr, "-" + bet + "$");
         onehandedMoney += bet;
     }
 
     map.CasinoLimit = onehandedMoney;
     return true;
+}
+
+#endif
+
 }

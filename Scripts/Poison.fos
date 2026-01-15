@@ -1,14 +1,18 @@
-// FOS Server
+namespace Poison
+{
+
+#if SERVER
+
 // Author: cvet
 // Original Fallout2 system
 
-#define POISON_BASE_DURATION (Time::RealSecond(505))
-#define POISON_DURATION_SUB  (Time::RealSecond(5))
+#define POISON_BASE_DURATION_SECONDS (505)
+#define POISON_DURATION_SUB          (5)
 
-#define STR_POISON_GAIN      (12810)
-#define STR_POISON_PROCESS   (12811)
-#define STR_POISON_REDUCE    (12812)
-#define STR_POISON_FREE      (12813)
+#define STR_POISON_GAIN              (12810)
+#define STR_POISON_PROCESS           (12811)
+#define STR_POISON_REDUCE            (12812)
+#define STR_POISON_FREE              (12813)
 
 void AffectPoison(Critter cr, int value)
 {
@@ -16,10 +20,7 @@ void AffectPoison(Critter cr, int value)
         return;
     }
 
-    uint[] indexes = {};
-    tick_t[] durations = {};
-    uint[] rates = {};
-    bool isActive = cr.GetTimeEvents(Tla::CtePoison, indexes, durations, rates) != 0;
+    bool isActive = cr.CountTimeEvent(cte_Poison) != 0;
     int levelVal = cr.PoisoningLevel;
     int resistVal = cr.DamageResistance[DamageTypes::Poison];
 
@@ -32,7 +33,7 @@ void AffectPoison(Critter cr, int value)
     cr.PoisoningLevel = CLAMP(levelVal + value, 0, 2000);
     levelVal = cr.PoisoningLevel;
 
-    uint strNum = 0;
+    int strNum = 0;
     if (levelVal == 0) {
         strNum = STR_POISON_FREE;
     }
@@ -43,7 +44,7 @@ void AffectPoison(Critter cr, int value)
         strNum = STR_POISON_REDUCE;
     }
     if (strNum != 0) {
-        cr.SayMsg(SAY_NETMSG, TextPackName::Game, strNum);
+        Messaging::Info(cr, TextPackName::Game, strNum);
     }
 
     if (levelVal > 0) {
@@ -69,40 +70,45 @@ void AffectPoison(Critter cr, int value)
     if (isActive) {
         // Try hurry event, if new stage aviable
         if (levelVal == 0) {
-            cr.RemoveTimeEvents(Tla::CtePoison);
+            cr.StopTimeEvent(cte_Poison);
         }
         else {
-            uint oldDuration = durations[0];
-            uint newDuration = GetPoisonDuration(cr);
-            if (newDuration < oldDuration) {
-                cr.ChangeTimeEvent(indexes[0], newDuration, 0);
-            }
+            //int oldDuration = durations[0];
+            auto newDuration = GetPoisonDuration(cr);
+            //if (newDuration < oldDuration) {
+            //    cr.ChangeTimeEvent(indexes[0], newDuration, 0);
+            //}
+            cr.StopTimeEvent(cte_Poison);
+            cr.StartTimeEvent(newDuration, cte_Poison);
         }
     }
     else {
         // Try start new event
-        cr.AddTimeEvent(cte_Poison, GetPoisonDuration(cr), Tla::CtePoison);
+        cr.StartTimeEvent(GetPoisonDuration(cr), cte_Poison);
     }
 }
 
 void DropPoison(Critter cr)
 {
-    cr.RemoveTimeEvents(Tla::CtePoison);
+    cr.StopTimeEvent(cte_Poison);
     cr.PoisoningLevel = 0;
     if (cr.IsPoisoned) {
         cr.IsPoisoned = false;
     }
 }
 
-uint cte_Poison(Critter cr, any identifier, uint& rate)
+void cte_Poison(Critter cr)
 {
     if (cr.IsDead()) {
-        return 100;
+        timespan delayTicks = Time::Seconds(100);
+        if (delayTicks != ZERO_TIMESPAN) {
+            Game.RepeatCurrentTimeEvent(delayTicks);
+        }
     }
 
     int levelVal = cr.PoisoningLevel;
     if (levelVal > 0) {
-        cr.SayMsg(SAY_NETMSG, TextPackName::Game, STR_POISON_PROCESS);
+        Messaging::Info(cr, TextPackName::Game, STR_POISON_PROCESS);
         cr.PoisoningLevel = CLAMP(levelVal - 2, 0, 2000);
         cr.CurrentHp -= 1;
         if (cr.CurrentHp <= 0) {
@@ -111,28 +117,31 @@ uint cte_Poison(Critter cr, any identifier, uint& rate)
     }
 
     if (cr.PoisoningLevel == 0) {
-        cr.SayMsg(SAY_NETMSG, TextPackName::Game, STR_POISON_FREE);
+        Messaging::Info(cr, TextPackName::Game, STR_POISON_FREE);
         if (cr.IsPoisoned) {
             cr.IsPoisoned = false;
         }
-        return 0;
+        return;
     }
 
-    return GetPoisonDuration(cr);
+    timespan delayTicks = GetPoisonDuration(cr);
+    if (delayTicks != ZERO_TIMESPAN) {
+        Game.RepeatCurrentTimeEvent(delayTicks);
+    }
 }
 
-uint GetPoisonDuration(Critter cr)
+timespan GetPoisonDuration(Critter cr)
 {
-    int duration = POISON_BASE_DURATION;
+    auto duration = POISON_BASE_DURATION_SECONDS;
     int levelVal = cr.PoisoningLevel;
     if (levelVal == 0) {
-        return 0;
+        return ZERO_TIMESPAN;
     }
     duration -= levelVal * POISON_DURATION_SUB;
     if (duration <= 0) {
-        duration = Time::RealSecond(1);
+        duration = 1;
     }
-    return duration;
+    return Time::Seconds(duration);
 }
 
 /* fallout2 revers engineering by Atom
@@ -233,3 +242,7 @@ uint GetPoisonDuration(Critter cr)
    {12812}{}{You feel a little better.}
    {12813}{}{You feel better.}
  */
+
+#endif
+
+}

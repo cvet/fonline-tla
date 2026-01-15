@@ -1,6 +1,9 @@
-// FOS Server Sort 2
+namespace PatternSniper // Sort 2
+{
 
-///@ Property Critter PrivateServer uint8 PatternSniperCountRunning
+#if SERVER
+
+///@ Property Critter Server uint8 PatternSniperCountRunning Mutable Persistent
 
 /* Снайпер-сникер.
    ----------------------
@@ -98,7 +101,7 @@ class SniperPattern : PatternCommon::CommonPattern
     // Атака снайпера
     bool _Attack(Critter cr, Critter target)
     {
-        if (!target.IsControlledByPlayer) {
+        if (!target.ControlledByPlayer) {
             return false;
         }
         if (target.IsKnockout()) {
@@ -127,7 +130,7 @@ class SniperPattern : PatternCommon::CommonPattern
         }
 
         // Скопировано из основного обработчика
-        cr.TimeoutAggressor = Game.GetFullSecond() + Time::RealMinute(1);
+        cr.TimeoutAggressor = Game.SynchronizedTime + Time::Minutes(1);
         Combat::CombatAttack(cr, target, weapon, _WeaponModeMake(0, HitLocations::LocationEyes), ammo);
         _SetOnAfterAttackEvent(cr, target);
         return true;
@@ -136,23 +139,22 @@ class SniperPattern : PatternCommon::CommonPattern
     // Снайпер убегает, если осталось мало АП
     void _SetOnAfterAttackEvent(Critter sniper, Critter target)
     {
-        if (!target.IsControlledByPlayer) {
+        if (!target.ControlledByPlayer) {
             return;
         }
         any[] values = {sniper.Id, target.Id};
-        Game.DeferredCall(GAME_SECOND_TO_TICK(60), OnAfterAttack, values);
+        Game.StartTimeEvent(Tla::GameSeconds(60), OnAfterAttack, values);
     }
 
     // Выбор плана отступления
     void TryRunAway(Critter sniper)
     {
-        uint16 x = sniper.HexX;
-        uint16 y = sniper.HexY;
+        mpos hex = sniper.Hex;
         uint8 dir = sniper.Dir;
-        if (!_GetRunAwayPoint(sniper, x, y, dir)) {
+        if (!_GetRunAwayPoint(sniper, hex, dir)) {
             return;
         }
-        NpcPlanes::AddWalkPlane(sniper, RUNAWAY_PRIORITY, PLANE_ID_RUNAWAY, 0, x, y, dir, true, 0);
+        NpcPlanes::AddWalkPlane(sniper, RUNAWAY_PRIORITY, PLANE_ID_RUNAWAY, 0, hex, dir, true, 0);
     }
 
     // Простой снайпера
@@ -166,14 +168,14 @@ class SniperPattern : PatternCommon::CommonPattern
             sniper.InSneakMode = true;
         }
 
-        Critter[] players = sniper.GetCritters(false, CritterFindType::AlivePlayers);
+        Critter[] players = sniper.GetCritters(CritterSeeType::WhoISee, CritterFindType::NonDeadPlayers);
         if (!players.isEmpty()) {
-            uint[] distances = array<uint>(players.length());
-            for (uint i = 0; i < players.length(); i++) {
+            int[] distances = array<int>(players.length());
+            for (int i = 0; i < players.length(); i++) {
                 distances[i] = Game.GetDistance(sniper, players[i]);
                 AttackPlayer(sniper, players[i]);
             }
-            uint minInd = 0;
+            int minInd = 0;
             if (PatternCommon::_GetFirstMinIndex(distances, minInd)) {
                 NpcPlanes::EraseAttackPlane(sniper, players[minInd]);
                 AttackPlayer(sniper, AI_PLANE_ATTACK_PRIORITY + 10, players[minInd]);
@@ -201,7 +203,7 @@ class SniperPattern : PatternCommon::CommonPattern
                 {
                     Map map = sniper.GetMap();
                     if (valid(map)) {
-                        if (Caravan::GetFreeHex(map, 4, plane.Walk_HexX, plane.Walk_HexY)) {
+                        if (Entrance::GetFreeHex(map, 4, plane.Walk_Hex)) {
                             return false;
                         }
                     }
@@ -223,7 +225,7 @@ class SniperPattern : PatternCommon::CommonPattern
         cr.OnAttack.Subscribe(_SniperAttack);
         cr.OnNpcPlaneEnd.Subscribe(_SniperPlaneEnd);
         cr.OnNpcPlaneBegin.Subscribe(_SniperPlaneBegin);
-        cr.OnIdle.Subscribe(_SniperIdle);
+        cr.StartTimeEvent(Time::Asap(), Time::Seconds(1), _SniperIdle);
         cr.OnMessage.Subscribe(_SniperMessage);
         cr.OnCritterAppeared.Subscribe(_SniperShowCritter);
         cr.OnAttacked.Subscribe(_SniperAttacked);
@@ -254,7 +256,7 @@ class SniperPattern : PatternCommon::CommonPattern
         }
 
         // Видит ли снайпер игроков
-        if (!sniper.GetCritters(false, CritterFindType::AlivePlayers).isEmpty()) {
+        if (!sniper.GetCritters(CritterSeeType::WhoISee, CritterFindType::NonDeadPlayers).isEmpty()) {
             return true;
         }
 
@@ -264,7 +266,7 @@ class SniperPattern : PatternCommon::CommonPattern
             return false;
         }
 
-        return !map.GetCritters(sniper.HexX, sniper.HexY, ENEMY_SRCH_RADIUS, CritterFindType::AlivePlayers).isEmpty();
+        return !map.GetCritters(sniper.Hex, ENEMY_SRCH_RADIUS, CritterFindType::NonDeadPlayers).isEmpty();
     }
     // end class
 }
@@ -275,7 +277,7 @@ SniperPattern pattern; // Для наследников нужно опреде�
 
 // Установка параметров криттера
 // lvl - уровень крутости от 0 до 4
-void SetSniperStats(Critter cr, uint8 lvl)
+void SetSniperStats(Critter cr, int lvl)
 {
     lvl = CLAMP(lvl, 0, S_COUNT - 1);
     if (lvl < 1) {
@@ -302,7 +304,7 @@ void SetSniperStats(Critter cr, uint8 lvl)
     cr.ActionPointsBase = S_AP(lvl);
     cr.CurrentHp = S_HP(lvl);
 
-    for (uint i = 0; i < CritterPropertyGroup::ResistsBase.length(); i++) {
+    for (int i = 0; i < CritterPropertyGroup::ResistsBase.length(); i++) {
         if (CritterPropertyGroup::ResistsBase[i] != CritterProperty::EmpResistanceBase) {
             cr.SetAsInt(CritterPropertyGroup::ResistsBase[i], S_RESIST(lvl));
         }
@@ -346,7 +348,7 @@ bool _SniperAttacked(Critter sniper, Critter attacker)
 }
 
 // Атака снайпера
-bool _SniperAttack(Critter cr, Critter target, Item weapon, uint8 weaponMode, ProtoItem ammo)
+bool _SniperAttack(Critter cr, Critter target, Item weapon, int weaponMode, ProtoItem ammo)
 {
     return pattern._Attack(cr, target);
 }
@@ -378,7 +380,7 @@ void OnAfterAttack(any[] values)
     }
 }
 
-bool _GetRunAwayPoint(Critter sniper, uint16 x, uint16 y, uint8 dir)
+bool _GetRunAwayPoint(Critter sniper, mpos hex, uint8 dir)
 {
     // 1. поиск игроков во всех направлениях
     Map map = sniper.GetMap();
@@ -386,54 +388,56 @@ bool _GetRunAwayPoint(Critter sniper, uint16 x, uint16 y, uint8 dir)
         return false;
     }
 
-    uint[] enemies = array<uint>(6);
-    for (uint i = 0; i < enemies.length(); i++) {
-        x = sniper.HexX;
-        y = sniper.HexY;
-        map.MoveHexByDir(x, y, i, RUN_AWAY_DISTANCE);
-        enemies[i] = Obsolete::GetCrittersInPath(map, sniper.HexX, sniper.HexY, x, y, 30, RUN_AWAY_DISTANCE, CritterFindType::AlivePlayers, null);
+    int[] enemies = array<int>(6);
+    for (int i = 0; i < enemies.length(); i++) {
+        hex = sniper.Hex;
+        map.MoveHexByDir(hex, i, RUN_AWAY_DISTANCE);
+        auto foundedCritters = map.GetCrittersInPath(sniper.Hex, hex, 30, RUN_AWAY_DISTANCE, CritterFindType::NonDeadPlayers);
+        enemies[i] = foundedCritters.length();
     }
 
-    uint min = 0;
-    uint max = 0;
+    int min = 0;
+    int max = 0;
     if (!PatternCommon::_GetLimits(enemies, min, max)) {
         return false;
     }
 
     // Проверяем, что не вылезем за границы карты
     // копируем направления с минимальным числом врагов в новый массив
-    uint[] safeDirs = {};
-    for (uint d = 0; d < enemies.length() && d < 6; d++) {
+    int[] safeDirs = {};
+    for (int d = 0; d < enemies.length() && d < 6; d++) {
         if (enemies[d] == min) {
             safeDirs.insertLast(d);
         }
     }
 
-    uint[] distances = array<uint>(safeDirs.length());
-    for (uint i = 0; i < safeDirs.length(); i++) {
-        x = sniper.HexX;
-        y = sniper.HexY;
-        map.MoveHexByDir(x, y, safeDirs[i], RUN_AWAY_DISTANCE);
-        distances[i] = Game.GetDistance(sniper.HexX, sniper.HexY, x, y);
+    int[] distances = array<int>(safeDirs.length());
+    for (int i = 0; i < safeDirs.length(); i++) {
+        hex = sniper.Hex;
+        map.MoveHexByDir(hex, safeDirs[i], RUN_AWAY_DISTANCE);
+        distances[i] = Game.GetDistance(sniper.Hex, hex);
     }
 
     if (!PatternCommon::_GetRandomMaxIndex(distances, max)) {
         return false;
     }
 
-    x = sniper.HexX;
-    y = sniper.HexY;
-    map.MoveHexByDir(x, y, safeDirs[max], RUN_AWAY_DISTANCE);
-    dir = Game.GetDirection(x, y, sniper.HexX, sniper.HexY);
+    hex = sniper.Hex;
+    map.MoveHexByDir(hex, safeDirs[max], RUN_AWAY_DISTANCE);
+    dir = Game.GetDirection(hex, sniper.Hex);
 
-    return Caravan::GetFreeHex(map, 4, x, y);
+    return Entrance::GetFreeHex(map, 4, hex);
 }
 
 /* ************************************************* DEBUG ************************************************* */
 void testSniper(Critter cr, int lvl, int team, int bag)
 {
     int[] props = {CritterProperty::BagId, bag, CritterProperty::TeamId, team};
-    Critter npc = cr.GetMap().AddNpc(Content::Critter::VaultCityPatrolMale, cr.HexX - 5, cr.HexY - 5, 0, Tla::GetCritPropsDict(props));
+    Critter npc = cr.GetMap().AddCritter(Content::Critter::VaultCityPatrolMale, mpos(cr.Hex.x - 5, cr.Hex.y - 5), 0, Tla::GetCritPropsDict(props));
     SetSniperStats(npc, lvl);
     pattern.SetEvents(npc);
+}
+
+#endif
+
 }

@@ -1,7 +1,10 @@
-// FOS Server
+namespace SlaversHunt
+{
 
-///@ Property Critter Protected     uint8 NcrElizeSlvrsHunting Group = Quests Quest = 4246 Max = 7
-///@ Property Critter PrivateServer uint  NcrElizeSlvrsHuntingStatus Max = 23
+#if SERVER
+
+///@ Property Critter Common uint8 NcrElizeSlvrsHunting Mutable OwnerSync Persistent Group = Quests Quest = 4246 Max = 7
+///@ Property Critter Server int32 NcrElizeSlvrsHuntingStatus Mutable Persistent Max = 23
 
 #define SLAVER_TYPE_COMBAT       (1)
 #define SLAVER_TYPE_HEALER       (2)
@@ -29,10 +32,10 @@
 // в таком гексе может появиться один из типов работорговцев
 class EncSpawnHexDescr
 {
-    uint HexX;
-    uint HexY;
+    int HexX;
+    int HexY;
 
-    EncSpawnHexDescr(uint hX, uint hY)
+    EncSpawnHexDescr(int hX, int hY)
     {
         HexX = hX;
         HexY = hY;
@@ -52,7 +55,7 @@ class EncSpawnHexDescr
     // проверка, можно ли поставить работорговца выбранного типа на данный гекс
     bool CheckSTypeAllow(int sType)
     {
-        for (uint i = 0; i < SlaverTypes.length(); i++) {
+        for (int i = 0; i < SlaverTypes.length(); i++) {
             if (SlaverTypes[i] == sType) {
                 return true;
             }
@@ -228,7 +231,7 @@ EncSlaversDescr Desert12Enc()
     return eDescr;
 }
 
-bool _CheckRightGlobalZone(uint wX, uint wY)
+bool _CheckRightGlobalZone(int wX, int wY)
 {
     if (wX < 318 || wX > 542) {
         return false;
@@ -241,16 +244,16 @@ bool _CheckRightGlobalZone(uint wX, uint wY)
     // зона поисков У: от 174 до 325
 }
 
-bool e_OnPlayerInvite(Critter cr, Item car, uint encounterDescriptor, int combatMode, ident mapId, uint16 hexX, uint16 hexY, uint8 dir)
+bool e_OnPlayerInvite(Critter cr, Item car, int encounterDescriptor, int combatMode, ident mapId, mpos hex, uint8 dir)
 // Обработка глобальной карты для перехода на карту.
 // При возвращении true - глобальный обработчик не запускается, false - запуск глобального обработчика. ~loadscript q_slavers_hunt
 {
     Critter[] group = GlobalmapGroupExtended::GetGlobalGroup(cr);
 
-    Worldmap::InviteToEncounter(group, null, encounterDescriptor, combatMode, mapId, hexX, hexY, dir);
+    Worldmap::InviteToEncounter(group, null, encounterDescriptor, combatMode, mapId, hex, dir);
 
     // проверяем, что у лидера есть нужный квест
-    if (!cr.IsControlledByPlayer) {
+    if (!cr.ControlledByPlayer) {
         return true;
     }
 
@@ -269,7 +272,7 @@ bool e_OnPlayerInvite(Critter cr, Item car, uint encounterDescriptor, int combat
 
     Map map = Game.GetMap(mapId);
     int maxLvl = cr.Level;
-    for (uint j = 0; j < group.length(); j++) {
+    for (int j = 0; j < group.length(); j++) {
         maxLvl = (group[j].Level > maxLvl) ? group[j].Level : maxLvl;
     }
     if (valid(map)) {
@@ -282,25 +285,25 @@ bool e_OnPlayerInvite(Critter cr, Item car, uint encounterDescriptor, int combat
         EncSlaversDescr d = GetEncDescr(loc.ProtoId);
 
         if (valid(d)) {
-            if (!_CheckRightGlobalZone(loc.WorldX, loc.WorldY)) {
+            if (!_CheckRightGlobalZone(loc.WorldPos.x, loc.WorldPos.y)) {
                 DL("\nWRONG ZONE");
                 return true;
             }
-            for (uint i = 0; i < CLAMP(group.length() + uint(Game.Random(2, 8)), 4, d.Hexes.length()); i++) {
+            for (int i = 0; i < CLAMP(group.length() + int(Game.Random(2, 8)), 4, d.Hexes.length()); i++) {
                 Critter slaver = _GetSlaver(map, d.Hexes[i], maxLvl, noLoot);
             }
             // отправляем мессагу игроку
-            cr.SayMsg(SAY_NETMSG, TextPackName::Text, STR_NUM_MAP_ENTER);
+            Messaging::Info(cr, TextPackName::Text, STR_NUM_MAP_ENTER);
         }
     }
 
     return true;
 }
 
-Critter _GetSlaver(Map map, EncSpawnHexDescr hDesc, uint crLvl, bool noLoot)
+Critter _GetSlaver(Map map, EncSpawnHexDescr hDesc, int crLvl, bool noLoot)
 {
     hstring slaverPid = Content::Critter::Yakuza;
-    uint type = SLAVER_TYPE_COMBAT;
+    int type = SLAVER_TYPE_COMBAT;
     // приоритеты снайпер-лекарь-милишник-автоматчик
     if (hDesc.CheckSTypeAllow(SLAVER_TYPE_MELEE)) {
         slaverPid = Content::Critter::Yakuza;
@@ -326,14 +329,14 @@ Critter _GetSlaver(Map map, EncSpawnHexDescr hDesc, uint crLvl, bool noLoot)
                    Fallout2AIPackets::BountyHunter,
                    CritterProperty::Level,
                    crLvl + Game.Random(4, 8)};
-    Critter slaver = map.AddNpc(slaverPid, hDesc.HexX, hDesc.HexY, Game.Random(1, 5), Tla::GetCritPropsDict(props));
+    Critter slaver = map.AddCritter(slaverPid, mpos(hDesc.HexX, hDesc.HexY), Game.Random(1, 5), Tla::GetCritPropsDict(props));
     slaver.SetupScript(EncounterNpc::_NpcInit);
     if (not valid(slaver)) {
         return null;
     }
 
     // чем выше уровень работорговцев, тем у них круче меткость
-    switch (uint(crLvl / 5)) {
+    switch (int(crLvl / 5)) {
     case 2:
         slaver.SkillSmallGuns = 120;
         break;
@@ -397,7 +400,7 @@ void _SlaverDead(Critter cr, Critter killer)
     }
     SendMessage::ToAllOnMap(cr, MSG_NUM_GALARM, killer.Id);
 
-    if (!killer.IsControlledByPlayer) {
+    if (!killer.ControlledByPlayer) {
         return;
     }
     // статус
@@ -431,17 +434,17 @@ void _SlaverDead(Critter cr, Critter killer)
     }
 }
 
-// Появился новый криттер в дистанции определенной uint Critter::ShowCritterDistX.
+// Появился новый криттер в дистанции определенной int Critter::ShowCritterDistX.
 // CRITTER_EVENT_SHOW_CRITTER_X
 void _SlaverShowCritterDist1(Critter cr, Critter showCrit)
 {
-    if (showCrit.IsControlledByPlayer) {
+    if (showCrit.ControlledByPlayer) {
         // Game.Log("distcnce "+Game.GetDistance(cr,showCrit) + " radius" + cr.ReactRadius);
 
         if (!EnemyStack::CheckEnemyInStack(cr, showCrit.Id)) {
             EnemyStack::AddEnemyToStack(cr, showCrit.Id);
             NpcPlanes::AddAttackPlane(cr, AI_PLANE_ATTACK_PRIORITY, showCrit.Id);
-            cr.SayMsg(SAY_NORM_ON_HEAD, TextPackName::Dialogs, DLGSTR(cr.DialogId, PHRASE_NUM_MEET_PLAYER));
+            Messaging::SayOnHead(cr, TextPackName::Dialogs, DLGSTR(cr.DialogId, PHRASE_NUM_MEET_PLAYER));
             // TODO: добавить удвоенный приоритет если игрок с квестом
         }
     }
@@ -454,7 +457,7 @@ void _SlaverHealerSmthDead(Critter cr, Critter fromCr, Critter killer)
     if (fromCr.TeamId == Teams::Slaver) {
         NpcPlanes::NpcPlane[] planes = {};
         if (NpcPlanes::GetPlanes(cr, PLANE_HEAL_SLAVER, fromCr.Id, planes) > 0) {
-            for (uint i = 0; i < planes.length(); i++) {
+            for (int i = 0; i < planes.length(); i++) {
                 if (planes[i].Identifier == PLANE_HEAL_SLAVER && planes[i].IdentifierExt == fromCr.Id) {
                     NpcPlanes::ErasePlane(cr, i);
                     return;
@@ -483,21 +486,13 @@ bool _SlaverHealerPlaneEnd(Critter cr, int planeId, int reason, Critter someCr, 
                 return true;
             }
 
-            cr.SetDir(Game.GetDirection(cr.HexX, cr.HexY, toCr.HexX, toCr.HexY));
-            // uint Game.GetDistance(Critter cr1, Critter cr2) расстояние в гексах
+            cr.SetDir(Game.GetDirection(cr.Hex, toCr.Hex));
+            // int Game.GetDistance(Critter cr1, Critter cr2) расстояние в гексах
             if (Game.GetDistance(cr, toCr) > 1) {
-                cr.SayMsg(2 * Game.Random(1, 2), TextPackName::Dialogs, DLGSTR(cr.DialogId, PHRASE_NUM_WAIT_FOR_HEAL));
-                NpcPlanes::AddWalkPlane(cr,
-                                        PLANE_HEAL_PRIORITY,
-                                        PLANE_HEAL_SLAVER,
-                                        toCr.Id,
-                                        toCr.HexX,
-                                        toCr.HexY,
-                                        Game.GetDirection(cr.HexX, cr.HexY, toCr.HexX, toCr.HexY),
-                                        true,
-                                        1);
+                Messaging::Say(cr, TextPackName::Dialogs, DLGSTR(cr.DialogId, PHRASE_NUM_WAIT_FOR_HEAL));
+                NpcPlanes::AddWalkPlane(cr, PLANE_HEAL_PRIORITY, PLANE_HEAL_SLAVER, toCr.Id, toCr.Hex, Game.GetDirection(cr.Hex, toCr.Hex), true, 1);
                 // одну игровую минут цель будет ждать на месте, пока подбежит лекарь
-                NpcPlanes::AddMiscPlane(toCr, PLANE_STOP_PRIORITY, Game.GetFullSecond() + 60, SlaversHunt::_WaitForHeal);
+                NpcPlanes::AddMiscPlane(toCr, PLANE_STOP_PRIORITY, Game.SynchronizedTime + Time::GameMinutes(1), SlaversHunt::_WaitForHeal);
 
                 return true;
             }
@@ -530,15 +525,7 @@ void _SlaverHealerMessage(Critter cr, Critter fromCr, int message, any value)
             return;
         }
 
-        NpcPlanes::AddWalkPlane(cr,
-                                PLANE_HEAL_PRIORITY,
-                                PLANE_HEAL_SLAVER,
-                                fromCr.Id,
-                                fromCr.HexX,
-                                fromCr.HexY,
-                                Game.GetDirection(cr.HexX, cr.HexY, fromCr.HexX, fromCr.HexY),
-                                true,
-                                1);
+        NpcPlanes::AddWalkPlane(cr, PLANE_HEAL_PRIORITY, PLANE_HEAL_SLAVER, fromCr.Id, fromCr.Hex, Game.GetDirection(cr.Hex, fromCr.Hex), true, 1);
         return;
     }
 }
@@ -589,7 +576,7 @@ void GG(Critter cr, int crId, int val, int)
 // добавление игроку карты расположения лагерей работорговцев
 void _AddElizeSlaversMap(Critter player)
 {
-    if (!player.IsControlledByPlayer) {
+    if (!player.ControlledByPlayer) {
         return;
     }
 
@@ -619,9 +606,9 @@ void _ElizeMapInit(Item item, bool firstTime)
 }
 
 // обработка
-bool e_ElizeMapUse(Item item, Critter player, uint param)
+bool e_ElizeMapUse(Item item, Critter player, int param)
 {
-    if (!player.IsControlledByPlayer) {
+    if (!player.ControlledByPlayer) {
         return false;
     }
 
@@ -630,7 +617,7 @@ bool e_ElizeMapUse(Item item, Critter player, uint param)
     }
 
     // "Вы сверяетесь с картой Элизы.\nСкорее всего работорговцев нужно искать между Кламатом и Ямой. ");
-    player.SayMsg(SAY_NETMSG, TextPackName::Text, STR_NUM_MAP_ITEM_USE);
+    Messaging::Info(player, TextPackName::Text, STR_NUM_MAP_ITEM_USE);
 
     // подписываемся снова на событие входа на карту.
     player.OnGlobalMapInvite.Subscribe(e_OnPlayerInvite);
@@ -643,4 +630,8 @@ void r_GetMap(Critter player, Critter cr)
 {
     _AddElizeSlaversMap(player);
     player.OnGlobalMapInvite.Subscribe(e_OnPlayerInvite);
+}
+
+#endif
+
 }

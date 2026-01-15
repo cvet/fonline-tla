@@ -1,16 +1,20 @@
-// FOS Server Sort 2
+namespace Hunter // Sort 2
+{
+
+#if SERVER
+
 // Author: rifleman17
 // Квесты цепочки "Лучший охотник Пустоши."
 
-///@ Property Critter Protected     uint8 BarterLourensRats1          Group = Quests Quest = 5200 Max = 4
-///@ Property Critter Protected     uint8 ModLourenceRatsFlute        Group = Quests Quest = 3317 Max = 3
-///@ Property Critter PrivateServer uint8 BarterLourensRatBodycount   Max = 11
-///@ Property Critter PrivateServer uint  ModHoughRatsFluteTimeout
-///@ Property Critter PrivateServer uint  ModLourenceToxinTimeout
-///@ Property Critter PrivateServer uint  ModLourenceRatsFluteCounter Max = 5
-///@ Property Critter PrivateServer uint  ModLourenceLureActive
+///@ Property Critter Common uint8 BarterLourensRats1 Mutable OwnerSync Persistent Group = Quests Quest = 5200 Max = 4
+///@ Property Critter Common uint8 ModLourenceRatsFlute Mutable OwnerSync Persistent Group = Quests Quest = 3317 Max = 3
+///@ Property Critter Server uint8 BarterLourensRatBodycount Mutable Persistent Max = 11
+///@ Property Critter Server synctime ModHoughRatsFluteTimeout Mutable Persistent
+///@ Property Critter Server synctime ModLourenceToxinTimeout Mutable Persistent
+///@ Property Critter Server int32 ModLourenceRatsFluteCounter Mutable Persistent Max = 5
+///@ Property Critter Server synctime ModLourenceLureActive Mutable Persistent
 
-///@ Property Item PrivateServer uint  QHunterCountFluteUse
+///@ Property Item Server int32 QHunterCountFluteUse Mutable Persistent
 
 #define MSG_COM2ME (33)
 
@@ -29,8 +33,7 @@ void dlg_Colorize(Critter player, Critter npc, string& lexems)
 
 void OnCritterKilled(Critter cr, Critter killer)
 {
-    if (valid(killer) && !cr.IsControlledByPlayer && killer.IsControlledByPlayer && cr.ModelNameBase == CRTYPE_MOLESKIN_RAT_BIG &&
-        killer.BarterLourensRats1 == 1) {
+    if (valid(killer) && !cr.ControlledByPlayer && killer.ControlledByPlayer && cr.ModelNameBase == CRTYPE_MOLESKIN_RAT_BIG && killer.BarterLourensRats1 == 1) {
         if (killer.BarterLourensRatBodycount < 10) {
             killer.BarterLourensRatBodycount += 1;
         }
@@ -44,24 +47,24 @@ void r_Explode(Critter player, Critter npc)
 {
     if (valid(npc)) {
         SendMessage::ToAllOnMap(npc, MSG_COM2ME, player.Id);
-        npc.AddTimeEvent(cte_Explode, Time::RealSecond(3), 0);
+        npc.StartTimeEvent(Time::Seconds(3), cte_Explode);
     }
 }
 
-uint cte_Explode(Critter cr, any identifier, uint& rate)
+void cte_Explode(Critter cr)
 {
     Map map = cr.GetMap();
     if (valid(map)) {
-        Explode::Explode(cr.GetMap(), cr.HexX, cr.HexY, null, Content::Item::active_dynamite, cr.Var4, Game.Random(0, 50), Game.Random(0, 1));
-        cr.AddTimeEvent(cte_Comment, Time::RealSecond(2), 0);
+        Explode::Explode(cr.GetMap(), cr.Hex, null, Content::Item::active_dynamite, cr.Var4, Game.Random(0, 50), Game.Random(0, 1));
+        cr.StartTimeEvent(Time::Seconds(2), cte_Comment);
     }
-    return 0;
+    return;
 }
 
-uint cte_Comment(Critter cr, any identifier, uint& rate)
+void cte_Comment(Critter cr)
 {
-    cr.SayMsg(SAY_NORM, TextPackName::Dialogs, DLGSTR(cr.DialogId, 1));
-    return 0;
+    Messaging::Say(cr, TextPackName::Dialogs, DLGSTR(cr.DialogId, 1));
+    return;
 }
 
 // Скрипт торговли для Хьюза
@@ -82,7 +85,7 @@ void _HoughInit(Critter cr, bool firstTime)
 void _HoughMessage(Critter cr, Critter fromCr, int message, any value)
 {
     if (message == MSG_COM2ME) {
-        NpcPlanes::AddWalkPlane(cr, 17, fromCr.HexX, fromCr.HexY, Game.GetDirection(cr.HexX, cr.HexY, fromCr.HexX, fromCr.HexY), false, 1);
+        NpcPlanes::AddWalkPlane(cr, 17, fromCr.Hex, Game.GetDirection(cr.Hex, fromCr.Hex), false, 1);
     }
 }
 
@@ -92,12 +95,12 @@ bool _HoughPlaneEnd(Critter cr, int planeId, int reason, Critter someCr, Item so
 
     if (plane.Priority == 17 && reason == REASON_SUCCESS) {
         DL("moing end");
-        NpcPlanes::AddMiscPlane(cr, 0, Game.GetFullSecond() + Time::RealSecond(3), null);
+        NpcPlanes::AddMiscPlane(cr, 0, Game.SynchronizedTime + Time::Seconds(3), null);
     }
     return true;
 }
 
-bool _HoughBarter(Critter cr, Critter barterCr, bool attach, uint barterCount)
+bool _HoughBarter(Critter cr, Critter barterCr, bool attach, int barterCount)
 {
     if (attach) {
         any[] values = {cr.Id};
@@ -106,8 +109,8 @@ bool _HoughBarter(Critter cr, Critter barterCr, bool attach, uint barterCount)
         Item flute = cr.GetItem(Content::Item::lourence_flute);
         Item fluteBarter = barterCr.GetItem(Content::Item::lourence_flute);
         if (!valid(flute) && !valid(fluteBarter)) {
-            if (barterCr.ModHoughRatsFluteTimeout < Game.GetFullSecond() && barterCr.ModHoughRatsFluteTimeout > 0) {
-                barterCr.ModHoughRatsFluteTimeout = Game.GetFullSecond() + Time::RealHour(Game.Random(12, 28) - barterCr.Luck);
+            if (barterCr.ModHoughRatsFluteTimeout < Game.SynchronizedTime && barterCr.ModHoughRatsFluteTimeout != ZERO_SYNCTIME) {
+                barterCr.ModHoughRatsFluteTimeout = Game.SynchronizedTime + Time::Hours(Game.Random(12, 28) - barterCr.Luck);
                 flute = cr.AddItem(Content::Item::lourence_flute, 1);
                 if (valid(flute)) {
                     values.insertLast(flute.Id);
@@ -116,12 +119,12 @@ bool _HoughBarter(Critter cr, Critter barterCr, bool attach, uint barterCount)
         }
         // 2. Cупертоксин
         if (barterCr.ModLourenceFloater > 0) {
-            if (barterCr.ModLourenceToxinTimeout < Game.GetFullSecond() && barterCr.ModLourenceToxinTimeout > 0) {
+            if (barterCr.ModLourenceToxinTimeout < Game.SynchronizedTime && barterCr.ModLourenceToxinTimeout != ZERO_SYNCTIME) {
                 if (barterCr.ModLourenceToxinRecipe == 1) {
                     Item toxine = cr.GetItem(Content::Item::danton_poison);
                     Item toxineBarter = barterCr.GetItem(Content::Item::danton_poison);
                     if (!valid(toxine) && !valid(toxineBarter)) {
-                        barterCr.ModLourenceToxinTimeout = Game.GetFullSecond() + Time::RealHour(Game.Random(12, 28) - barterCr.Luck);
+                        barterCr.ModLourenceToxinTimeout = Game.SynchronizedTime + Time::Hours(Game.Random(12, 28) - barterCr.Luck);
                         toxine = cr.AddItem(Content::Item::danton_poison, 5);
                         if (valid(toxine)) {
                             values.insertLast(toxine.Id);
@@ -131,7 +134,7 @@ bool _HoughBarter(Critter cr, Critter barterCr, bool attach, uint barterCount)
                 Item sToxine = cr.GetItem(Content::Item::supertoxine);
                 Item sToxineBarter = barterCr.GetItem(Content::Item::supertoxine);
                 if (!valid(sToxine) && !valid(sToxineBarter)) {
-                    barterCr.ModLourenceToxinTimeout = Game.GetFullSecond() + CLAMP(Time::RealHour(Game.Random(10, 15) - barterCr.Luck), 1, 30);
+                    barterCr.ModLourenceToxinTimeout = Game.SynchronizedTime + Time::Hours(CLAMP(Game.Random(10, 15) - barterCr.Luck, 1, 30));
                     sToxine = cr.AddItem(Content::Item::supertoxine, 1);
                     if (valid(sToxine)) {
                         values.insertLast(sToxine.Id);
@@ -142,7 +145,7 @@ bool _HoughBarter(Critter cr, Critter barterCr, bool attach, uint barterCount)
 
         // После всех проверок
         if (values.length() > 1) {
-            Game.DeferredCall(MINUTE_TICKS(10), DestroyItemsHough, values);
+            Game.StartTimeEvent(Time::GameMinutes(10), DestroyItemsHough, values);
         }
     }
     else {
@@ -158,7 +161,7 @@ void DestroyItemsHough(any[] values)
 {
     Critter cr = Game.GetCritter(values[0]);
     if (valid(cr)) {
-        for (uint i = 1, l = values.length(); i < l; i++) {
+        for (int i = 1, l = values.length(); i < l; i++) {
             Item item = Game.GetItem(values[i]);
             if (valid(item) && item.CritterId == cr.Id) {
                 Game.DestroyItem(item);
@@ -201,15 +204,15 @@ void _VertiberdInit(Item vertiberd, bool firstTime)
     vertiberd.Info = 2;
 }
 
-bool _VertiberdUse(Item vertiberd, Critter cr, Item usedItem, uint param)
+bool _VertiberdUse(Item vertiberd, Critter cr, Item usedItem, int param)
 {
-    cr.SayMsg(SAY_NETMSG, TextPackName::Game, MsgStr::StrUseNothing);
+    Messaging::Info(cr, TextPackName::Game, MsgStr::StrUseNothing);
     return true;
 }
 
 bool _VertiberdSkill(Item vertiberd, Critter cr, CritterProperty skill)
 {
-    cr.SayMsg(SAY_NETMSG, TextPackName::Game, MsgStr::StrUseNothing);
+    Messaging::Info(cr, TextPackName::Game, MsgStr::StrUseNothing);
     return true;
 }
 
@@ -229,21 +232,21 @@ void _FluteInit(Item item, bool firstTime)
 #define STR_EMPTY    (28) // В свистке закончились заряды. При последнем неаккуратном применении прибор был уничтожен.
 #define STR_WRONGRAT (29) // Крыса не реагирует на воздействие гипнотизатора. Попробуйте найти менее устойчивый экземпляр, где-нибудь в Пустоши.
 
-bool _FluteUse(Item item, Critter cr, Critter onCritter, Item onItem, StaticItem onScenery, uint param)
+bool _FluteUse(Item item, Critter cr, Critter onCritter, Item onItem, StaticItem onScenery, int param)
 {
-    if (valid(onCritter) && !onCritter.IsControlledByPlayer && onCritter.ModelNameBase == CRTYPE_RAT && onCritter.IsAlive()) {
+    if (valid(onCritter) && !onCritter.ControlledByPlayer && onCritter.ModelNameBase == CRTYPE_RAT && onCritter.IsAlive()) {
         item.QHunterCountFluteUse -= 1;
         item.Lexems = "$count" + item.QHunterCountFluteUse;
         Map map = onCritter.GetMap();
         if (valid(map)) {
             Location loc = map.GetLocation();
             if (valid(loc) && loc.AutoGarbage) {
-                Item rat = map.AddItem(onCritter.HexX, onCritter.HexY, Content::Item::rat_grenade, 1);
+                Item rat = map.AddItem(onCritter.Hex, Content::Item::rat_grenade, 1);
                 if (valid(rat)) {
                     rat.SetupScript(RatGrenade::_RatGrenadeInit);
                 }
                 Game.DestroyCritter(onCritter);
-                cr.SayMsg(SAY_NETMSG, TextPackName::Text, STR_RAT_CATCHED);
+                Messaging::Info(cr, TextPackName::Text, STR_RAT_CATCHED);
                 if (cr.ModLourenceRatsFlute == 1 && cr.ModLourenceRatsFluteCounter < 5) {
                     cr.ModLourenceRatsFluteCounter += 1;
                     if (cr.ModLourenceRatsFluteCounter == 5) {
@@ -252,12 +255,12 @@ bool _FluteUse(Item item, Critter cr, Critter onCritter, Item onItem, StaticItem
                 }
             }
             else {
-                cr.SayMsg(SAY_NETMSG, TextPackName::Text, STR_WRONGRAT);
+                Messaging::Info(cr, TextPackName::Text, STR_WRONGRAT);
             }
         }
         if (item.QHunterCountFluteUse <= 0) {
             Game.DestroyItem(item);
-            cr.SayMsg(SAY_NETMSG, TextPackName::Text, STR_EMPTY);
+            Messaging::Info(cr, TextPackName::Text, STR_EMPTY);
         }
         return true;
     }
@@ -267,8 +270,8 @@ bool _FluteUse(Item item, Critter cr, Critter onCritter, Item onItem, StaticItem
 // Диалоги, установка переменных, отвечающих за частоту появления разных предметов в инвентаре Хьюза
 void r_SetTO(Critter player, Critter npc, int timeoutNum, int realHours)
 {
-    player.SetAsInt(CritterProperty(timeoutNum), Game.GetFullSecond() + Time::RealHour(realHours));
-    DL("" + (Game.GetFullSecond() + Time::RealHour(realHours)));
+    player.SetAsAny(CritterProperty(timeoutNum), Game.SynchronizedTime + Time::Hours(realHours));
+    DL("" + (Game.SynchronizedTime + Time::Hours(realHours)));
 }
 
 // Сдача крыс лоуренсу при выполнении квеста "пляши под мою дудку"
@@ -277,27 +280,26 @@ void r_AwakeRats(Critter cr, Critter npc)
     if (valid(npc) && NpcPlanes::IsNoPlanes(npc)) {
         Map map = npc.GetMap();
         if (valid(map)) {
-            for (uint i = 0; i < 5; i++) {
-                uint16 x = npc.HexX;
-                uint16 y = npc.HexY;
-                if (Caravan::GetFreeHex(map, 2, x, y)) {
-                    uint8 dir = Game.GetDirection(x, y, npc.HexX, npc.HexY);
-                    Critter rat = map.AddNpc(Content::Critter::RegularRat, x, y, dir);
+            for (int i = 0; i < 5; i++) {
+                mpos hex = npc.Hex;
+                if (Entrance::GetFreeHex(map, 2, hex)) {
+                    uint8 dir = Game.GetDirection(hex, npc.Hex);
+                    Critter rat = map.AddCritter(Content::Critter::RegularRat, hex, dir);
                     rat.SetupScript(RatGrenade::_RatInit);
                     if (valid(rat)) {
                         NpcPlanes::AddAttackPlane(rat, 0, npc);
                     }
                 }
             }
-            npc.AddTimeEvent(cte_Comment1, Time::RealSecond(3), 0);
+            npc.StartTimeEvent(Time::Seconds(3), cte_Comment1);
         }
     }
 }
 
-uint cte_Comment1(Critter cr, any identifier, uint& rate)
+void cte_Comment1(Critter cr)
 {
-    cr.SayMsg(SAY_NORM, TextPackName::Dialogs, DLGSTR(cr.DialogId, 2));
-    return 0;
+    Messaging::Say(cr, TextPackName::Dialogs, DLGSTR(cr.DialogId, 2));
+    return;
 }
 
 // Приманка лоуренса
@@ -320,33 +322,36 @@ void _LureInit(Item item, bool firstTime)
     item.OnCritterUse.Subscribe(_LureUse);
 }
 
-bool _LureUse(Item item, Critter cr, uint param)
+bool _LureUse(Item item, Critter cr, int param)
 {
     Map map = cr.GetMap();
-    if (valid(map) && map.ProtoId == Content::Map::q_rats_out && map.GetStaticItems(cr.HexX, cr.HexY, 1, Content::Item::generic_4777).length() > 0) {
-        cr.SayMsg(SAY_NETMSG, TextPackName::Text, STR_SUCCESS);
+    if (valid(map) && map.ProtoId == Content::Map::q_rats_out && map.GetStaticItems(cr.Hex, 1, Content::Item::generic_4777).length() > 0) {
+        Messaging::Info(cr, TextPackName::Text, STR_SUCCESS);
         Game.DestroyItem(item);
-        Game.SavedDeferredCall(SECOND_TICKS(10), MoveRat, map.GetLocation().Id);
-        cr.ModLourenceLureActive = Game.GetFullSecond() + Time::RealHour(3);
-        cr.AddTimeEvent(cte_Lure, Time::RealSecond(30), 0);
+        Game.StartTimeEvent(Time::Seconds(10), MoveRat, map.GetLocation().Id); //SavedDeferredCall
+        cr.ModLourenceLureActive = Game.SynchronizedTime + Time::Hours(3);
+        cr.StartTimeEvent(Time::Seconds(30), cte_Lure);
     }
-    cr.SayMsg(SAY_NETMSG, TextPackName::Text, STR_WRONG_PLACE);
+    Messaging::Info(cr, TextPackName::Text, STR_WRONG_PLACE);
     return true;
 }
 
-uint cte_Lure(Critter cr, any identifier, uint& rate)
+void cte_Lure(Critter cr)
 {
-    if (cr.ModLourenceLureActive > Game.GetFullSecond()) {
+    if (cr.ModLourenceLureActive > Game.SynchronizedTime) {
         Map map = cr.GetMap();
         if (valid(map)) {
-            Critter[] npc = map.GetCritters(cr.HexX, cr.HexY, 5, CritterFindType::AliveNpc);
+            Critter[] npc = map.GetCritters(cr.Hex, 5, CritterFindType::NonDeadNpc);
             if (!npc.isEmpty()) {
-                npc[Game.Random(0, npc.length() - 1)].SayMsg(SAY_NORM, TextPackName::Text, STR_FOO, "$name" + Obsolete::GetPlayerName(cr.Id));
+                Messaging::Say(npc[Game.Random(0, npc.length() - 1)], TextPackName::Text, STR_FOO, "$name" + PlayerRegistration::GetPlayerName(cr.Id));
             }
         }
-        return Time::RealMinute(2);
+        timespan delayTicks = Time::Minutes(2);
+        if (delayTicks != ZERO_TIMESPAN) {
+            Game.RepeatCurrentTimeEvent(delayTicks);
+        }
     }
-    return 0;
+    return;
 }
 
 void MoveRat(any value)
@@ -359,44 +364,49 @@ void MoveRat(any value)
             Critter[] rats = map.GetCritters(CritterFindType::Npc);
             Critter[] allies = map.GetCritters(CritterFindType::Any);
             if (!rats.isEmpty()) {
-                for (uint i = 0; i < rats.length() && i < 5; i++) {
+                for (int i = 0; i < rats.length() && i < 5; i++) {
                     Critter cr = rats[i];
-                    uint16 x = 0;
-                    uint16 y = 0;
-                    Entrance::MapGetEntryCoords(mapTo, ENTRY_SPAWN, 0, x, y);
-                    if (Caravan::GetFreeHex(mapTo, 3, x, y)) {
-                        Obsolete::CritterTransitToMapCoords(cr, mapTo.Id, x, y, Game.Random(0, 5));
+                    mpos hex;
+                    Entrance::MapGetEntryCoords(mapTo, ENTRY_SPAWN, 0, hex);
+                    if (Entrance::GetFreeHex(mapTo, 3, hex)) {
+                        cr.TransferToMap(map, hex, Game.Random(0, 5));
                         cr.IsNoHome = true;
-                        cr.AddTimeEvent(cte_move, Time::RealSecond(30), 0);
-                        for (uint j = 0; j < allies.length(); j++) {
+                        cr.StartTimeEvent(Time::Seconds(30), cte_move);
+                        for (int j = 0; j < allies.length(); j++) {
                             Critter crit = allies[j];
-                            if (crit.IsControlledByPlayer || crit.NpcRole == 401) {
+                            if (crit.ControlledByPlayer || crit.NpcRole == 401) {
                                 NpcPlanes::AddAttackPlane(cr, 0, crit);
                                 EnemyStack::AddEnemyToStack(cr, crit.Id);
                             }
                         }
                     }
                 }
-                Game.SavedDeferredCall(SECOND_TICKS(Game.Random(1, 3)), MoveRat, value);
+                Game.StartTimeEvent(Time::Seconds(Game.Random(1, 3)), MoveRat, value); //SavedDeferredCall
             }
         }
     }
 }
 
-uint cte_move(Critter cr, any identifier, uint& rate)
+void cte_move(Critter cr)
 {
     if (cr.IsDead()) {
-        return 0;
+        return;
     }
     if (NpcPlanes::IsNoPlanes(cr)) {
         Map map = cr.GetMap();
-        uint16 x = cr.HexX;
-        uint16 y = cr.HexY;
-        if (valid(map) && Entrance::MapGetEntryCoords(map, ENTRY_MOVETO, 0, x, y)) {
-            if (Caravan::GetFreeHex(map, 15, x, y)) {
-                NpcPlanes::AddWalkPlane(cr, 17, x, y, Game.Random(0, 5), false, 0);
+        mpos hex = cr.Hex;
+        if (valid(map) && Entrance::MapGetEntryCoords(map, ENTRY_MOVETO, 0, hex)) {
+            if (Entrance::GetFreeHex(map, 15, hex)) {
+                NpcPlanes::AddWalkPlane(cr, 17, hex, Game.Random(0, 5), false, 0);
             }
         }
     }
-    return Time::RealSecond(30);
+    timespan delayTicks = Time::Seconds(30);
+    if (delayTicks != ZERO_TIMESPAN) {
+        Game.RepeatCurrentTimeEvent(delayTicks);
+    }
+}
+
+#endif
+
 }

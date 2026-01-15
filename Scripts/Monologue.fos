@@ -1,4 +1,8 @@
-// FOS Server
+namespace Monologue
+{
+
+#if SERVER
+
 // Author rifleman17
 // Монологи для НПЦ: несколько фраз. повторяемых через определенные промежутки времени.
 // Указывается первая и последняя строка монолога, время, через которое повторится монолог и т.д.
@@ -6,22 +10,16 @@
 // Строки монолога должны нумероваться подряд.
 // Если время следующего диалога равно нулю, все записи будут удалены после первого использования
 
-///@ Property Critter PrivateServer uint8[] MonologueData
-
-const uint CteRunMonolog = 60;
-const uint CteNextMessage = 61;
-
-#define CTE_RUN_MONOLOG  (60)
-#define CTE_NEXT_MESSAGE (61)
+///@ Property Critter Server uint8[] MonologueData Mutable Persistent
 
 bool MonologueRunning(Critter cr)
 {
     return valid(GetMonologue(cr));
 }
 
-void SetMonologue(Critter cr, uint firstStr, uint lastStr, uint nextMsg, uint nextDialog, uint8 sayType)
+void SetMonologue(Critter cr, int firstStr, int lastStr, timespan nextMsg, timespan nextDialog, SayType say)
 {
-    Monologue m = Monologue(firstStr, lastStr, nextMsg, nextDialog, sayType, cr.Id);
+    Monologue m = Monologue(firstStr, lastStr, nextMsg, nextDialog, say, cr.Id);
     if (valid(m)) {
         m.ScheduleMonologue();
     }
@@ -47,25 +45,25 @@ class Monologue
         CritterId = critterId;
     }
 
-    Monologue(uint firstStr, uint lastStr, uint nextMsg, uint nextDialog, uint8 sayType, ident critterId)
+    Monologue(int firstStr, int lastStr, timespan nextMsg, timespan nextDialog, SayType say, ident critterId)
     {
         FirstString = firstStr;
         LastString = lastStr;
         CurrentString = 0;
         NextMessage = nextMsg;
         NextDialogue = nextDialog;
-        SayType = sayType;
+        Say = say;
         CritterId = critterId;
         Save();
     }
 
-    uint FirstString;   // Номер первой строки в монологе
-    uint LastString;    // Номер последней строки
-    uint CurrentString; // Текущая строка
-    uint NextMessage;   // Время следующей фразы в монологе в секундах
-    uint NextDialogue;  // Время следующего монолога
-    uint8 SayType;      // Тип разговора (шепот, эмоции итд)
-    ident CritterId;    // Код криттера, читающего монолог
+    int FirstString;       // Номер первой строки в монологе
+    int LastString;        // Номер последней строки
+    int CurrentString;     // Текущая строка
+    timespan NextMessage;  // Время следующей фразы в монологе в секундах
+    timespan NextDialogue; // Время следующего монолога
+    SayType Say;           // Тип разговора (шепот, эмоции итд)
+    ident CritterId;       // Код криттера, читающего монолог
 
     bool Exist()
     {
@@ -81,7 +79,7 @@ class Monologue
         save.Set(CurrentString);
         save.Set(NextMessage);
         save.Set(NextDialogue);
-        save.Set(SayType);
+        save.Set(int(Say));
         save.Set(CritterId);
         Game.GetCritter(CritterId).MonologueData = save.GetData();
     }
@@ -97,7 +95,9 @@ class Monologue
         load.Get(CurrentString);
         load.Get(NextMessage);
         load.Get(NextDialogue);
-        load.Get(SayType);
+        int say = 0;
+        load.Get(say);
+        Say = SayType(say);
         load.Get(CritterId);
     }
 
@@ -113,8 +113,8 @@ class Monologue
             return;
         }
 
-        if (cr.GetTimeEvents(CTE_RUN_MONOLOG) == 0) {
-            cr.AddTimeEvent(cte_RunMonologue, NextDialogue, CTE_RUN_MONOLOG);
+        if (cr.CountTimeEvent(cte_RunMonologue) == 0) {
+            cr.StartTimeEvent(NextDialogue, cte_RunMonologue);
         }
     }
 
@@ -125,41 +125,43 @@ class Monologue
             return;
         }
 
-        if (cr.GetTimeEvents(CTE_NEXT_MESSAGE) == 0) {
-            cr.AddTimeEvent(cte_NextMessage, NextMessage, CTE_NEXT_MESSAGE);
+        if (cr.CountTimeEvent(cte_NextMessage) == 0) {
+            cr.StartTimeEvent(NextMessage, cte_NextMessage);
         }
     }
 };
 
 // Начало диалога
-uint cte_RunMonologue(Critter cr, any identifier, uint& rate)
+void cte_RunMonologue(Critter cr)
 {
     Monologue m = GetMonologue(cr);
     if (valid(m)) {
         m.CurrentString = m.FirstString;
         m.Save();
         m.ScheduleMessage();
-        return m.NextDialogue;
+        if (m.NextDialogue != ZERO_TIMESPAN) {
+            Game.RepeatCurrentTimeEvent(m.NextDialogue);
+        }
     }
-    return 0;
 }
 
-uint cte_NextMessage(Critter cr, any identifier, uint& rate)
+void cte_NextMessage(Critter cr)
 {
     Monologue m = GetMonologue(cr);
     if (valid(m)) {
         if (m.CurrentString > m.LastString) {
-            if (m.NextDialogue == 0) { // Диалог одноразовый
+            if (m.NextDialogue == ZERO_TIMESPAN) { // Диалог одноразовый
                 m.Erase();
             }
-            return 0;
+            return;
         }
-        cr.SayMsg(m.SayType, TextPackName::Text, m.CurrentString);
+        Messaging::SayExt(cr, m.Say, true, "", TextPackName::Text, m.CurrentString, "");
         m.CurrentString++;
         m.Save();
-        return m.NextMessage;
+        if (m.NextMessage != ZERO_TIMESPAN) {
+            Game.RepeatCurrentTimeEvent(m.NextMessage);
+        }
     }
-    return 0;
 }
 
 // Баллада паладина БС
@@ -173,7 +175,16 @@ bool d_NotMonologueRunning(Critter player, Critter npc)
     return !d_MonologueRunning(player, npc);
 }
 
-void r_RunMonologue(Critter player, Critter npc, int firstStr, int lastStr, int nextMsg, int nextDialog, int sayType)
+void r_RunMonologue(Critter player, Critter npc, int firstStr, int lastStr, int nextMsgSeconds, int nextDialogSeconds, int sayType)
 {
-    SetMonologue(npc, firstStr, lastStr, nextMsg * Settings.TimeMultiplier, nextDialog, sayType);
+    SetMonologue(npc,
+                 firstStr,
+                 lastStr,
+                 Time::Seconds(nextMsgSeconds),
+                 (nextDialogSeconds == 0 ? ZERO_TIMESPAN : Time::Seconds(nextDialogSeconds)),
+                 SayType(sayType));
+}
+
+#endif
+
 }

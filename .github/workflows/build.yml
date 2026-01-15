@@ -10,46 +10,48 @@ on:
 
 jobs:
   check-formatting:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v6
     - uses: DoozyX/clang-format-lint-action@v0.18
       with:
         source: ./Scripts
+        exclude: ./Scripts/Extension/SHA
         extensions: 'fos,h,cpp'
         clangFormatVersion: 18
   unit-tests:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v6
       with:
         submodules: recursive
+    - run: Engine/BuildTools/prepare-workspace.sh packages linux
     - run: Engine/BuildTools/validate.sh unit-tests
   compile-scripts:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v6
       with:
         submodules: recursive
     - run: Engine/BuildTools/prepare-workspace.sh packages linux toolset
     - run: Engine/BuildTools/toolset.sh CompileAngelScript
   bake-resources:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v6
       with:
         submodules: recursive
     - run: Engine/BuildTools/prepare-workspace.sh packages linux toolset
     - run: Engine/BuildTools/toolset.sh BakeResources
     - run: cd Workspace/output && tar -cf Baking.tar Baking
-    - uses: actions/upload-artifact@v4
+    - uses: actions/upload-artifact@v6
       with:
         name: Baking
         path: Workspace/output/Baking.tar
         if-no-files-found: error
         retention-days: 1
   windows-build:
-    runs-on: windows-2019
+    runs-on: windows-2022
     strategy:
       fail-fast: false
       matrix:
@@ -59,14 +61,15 @@ jobs:
         - win64 server Release
         - win64 editor Release
         - win64 mapper Release
+        - win64 baker Release
         - win64 client Profiling_Total
         - win64 server Profiling_Total
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v6
       with:
         submodules: recursive
-    - run: Engine/BuildTools/build.bat ${{matrix.app}}
-    - uses: actions/upload-artifact@v4
+    - run: Engine/BuildTools/build.cmd ${{matrix.app}}
+    - uses: actions/upload-artifact@v6
       with:
         name: Binaries-${{matrix.app}}
         path: |
@@ -74,10 +77,11 @@ jobs:
           Workspace/output/*Binaries/Server*
           Workspace/output/*Binaries/Editor*
           Workspace/output/*Binaries/Mapper*
+          Workspace/output/*Binaries/Baker*
         if-no-files-found: error
         retention-days: 1
   linux-build:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
@@ -90,12 +94,12 @@ jobs:
         - linux editor Release
         - linux mapper Release
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v6
       with:
         submodules: recursive
     - run: Engine/BuildTools/prepare-workspace.sh packages ${{matrix.app}}
     - run: Engine/BuildTools/build.sh ${{matrix.app}}
-    - uses: actions/upload-artifact@v4
+    - uses: actions/upload-artifact@v6
       with:
         name: Binaries-${{matrix.app}}
         path: |
@@ -106,7 +110,7 @@ jobs:
         if-no-files-found: error
         retention-days: 1
   macos-build:
-    runs-on: macos-13
+    runs-on: macos-15
     strategy:
       fail-fast: false
       matrix:
@@ -114,11 +118,11 @@ jobs:
         - mac client Release
         - ios client Release
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v6
       with:
         submodules: recursive
     - run: Engine/BuildTools/build.sh ${{matrix.app}}
-    - uses: actions/upload-artifact@v4
+    - uses: actions/upload-artifact@v6
       with:
         name: Binaries-${{matrix.app}}
         path: |
@@ -126,18 +130,18 @@ jobs:
         if-no-files-found: error
         retention-days: 1
   package:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     needs: [bake-resources, windows-build, linux-build, macos-build]
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v6
       with:
         submodules: recursive
-    - uses: actions/download-artifact@v4
+    - uses: actions/download-artifact@v7
       with:
         pattern: Binaries-*
         merge-multiple: true
         path: Workspace/output
-    - uses: actions/download-artifact@v4
+    - uses: actions/download-artifact@v7
       with:
         name: Baking
         path: Workspace/output
@@ -145,18 +149,27 @@ jobs:
     - run: cd Workspace/output && tree -d
     - run: Engine/BuildTools/prepare-workspace.sh packages linux toolset
     - run: Engine/BuildTools/toolset.sh MakePackage-Dev
-    - uses: actions/upload-artifact@v4
+    - run: Engine/BuildTools/toolset.sh MakePackage-Test
+    - uses: actions/upload-artifact@v6
       with:
         name: TLA-Dev
         path: Workspace/output/TLA-Dev
         if-no-files-found: error
         retention-days: 1
-    - run: (cd Workspace/output/TLA-Dev/TLA-Server-LocalTest && zip -0 -r - .) > TLA-Server.zip
-    - run: (cd Workspace/output/TLA-Dev/TLA-Client-LocalTest && zip -0 -r - .) > TLA-Client.zip
+    - uses: actions/upload-artifact@v6
+      with:
+        name: TLA-Test
+        path: Workspace/output/TLA-Test
+        if-no-files-found: error
+        retention-days: 1
+    - run: mv Workspace/output/TLA-Dev/TLA-Dev.zip TLA-Dev.zip
+    - run: (cd Workspace/output/TLA-Test/TLA-Server-LocalTest && zip -0 -r - .) > TLA-Server.zip
+    - run: (cd Workspace/output/TLA-Test/TLA-Client-LocalTest && zip -0 -r - .) > TLA-Client.zip
     - uses: softprops/action-gh-release@v2
       if: startsWith(github.ref, 'refs/tags/')
       with:
         generate_release_notes: true
         files: |
+          TLA-Dev.zip
           TLA-Server.zip
           TLA-Client.zip

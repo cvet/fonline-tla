@@ -1,4 +1,7 @@
-// FOS Server
+namespace Combat
+{
+
+#if SERVER
 
 // WeaponSubtype
 #define WS_UNARMED   (1)
@@ -42,7 +45,7 @@ void AddEff(Critter crit, any[] eff, CombatRes[] combatResults)
                 ptr = combatResults[ptr].Left;
             }
             else {
-                uint last = combatResults.length();
+                int last = combatResults.length();
                 combatResults.resize(last + 1);
                 combatResults.last() = CombatRes();
                 combatResults[ptr].Left = last;
@@ -55,7 +58,7 @@ void AddEff(Critter crit, any[] eff, CombatRes[] combatResults)
                 ptr = combatResults[ptr].Right;
             }
             else {
-                uint last = combatResults.length();
+                int last = combatResults.length();
                 combatResults.resize(last + 1);
                 combatResults.last() = CombatRes();
                 combatResults[ptr].Right = last;
@@ -66,9 +69,9 @@ void AddEff(Critter crit, any[] eff, CombatRes[] combatResults)
     }
 
     // add the effect:
-    uint len = eff.length();
+    int len = eff.length();
     combatResults[ptr].Res.resize(int(combatResults[ptr].Res[0]) + len);
-    for (uint i = 0; i < len; i++) {
+    for (int i = 0; i < len; i++) {
         combatResults[ptr].Res[i + int(combatResults[ptr].Res[0])] = eff[i];
     }
 
@@ -110,15 +113,15 @@ class AttackStruct
 {
     Critter Attacker;
     Item RealWeapon;
-    uint16 Hx;
-    uint16 Hy;
-    uint8 Aim;
+    int Hx;
+    int Hy;
+    int Aim;
     bool IsBurst;
     bool BloodyMess;
     bool CombatMessage;
     bool scoreUnarmed;
     ItemPerks WeaponPerk;
-    uint8 WeaponSubtype;
+    int WeaponSubtype;
     int DmgMin;
     int DmgMax;
     DamageTypes DmgType;
@@ -129,7 +132,7 @@ class AttackStruct
     int DDMod;
     ident TargetId;
     bool TargetHit;
-    uint ForceFlags;
+    int ForceFlags;
     bool ShowHitAnimForce;
 
     AttackStruct()
@@ -161,35 +164,33 @@ class AttackStruct
     }
 };
 
-void CombatAttack(Critter cr, Critter target, AbstractItem weapon, uint8 weaponMode, ProtoItem ammo)
+void CombatAttack(Critter cr, Critter target, AbstractItem weapon, int weaponMode, ProtoItem ammo)
 {
     if (!cr.IsAlive()) {
         return;
     }
-    uint8 use = _WeaponModeUse(weaponMode);
-    uint8 aim = _WeaponModeAim(weaponMode);
+    int use = _WeaponModeUse(weaponMode);
+    int aim = _WeaponModeAim(weaponMode);
     Item realWeapon = _CritGetItemHand(cr);
     Map map = cr.GetMap();
     int wpnMaxDist = _WeaponMaxDist(weapon, use);
     CritterProperty skill = _WeaponSkill(weapon, use);
     if (skill == CritterProperty::SkillThrowing) {
-        wpnMaxDist = MIN(wpnMaxDist, 3 * MIN(int(10), (cr.Strength + 2 * cr.PerkHeaveHo)));
+        wpnMaxDist = MIN(wpnMaxDist, 3 * MIN(10, cr.Strength + 2 * cr.PerkHeaveHo));
     }
     int skillVal = cr.GetAsInt(skill);
-    uint8 weaponSubtype = (skill == CritterProperty::SkillSmallGuns || skill == CritterProperty::SkillBigGuns || skill == CritterProperty::SkillEnergyWeapons) ?
-                              WS_GUN :
-                              ((skill == CritterProperty::SkillThrowing)     ? WS_THROWING :
-                               (skill == CritterProperty::SkillMeleeWeapons) ? WS_MELEE :
-                                                                               WS_UNARMED);
+    int weaponSubtype = ((skill == CritterProperty::SkillSmallGuns || skill == CritterProperty::SkillBigGuns || skill == CritterProperty::SkillEnergyWeapons) ?
+                             WS_GUN :
+                             ((skill == CritterProperty::SkillThrowing)     ? WS_THROWING :
+                              (skill == CritterProperty::SkillMeleeWeapons) ? WS_MELEE :
+                                                                              WS_UNARMED));
     bool isRanged = (weaponSubtype == WS_THROWING || weaponSubtype == WS_GUN);
     bool isUnarmed = weapon.Weapon_IsUnarmed;
     bool isHthAttack = (weaponSubtype == WS_MELEE || weaponSubtype == WS_UNARMED);
-    uint16 ammoRound = _WeaponRound(weapon, use);
+    int ammoRound = _WeaponRound(weapon, use);
     bool wpnIsRemoved = _WeaponRemove(weapon, use);
-    uint16 hx = cr.HexX;
-    uint16 hy = cr.HexY;
-    uint16 tx = target.HexX;
-    uint16 ty = target.HexY;
+    mpos critterHex = cr.Hex;
+    mpos targetHex = target.Hex;
     hstring weapPid = weapon.ProtoId;
     hstring ammoPid;
     if (valid(ammo)) {
@@ -209,11 +210,11 @@ void CombatAttack(Critter cr, Critter target, AbstractItem weapon, uint8 weaponM
 
     bool eyeDamage = cr.IsDamagedEye;
     ItemPerks weaponPerk = weapon.Weapon_Perk;
-    bool crIsPlayer = cr.IsControlledByPlayer;
+    bool crIsPlayer = cr.ControlledByPlayer;
     bool isHit = false;
     bool isCritical = false;
     bool hitRandomly = false;
-    uint critfailFlags = 0;
+    int critfailFlags = 0;
     Critter realTarget;
     bool isSneak = false;
     bool useNormal = false; // used to change target during RunFlyEffect
@@ -232,18 +233,18 @@ void CombatAttack(Critter cr, Critter target, AbstractItem weapon, uint8 weaponM
 
     target.InSneakMode = false;
 
-    cr.SetDir(Game.GetDirection(hx, hy, tx, ty));
+    cr.SetDir(Game.GetDirection(critterHex, targetHex));
 
     // now we change aim:
     if (aim == HitLocations::LocationEyes && valid(cr) && (cr.Dir + 3) % 6 != target.Dir) {
         aim = HitLocations::LocationHead;
     }
 
-    uint crTimeout = BATTLE_TIMEOUT(cr);
+    synctime crTimeout = BATTLE_TIMEOUT(cr);
     if (cr.TimeoutBattle < crTimeout) {
         cr.TimeoutBattle = crTimeout;
     }
-    uint targetTimeout = BATTLE_TIMEOUT(target);
+    synctime targetTimeout = BATTLE_TIMEOUT(target);
     if (target.TimeoutBattle < targetTimeout) {
         target.TimeoutBattle = targetTimeout;
     }
@@ -305,14 +306,14 @@ void CombatAttack(Critter cr, Critter target, AbstractItem weapon, uint8 weaponM
     AttackStruct attack = AttackStruct();
     attack.Attacker = cr;
     attack.RealWeapon = realWeapon;
-    attack.Hx = hx;
-    attack.Hy = hy;
+    attack.Hx = critterHex.x;
+    attack.Hy = critterHex.y;
     attack.Aim = aim;
     attack.IsBurst = isBurst;
     attack.BloodyMess = cr.IsTraitBloodyMess;
     attack.CombatMessage = true;
     attack.scoreUnarmed = (weaponSubtype == WS_UNARMED);
-    attack.WeaponPerk = (isUnarmed && weapon.Weapon_UnarmedArmorPiercing) ? ItemPerks::Penetrate : weaponPerk;
+    attack.WeaponPerk = ((isUnarmed && weapon.Weapon_UnarmedArmorPiercing) ? ItemPerks::Penetrate : weaponPerk);
     attack.WeaponSubtype = weaponSubtype;
     attack.DmgMin = _WeaponDmgMin(weapon, use);
     attack.DmgMax = _WeaponDmgMax(weapon, use);
@@ -359,7 +360,7 @@ void CombatAttack(Critter cr, Critter target, AbstractItem weapon, uint8 weaponM
     }
 
     int perception = cr.Perception;
-    int dist = Game.GetDistance(hx, hy, target.HexX, target.HexY);
+    int dist = Game.GetDistance(critterHex, target.Hex);
     int acc = dist;
     int accloss = (crIsPlayer ? (perception - 2) * distmod1 : (perception * distmod1));
     int sharpshooter = 2 * cr.PerkSharpshooter;
@@ -380,7 +381,8 @@ void CombatAttack(Critter cr, Critter target, AbstractItem weapon, uint8 weaponM
         }
         acc *= -4;
         toHit += acc;
-        int blockers = Obsolete::GetCrittersInPath(map, hx, hy, tx, ty, 0.0f, dist, CritterFindType::Alive, null);
+        auto crittersInPath = map.GetCrittersInPath(critterHex, targetHex, 0.0f, dist, CritterFindType::NonDead);
+        int blockers = crittersInPath.length();
         if (!target.IsKnockout()) {
             blockers--;
         }
@@ -466,8 +468,7 @@ void CombatAttack(Critter cr, Critter target, AbstractItem weapon, uint8 weaponM
         Critter randomTarget = ChooseRandomTarget(map, cr, target, wpnMaxDist);
         if (randomTarget != null) {
             realTarget = randomTarget;
-            tx = realTarget.HexX;
-            ty = realTarget.HexY;
+            targetHex = realTarget.Hex;
             attack.Aim = HitLocations::LocationUncalled;
             realTarget.InSneakMode = false; // done here to allow combat notifications later
             NotifyOops(cr, target, realTarget, results);
@@ -518,9 +519,8 @@ void CombatAttack(Critter cr, Critter target, AbstractItem weapon, uint8 weaponM
         }
         else // standard miss here
         {
-            Critter[] critsLine = {};
+            Critter[] critsLine = map.GetCrittersInPath(critterHex, targetHex, 0.0f, wpnMaxDist, CritterFindType::NonDead);
             attack.Aim = HitLocations::LocationUncalled;
-            Obsolete::GetCrittersInPath(map, hx, hy, tx, ty, 0.0f, wpnMaxDist, CritterFindType::Alive, critsLine);
             int bl = 0;
             bool anyHit = false;
             for (int i = 0, j = critsLine.length(); (i < j) && !anyHit; i++) {
@@ -530,7 +530,7 @@ void CombatAttack(Critter cr, Critter target, AbstractItem weapon, uint8 weaponM
                 } // skip the primary target
 
                 // adjust tohit
-                dist = Game.GetDistance(hx, hy, critsLine[i].HexX, critsLine[i].HexY);
+                dist = Game.GetDistance(critterHex, critsLine[i].Hex);
                 acc = dist;
                 toHit = baseToHit;
                 if (dist < distmod2) {
@@ -584,7 +584,7 @@ void CombatAttack(Critter cr, Critter target, AbstractItem weapon, uint8 weaponM
     {
         // adjust toHit if random hit
         if (changedTarget) {
-            dist = Game.GetDistance(hx, hy, tx, ty);
+            dist = Game.GetDistance(critterHex, targetHex);
             acc = dist;
             toHit = baseToHit;
             if (dist < distmod2) {
@@ -615,7 +615,8 @@ void CombatAttack(Critter cr, Critter target, AbstractItem weapon, uint8 weaponM
             if (realTarget.Multihex > 0) {
                 toHit += 15;
             }
-            int blockers = Obsolete::GetCrittersInPath(map, hx, hy, tx, ty, 0.0f, dist, CritterFindType::Alive, null);
+            int blockers = map.GetCrittersInPath(critterHex, targetHex, 0.0f, dist, CritterFindType::NonDead).length();
+
             if (!realTarget.IsKnockout()) {
                 blockers--;
             }
@@ -630,7 +631,7 @@ void CombatAttack(Critter cr, Critter target, AbstractItem weapon, uint8 weaponM
 
         // proceed with the flame attack
         Critter[] critsHit = {};
-        uint[] critsHitBullets = {};
+        int[] critsHitBullets = {};
         int len_ = 0;
 
         if (Game.Random(1, 100) <= toHit) {
@@ -641,11 +642,10 @@ void CombatAttack(Critter cr, Critter target, AbstractItem weapon, uint8 weaponM
             len_++;
         }
 
-        Critter[] lineCentral = {};
-        Obsolete::GetCrittersInPath(map, hx, hy, tx, ty, 0.0f, wpnMaxDist, CritterFindType::Alive, lineCentral);
+        Critter[] lineCentral = map.GetCrittersInPath(critterHex, targetHex, 0.0f, wpnMaxDist, CritterFindType::NonDead);
         int bl;
 
-        bool threeLines = (Game.GetDistance(hx, hy, lineCentral[0].HexX, lineCentral[0].HexY) > 1); // target not adjacent and weapon not shotgun
+        bool threeLines = (Game.GetDistance(critterHex, lineCentral[0].Hex) > 1); // target not adjacent and weapon not shotgun
         // already shot: MAX(rounds/6,1);
 
         for (int lineCount = 0, lineMax = (threeLines ? 1 : 3); lineCount < lineMax; lineCount++) {
@@ -654,7 +654,7 @@ void CombatAttack(Critter cr, Critter target, AbstractItem weapon, uint8 weaponM
             for (int i = 0, j = lineCentral.length(); i < j; i++) {
                 // adjust tohit
                 toHit = baseToHit - 10 * bl;
-                dist = Game.GetDistance(hx, hy, lineCentral[i].HexX, lineCentral[i].HexY);
+                dist = Game.GetDistance(critterHex, lineCentral[i].Hex);
                 acc = dist;
                 if (dist < distmod2) {
                     acc += distmod2;
@@ -707,27 +707,24 @@ void CombatAttack(Critter cr, Critter target, AbstractItem weapon, uint8 weaponM
             // rounds for the left stack
             // real left
 
-            uint8 leftDir = Game.GetDirection(hx, hy, tx, ty, 89.0f);
-            uint16 sx = hx;
-            uint16 sy = hy;
-            uint16 ex = tx;
-            uint16 ey = ty;
+            int leftDir = Game.GetDirection(critterHex, targetHex, 89.0f);
+            mpos startHex = critterHex;
+            mpos endHex = targetHex;
 
-            map.MoveHexByDir(sx, sy, leftDir, 1);
-            map.MoveHexByDir(ex, ey, leftDir, 1);
+            map.MoveHexByDir(startHex, leftDir, 1);
+            map.MoveHexByDir(endHex, leftDir, 1);
 
-            Critter[] lineLeft = {};
-            Obsolete::GetCrittersInPath(map, sx, sy, ex, ey, 0.0f, wpnMaxDist - 1, CritterFindType::Alive, lineLeft);
+            Critter[] lineLeft = map.GetCrittersInPath(startHex, endHex, 0.0f, wpnMaxDist - 1, CritterFindType::NonDead);
             int leftStart = 0;
             int leftLen = lineLeft.length();
-            while ((leftStart < leftLen) && (Game.GetDistance(hx, hy, lineLeft[leftStart].HexX, lineLeft[leftStart].HexY)) < 3) {
+            while ((leftStart < leftLen) && (Game.GetDistance(critterHex, lineLeft[leftStart].Hex)) < 3) {
                 leftStart++;
             }
 
             for (int i = leftStart, j = leftLen; i < j; i++) {
                 // adjust tohit
-                dist = Game.GetDistance(hx, hy, lineLeft[i].HexX, lineLeft[i].HexY);
-                bl = Obsolete::GetCrittersInPath(map, hx, hy, lineLeft[i].HexX, lineLeft[i].HexY, 0.0f, dist, CritterFindType::Alive, null) - 1;
+                dist = Game.GetDistance(critterHex, lineLeft[i].Hex);
+                bl = map.GetCrittersInPath(critterHex, lineLeft[i].Hex, 0.0f, dist, CritterFindType::NonDead).length();
                 toHit = baseToHit - 10 * bl;
                 acc = dist;
                 if (dist < distmod2) {
@@ -772,26 +769,23 @@ void CombatAttack(Critter cr, Critter target, AbstractItem weapon, uint8 weaponM
                 }
             } // left line
 
-            uint8 rightDir = Game.GetDirection(hx, hy, tx, ty, -89.0f);
-            sx = hx;
-            sy = hy;
-            ex = tx;
-            ey = ty;
+            int rightDir = Game.GetDirection(critterHex, targetHex, -89.0f);
+            startHex = critterHex;
+            endHex = targetHex;
 
-            map.MoveHexByDir(sx, sy, rightDir, 1);
-            map.MoveHexByDir(ex, ey, rightDir, 1);
+            map.MoveHexByDir(startHex, rightDir, 1);
+            map.MoveHexByDir(endHex, rightDir, 1);
 
-            Critter[] lineRight = {};
-            Obsolete::GetCrittersInPath(map, sx, sy, ex, ey, 0.0f, wpnMaxDist - 1, CritterFindType::Alive, lineRight);
+            Critter[] lineRight = map.GetCrittersInPath(startHex, endHex, 0.0f, wpnMaxDist - 1, CritterFindType::NonDead);
             int rightStart = 0;
             int rightLen = lineRight.length();
-            while ((rightStart < rightLen) && (Game.GetDistance(hx, hy, lineRight[rightStart].HexX, lineRight[rightStart].HexY)) < 3) {
+            while ((rightStart < rightLen) && (Game.GetDistance(endHex, lineRight[rightStart].Hex)) < 3) {
                 rightStart++;
             }
             for (int i = rightStart, j = rightLen; i < j; i++) {
                 // adjust tohit
-                dist = Game.GetDistance(hx, hy, lineRight[i].HexX, lineRight[i].HexY);
-                bl = Obsolete::GetCrittersInPath(map, hx, hy, lineRight[i].HexX, lineRight[i].HexY, 0.0f, dist, CritterFindType::Alive, null) - 1;
+                dist = Game.GetDistance(endHex, lineRight[i].Hex);
+                bl = map.GetCrittersInPath(critterHex, lineRight[i].Hex, 0.0f, dist, CritterFindType::NonDead).length() - 1;
                 toHit = baseToHit - 10 * bl;
                 acc = dist;
                 if (dist < distmod2) {
@@ -842,7 +836,7 @@ void CombatAttack(Critter cr, Critter target, AbstractItem weapon, uint8 weaponM
                         critsHit[i],
                         1,
                         (realTarget.Id == critsHit[i].Id) && criticalHit,
-                        (cr.IsControlledByPlayer && !changedTarget) || (!cr.IsControlledByPlayer && critsHit[i].Id == target.Id),
+                        (cr.ControlledByPlayer && !changedTarget) || (!cr.ControlledByPlayer && critsHit[i].Id == target.Id),
                         results);
         }
 
@@ -854,7 +848,7 @@ void CombatAttack(Critter cr, Critter target, AbstractItem weapon, uint8 weaponM
     {
         // adjust toHit if random hit
         if (changedTarget) {
-            dist = Game.GetDistance(hx, hy, tx, ty);
+            dist = Game.GetDistance(critterHex, targetHex);
             acc = dist;
             toHit = baseToHit;
             if (dist < distmod2) {
@@ -885,7 +879,7 @@ void CombatAttack(Critter cr, Critter target, AbstractItem weapon, uint8 weaponM
             if (realTarget.Multihex > 0) {
                 toHit += 15;
             }
-            int blockers = Obsolete::GetCrittersInPath(map, hx, hy, tx, ty, 0.0f, dist, CritterFindType::Alive, null);
+            int blockers = map.GetCrittersInPath(critterHex, targetHex, 0.0f, dist, CritterFindType::NonDead).length();
             if (!realTarget.IsKnockout()) {
                 blockers--;
             }
@@ -900,11 +894,11 @@ void CombatAttack(Critter cr, Critter target, AbstractItem weapon, uint8 weaponM
 
         // proceed with the burst attack
         int rounds = ammoRound;
-        if (valid(realWeapon) && int(realWeapon.AmmoCount) < rounds) {
+        if (valid(realWeapon) && realWeapon.AmmoCount < rounds) {
             rounds = realWeapon.AmmoCount;
         }
         Critter[] critsHit = {};
-        uint[] critsHitBullets = {};
+        int[] critsHitBullets = {};
 
         int len_ = 0;
         int volleyRounds = MAX((rounds / 6), 1);
@@ -924,8 +918,7 @@ void CombatAttack(Critter cr, Critter target, AbstractItem weapon, uint8 weaponM
         }
         volleyRounds -= curRounds;
 
-        Critter[] lineCentral = {};
-        Obsolete::GetCrittersInPath(map, hx, hy, tx, ty, 0.0f, wpnMaxDist, CritterFindType::Alive, lineCentral);
+        Critter[] lineCentral = map.GetCrittersInPath(critterHex, targetHex, 0.0f, wpnMaxDist, CritterFindType::NonDead);
 
         int bl = 0;
         curRounds = 0;
@@ -936,7 +929,7 @@ void CombatAttack(Critter cr, Critter target, AbstractItem weapon, uint8 weaponM
             } // skip the primary target, but add blocker
             // adjust tohit
             toHit = baseToHit - 10 * bl;
-            dist = Game.GetDistance(hx, hy, lineCentral[i].HexX, lineCentral[i].HexY);
+            dist = Game.GetDistance(critterHex, lineCentral[i].Hex);
             acc = dist;
             if (dist < distmod2) {
                 acc += distmod2;
@@ -994,8 +987,7 @@ void CombatAttack(Critter cr, Critter target, AbstractItem weapon, uint8 weaponM
         }
 
         // now we're shooting the rest of the bullets (=rounds-MAX(1,rounds/6))
-        bool threeLines =
-            (Game.GetDistance(hx, hy, lineCentral[0].HexX, lineCentral[0].HexY) > 1) && (ammoRound > 3); // target not adjacent and weapon not shotgun
+        bool threeLines = (Game.GetDistance(critterHex, lineCentral[0].Hex) > 1) && (ammoRound > 3); // target not adjacent and weapon not shotgun
 
         // already shot: MAX(rounds/6,1);
 
@@ -1024,7 +1016,7 @@ void CombatAttack(Critter cr, Critter target, AbstractItem weapon, uint8 weaponM
             for (int i = 0, j = lineCentral.length(); (i < j) && (volleyRounds > 0); i++) {
                 // adjust tohit
                 toHit = baseToHit - 10 * bl;
-                dist = Game.GetDistance(hx, hy, lineCentral[i].HexX, lineCentral[i].HexY);
+                dist = Game.GetDistance(critterHex, lineCentral[i].Hex);
                 acc = dist;
                 if (dist < distmod2) {
                     acc += distmod2;
@@ -1087,27 +1079,24 @@ void CombatAttack(Critter cr, Critter target, AbstractItem weapon, uint8 weaponM
 
             if (volleyRounds > 0) // real left
             {
-                uint8 leftDir = Game.GetDirection(hx, hy, tx, ty, 89.0f);
-                uint16 sx = hx;
-                uint16 sy = hy;
-                uint16 ex = tx;
-                uint16 ey = ty;
+                int leftDir = Game.GetDirection(critterHex, targetHex, 89.0f);
+                mpos startHex = critterHex;
+                mpos endHex = targetHex;
 
-                map.MoveHexByDir(sx, sy, leftDir, 1);
-                map.MoveHexByDir(ex, ey, leftDir, 1);
+                map.MoveHexByDir(startHex, leftDir, 1);
+                map.MoveHexByDir(endHex, leftDir, 1);
 
-                Critter[] lineLeft = {};
-                Obsolete::GetCrittersInPath(map, sx, sy, ex, ey, 0.0f, wpnMaxDist - 1, CritterFindType::Alive, lineLeft);
+                Critter[] lineLeft = map.GetCrittersInPath(startHex, endHex, 0.0f, wpnMaxDist - 1, CritterFindType::NonDead);
                 int leftStart = 0;
                 int leftLen = lineLeft.length();
-                while ((leftStart < leftLen) && (Game.GetDistance(hx, hy, lineLeft[leftStart].HexX, lineLeft[leftStart].HexY)) < 3) {
+                while ((leftStart < leftLen) && (Game.GetDistance(critterHex, lineLeft[leftStart].Hex)) < 3) {
                     leftStart++;
                 }
 
                 for (int i = leftStart, j = leftLen; (i < j) && (volleyRounds > 0); i++) {
                     // adjust tohit
-                    dist = Game.GetDistance(hx, hy, lineLeft[i].HexX, lineLeft[i].HexY);
-                    bl = Obsolete::GetCrittersInPath(map, hx, hy, lineLeft[i].HexX, lineLeft[i].HexY, 0.0f, dist, CritterFindType::Alive, null) - 1;
+                    dist = Game.GetDistance(critterHex, lineLeft[i].Hex);
+                    bl = map.GetCrittersInPath(critterHex, lineLeft[i].Hex, 0.0f, dist, CritterFindType::NonDead).length() - 1;
                     toHit = baseToHit - 10 * bl;
                     acc = dist;
                     if (dist < distmod2) {
@@ -1167,27 +1156,25 @@ void CombatAttack(Critter cr, Critter target, AbstractItem weapon, uint8 weaponM
             volleyRounds = (rounds) / 3;
 
             if (volleyRounds > 0) {
-                uint8 rightDir = Game.GetDirection(hx, hy, tx, ty, -89.0f);
+                int rightDir = Game.GetDirection(critterHex, targetHex, -89.0f);
 
-                uint16 sx = hx;
-                uint16 sy = hy;
-                uint16 ex = tx;
-                uint16 ey = ty;
+                mpos startHex = critterHex;
+                mpos endHex = targetHex;
 
-                map.MoveHexByDir(sx, sy, rightDir, 1);
-                map.MoveHexByDir(ex, ey, rightDir, 1);
+                map.MoveHexByDir(startHex, rightDir, 1);
+                map.MoveHexByDir(endHex, rightDir, 1);
 
-                Critter[] lineRight = {};
-                Obsolete::GetCrittersInPath(map, sx, sy, ex, ey, 0.0f, wpnMaxDist - 1, CritterFindType::Alive, lineRight);
+                Critter[] lineRight = map.GetCrittersInPath(startHex, endHex, 0.0f, wpnMaxDist - 1, CritterFindType::NonDead);
+
                 int rightStart = 0;
                 int rightLen = lineRight.length();
-                while ((rightStart < rightLen) && (Game.GetDistance(hx, hy, lineRight[rightStart].HexX, lineRight[rightStart].HexY)) < 3) {
+                while ((rightStart < rightLen) && (Game.GetDistance(critterHex, lineRight[rightStart].Hex)) < 3) {
                     rightStart++;
                 }
                 for (int i = rightStart, j = rightLen; (i < j) && (volleyRounds > 0); i++) {
                     // adjust tohit
-                    dist = Game.GetDistance(hx, hy, lineRight[i].HexX, lineRight[i].HexY);
-                    bl = Obsolete::GetCrittersInPath(map, hx, hy, lineRight[i].HexX, lineRight[i].HexY, 0.0f, dist, CritterFindType::Alive, null) - 1;
+                    dist = Game.GetDistance(critterHex, lineRight[i].Hex);
+                    bl = map.GetCrittersInPath(critterHex, lineRight[i].Hex, 0.0f, dist, CritterFindType::NonDead).length() - 1;
                     toHit = baseToHit - 10 * bl;
                     acc = dist;
                     if (dist < distmod2) {
@@ -1249,7 +1236,7 @@ void CombatAttack(Critter cr, Critter target, AbstractItem weapon, uint8 weaponM
                         critsHit[i],
                         critsHitBullets[i],
                         (realTarget.Id == critsHit[i].Id) && criticalHit,
-                        (cr.IsControlledByPlayer && !changedTarget) || (!cr.IsControlledByPlayer && critsHit[i].Id == target.Id),
+                        (cr.ControlledByPlayer && !changedTarget) || (!cr.ControlledByPlayer && critsHit[i].Id == target.Id),
                         results);
         }
 
@@ -1263,7 +1250,7 @@ void CombatAttack(Critter cr, Critter target, AbstractItem weapon, uint8 weaponM
 
         if (isHit || changedTarget) {
             if (exploding) {
-                CommenceExplosion(attack, map, tx, ty, realTarget, weapPid, ammoPid, criticalHit, realTarget.Id, isRocket, results);
+                CommenceExplosion(attack, map, targetHex, realTarget, weapPid, ammoPid, criticalHit, realTarget.Id, isRocket, results);
             }
             else {
                 ApplyDamage(attack, realTarget, 1, criticalHit, !changedTarget, results);
@@ -1276,13 +1263,10 @@ void CombatAttack(Critter cr, Critter target, AbstractItem weapon, uint8 weaponM
             if (weaponSubtype == WS_THROWING) {
                 sharpshooter = 0;
             }
-            uint16 bx = 0;
-            uint16 by = 0;
-            uint16 pbx = 0;
-            uint16 pby = 0;
+            mpos preblockHex;
+            mpos blockHex;
 
-            Critter[] critsLine = {};
-            Obsolete::GetCrittersInPath(map, hx, hy, tx, ty, 0.0f, wpnMaxDist, CritterFindType::Alive, critsLine, pbx, pby, bx, by);
+            Critter[] critsLine = map.GetCrittersInPath(critterHex, targetHex, 0.0f, wpnMaxDist, CritterFindType::NonDead, preblockHex, blockHex);
 
             int bl = 0;
             bool anyHit = false;
@@ -1293,7 +1277,7 @@ void CombatAttack(Critter cr, Critter target, AbstractItem weapon, uint8 weaponM
                 } // skip the primary target
 
                 // adjust tohit
-                dist = Game.GetDistance(hx, hy, critsLine[i].HexX, critsLine[i].HexY);
+                dist = Game.GetDistance(critterHex, critsLine[i].Hex);
                 acc = dist;
                 toHit = baseToHit;
                 if (dist < distmod2) {
@@ -1331,8 +1315,7 @@ void CombatAttack(Critter cr, Critter target, AbstractItem weapon, uint8 weaponM
                 toHit = CLAMP(toHit, 5, 95);
                 toHit /= 3; // after clamp
                 if (Game.Random(1, 100) <= toHit) {
-                    tx = critsLine[i].HexX;
-                    ty = critsLine[i].HexY;
+                    targetHex = critsLine[i].Hex;
                     normalTarget = critsLine[i];
                     anyHit = true;
                 }
@@ -1343,7 +1326,7 @@ void CombatAttack(Critter cr, Critter target, AbstractItem weapon, uint8 weaponM
                 useNormal = true;
 
                 if (exploding) {
-                    CommenceExplosion(attack, map, tx, ty, normalTarget, weapPid, ammoPid, false, realTarget.Id, isRocket, results);
+                    CommenceExplosion(attack, map, targetHex, normalTarget, weapPid, ammoPid, false, realTarget.Id, isRocket, results);
                 }
                 else {
                     ApplyDamage(attack, normalTarget, 1, false, false, results);
@@ -1353,33 +1336,31 @@ void CombatAttack(Critter cr, Critter target, AbstractItem weapon, uint8 weaponM
                 useHex = true;
                 NotifyMiss(cr, results);
                 if (isGrenade) {
-                    tx = realTarget.HexX;
-                    ty = realTarget.HexY;
-                    int newdist = Game.GetDistance(hx, hy, tx, ty) + 1;
-                    map.MoveHexByDir(tx, ty, Game.Random(0, 5), Game.Random(1, newdist / 2));
-                    newdist = Game.GetDistance(hx, hy, tx, ty);
+                    targetHex = realTarget.Hex;
+                    int newdist = Game.GetDistance(critterHex, targetHex) + 1;
+                    map.MoveHexByDir(targetHex, Game.Random(0, 5), Game.Random(1, newdist / 2));
+                    newdist = Game.GetDistance(critterHex, targetHex);
                     // Чтение координат взрыва
-                    map.GetCrittersInPath(hx, hy, tx, ty, 0.0f, newdist, CritterFindType::Alive, tx, ty, bx, by);
+                    // TODO: check if second targetHex have to b changed to preblockHex
+                    map.GetCrittersInPath(critterHex, targetHex, 0.0f, newdist, CritterFindType::NonDead, targetHex, blockHex);
                 }
                 else {
                     if (isRocket) {
-                        tx = bx;
-                        ty = by;
+                        targetHex = blockHex;
                     }
                     else {
-                        tx = pbx;
-                        ty = pby;
+                        targetHex = preblockHex;
                     }
                 }
 
                 if (exploding) {
-                    CommenceExplosion(attack, map, tx, ty, null, weapPid, ammoPid, false, realTarget.Id, isRocket, results);
+                    CommenceExplosion(attack, map, targetHex, null, weapPid, ammoPid, false, realTarget.Id, isRocket, results);
                 }
             }
         } // miss
     }
     else {
-        cr.Say(SAY_NETMSG, "Combat error: weapon PID=" + weapPid + " not handled, please send bug report.");
+        Messaging::Info(cr, "Combat error: weapon PID=" + weapPid + " not handled, please send bug report.");
     }
 
     // combat messages
@@ -1391,10 +1372,10 @@ void CombatAttack(Critter cr, Critter target, AbstractItem weapon, uint8 weaponM
     // Shoot
     if (_WeaponEffect(weapon, use) != EMPTY_HSTRING) {
         if (useHex) {
-            map.RunFlyEffect(_WeaponEffect(weapon, use), cr, null, hx, hy, tx, ty); // yeah, the target can be null (see: grenades, rocket launcher)
+            Effects::RunFlyEffect(map, _WeaponEffect(weapon, use), cr, targetHex); // yeah, the target can be null (see: grenades, rocket launcher)
         }
         else {
-            map.RunFlyEffect(_WeaponEffect(weapon, use), cr, useNormal ? normalTarget : realTarget, hx, hy, tx, ty);
+            Effects::RunFlyEffect(map, _WeaponEffect(weapon, use), cr, (useNormal ? normalTarget : realTarget));
         }
     }
 
@@ -1418,7 +1399,7 @@ void CombatAttack(Critter cr, Critter target, AbstractItem weapon, uint8 weaponM
             if (realWeapon.Stackable) {
                 // Place on hex
                 if (placeOnHex) {
-                    map.AddItem(tx, ty, weapPid, 1);
+                    map.AddItem(targetHex, weapPid, 1);
                 }
 
                 // Sub 1 item
@@ -1430,14 +1411,14 @@ void CombatAttack(Critter cr, Critter target, AbstractItem weapon, uint8 weaponM
                 }
             }
             else {
-                ItemMovement::MoveItem(realWeapon, 0, map, tx, ty);
+                ItemMovement::MoveItem(realWeapon, 0, map, targetHex);
             }
         }
     }
 
     // Npc miss text
     if (!attack.TargetHit) {
-        if (!target.IsControlledByPlayer) {
+        if (!target.ControlledByPlayer) {
             AiSettings::AI_TrySayCombatText(target, CombatText::Miss);
         }
         target.Action(CritterAction::Dodge, 0, null); // Todo: type front/back
@@ -1446,12 +1427,12 @@ void CombatAttack(Critter cr, Critter target, AbstractItem weapon, uint8 weaponM
     return;
 }
 
-void ApplyDamage(AttackStruct attack, Critter target, uint rounds, bool isCritical, bool intentionally, CombatRes[] results)
+void ApplyDamage(AttackStruct attack, Critter target, int rounds, bool isCritical, bool intentionally, CombatRes[] results)
 {
     int dmgMul = attack.DmgMul;
-    uint bt = target.BodyType;
-    uint eff = 0;
-    uint msgEff = 0;
+    int bt = target.BodyType;
+    int eff = 0;
+    int msgEff = 0;
     ItemPerks weaponPerk = attack.WeaponPerk;
     Critter attacker = attack.Attacker;
     bool validAttacker = valid(attacker);
@@ -1459,12 +1440,12 @@ void ApplyDamage(AttackStruct attack, Critter target, uint rounds, bool isCritic
     bool isBloodyMess = attack.BloodyMess;
     bool isCombatText = attack.CombatMessage;
     Item realWeapon = attack.RealWeapon;
-    uint aim = attack.Aim;
-    uint extraMessage = 0;
-    uint extraMessageSelf = 0;
+    int aim = attack.Aim;
+    int extraMessage = 0;
+    int extraMessageSelf = 0;
 
-    bool targetIsPlayer = target.IsControlledByPlayer;
-    bool attackerIsPlayer = (valid(attacker) ? attacker.IsControlledByPlayer : false);
+    bool targetIsPlayer = target.ControlledByPlayer;
+    bool attackerIsPlayer = (valid(attacker) ? attacker.ControlledByPlayer : false);
 
     if (target.IsDead() || not valid(map)) {
         return;
@@ -1482,14 +1463,14 @@ void ApplyDamage(AttackStruct attack, Critter target, uint rounds, bool isCritic
     // Check no PvP
     if (targetIsPlayer && attackerIsPlayer && validAttacker && (attacker.IsNoPvp || target.IsNoPvp)) {
         if (validAttacker) {
-            attacker.Say(SAY_NETMSG, "No PvP.");
+            Messaging::Info(attacker, "No PvP.");
         }
-        target.Say(SAY_NETMSG, "No PvP.");
+        Messaging::Info(target, "No PvP.");
         return;
     }
     // Мины от игроков, ушедших на глобал
     if (targetIsPlayer && !validAttacker && target.IsNoPvp) {
-        target.Say(SAY_NETMSG, "No PvP.");
+        Messaging::Info(target, "No PvP.");
         return;
     }
 
@@ -1497,7 +1478,7 @@ void ApplyDamage(AttackStruct attack, Critter target, uint rounds, bool isCritic
         target.InSneakMode = false;
     }
 
-    uint targetTimeout = BATTLE_TIMEOUT(target);
+    synctime targetTimeout = BATTLE_TIMEOUT(target);
     if (target.TimeoutBattle < targetTimeout) {
         target.TimeoutBattle = targetTimeout;
     }
@@ -1552,15 +1533,15 @@ void ApplyDamage(AttackStruct attack, Critter target, uint rounds, bool isCritic
             // 0x00008000 - lose next turn
             // 0x00200000 - random
 
-            uint offset = bt * 9 * 6 * 7 + aim_ * 6 * 7 + roll * 7;
+            int offset = bt * 9 * 6 * 7 + aim_ * 6 * 7 + roll * 7;
             dmgMul *= CriticalTable[offset];
             dmgMul >>= 1;
             eff = CriticalTable[offset + 1];
             int stat = CriticalTable[offset + 2];
             int statMod = CriticalTable[offset + 3];
 
-            uint cMessage = CriticalTable[offset + 5];
-            uint cFailureMessage = CriticalTable[offset + 6];
+            int cMessage = CriticalTable[offset + 5];
+            int cFailureMessage = CriticalTable[offset + 6];
 
             extraMessage = cMessage;
 
@@ -1657,7 +1638,7 @@ void ApplyDamage(AttackStruct attack, Critter target, uint rounds, bool isCritic
     int totalDmg = 0;
     dmgMul *= attack.DMMod;
     int dmgDiv = 2 * attack.DDMod;
-    for (uint i = 0; i < rounds; i++) {
+    for (int i = 0; i < rounds; i++) {
         rawDmg = Game.Random(dmgMin, dmgMax);
         rawDmg *= dmgMul;
         rawDmg /= dmgDiv;
@@ -1695,7 +1676,7 @@ void ApplyDamage(AttackStruct attack, Critter target, uint rounds, bool isCritic
         Item realWeaponTarget = _CritGetItemHand(target);
         if (valid(realWeaponTarget)) {
             if (realWeaponTarget.Stackable) {
-                Item dropped = map.AddItem(target.HexX, target.HexY, realWeaponTarget.ProtoId, 1);
+                Item dropped = map.AddItem(target.Hex, realWeaponTarget.ProtoId, 1);
                 if (realWeaponTarget.Count > 1) {
                     realWeaponTarget.Count = realWeaponTarget.Count - 1;
                 }
@@ -1703,7 +1684,7 @@ void ApplyDamage(AttackStruct attack, Critter target, uint rounds, bool isCritic
                     Game.DestroyItem(realWeaponTarget);
                 }
 
-                if (!target.IsControlledByPlayer) {
+                if (!target.ControlledByPlayer) {
                     NpcPlanes::NpcPlane plane = NpcPlanes::CreatePlane();
                     NpcPlanes::NpcPlane[] crPlanes = {}; // array<NpcPlanes::NpcPlane>( 0 );
 
@@ -1715,8 +1696,7 @@ void ApplyDamage(AttackStruct attack, Critter target, uint rounds, bool isCritic
                     }
 
                     plane.Type = AI_PLANE_PICK;
-                    plane.Pick_HexX = dropped.HexX;
-                    plane.Pick_HexY = dropped.HexY;
+                    plane.Pick_Hex = dropped.Hex;
                     plane.Pick_Pid = dropped.ProtoId;
                     plane.Pick_UseItemId = ZERO_IDENT;
                     plane.Pick_ToOpen = false;
@@ -1725,8 +1705,8 @@ void ApplyDamage(AttackStruct attack, Critter target, uint rounds, bool isCritic
                 }
             }
             else {
-                ItemMovement::MoveItem(realWeaponTarget, 0, map, target.HexX, target.HexY);
-                if (!target.IsControlledByPlayer) {
+                ItemMovement::MoveItem(realWeaponTarget, 0, map, target.Hex);
+                if (!target.ControlledByPlayer) {
                     NpcPlanes::NpcPlane plane = NpcPlanes::CreatePlane();
 
                     NpcPlanes::NpcPlane[] crPlanes = {};
@@ -1739,8 +1719,7 @@ void ApplyDamage(AttackStruct attack, Critter target, uint rounds, bool isCritic
                     }
 
                     plane.Type = AI_PLANE_PICK;
-                    plane.Pick_HexX = realWeaponTarget.HexX;
-                    plane.Pick_HexY = realWeaponTarget.HexY;
+                    plane.Pick_Hex = realWeaponTarget.Hex;
                     plane.Pick_Pid = realWeaponTarget.ProtoId;
                     plane.Pick_UseItemId = ZERO_IDENT;
                     plane.Pick_ToOpen = false;
@@ -1832,7 +1811,7 @@ void ApplyDamage(AttackStruct attack, Critter target, uint rounds, bool isCritic
     }
 
     bool attackFront = true;
-    uint dir = Game.GetDirection(attack.Hx, attack.Hy, target.HexX, target.HexY);
+    uint8 dir = Game.GetDirection(mpos(attack.Hx, attack.Hy), target.Hex);
     if ((dir == target.Dir || ((dir + 1) % 6) == target.Dir || ((dir + 5) % 6) == target.Dir)) {
         attackFront = false;
     }
@@ -1931,7 +1910,7 @@ void ApplyDamage(AttackStruct attack, Critter target, uint rounds, bool isCritic
         if (valid(attacker)) {
             attacker.Experience += target.KillExperience;
             if (bt < attacker.Kills.length()) {
-                uint[] kills = attacker.Kills.clone();
+                int[] kills = attacker.Kills.clone();
                 kills[bt] += 1;
                 attacker.Kills = kills;
             }
@@ -1968,18 +1947,17 @@ void ApplyDamage(AttackStruct attack, Critter target, uint rounds, bool isCritic
                 if (knockDist > 10) {
                     knockDist = 10;
                 }
-                uint16 knockHx = attack.Hx;
-                uint16 knockHy = attack.Hy;
+                mpos knockHex = mpos(attack.Hx, attack.Hy);
                 if (knockDist > 0) {
-                    map.GetWallHexInPath(target.HexX, target.HexY, knockHx, knockHy, 180.0f, knockDist);
-                    CritterState::ToKnockout(target, KNOCKOUT_ACTION_ANIM_DEFAULT(attackFront), 0, knockHx, knockHy);
+                    map.GetWallHexInPath(target.Hex, knockHex, 180.0f, knockDist);
+                    CritterState::ToKnockout(target, KNOCKOUT_ACTION_ANIM_DEFAULT(attackFront), 0, knockHex);
                 }
                 else {
-                    CritterState::ToKnockout(target, KNOCKOUT_ACTION_ANIM_DEFAULT(attackFront), 0, target.HexX, target.HexY);
+                    CritterState::ToKnockout(target, KNOCKOUT_ACTION_ANIM_DEFAULT(attackFront), 0, target.Hex);
                 }
             }
             else {
-                CritterState::ToKnockout(target, KNOCKOUT_ACTION_ANIM_DEFAULT(attackFront), 0, target.HexX, target.HexY);
+                CritterState::ToKnockout(target, KNOCKOUT_ACTION_ANIM_DEFAULT(attackFront), 0, target.Hex);
             }
         }
         if (targetAp < currentAp / AP_DIVIDER) {
@@ -1991,10 +1969,10 @@ void ApplyDamage(AttackStruct attack, Critter target, uint rounds, bool isCritic
     else if (not target.IsKnockout()) {
         // Animate hit
         if (attack.ShowHitAnimForce) {
-            target.Action(CritterAction::DamageForce, attackFront ? 0 : 1, null);
+            target.Action(CritterAction::DamageForce, (attackFront ? 0 : 1), null);
         }
         else {
-            target.Action(CritterAction::Damage, attackFront ? 0 : 1, null);
+            target.Action(CritterAction::Damage, (attackFront ? 0 : 1), null);
         }
 
         // Npc hit message
@@ -2034,8 +2012,8 @@ void ApplyDamage(AttackStruct attack, Critter target, uint rounds, bool isCritic
 
     bool isAimed = (aim != HitLocations::LocationNone) && (aim != HitLocations::LocationTorso) && (aim != HitLocations::LocationUncalled);
 
-    uint mainMsg = MessageSpecifications::Hit;
-    uint length = 3;
+    int mainMsg = MessageSpecifications::Hit;
+    int length = 3;
 
     if (isCritical) {
         mainMsg += 2;
@@ -2055,7 +2033,7 @@ void ApplyDamage(AttackStruct attack, Critter target, uint rounds, bool isCritic
     any[] sendEff = array<any>(length);
     sendEff[0] = mainMsg;
     sendEff[1] = target.Id;
-    uint now = 2;
+    int now = 2;
 
     if (isAimed) {
         sendEff[2] = aim;
@@ -2074,18 +2052,14 @@ void ApplyDamage(AttackStruct attack, Critter target, uint rounds, bool isCritic
         sendEff[now] = extraMessage;
     }
 
-    Critter[] source = {target};
-    Critter[] crits = {};
+    Critter[] crits = target.GetCritters(CritterSeeType::WhoSeeMe, CritterFindType::Players);
 
-    if (target.GetMap() != null) {
-        crits = target.GetMap().GetCrittersSeeing(source, true, CritterFindType::Players);
-
-        for (int i = 0, j = crits.length(); i < j; i++) {
-            if (crits[i].Id != target.Id) {
-                AddEff(crits[i], sendEff, results);
-            }
+    for (int i = 0, j = crits.length(); i < j; i++) {
+        if (crits[i].Id != target.Id) {
+            AddEff(crits[i], sendEff, results);
         }
     }
+
     if (isCritical) {
         sendEff[now] = extraMessage + 1500; // men_player - men_npc
     }
@@ -2108,7 +2082,7 @@ void ApplyDamage(AttackStruct attack, Critter target, uint rounds, bool isCritic
             }
         }
         else {
-            uint attackerBt = attacker.BodyType;
+            int attackerBt = attacker.BodyType;
             if (attackerBt == BodyTypes::Radscorpion || attackerBt == BodyTypes::Floater || attackerBt == BodyTypes::GiantWasp ||
                 attackerBt == BodyTypes::Alien || attackerBt == BodyTypes::Centaur) {
                 if (Game.Random(2, 11) > target.Luck) {
@@ -2136,8 +2110,8 @@ void ApplyDamage(AttackStruct attack, Critter target, uint rounds, bool isCritic
     }
 }
 
-void CommenceExplosion(AttackStruct attack, Map map, uint16 tx, uint16 ty, Critter target, hstring weapPid, hstring ammoPid, bool isCritical,
-                       ident intentionallyId, bool isRocket, CombatRes[] results)
+void CommenceExplosion(AttackStruct attack, Map map, mpos targetHex, Critter target, hstring weapPid, hstring ammoPid, bool isCritical, ident intentionallyId,
+                       bool isRocket, CombatRes[] results)
 {
     if (ammoPid == Content::Item::emp_rocket) {
         weapPid = ammoPid;
@@ -2145,39 +2119,39 @@ void CommenceExplosion(AttackStruct attack, Map map, uint16 tx, uint16 ty, Critt
         attack.DmgMin += 30; // Увеличение дамага, чтобы приблизить значения к ЕМП гранате
         attack.DmgMax += 40;
     }
-    CommenceExplosion(attack, map, tx, ty, target, weapPid, isCritical, intentionallyId, isRocket, results);
+    CommenceExplosion(attack, map, targetHex, target, weapPid, isCritical, intentionallyId, isRocket, results);
 }
 
-void CommenceExplosion(AttackStruct attack, Map map, uint16 tx, uint16 ty, Critter target, hstring weapPid, bool isCritical, ident intentionallyId,
-                       bool isRocket, CombatRes[] results)
+void CommenceExplosion(AttackStruct attack, Map map, mpos targetHex, Critter target, hstring weapPid, bool isCritical, ident intentionallyId, bool isRocket,
+                       CombatRes[] results)
 {
-    uint radius = isRocket ? 3 : 2;
+    int radius = (isRocket ? 3 : 2);
     if (weapPid == Content::Item::molotov_cocktail) {
-        map.RunEffect(Content::Item::explode_fire_big, tx, ty, 2);
+        Effects::RunEffect(map, Content::Item::explode_fire_big, targetHex, 2);
     }
     else if (weapPid == Content::Item::frag_grenade || weapPid == Content::Item::holy_hand_grenade) {
-        map.RunEffect(Content::Item::explode_fire_small, tx, ty, 2);
+        Effects::RunEffect(map, Content::Item::explode_fire_small, targetHex, 2);
     }
     else if (weapPid == Content::Item::pulse_grenade) {
-        map.RunEffect(Content::Item::explode_emp, tx, ty, 2);
+        Effects::RunEffect(map, Content::Item::explode_emp, targetHex, 2);
     }
     else if (weapPid == Content::Item::plasma_grenade) {
-        map.RunEffect(Content::Item::explode_plasma, tx, ty, 2);
+        Effects::RunEffect(map, Content::Item::explode_plasma, targetHex, 2);
     }
     else if (weapPid == Content::Item::smoke_grenade) {
-        SmokeGrenade::SmokeBlast(map, tx, ty, Content::Item::smoke, (valid(attack.Attacker) ? attack.Attacker.Id : ZERO_IDENT));
+        SmokeGrenade::SmokeBlast(map, targetHex, Content::Item::smoke, (valid(attack.Attacker) ? attack.Attacker.Id : ZERO_IDENT));
     }
     else if (weapPid == Content::Item::mustard_gas_grenade) {
-        SmokeGrenade::SmokeBlast(map, tx, ty, Content::Item::mustard_gas, (valid(attack.Attacker) ? attack.Attacker.Id : ZERO_IDENT));
+        SmokeGrenade::SmokeBlast(map, targetHex, Content::Item::mustard_gas, (valid(attack.Attacker) ? attack.Attacker.Id : ZERO_IDENT));
     }
     else if (weapPid == Content::Item::emp_rocket) {
-        map.RunEffect(Content::Item::explode_emp, tx, ty, 1);
+        Effects::RunEffect(map, Content::Item::explode_emp, targetHex, 1);
     }
     else if (isRocket) {
-        map.RunEffect(Content::Item::explode_rocket, tx, ty, 1);
+        Effects::RunEffect(map, Content::Item::explode_rocket, targetHex, 1);
     }
     else {
-        map.RunEffect(Content::Item::explode_fire_big, tx, ty, 2); // default case
+        Effects::RunEffect(map, Content::Item::explode_fire_big, targetHex, 2); // default case
     }
 
     if (weapPid == Content::Item::mustard_gas_grenade || weapPid == Content::Item::smoke_grenade) {
@@ -2185,26 +2159,26 @@ void CommenceExplosion(AttackStruct attack, Map map, uint16 tx, uint16 ty, Critt
     }
 
     Effects::QuakeScreen(map);
-    Critter[] critsHit = map.GetCritters(tx, ty, radius, CritterFindType::Alive);
+    Critter[] critsHit = map.GetCritters(targetHex, radius, CritterFindType::NonDead);
     bool validTarget = valid(target);
-    ident targetId = validTarget ? target.Id : ZERO_IDENT;
-    bool intentionally = (valid(attack.Attacker) && attack.Attacker.IsControlledByPlayer || targetId == intentionallyId);
+    ident targetId = (validTarget ? target.Id : ZERO_IDENT);
+    bool intentionally = (valid(attack.Attacker) && attack.Attacker.ControlledByPlayer || targetId == intentionallyId);
 
     if (validTarget) {
         ApplyDamage(attack, target, 1, isCritical, intentionally, results);
     }
 
-    attack.Hx = tx;
-    attack.Hy = ty;
+    attack.Hx = targetHex.x;
+    attack.Hy = targetHex.y;
 
-    for (uint i = 0; i < critsHit.length(); i++) {
+    for (int i = 0; i < critsHit.length(); i++) {
         if (!validTarget || targetId != critsHit[i].Id) {
             ApplyDamage(attack, critsHit[i], 1, false, intentionally, results);
         }
     }
 }
 
-void CriticalFailure(Critter cr, AbstractItem weap, uint8 weaponUse, ProtoItem ammo, uint eff, CombatRes[] results)
+void CriticalFailure(Critter cr, AbstractItem weap, int weaponUse, ProtoItem ammo, int eff, CombatRes[] results)
 {
     // 0x00000100 hit self OK
     // 0x00100000 weapon exploded OK
@@ -2244,12 +2218,12 @@ void CriticalFailure(Critter cr, AbstractItem weap, uint8 weaponUse, ProtoItem a
         }
 
         targetDR += (cr.IsTraitFinesse ? 30 : 0);
-        targetDR += validAmmo ? ammo.Ammo_DrMod : 0;
+        targetDR += (validAmmo ? ammo.Ammo_DrMod : 0);
         targetDR = CLAMP(targetDR, 0, 100);
         int dmgMin = _WeaponDmgMin(weapon, weaponUse);
         int dmgMax = _WeaponDmgMax(weapon, weaponUse);
-        int dmgMul = validAmmo ? ammo.Ammo_DmgMult : 1; // technically, should be *2
-        int dmgDiv = validAmmo ? ammo.Ammo_DmgDiv : 1;  // technically, should be *2
+        int dmgMul = (validAmmo ? ammo.Ammo_DmgMult : 1); // technically, should be *2
+        int dmgDiv = (validAmmo ? ammo.Ammo_DmgDiv : 1);  // technically, should be *2
         totalDmg = Game.Random(dmgMin, dmgMax) + 2 * cr.PerkBonusRangedDamage;
         totalDmg *= dmgMul;
         totalDmg /= dmgDiv;
@@ -2258,7 +2232,7 @@ void CriticalFailure(Critter cr, AbstractItem weap, uint8 weaponUse, ProtoItem a
         if (totalDmg < 0) {
             totalDmg = 0;
         }
-        uint bt = cr.BodyType;
+        int bt = cr.BodyType;
         if (cr.PerkLivingAnatomy != 0 && !(bt == BodyTypes::Alien || bt == BodyTypes::Robot)) {
             totalDmg += 5;
         }
@@ -2268,7 +2242,7 @@ void CriticalFailure(Critter cr, AbstractItem weap, uint8 weaponUse, ProtoItem a
         tookDamage = true;
     }
 
-    uint16 ammoRound = _WeaponRound(weapon, weaponUse);
+    int ammoRound = _WeaponRound(weapon, weaponUse);
     if (ammoRound > 0 && valid(realWeapon) && !cr.IsUnlimitedAmmo) {
         if (realWeapon.AmmoCount <= ammoRound || FLAG(eff, MF_LOST_REST_OF_AMMO)) {
             realWeapon.AmmoCount = 0;
@@ -2284,7 +2258,7 @@ void CriticalFailure(Critter cr, AbstractItem weap, uint8 weaponUse, ProtoItem a
 
     if (FLAG(eff, MF_WEAPON_DROPPED) && valid(realWeapon)) {
         if (realWeapon.Stackable) {
-            Item dropped = map.AddItem(cr.HexX, cr.HexY, weapon.ProtoId, 1);
+            Item dropped = map.AddItem(cr.Hex, weapon.ProtoId, 1);
             if (realWeapon.Count > 1) {
                 realWeapon.Count = realWeapon.Count - 1;
             }
@@ -2292,7 +2266,7 @@ void CriticalFailure(Critter cr, AbstractItem weap, uint8 weaponUse, ProtoItem a
                 Game.DestroyItem(realWeapon);
             }
 
-            if (!cr.IsControlledByPlayer) {
+            if (!cr.ControlledByPlayer) {
                 NpcPlanes::NpcPlane plane = NpcPlanes::CreatePlane();
                 NpcPlanes::NpcPlane[] crPlanes = {};
 
@@ -2304,8 +2278,7 @@ void CriticalFailure(Critter cr, AbstractItem weap, uint8 weaponUse, ProtoItem a
                 }
 
                 plane.Type = AI_PLANE_PICK;
-                plane.Pick_HexX = dropped.HexX;
-                plane.Pick_HexY = dropped.HexY;
+                plane.Pick_Hex = dropped.Hex;
                 plane.Pick_Pid = dropped.ProtoId;
                 plane.Pick_UseItemId = ZERO_IDENT;
                 plane.Pick_ToOpen = false;
@@ -2314,8 +2287,8 @@ void CriticalFailure(Critter cr, AbstractItem weap, uint8 weaponUse, ProtoItem a
             }
         }
         else {
-            ItemMovement::MoveItem(realWeapon, 0, map, cr.HexX, cr.HexY);
-            if (!cr.IsControlledByPlayer) {
+            ItemMovement::MoveItem(realWeapon, 0, map, cr.Hex);
+            if (!cr.ControlledByPlayer) {
                 NpcPlanes::NpcPlane plane = NpcPlanes::CreatePlane();
 
                 NpcPlanes::NpcPlane[] crPlanes = {};
@@ -2328,8 +2301,7 @@ void CriticalFailure(Critter cr, AbstractItem weap, uint8 weaponUse, ProtoItem a
                 }
 
                 plane.Type = AI_PLANE_PICK;
-                plane.Pick_HexX = realWeapon.HexX;
-                plane.Pick_HexY = realWeapon.HexY;
+                plane.Pick_Hex = realWeapon.Hex;
                 plane.Pick_Pid = realWeapon.ProtoId;
                 plane.Pick_UseItemId = ZERO_IDENT;
                 plane.Pick_ToOpen = false;
@@ -2363,7 +2335,7 @@ void CriticalFailure(Critter cr, AbstractItem weap, uint8 weaponUse, ProtoItem a
     }
 
     if (FLAG(eff, MF_KNOCKED_DOWN) && !cr.IsKnockout()) {
-        CritterState::ToKnockout(cr, KNOCKOUT_ACTION_ANIM_DEFAULT(true), cr.PerkQuickRecovery != 0 ? 1 : 3, cr.HexX, cr.HexY);
+        CritterState::ToKnockout(cr, KNOCKOUT_ACTION_ANIM_DEFAULT(true), (cr.PerkQuickRecovery != 0 ? 1 : 3), cr.Hex);
     }
 
     if (FLAG(eff, MF_CRIPPLED_RANDOM_LIMB) && !cr.IsNoLooseLimbs) {
@@ -2386,7 +2358,7 @@ void CriticalFailure(Critter cr, AbstractItem weap, uint8 weaponUse, ProtoItem a
     }
 
     if (FLAG(eff, MF_WEAPON_EXPLODED)) {
-        map.RunEffect(Content::Item::explode_fire_small, cr.HexX, cr.HexY, 2);
+        Effects::RunEffect(map, Content::Item::explode_fire_small, cr.Hex, 2);
     }
 
     if (totalDmg > 0) {
@@ -2404,7 +2376,7 @@ void CriticalFailure(Critter cr, AbstractItem weap, uint8 weaponUse, ProtoItem a
     if (cr.CurrentHp < 1) {
         if (cr.CurrentHp > Settings.DeadHitPoints && !cr.IsNoKnock) {
             if (!cr.IsKnockout()) {
-                CritterState::ToKnockout(cr, KNOCKOUT_ACTION_ANIM_DEFAULT(true), 0, cr.HexX, cr.HexY);
+                CritterState::ToKnockout(cr, KNOCKOUT_ACTION_ANIM_DEFAULT(true), 0, cr.Hex);
             }
         }
         else {
@@ -2424,9 +2396,7 @@ void CriticalFailure(Critter cr, AbstractItem weap, uint8 weaponUse, ProtoItem a
         }
     }
 
-    Critter[] him = {cr};
-    Critter[] crits = {};
-    crits = cr.GetMap().GetCrittersSeeing(him, true, CritterFindType::Players);
+    Critter[] crits = crits = cr.GetCritters(CritterSeeType::WhoSeeMe, CritterFindType::Players);
     for (int i = 0, j = crits.length(); i < j; i++) {
         AddEff(crits[i], allEff, results);
     }
@@ -2436,25 +2406,24 @@ void CriticalFailure(Critter cr, AbstractItem weap, uint8 weaponUse, ProtoItem a
     return;
 }
 
-void InjureCritter(Critter cr, uint dmg, DamageTypes dmgType, uint8 dir, ident attackerId)
+void InjureCritter(Critter cr, int dmg, DamageTypes dmgType, uint8 dir, ident attackerId)
 {
     Critter attacker = null;
     if (attackerId != ZERO_IDENT && cr.Id != attackerId) {
         attacker = Game.GetCritter(attackerId);
     }
 
-    AttackStruct attack;
+    AttackStruct attack = AttackStruct();
     attack.Attacker = attacker;
 
-    uint16 hx = cr.HexX;
-    uint16 hy = cr.HexY;
+    mpos hexA = cr.Hex;
     Map map = cr.GetMap();
     if (valid(map)) {
-        map.MoveHexByDir(hx, hy, (dir + 3) % 6, 1);
+        map.MoveHexByDir(hexA, (dir + 3) % 6, 1);
     }
 
-    attack.Hx = hx;
-    attack.Hy = hy;
+    attack.Hx = hexA.x;
+    attack.Hy = hexA.y;
     attack.Aim = HitLocations::LocationUncalled;
     attack.IsBurst = false;
     attack.BloodyMess = false;
@@ -2478,7 +2447,7 @@ void InjureCritter(Critter cr, uint dmg, DamageTypes dmgType, uint8 dir, ident a
     FlushResults(results);
 }
 
-void InjureCritter(Critter cr, uint dmg, DamageTypes dmgType, uint8 dir, ident attackerId, uint forceFlags)
+void InjureCritter(Critter cr, int dmg, DamageTypes dmgType, uint8 dir, ident attackerId, int forceFlags)
 {
     if (dmgType > DamageTypes::Explode) {
         Game.Log("Invalid damage type.");
@@ -2490,18 +2459,17 @@ void InjureCritter(Critter cr, uint dmg, DamageTypes dmgType, uint8 dir, ident a
         attacker = Game.GetCritter(attackerId);
     }
 
-    AttackStruct attack;
+    AttackStruct attack = AttackStruct();
     attack.Attacker = attacker;
 
-    uint16 hx = cr.HexX;
-    uint16 hy = cr.HexY;
+    mpos hexA = cr.Hex;
     Map map = cr.GetMap();
     if (valid(map)) {
-        map.MoveHexByDir(hx, hy, (dir + 3) % 6, 1);
+        map.MoveHexByDir(hexA, (dir + 3) % 6, 1);
     }
 
-    attack.Hx = hx;
-    attack.Hy = hy;
+    attack.Hx = hexA.x;
+    attack.Hy = hexA.y;
     attack.Aim = HitLocations::LocationUncalled;
     attack.IsBurst = false;
     attack.BloodyMess = false;
@@ -2528,7 +2496,7 @@ void InjureCritter(Critter cr, uint dmg, DamageTypes dmgType, uint8 dir, ident a
 
 int FindCritterInArray(Critter[] crits, Critter cr)
 {
-    for (uint i = 0, j = crits.length(); i < j; i++) {
+    for (int i = 0, j = crits.length(); i < j; i++) {
         if (crits[i].Id == cr.Id) {
             return i;
         }
@@ -2536,7 +2504,7 @@ int FindCritterInArray(Critter[] crits, Critter cr)
     return -1;
 }
 
-uint GetAimApCost(int hitLocation)
+int GetAimApCost(int hitLocation)
 {
     switch (hitLocation) {
     case HitLocations::LocationNone:
@@ -2563,7 +2531,7 @@ uint GetAimApCost(int hitLocation)
     return 0;
 }
 
-uint GetHitAim(int hitLocation)
+int GetHitAim(int hitLocation)
 {
     switch (hitLocation) {
     case HitLocations::LocationNone:
@@ -2591,13 +2559,13 @@ uint GetHitAim(int hitLocation)
 }
 
 // client only, possible use by AI
-int RawToHit(Critter cr, Critter target, Item weapon, uint8 weaponUse, ProtoItem ammo)
+int RawToHit(Critter cr, Critter target, Item weapon, int weaponUse, ProtoItem ammo)
 {
-    CritterProperty skill = valid(weapon) ? _WeaponSkill(weapon, weaponUse) : CritterProperty::SkillUnarmed;
+    CritterProperty skill = (valid(weapon) ? _WeaponSkill(weapon, weaponUse) : CritterProperty::SkillUnarmed);
     int toHit = cr.GetAsInt(skill);
     ItemPerks weaponPerk = valid(weapon) ? weapon.Weapon_Perk : ItemPerks::ItemPerkNone;
-    uint blockers = 0;
-    int dist = Game.GetDistance(cr.HexX, cr.HexY, target.HexX, target.HexY);
+    int blockers = 0;
+    int dist = Game.GetDistance(cr.Hex, target.Hex);
     if (skill != CritterProperty::SkillUnarmed && skill != CritterProperty::SkillMeleeWeapons) {
         // ranged attack modifiers
         int distmod1 = 2; // used for initial weapon bonus
@@ -2617,7 +2585,7 @@ int RawToHit(Critter cr, Critter target, Item weapon, uint8 weaponUse, ProtoItem
             acc += distmod2;
         }
         else {
-            if (cr.IsControlledByPlayer) {
+            if (cr.ControlledByPlayer) {
                 acc -= (perception - 2) * distmod1;
             }
             else {
@@ -2647,7 +2615,7 @@ int RawToHit(Critter cr, Critter target, Item weapon, uint8 weaponUse, ProtoItem
 
         Map map = cr.GetMap();
         // TODO: const question
-        blockers = Obsolete::GetCrittersInPath(Game.GetMap(map.Id), cr.HexX, cr.HexY, target.HexX, target.HexY, 0.0f, dist, CritterFindType::Alive, null);
+        blockers = map.GetCrittersInPath(cr.Hex, target.Hex, 0.0f, dist, CritterFindType::NonDead).length();
         if (!target.IsKnockout()) {
             blockers--;
         }
@@ -2704,18 +2672,15 @@ void NotifyOops(Critter cr, Critter t1, Critter t2, CombatRes[] results)
     // otherwise pass "oops! t2 was hit instead of t1!"
     if (t2 == null) {
         any[] allEff = {MessageSpecifications::HitRandomly, cr.Id};
-        Critter[] him = {cr};
-        Critter[] crits = {};
-        crits = cr.GetMap().GetCrittersSeeing(him, true, CritterFindType::Players);
+        Critter[] crits = cr.GetCritters(CritterSeeType::WhoSeeMe, CritterFindType::Players);
         for (int i = 0, j = crits.length(); i < j; i++) {
             AddEff(crits[i], allEff, results);
         }
     }
     else {
         any[] allEff = {MessageSpecifications::Oops, t1.Id, t2.Id};
-        Critter[] them = {t1, t2};
-        Critter[] crits = {};
-        crits = t1.GetMap().GetCrittersSeeing(them, true, CritterFindType::Players);
+        Critter[] crits = t1.GetCritters(CritterSeeType::WhoSeeMe, CritterFindType::Players);
+        // Todo: добавить существ которые видят t2 и сделать массив уникальным
         for (int i = 0, j = crits.length(); i < j; i++) {
             AddEff(crits[i], allEff, results);
         }
@@ -2727,9 +2692,7 @@ void NotifyOops(Critter cr, Critter t1, Critter t2, CombatRes[] results)
 void NotifyMiss(Critter cr, CombatRes[] results)
 {
     any[] allEff = {MessageSpecifications::Miss, cr.Id};
-    Critter[] him = {cr};
-    Critter[] crits = {};
-    crits = cr.GetMap().GetCrittersSeeing(him, true, CritterFindType::Players);
+    Critter[] crits = cr.GetCritters(CritterSeeType::WhoSeeMe, CritterFindType::Players);
     for (int i = 0, j = crits.length(); i < j; i++) {
         AddEff(crits[i], allEff, results);
     }
@@ -2737,32 +2700,30 @@ void NotifyMiss(Critter cr, CombatRes[] results)
     return;
 }
 
-Critter ChooseRandomTarget(Map map, Critter cr, Critter target, uint wpnMaxDist)
+Critter ChooseRandomTarget(Map map, Critter cr, Critter target, int wpnMaxDist)
 {
-    uint16 hx = cr.HexX;
-    uint16 hy = cr.HexY;
-    Critter[] crits = map.GetCritters(hx, hy, wpnMaxDist, CritterFindType::Alive);
+    mpos hex = cr.Hex;
+    Critter[] crits = map.GetCritters(hex, wpnMaxDist, CritterFindType::NonDead);
     if (crits.isEmpty()) {
         return null; // should never happen
     }
 
-    uint start = Game.Random(0, crits.length() - 1);
-    uint16 bx = 0;
-    uint16 by = 0;
-    uint16 pbx = 0;
-    uint16 pby = 0;
-    for (uint i = start; i < crits.length(); i++) {
+    int start = Game.Random(0, crits.length() - 1);
+    mpos blockHex;
+    mpos preBlockHex;
+    ;
+    for (int i = start; i < crits.length(); i++) {
         if (crits[i].Id == cr.Id || crits[i].Id == target.Id) {
             continue;
         }
         // wallcheck:
-        Obsolete::GetCrittersInPath(map, hx, hy, crits[i].HexX, crits[i].HexY, 0.0f, 0, CritterFindType::Alive, null, pbx, pby, bx, by);
-        if (bx == crits[i].HexX && by == crits[i].HexY) {
+        map.GetCrittersInPath(hex, crits[i].Hex, 0.0f, 0, CritterFindType::NonDead, preBlockHex, blockHex);
+        if (blockHex == crits[i].Hex) {
             return crits[i];
         }
     }
 
-    for (uint i = 0; i < start; i++) {
+    for (int i = 0; i < start; i++) {
         if (!valid(crits[i])) {
             continue;
         }
@@ -2770,8 +2731,8 @@ Critter ChooseRandomTarget(Map map, Critter cr, Critter target, uint wpnMaxDist)
             continue;
         }
         // wallcheck:
-        Obsolete::GetCrittersInPath(map, hx, hy, crits[i].HexX, crits[i].HexY, 0.0f, 0, CritterFindType::Alive, null, pbx, pby, bx, by);
-        if (bx == crits[i].HexX && by == crits[i].HexY) {
+        map.GetCrittersInPath(hex, crits[i].Hex, 0.0f, 0, CritterFindType::NonDead, preBlockHex, blockHex);
+        if (blockHex == crits[i].Hex) {
             return crits[i];
         }
     }
@@ -3018,7 +2979,7 @@ const int[] CriticalTable =
 
 // fallout2.exe at file offset 0x1065A0 (517FA0 memory offset)
 // row: weapon type (critfail list), column: critfail severity
-const uint[] CriticalFailureTable =
+const int[] CriticalFailureTable =
 {
     0x00000000, 0x00008000, 0x00008000, 0x00080002, 0x00200000,
     0x00000000, 0x00008000, 0x00004000, 0x00100000, 0x00010000,
@@ -3030,3 +2991,7 @@ const uint[] CriticalFailureTable =
 };
 
 // clang-format on
+
+#endif
+
+}

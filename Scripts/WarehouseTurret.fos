@@ -1,7 +1,11 @@
-// FOS Server Sort 2
+namespace WarehouseTurret // Sort 2
+{
+
+#if SERVER
+
 // Author: cvet
 
-///@ Property Map PrivateServer bool WarehouseTurretActive
+///@ Property Map Server bool WarehouseTurretActive Mutable Persistent
 
 #define TURRET_PID          (Content::Critter::AutoCannon)
 #define SCIENCE_OFF_TURRETS (110)
@@ -30,8 +34,8 @@ void TurretScanArea(Critter turret)
         return;
     }
 
-    Critter[] players = turret.GetCritters(false, CritterFindType::AlivePlayers);
-    for (uint i = 0; i < players.length(); i++) {
+    Critter[] players = turret.GetCritters(CritterSeeType::WhoISee, CritterFindType::NonDeadPlayers);
+    for (int i = 0; i < players.length(); i++) {
         Critter player = players[i];
         EnemyStack::AddEnemyToStack(turret, player.Id);
         NpcPlanes::AddAttackPlane(turret, 0, player);
@@ -47,8 +51,8 @@ void TurretsTurnOn(Map map)
     map.WarehouseTurretActive = true;
 
     // Scan area for attack
-    Critter[] turrets = map.GetCritters(TURRET_PID, CritterFindType::AliveNpc);
-    for (uint i = 0; i < turrets.length(); i++) {
+    Critter[] turrets = map.GetCritters(TURRET_PID, CritterFindType::NonDeadNpc);
+    for (int i = 0; i < turrets.length(); i++) {
         TurretScanArea(turrets[i]);
     }
 }
@@ -63,7 +67,7 @@ void TurretsTurnOff(Map map)
 
     // If turrets has attack plane, clear it
     Critter[] turrets = map.GetCritters(TURRET_PID, CritterFindType::Npc);
-    for (uint i = 0; i < turrets.length(); i++) {
+    for (int i = 0; i < turrets.length(); i++) {
         NpcPlanes::ErasePlane(turrets[i], AI_PLANE_ATTACK, true);
         EnemyStack::ClearEnemyStack(turrets[i]);
     }
@@ -71,7 +75,7 @@ void TurretsTurnOff(Map map)
 
 // Computer On/Off turrets
 // bool s_Computer( Critter cr, StaticItem computer, CritterProperty skill, Item item )
-bool s_Computer(Critter cr, StaticItem computer, Item item, int skill)
+bool s_Computer(Critter cr, StaticItem computer, Item item, any skill)
 {
     Map map = cr.GetMap();
     if (not valid(map)) {
@@ -79,18 +83,18 @@ bool s_Computer(Critter cr, StaticItem computer, Item item, int skill)
     }
 
     if (skill != int(CritterProperty::SkillScience) || cr.SkillScience < SCIENCE_OFF_TURRETS) {
-        map.SetTextMsg(computer.HexX, computer.HexY, COLOR_GRAY, TextPackName::Text, STR_COMPUTER_BEEP);
+        MapText::AddText(map, computer.Hex, COLOR_GRAY, TextPackName::Text, STR_COMPUTER_BEEP);
         return true;
     }
 
     // Switch state
     if (!map.WarehouseTurretActive) {
         TurretsTurnOn(map);
-        map.SetTextMsg(computer.HexX, computer.HexY, COLOR_GRAY, TextPackName::Text, STR_TURRETS_ON);
+        MapText::AddText(map, computer.Hex, COLOR_GRAY, TextPackName::Text, STR_TURRETS_ON);
     }
     else {
         TurretsTurnOff(map);
-        map.SetTextMsg(computer.HexX, computer.HexY, COLOR_GRAY, TextPackName::Text, STR_TURRETS_OFF);
+        MapText::AddText(map, computer.Hex, COLOR_GRAY, TextPackName::Text, STR_TURRETS_OFF);
     }
 
     return true;
@@ -99,7 +103,7 @@ bool s_Computer(Critter cr, StaticItem computer, Item item, int skill)
 // Turret functions
 void _TurretInit(Critter turret, bool firstTime)
 {
-    turret.OnIdle.Subscribe(_TurretIdle);
+    turret.StartTimeEvent(Time::Asap(), Time::Seconds(1), _TurretIdle);
     turret.OnCritterAppeared.Subscribe(_TurretShowCritter);
     turret.OnNpcPlaneBegin.Subscribe(_TurretBeginPlane);
     turret.IsUnlimitedAmmo = true;
@@ -112,7 +116,7 @@ void _TurretIdle(Critter turret)
 
 void _TurretShowCritter(Critter turret, Critter cr)
 {
-    if (cr.IsControlledByPlayer && IsTurretActive(turret)) {
+    if (cr.ControlledByPlayer && IsTurretActive(turret)) {
         EnemyStack::AddEnemyToStack(turret, cr.Id);
         NpcPlanes::AddAttackPlane(turret, 0, cr);
     }
@@ -126,4 +130,8 @@ bool _TurretBeginPlane(Critter turret, int planeId, int reason, Critter someCr, 
         return false;
     }
     return true;
+}
+
+#endif
+
 }

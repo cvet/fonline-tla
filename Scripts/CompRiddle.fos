@@ -1,13 +1,16 @@
-// FOS Server Sort 2
+namespace CompRiddle // Sort 2
+{
+
+#if SERVER
 
 // Скрипт взлома компьютеров
 // Генерится последовательность из 4 неповторяющихся цифр, игроку дается от 4 до 6 попыток угадать последовательность
 
-///@ Property Critter PrivateServer ident CompRiddleMapId // Переменная ид карты на которой стоит сценери
-///@ Property Critter PrivateServer uint CompRiddleHexX  // Переменная с координатой сценери по оси X
-///@ Property Critter PrivateServer uint CompRiddleHexY  // Переменная с координатой сценери по оси Y
+///@ Property Critter Server ident CompRiddleMapId Mutable Persistent // Переменная ид карты на которой стоит сценери
+///@ Property Critter Server int32 CompRiddleHexX Mutable Persistent // Переменная с координатой сценери по оси X
+///@ Property Critter Server int32 CompRiddleHexY Mutable Persistent // Переменная с координатой сценери по оси Y
 
-///@ Property Map PrivateServer uint=>uint8[] CompRiddleData
+///@ Property Map Server int32=>uint8[] CompRiddleData Mutable Persistent
 
 // Для взлома компьютера нужно правильно подобрать последовательность из 4 неповторяющихся цифр.\nСимвол "*" означает, что цифра присутствует в коде,
 // но неверно указано ее положение.\nСимвол "-" означает, что цифра не используется в коде.\nДо блокировки осталось@lex num@ попыток.
@@ -24,7 +27,7 @@
 #define TIME_RESET \
     (60 * 60 * 24) // 24 часа. После этого компьютер можно снова попробовать взломать - генерится новый код или удаляется запись, если карта не существует.
 
-uint MakeDataKey(uint16 hexX, uint16 hexY)
+int MakeDataKey(int hexX, int hexY)
 {
     return (hexX << 16) | hexY;
 }
@@ -32,18 +35,18 @@ uint MakeDataKey(uint16 hexX, uint16 hexY)
 ComputerRiddleInfo GetRiddleInfo(Critter player)
 {
     ident mapId = player.CompRiddleMapId;
-    uint hexX = player.CompRiddleHexX;
-    uint hexY = player.CompRiddleHexY;
+    int hexX = player.CompRiddleHexX;
+    int hexY = player.CompRiddleHexY;
     if (mapId == ZERO_IDENT || !valid(player.GetMap()) || mapId != player.GetMap().Id || hexY == 0 || hexY == 0 ||
-        Game.GetDistance(player.HexX, player.HexY, hexX, hexY) > 3) {
+        Game.GetDistance(player.Hex, mpos(hexX, hexY)) > 3) {
         return null;
     }
     return GetRiddleInfo(mapId, hexX, hexY);
 }
 
-ComputerRiddleInfo GetRiddleInfo(ident mapId, uint16 hexX, uint16 hexY)
+ComputerRiddleInfo GetRiddleInfo(ident mapId, int hexX, int hexY)
 {
-    uint key = MakeDataKey(hexX, hexY);
+    int key = MakeDataKey(hexX, hexY);
     uint8[] data = Game.GetMap(mapId).CompRiddleData.get(key, array<uint8>());
     if (data.length() > 0) {
         return ComputerRiddleInfo(mapId, hexX, hexY);
@@ -54,12 +57,12 @@ ComputerRiddleInfo GetRiddleInfo(ident mapId, uint16 hexX, uint16 hexY)
 class ComputerRiddleInfo
 {
     ident MapId;
-    uint16 HexX;
-    uint16 HexY;
-    uint[] Code = {};
-    uint8 TriesLeft;
+    int HexX;
+    int HexY;
+    int[] Code = {};
+    int TriesLeft;
 
-    ComputerRiddleInfo(ident mapId, uint16 hx, uint16 hy)
+    ComputerRiddleInfo(ident mapId, int hx, int hy)
     {
         MapId = mapId;
         HexX = hx;
@@ -70,15 +73,15 @@ class ComputerRiddleInfo
     ComputerRiddleInfo(Map map, StaticItem computer)
     {
         MapId = map.Id;
-        HexX = computer.HexX;
-        HexY = computer.HexY;
+        HexX = computer.Hex.x;
+        HexY = computer.Hex.y;
         Load();
     }
 
     string SCode()
     {
         string code = "";
-        for (uint i = 0, l = Code.length(); i < l; i++) {
+        for (int i = 0, l = Code.length(); i < l; i++) {
             code += Code[i];
         }
         return code;
@@ -93,9 +96,9 @@ class ComputerRiddleInfo
         save.Set(HexY);
         save.Set(Code);
         save.Set(TriesLeft);
-        uint key = MakeDataKey(HexX, HexY);
+        int key = MakeDataKey(HexX, HexY);
         Map map = Game.GetMap(MapId);
-        dict<uint, uint8[]> compRiddleData = map.CompRiddleData.clone();
+        dict<int, uint8[]> compRiddleData = map.CompRiddleData.clone();
         compRiddleData[key] = save.GetData();
         map.CompRiddleData = compRiddleData;
     }
@@ -103,7 +106,7 @@ class ComputerRiddleInfo
     void Load()
     {
         auto load = Serializator::Serializator();
-        uint key = MakeDataKey(HexX, HexY);
+        int key = MakeDataKey(HexX, HexY);
         if (load.SetData(Game.GetMap(MapId).CompRiddleData.get(key, array<uint8>())) > 0) {
             load.Get(MapId);
             load.Get(HexX);
@@ -115,23 +118,23 @@ class ComputerRiddleInfo
             GenerateCode();
             Save();
             any[] values = {MapId, HexX, HexY};
-            Game.SavedDeferredCall(GAME_SECOND_TO_TICK(TIME_RESET), ResetRiddle, values);
+            Game.StartTimeEvent(Tla::GameSeconds(TIME_RESET), ResetRiddle, values); //SavedDeferredCall
         }
     }
 
     void Erase()
     {
-        uint key = MakeDataKey(HexX, HexY);
+        int key = MakeDataKey(HexX, HexY);
         Map map = Game.GetMap(MapId);
-        dict<uint, uint8[]> compRiddleData = map.CompRiddleData.clone();
+        dict<int, uint8[]> compRiddleData = map.CompRiddleData.clone();
         compRiddleData.remove(key);
         map.CompRiddleData = compRiddleData;
     }
 
     void GenerateCode() // Генерирует новый код и сбрасывает число оставшихся попыток
     {
-        uint[] numbers = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9};
-        uint index = 0;
+        int[] numbers = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9};
+        int index = 0;
         Code.clear();
         while (Code.length() < MAX_CODE_LENGTH) {
             index = Game.Random(0, numbers.length() - 1);
@@ -149,7 +152,7 @@ class ComputerRiddleInfo
     bool TrySolveRiddle(Critter player, string codePlayer, string& codeAnswer)
     {
         if (TriesLeft < 1) {
-            player.SayMsg(SAY_NETMSG, TextPackName::Text, STR_BLOCKED);
+            Messaging::Info(player, TextPackName::Text, STR_BLOCKED);
             return false;
         }
         string charPlayer = "";
@@ -158,10 +161,10 @@ class ComputerRiddleInfo
         bool charFound = false;
         codeAnswer = "";
 
-        for (uint i = 0, l = codePlayer.length(); i < MAX_CODE_LENGTH && i < l; i++) {
+        for (int i = 0, l = codePlayer.length(); i < MAX_CODE_LENGTH && i < l; i++) {
             charFound = false;
             charPlayer = codePlayer[i];
-            for (uint j = 0, len = codeReal.length(); j < MAX_CODE_LENGTH && j < len && !charFound; j++) {
+            for (int j = 0, len = codeReal.length(); j < MAX_CODE_LENGTH && j < len && !charFound; j++) {
                 charReal = codeReal[j];
                 if (charReal == charPlayer) {
                     charFound = true;
@@ -177,7 +180,7 @@ class ComputerRiddleInfo
                 codeAnswer += "-";
             }
         }
-
+        Game.Log("tries " + TriesLeft);
         TriesLeft--;
         Save();
 
@@ -197,7 +200,7 @@ void ResetRiddle(any[] values)
         if (valid(Game.GetMap(ident(values[0])))) {
             riddle.GenerateCode();
             riddle.Save();
-            Game.SavedDeferredCall(GAME_SECOND_TO_TICK(TIME_RESET), ResetRiddle, values);
+            Game.StartTimeEvent(Tla::GameSeconds(TIME_RESET), ResetRiddle, values); //SavedDeferredCall
         }
         else {
             riddle.Erase();
@@ -205,7 +208,7 @@ void ResetRiddle(any[] values)
     }
 }
 
-bool s_Use(Critter player, StaticItem scenery, Item item, int skill)
+bool s_Use(Critter player, StaticItem scenery, Item item, any skill)
 {
     if (skill == int(CritterProperty::SkillScience) && !valid(item)) {
         CritterState::Wait(player, 1000);
@@ -216,18 +219,18 @@ bool s_Use(Critter player, StaticItem scenery, Item item, int skill)
         }
 
         if (info.TriesLeft == 0) {
-            player.SayMsg(SAY_NETMSG, TextPackName::Text, STR_BLOCKED);
+            Messaging::Info(player, TextPackName::Text, STR_BLOCKED);
             return true;
         }
-        player.SayMsg(SAY_NETMSG, TextPackName::Text, STR_INFO, "$num" + info.TriesLeft);
+        Messaging::Info(player, TextPackName::Text, STR_INFO, "$num" + info.TriesLeft);
 
         player.CompRiddleMapId = player.GetMap().Id;
-        player.CompRiddleHexX = scenery.HexX;
-        player.CompRiddleHexY = scenery.HexY;
+        player.CompRiddleHexX = scenery.Hex.x;
+        player.CompRiddleHexY = scenery.Hex.y;
         player.OnPlayerSaidTextFromScenery.Unsubscribe(AnswerTrySolveRiddle);
         player.OnPlayerSaidTextFromScenery.Subscribe(AnswerTrySolveRiddle);
         player.CanSendSay = true;
-        player.PlayerClientCall.ShowSayExtendedScreenFromScenery(STR_HEADER, STR_INPUTTEXT, scenery.ProtoId.uhash, scenery.HexX, scenery.HexY);
+        player.PlayerClientCall.ShowSayExtendedScreenFromScenery(STR_HEADER, STR_INPUTTEXT, scenery.ProtoId, scenery.Hex);
         /*
            //player.ShowScreen( ShowScreenModes::Say, 0, "answer_TrySolve" );
            player.SayMsg( Tla::SaySayTitle, TextPackName::Text, STR_HEADER );
@@ -238,7 +241,7 @@ bool s_Use(Critter player, StaticItem scenery, Item item, int skill)
     return false;
 }
 
-void AnswerTrySolveRiddle(Critter player, int sceneryPid, uint16 hexX, uint16 hexY, string text)
+void AnswerTrySolveRiddle(Critter player, hstring sceneryPid, mpos hex, string text)
 {
     player.OnPlayerSaidTextFromScenery.Unsubscribe(AnswerTrySolveRiddle);
     player.CanSendSay = false;
@@ -246,12 +249,12 @@ void AnswerTrySolveRiddle(Critter player, int sceneryPid, uint16 hexX, uint16 he
     if (valid(info)) {
         string code = "";
         bool solved = info.TrySolveRiddle(player, text, code);
-        player.SayMsg(SAY_NETMSG, TextPackName::Text, STR_ANSWER, "$pcode" + text + "$code" + code);
+        Messaging::Info(player, TextPackName::Text, STR_ANSWER, "$pcode" + text + "$code" + code);
         if (solved) {
-            player.SayMsg(SAY_NETMSG, TextPackName::Text, STR_SOLVED);
+            Messaging::Info(player, TextPackName::Text, STR_SOLVED);
             player.Experience += _GetXP(player);
-            player.SayMsg(SAY_NETMSG, TextPackName::Text, STR_CAMERA);
-            Game.DeferredCall(500, ShowCamera, player.Id);
+            Messaging::Info(player, TextPackName::Text, STR_CAMERA);
+            Game.StartTimeEvent(Time::Seconds(1), ShowCamera, player.Id);
         }
     }
 }
@@ -260,20 +263,24 @@ void ShowCamera(any value)
 {
     Critter cr = Game.GetCritter(value);
     if (valid(cr)) {
-        Location[] locations = Game.GetLocations(cr.WorldX, cr.WorldY, 300);
+        Location[] locations = Location::GetLocationsInRadius(ipos(cr.WorldPos.x, cr.WorldPos.y), 300);
         if (locations.length() > 0) {
             Location loc = locations[Game.Random(0, locations.length() - 1)];
             if (valid(loc)) {
                 Map map = loc.GetMapByIndex(0);
                 Game.Log("ViewMap");
                 if (valid(map)) {
-                    uint16 hx = 0, hy = 0;
-                    if (Entrance::MapGetEntryCoords(map, 0, 0, hx, hy)) {
+                    mpos hex;
+                    if (Entrance::MapGetEntryCoords(map, 0, 0, hex)) {
                         Game.Log("Entry founded");
-                        cr.ViewMap(map, 50, hx, hy, 5);
+                        cr.ViewMap(map, 50, hex, 5);
                     }
                 }
             }
         }
     }
+}
+
+#endif
+
 }

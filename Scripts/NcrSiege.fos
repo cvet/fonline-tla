@@ -1,9 +1,12 @@
-// FOS Server Sort 2
+namespace NcrSiege // Sort 2
+{
 
-///@ Property Critter Protected     uint8 NcrSiegeTerminate    Group = Quests Quest = 4263 Max = 3
-///@ Property Critter PrivateServer uint8 NcrSiegeKillsCounter Max = 10
+#if SERVER
 
-///@ Property Map PrivateServer uint NcrSiegeComplexity
+///@ Property Critter Common uint8 NcrSiegeTerminate Mutable OwnerSync Persistent Group = Quests Quest = 4263 Max = 3
+///@ Property Critter Server uint8 NcrSiegeKillsCounter Mutable Persistent Max = 10
+
+///@ Property Map Server int32 NcrSiegeComplexity Mutable Persistent
 
 #define RND_COORD_OFFSET \
     #(offset)(offset * Settings.GlobalMapZoneLength + \
@@ -20,7 +23,7 @@
 #define STR_SIEGE_MAP_ENTER   (2942) // сообщение на входе в карту для игрока
 
 #define SIEGE_CHANNEL         (0) // номер радиоканала, на котором вещает Элиза из нкр при начале и конце осады
-#define RMSG_NEXT             (60 * 60 * 12) // период между сообщениями Элизы, 12 игровых часов
+#define RMSG_NEXT             (Time::GameHours(12)) // период между сообщениями Элизы, 12 игровых часов
 
 #define NPC_ROLE_RAIDER       (17) // роль рядового рейдера
 
@@ -28,8 +31,8 @@
 #define Q_ST_COMPLETE         (2) // cтатус квеста - задание выполнено
 #define Q_ST_CLOSED           (3) // статус квеста - сдан
 
-#define FIRST_SIEGE_EVENT     (30 * 6 * DAY_TICKS(30)) // первая осада через 6 месяцев
-#define NEXT_SIEGE_EVENT      (30 * 6 * DAY_TICKS(30)) // первая осада через 6 месяцев
+#define FIRST_SIEGE_EVENT     (Time::GameDays(30 * 6)) // первая осада через 6 месяцев
+#define NEXT_SIEGE_EVENT      (Time::GameDays(30 * 6)) // первая осада через 6 месяцев
 
 #define START_COMPELIXITY     (1) // стартовая сложность осады
 #define MAX_COMPLEXITY        (6) // максимальная сложность осады
@@ -40,36 +43,36 @@
 // xOff, yOff - смешения относительно НКР по х и у - чтобы локации были в разных клетках вокруг города
 // pidCLoc - код прототипа случайной локации, вокруг которой будет размещена новая локация
 // pidNewLoc - прототип новой локации
-Location _GetSiegeCamp(int8 xOff, int8 yOff, hstring pidCLoc, hstring pidNewLoc)
+Location _GetSiegeCamp(int xOff, int yOff, hstring pidCLoc, hstring pidNewLoc)
 {
     Location locCenter = Game.GetLocation(pidCLoc); // локация центральная
     if (!valid(locCenter)) {
         return null;
     }
 
-    uint xGlobal = locCenter.WorldX + RND_COORD_OFFSET(xOff);
-    uint yGlobal = locCenter.WorldY + RND_COORD_OFFSET(yOff);
+    int xGlobal = locCenter.WorldPos.x + RND_COORD_OFFSET(xOff);
+    int yGlobal = locCenter.WorldPos.y + RND_COORD_OFFSET(yOff);
 
-    return Game.CreateLocation(pidNewLoc, xGlobal, yGlobal, null); // новая локация
+    return Location::CreateLocation(pidNewLoc, ipos(xGlobal, yGlobal), null); // новая локация
 }
 // объявление первой осады
 void DeclareSiegeEvent(Map map)
 {
     // value = сложность осады
-    Game.SavedDeferredCall(GAME_SECOND_TO_TICK(FIRST_SIEGE_EVENT), BeginSiege, START_COMPELIXITY);
+    Game.StartTimeEvent(FIRST_SIEGE_EVENT, BeginSiege, START_COMPELIXITY); //SavedDeferredCall
 }
 
 // начало осады
 void BeginSiege(any value)
 {
     // генерация локаций.
-    uint complexity = START_COMPELIXITY; // CLAMP(values[0], START_COMPELIXITY, MAX_COMPLEXITY);
+    int complexity = START_COMPELIXITY; // CLAMP(values[0], START_COMPELIXITY, MAX_COMPLEXITY);
     DL("ncr siege compl =" + complexity);
 
     // предыдущая осада закончилась
     if (Game.NCRSiegeCampsNum > 0) {
         DL("Previous Siege not ended");
-        Game.SavedDeferredCall(GAME_SECOND_TO_TICK(60 * 60 * 12), BeginSiege, value);
+        Game.StartTimeEvent(Tla::GameSeconds(60 * 60 * 12), BeginSiege, value); //SavedDeferredCall
         return;
     }
 
@@ -77,11 +80,11 @@ void BeginSiege(any value)
 
     DL("LocNum: " + Game.NCRSiegeCampsNum);
 
-    uint xOff = 0; // смещение относительно центра нкр по оси Х
-    uint yOff = 0; // по оси У
-    uint locNum = Game.NCRSiegeCampsNum;
+    int xOff = 0; // смещение относительно центра нкр по оси Х
+    int yOff = 0; // по оси У
+    int locNum = Game.NCRSiegeCampsNum;
 
-    for (uint i = 0; i < locNum; i++) {
+    for (int i = 0; i < locNum; i++) {
         while (xOff == 0 && yOff == 0) {
             yOff = Game.Random(-1, 1);
             xOff = Game.Random(-1, 1);
@@ -100,7 +103,7 @@ void BeginSiege(any value)
             loc.AutoGarbage = false;
             // loc.Color = COLOR_DDRED;
 
-            for (uint j = 0; j < loc.GetMapCount(); j++) {
+            for (int j = 0; j < loc.GetMapCount(); j++) {
                 Map map = loc.GetMapByIndex(j);
                 if (valid(map)) {
                     map.NcrSiegeComplexity = complexity;
@@ -118,10 +121,10 @@ void BeginSiege(any value)
 
     complexity++;
     // следующая осада
-    Game.SavedDeferredCall(GAME_SECOND_TO_TICK(NEXT_SIEGE_EVENT), BeginSiege, complexity);
-    Game.SavedDeferredCall(GAME_SECOND_TO_TICK(RMSG_NEXT), SayElizeRadio);
+    Game.StartTimeEvent(NEXT_SIEGE_EVENT, BeginSiege, complexity); //SavedDeferredCall
+    Game.StartTimeEvent(RMSG_NEXT, SayElizeRadio);                 //SavedDeferredCall
     // сообщение по радио от Элизы
-    Game.RadioMessageMsg(SIEGE_CHANNEL, TextPackName::Text, STR_BEGIN_SIEGE_RADIO);
+    Radio::SendChannelRadioMessage(SIEGE_CHANNEL, TextPackName::Text, STR_BEGIN_SIEGE_RADIO);
     // объявляем нападение на НКР
     NcrInvasion::DefineInvasionEvent();
 }
@@ -134,9 +137,9 @@ void SayElizeRadio()
     }
 
     // сообщение по радио от Элизы
-    Game.RadioMessageMsg(SIEGE_CHANNEL, TextPackName::Text, STR_BEGIN_SIEGE_RADIO);
+    Radio::SendChannelRadioMessage(SIEGE_CHANNEL, TextPackName::Text, STR_BEGIN_SIEGE_RADIO);
 
-    Game.SavedDeferredCall(GAME_SECOND_TO_TICK(RMSG_NEXT), SayElizeRadio);
+    Game.StartTimeEvent(RMSG_NEXT, SayElizeRadio); //SavedDeferredCall
 }
 
 // 21?8Teams::Bandit  Teams::Slaver
@@ -148,7 +151,7 @@ void _MapInit(Map map, bool firstTime)
     map.OnCritterIn.Subscribe(e_MapCritterIn);
 
     Critter[] critters = map.GetCritters(CritterFindType::Npc);
-    for (uint i = 0; i < critters.length(); i++) {
+    for (int i = 0; i < critters.length(); i++) {
         critters[i].SetupScript(_RaiderInit);
     }
 
@@ -160,7 +163,7 @@ void _MapInit(Map map, bool firstTime)
 void ActivateMines(Map map)
 {
     Item[] items = map.GetItems(Content::Item::active_mine);
-    for (uint i = 0; i < items.length(); i++) {
+    for (int i = 0; i < items.length(); i++) {
         items[i].SetupScript(_MineInit);
     }
 }
@@ -168,14 +171,14 @@ void ActivateMines(Map map)
 void _MineInit(Item item, bool firstTime)
 {
     Explode::_ExplodeInit(item, firstTime);
-    item.IsHidden = true;
+    item.Hidden = true;
 }
 
 // MAP_EVENT_IN_CRITTER
 void e_MapCritterIn(Map map, Critter cr)
 {
-    if (cr.IsControlledByPlayer) {
-        cr.SayMsg(SAY_NETMSG, TextPackName::Text, STR_SIEGE_MAP_ENTER);
+    if (cr.ControlledByPlayer) {
+        Messaging::Info(cr, TextPackName::Text, STR_SIEGE_MAP_ENTER);
     }
 }
 
@@ -209,7 +212,7 @@ void e_RaiderDead(Critter cr, Critter killer)
     }
 
     DL("all ok");
-    if (map.GetCritters(CritterProperty::NpcRole, NPC_ROLE_RAIDER, CritterFindType::AliveNpc).isEmpty()) {
+    if (map.GetCritters(CritterProperty::NpcRole, NPC_ROLE_RAIDER, CritterFindType::NonDeadNpc).isEmpty()) {
         DL("Все рейдеры мертвы");
         Location loc = map.GetLocation();
         if (valid(loc)) {
@@ -226,15 +229,15 @@ void e_RaiderDead(Critter cr, Critter killer)
         // он получает статус квеста "выполнено"
         Critter[] critters = map.GetCritters(CritterFindType::Players);
         DL("players: " + critters.length());
-        for (uint i = 0; i < critters.length(); i++) {
+        for (int i = 0; i < critters.length(); i++) {
             Critter critter = critters[i];
             DL("find player");
-            if (!critter.IsControlledByPlayer) {
+            if (!critter.ControlledByPlayer) {
                 continue;
             }
 
             if (critter.NcrSiegeTerminate == Q_ST_ACTIVE) {
-                critter.NcrSiegeTerminate = uint(Q_ST_COMPLETE);
+                critter.NcrSiegeTerminate = int(Q_ST_COMPLETE);
             }
         }
     }
@@ -243,7 +246,7 @@ void e_RaiderDead(Critter cr, Critter killer)
 // награда за убийство рейдеров
 void r_GrantPlayer(Critter player, Critter cr)
 {
-    uint counter = player.NcrSiegeKillsCounter;
+    int counter = player.NcrSiegeKillsCounter;
     if (counter > 9 || counter == 0) {
         return;
     }
@@ -268,4 +271,8 @@ void NewLoc(Critter cr, int p0, int p1, int p2)
         loc.AutoGarbage = false;
         loc.Color = COLOR_DDRED;
     }
+}
+
+#endif
+
 }

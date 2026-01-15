@@ -1,14 +1,70 @@
-// FOS Client Mapper
+namespace Animation
+{
+
+#if CLIENT || MAPPER
 
 void ModuleInit()
 {
-    Game.OnCritterAnimation.Subscribe(OnCritterAnimation);
+    Game.OnCritterAnimationInit.Subscribe(OnCritterAnimationInit);
+    Game.OnCritterAnimationProcess.Subscribe(OnCritterAnimationProcess);
+    Game.OnCritterAnimationFrames.Subscribe(OnCritterAnimationFrames);
     Game.OnCritterAnimationSubstitute.Subscribe(OnCritterAnimationSubstitute);
     Game.OnCritterAnimationFallout.Subscribe(OnCritterAnimationFallout);
 }
 
-void OnCritterAnimation(hstring modelName, CritterStateAnim stateAnim, CritterActionAnim actionAnim, uint& pass, uint& flags, int& ox, int& oy,
-                        string& animation)
+CritterStateAnim GetStateAnim(Critter cr)
+{
+    if (cr.Condition == CritterCondition::Alive) {
+        AbstractItem activeItem = CritterItem::GetActive(cr);
+        return activeItem.Type == ItemType::Weapon ? activeItem.Weapon_StateAnim : CritterStateAnim::Unarmed;
+    }
+
+    return CritterStateAnim::Unarmed;
+}
+
+CritterActionAnim GetIdleActionAnim(Critter cr)
+{
+    if (cr.Condition == CritterCondition::Alive) {
+        return CritterActionAnim::Idle;
+    }
+    else if (cr.Condition == CritterCondition::Knockout) {
+        return cr.KnockoutActionAnim != CritterActionAnim::None ? cr.KnockoutActionAnim : CritterActionAnim::IdleProneFront;
+    }
+    else if (cr.Condition == CritterCondition::Dead) {
+        return cr.DeadActionAnim != CritterActionAnim::None ? cr.DeadActionAnim : CritterActionAnim::DeadFront;
+    }
+
+    ThrowException("Invalid critter condition", cr.Condition);
+    return CritterActionAnim::Idle;
+}
+
+void OnCritterAnimationInit(Critter cr, CritterStateAnim& stateAnim, CritterActionAnim& actionAnim, AbstractItem contextItem)
+{
+    if (stateAnim == CritterStateAnim::None) {
+        if (contextItem != null) {
+            stateAnim = contextItem.Type == ItemType::Weapon ? contextItem.Weapon_StateAnim : CritterStateAnim::Unarmed;
+        }
+        else {
+            stateAnim = GetStateAnim(cr);
+        }
+    }
+
+    if (actionAnim == CritterActionAnim::None) {
+        actionAnim = GetIdleActionAnim(cr);
+    }
+}
+
+void OnCritterAnimationProcess(Critter cr, CritterStateAnim stateAnim, CritterActionAnim actionAnim, AbstractItem contextItem, bool refreshAnim)
+{
+#if CLIENT
+    if (!refreshAnim) {
+        PlayAnimSound(cr.ModelName, cr.Gender, stateAnim, actionAnim);
+    }
+#endif
+}
+
+void OnCritterAnimationFrames(hstring modelName, CritterStateAnim stateAnim, CritterActionAnim actionAnim, int& pass, uint& flags, int& ox, int& oy,
+                              string& animation)
 {
     if (modelName == CRTYPE_TACTICS_RHUMANOID) {
         animation = ProcessTactics(modelName, stateAnim, actionAnim, pass, flags, ox, oy);
@@ -17,7 +73,7 @@ void OnCritterAnimation(hstring modelName, CritterStateAnim stateAnim, CritterAc
     animation = ""; // ProcessTactics("Rhumanoid", stateAnim, actionAnim, pass, flags, ox, oy);
 }
 
-string ProcessTactics(string crTypeName, uint stateAnim, uint actionAnim, uint& pass, uint& flags, int& ox, int& oy)
+string ProcessTactics(string crTypeName, int stateAnim, int actionAnim, int& pass, uint& flags, int& ox, int& oy)
 {
     // Todo: Implement overlays
 
@@ -87,9 +143,9 @@ string ProcessTactics(string crTypeName, uint stateAnim, uint actionAnim, uint& 
         "0,0,0"        // 15 ...
     };
 
-    uint skinColor = (stateAnim >> 20) & 0xF;
-    uint hairColor = (stateAnim >> 24) & 0xF;
-    uint armorColor = (stateAnim >> 28) & 0xF;
+    int skinColor = (stateAnim >> 20) & 0xF;
+    int hairColor = (stateAnim >> 24) & 0xF;
+    int armorColor = (stateAnim >> 28) & 0xF;
 
     if (skinColor != 0) {
         animName += "[1," + colorOffsets[skinColor] + "]";
@@ -717,8 +773,8 @@ bool OnCritterAnimationSubstitute(hstring modelNameBase, CritterStateAnim stateA
 }
 
 // Convert from common to fallout specific
-bool OnCritterAnimationFallout(hstring modelName, CritterStateAnim stateAnim, CritterActionAnim actionAnim, uint& fStateAnim, uint& fActionAnim,
-                               uint& fStateAnimEx, uint& fActionAnimEx, uint& flags)
+bool OnCritterAnimationFallout(hstring modelName, CritterStateAnim stateAnim, CritterActionAnim actionAnim, int& fStateAnim, int& fActionAnim,
+                               int& fStateAnimEx, int& fActionAnimEx, uint& flags)
 {
     // Still only weapon
     stateAnim = CritterStateAnim(stateAnim & STATE_ANIM_WEAPON_MASK);
@@ -1049,7 +1105,10 @@ bool OnCritterAnimationFallout(hstring modelName, CritterStateAnim stateAnim, Cr
     return true;
 }
 
-#ifdef __CLIENT
+#endif
+
+#if CLIENT
+
 void PlayAnimSound(hstring modelName, int gender, CritterStateAnim stateAnim, CritterActionAnim actionAnim)
 {
     if (actionAnim == CritterActionAnim::Walk || actionAnim == CritterActionAnim::Limp || actionAnim == CritterActionAnim::Run ||
@@ -1064,7 +1123,8 @@ void PlayAnimSound(hstring modelName, int gender, CritterStateAnim stateAnim, Cr
     }
 
     // Convert indicies to fallout specific
-    uint fStateAnim = 0, fActionAnim = 0, fStateAnimEx = 0, fActionAnimEx = 0, fFlags = 0;
+    int fStateAnim = 0, fActionAnim = 0, fStateAnimEx = 0, fActionAnimEx = 0;
+    uint fFlags = 0;
     if (!OnCritterAnimationFallout(modelName, stateAnim, actionAnim, fStateAnim, fActionAnim, fStateAnimEx, fActionAnimEx, fFlags) || fFlags != 0) {
         return;
     }
@@ -1091,7 +1151,7 @@ void PlayAnimSound(hstring modelName, int gender, CritterStateAnim stateAnim, Cr
     // Find substitutes for humans
     if (sound[0] == "h") {
         // Try find by mask (hmxxxxab)
-        for (uint i = 2, j = modelNameSound.length(); i < j; i++) {
+        for (int i = 2, j = modelNameSound.length(); i < j; i++) {
             sound[i] = "x";
         }
         if (Game.PlaySound(sound)) {
@@ -1107,4 +1167,7 @@ void PlayAnimSound(hstring modelName, int gender, CritterStateAnim stateAnim, Cr
         }
     }
 }
+
 #endif
+
+}

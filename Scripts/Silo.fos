@@ -1,27 +1,31 @@
-// FOS Server Sort 2
+namespace Silo // Sort 2
+{
+
+#if SERVER
+
 // Author: rifleman17
 // Квест "Рискованное дельце"
 
-///@ Property Critter Protected uint8 BHRocketBase Group = Quests Quest = 3610 Max = 5
+///@ Property Critter Common uint8 BHRocketBase Mutable OwnerSync Persistent Group = Quests Quest = 3610 Max = 5
 
-///@ Property Location PrivateServer uint8 SiloMissileLaunched Max = 2
+///@ Property Location Server uint8 SiloMissileLaunched Mutable Persistent Max = 2
 
-///@ Property Game PrivateServer uint MissilesCanada
-///@ Property Game PrivateServer uint MissilesKishinev
-///@ Property Game PrivateServer uint MissilesBaku
-///@ Property Game PrivateServer uint MissilesTokio
-///@ Property Game PrivateServer uint MissilesEburg
-///@ Property Game PrivateServer uint MissilesVladik
-///@ Property Game PrivateServer uint MissilesRay
-///@ Property Game PrivateServer uint MissilesFukusima
+///@ Property Game Server int32 MissilesCanada Mutable Persistent
+///@ Property Game Server int32 MissilesKishinev Mutable Persistent
+///@ Property Game Server int32 MissilesBaku Mutable Persistent
+///@ Property Game Server int32 MissilesTokio Mutable Persistent
+///@ Property Game Server int32 MissilesEburg Mutable Persistent
+///@ Property Game Server int32 MissilesVladik Mutable Persistent
+///@ Property Game Server int32 MissilesRay Mutable Persistent
+///@ Property Game Server int32 MissilesFukusima Mutable Persistent
 
 #define ROLE (12)
 
 void r_Attack(Critter player, Critter npc)
 {
     Map map = player.GetMap();
-    Critter[] aliveNpc = map.GetCritters(CritterProperty::NpcRole, ROLE, CritterFindType::AliveNpc);
-    for (uint i = 0; i < aliveNpc.length(); i++) {
+    Critter[] aliveNpc = map.GetCritters(CritterProperty::NpcRole, ROLE, CritterFindType::NonDeadNpc);
+    for (int i = 0; i < aliveNpc.length(); i++) {
         NpcPlanes::AddAttackPlane(aliveNpc[i], 0, player);
     }
 }
@@ -33,16 +37,16 @@ void _HoloInit(Item item, bool firstTime)
     item.OnCritterUse.Subscribe(_HoloUse);
 }
 
-bool _HoloUse(Item item, Critter cr, uint param)
+bool _HoloUse(Item item, Critter cr, int param)
 {
     if (cr.BHRocketBase > 1 && cr.BHRocketBase < 4) {
         cr.BHRocketBase = 4;
         Game.DestroyItem(item);
         cr.Experience += 5000;
-        Location loc = Game.CreateLocation(Content::Location::silo_base,
-                                           829 + Game.Random(-1 * int(Settings.GlobalMapZoneLength), int(Settings.GlobalMapZoneLength)),
-                                           720 + Game.Random(-1 * int(Settings.GlobalMapZoneLength), int(Settings.GlobalMapZoneLength)),
-                                           null);
+        Location loc = Location::CreateLocation(Content::Location::silo_base,
+                                                ipos(829 + Game.Random(-1 * int(Settings.GlobalMapZoneLength), int(Settings.GlobalMapZoneLength)),
+                                                     720 + Game.Random(-1 * int(Settings.GlobalMapZoneLength), int(Settings.GlobalMapZoneLength))),
+                                                null);
         if (loc != null) {
             Location::SetKnownLoc(cr, loc);
         }
@@ -58,14 +62,14 @@ void _AmbushInit(Map map, bool firstTime)
 
 void _AmbushInCritter(Map map, Critter cr)
 {
-    if (cr.IsControlledByPlayer) {
+    if (cr.ControlledByPlayer) {
         map.GetLocation().AutoGarbage = true;
     }
 }
 
 void _AmbushDead(Map map, Critter cr, Critter killer)
 {
-    if (map.GetCritters(CritterProperty::NpcRole, ROLE, CritterFindType::AliveNpc).isEmpty()) {
+    if (map.GetCritters(CritterProperty::NpcRole, ROLE, CritterFindType::NonDeadNpc).isEmpty()) {
         map.GetLocation().AutoGarbage = true;
     }
 }
@@ -82,7 +86,7 @@ void _BlockedDoorInit(Item item, bool firstTime)
 
 bool _DoorSkill(Item item, Critter cr, CritterProperty skilly)
 {
-    cr.SayMsg(SAY_NETMSG, TextPackName::Text, 7110);
+    Messaging::Info(cr, TextPackName::Text, 7110);
     return true;
 }
 
@@ -94,10 +98,10 @@ void t_Transit(Critter player, StaticItem trigger, bool entered, uint8 dir)
     }
 
     int entry = trigger.SceneryParams[0].hash;
-    uint idx = (loc.SiloMissileLaunched == 2 ? 3 : 2);
+    int idx = (loc.SiloMissileLaunched == 2 ? 3 : 2);
     Map map = loc.GetMapByIndex(idx);
     if (valid(map)) {
-        Obsolete::CritterTransitToMapEntry(player, map.Id, HASHI(entry));
+        Entrance::CritterTransferToMapEntry(player, map.Id, HASHI(entry));
     }
 }
 
@@ -107,17 +111,17 @@ void r_Launch(Critter player, Critter npc)
     Location loc = map.GetLocation();
     Map mapFrom = loc.GetMapByIndex(2);
     Map mapTo = loc.GetMapByIndex(3);
-    map.PlaySound("AIRSIREN.OGG");
-    mapFrom.PlaySound("AIRSIREN.OGG");
+    Effects::PlaySound(map, "AIRSIREN.OGG");
+    Effects::PlaySound(mapFrom, "AIRSIREN.OGG");
     Critter[] critters = mapFrom.GetCritters(CritterFindType::Any);
-    Effects::QuakeScreen(mapFrom, 50, 1000);
-    for (uint i = 0; i < critters.length(); i++) {
+    Effects::QuakeScreen(mapFrom, 50, Time::Seconds(1));
+    for (int i = 0; i < critters.length(); i++) {
         Critter cr = critters[i];
-        Effects::FlushScreen(cr, COLOR_BLACK, COLOR_BLACK, 5000);
-        Obsolete::CritterTransitToMapCoords(cr, mapTo.Id, cr.HexX, cr.HexY, cr.Dir);
+        Effects::FadeScreen(cr, COLOR_BLACK, COLOR_BLACK, Time::Seconds(5));
+        cr.TransferToMap(mapTo, cr.Hex, cr.Dir);
     }
-    Effects::QuakeScreen(mapTo, 50, 2000);
-    Effects::QuakeScreen(map, 50, 3000);
+    Effects::QuakeScreen(mapTo, 50, Time::Seconds(2));
+    Effects::QuakeScreen(map, 50, Time::Seconds(3));
 }
 
 void dlg_Stat(Critter player, Critter npc, string& lexems)
@@ -125,7 +129,7 @@ void dlg_Stat(Critter player, Critter npc, string& lexems)
     if (IS_DIALOG_END(lexems) or IS_DIALOG_SAY_MODE(lexems)) {
         return;
     }
-    lexems = "$when" + Time::DateTimeToString(Game.GetFullSecond());
+    lexems = "$when" + GameTime::SynchronizedTimeToString(Game.SynchronizedTime);
     lexems += "$canada" + Game.MissilesCanada;
     lexems += "$kishinev" + Game.MissilesKishinev;
     lexems += "$baku" + Game.MissilesBaku;
@@ -148,3 +152,7 @@ void dlg_Stat(Critter player, Critter npc, string& lexems)
    Райчихинск: lex ray.
    Фукусима: lex fukusima.
  */
+
+#endif
+
+}

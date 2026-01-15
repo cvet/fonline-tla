@@ -1,16 +1,19 @@
-// FOS Server
+namespace FighterQuest
+{
+
+#if SERVER
 
 // Author rifleman17
 // Специальный класс для реализации квестов на рукопашный или другой бой с НПЦ
 // только с одним игроком. Cмерть нпц засчитывается победой игрока
 
-///@ Property Critter PrivateServer int   FighterQuestMinHp
-///@ Property Critter PrivateServer uint8 FighterQuestOnlyHandCombat
-///@ Property Critter PrivateServer uint  FighterQuestTeamIdOld
-///@ Property Critter PrivateServer uint  FighterQuestTeamIdFight
-///@ Property Critter PrivateServer ident FighterQuestPlayerId
-///@ Property Critter PrivateServer uint  FighterQuestFightPriority
-///@ Property Critter PrivateServer uint  FighterQuestVarNum
+///@ Property Critter Server int32 FighterQuestMinHp Mutable Persistent
+///@ Property Critter Server uint8 FighterQuestOnlyHandCombat Mutable Persistent
+///@ Property Critter Server int32 FighterQuestTeamIdOld Mutable Persistent
+///@ Property Critter Server int32 FighterQuestTeamIdFight Mutable Persistent
+///@ Property Critter Server ident FighterQuestPlayerId Mutable Persistent
+///@ Property Critter Server int32 FighterQuestFightPriority Mutable Persistent
+///@ Property Critter Server int32 FighterQuestVarNum Mutable Persistent
 
 #define STR_FIGHT_BEGIN (5910) // Начат поединок c @lex npcname@. Удачи!
 #define STR_FIGHT_WIN   (5911) // Вы победили в поединке с @lex npcname@. Поздравляем. Прекратите атаку, иначе вас не поймут окружающие.
@@ -46,7 +49,7 @@ class FighterQuest
     }
 
     int MinHp;              // Минимальное число хп, при котором бой останавливается
-    uint8 OnlyHandCombat;   // Признак - только рукопашный бой
+    int OnlyHandCombat;     // Признак - только рукопашный бой
     int TeamIdOld;          // Номер команды НПЦ до боя
     int TeamIdFight;        // Номер команды НПЦ во время боя
     ident NpcId;            // Id нпц
@@ -69,7 +72,7 @@ class FighterQuest
         cr.FighterQuestTeamIdFight = TeamIdFight;
         cr.FighterQuestPlayerId = PlayerId;
         cr.FighterQuestFightPriority = FightPriority;
-        cr.FighterQuestVarNum = uint(VarNum);
+        cr.FighterQuestVarNum = int(VarNum);
         cr.OnAttacked.Subscribe(_FighterAttacked);
         cr.OnAttack.Subscribe(_FighterAttack);
         cr.OnDead.Subscribe(_FighterDead);
@@ -132,7 +135,7 @@ class FighterQuest
         npc.TeamId = TeamIdFight;
         NpcPlanes::AddAttackPlane(npc, FightPriority, player, MinHp);
         string lex = "$npcname@text Dialogs " + STR_NPC_NAME(npc.DialogId, npc.ProtoId) + "@";
-        player.SayMsg(SAY_NETMSG, TextPackName::Text, STR_FIGHT_BEGIN, lex);
+        Messaging::Info(player, TextPackName::Text, STR_FIGHT_BEGIN, lex);
     }
 
     void SetFighterDead()
@@ -141,7 +144,7 @@ class FighterQuest
             Critter cr = Game.GetCritter(PlayerId);
             if (valid(cr)) {
                 cr.SetAsInt(VarNum, STATUS_DEAD);
-                cr.SayMsg(SAY_NETMSG, TextPackName::Text, STR_FIGHT_DEAD);
+                Messaging::Info(cr, TextPackName::Text, STR_FIGHT_DEAD);
             }
         }
         CancelFigther();
@@ -160,9 +163,9 @@ class FighterQuest
                 cr.SetAsInt(VarNum, STATUS_WIN);
                 CritterState::Wait(cr, 0);
 
-                cr.SayMsg(SAY_NETMSG, TextPackName::Text, STR_FIGHT_WIN, lex);
+                Messaging::Info(cr, TextPackName::Text, STR_FIGHT_WIN, lex);
                 /*
-                   //cr.ShowScreen( CLIENT_SCREEN_DIALOGBOX, 0, "answer_None" );
+                   //cr.ShowScreen( GuiScreen::DialogBox, 0, "answer_None" );
                    cr.SayMsg( Tla::SayDialogboxText, TextPackName::Text, STR_FIGHT_WIN, lex );
                  */
             }
@@ -185,7 +188,7 @@ class FighterQuest
             Critter cr = Game.GetCritter(PlayerId);
             if (valid(cr)) {
                 cr.SetAsInt(VarNum, STATUS_LOOSE);
-                cr.SayMsg(SAY_NETMSG, TextPackName::Text, STR_FIGHT_LOOSE, lex);
+                Messaging::Info(cr, TextPackName::Text, STR_FIGHT_LOOSE, lex);
             }
         }
         CancelFigther();
@@ -206,9 +209,9 @@ class FighterQuest
     }
 };
 
-bool _FighterAttack(Critter cr, Critter target, Item weapon, uint8 weaponMode, ProtoItem ammo)
+bool _FighterAttack(Critter cr, Critter target, Item weapon, int weaponMode, ProtoItem ammo)
 {
-    Game.DeferredCall(0, CheckHealth, cr.Id);
+    Game.StartTimeEvent(ZERO_TIMESPAN, CheckHealth, cr.Id);
     return false;
 }
 
@@ -218,13 +221,13 @@ bool _FighterAttacked(Critter cr, Critter attacker)
     fq.FromCritter(cr);
     if (valid(fq)) {
         if (!fq.IsFairAttacker()) {
-            cr.SayMsg(SAY_SHOUT, TextPackName::Text, STR_USE_WEAPON);
+            Messaging::SayShout(cr, TextPackName::Text, STR_USE_WEAPON);
             fq.SetPlayerLoose();
             NpcPlanes::AddAttackPlane(cr, 0, attacker);
             return true;
         }
     }
-    Game.DeferredCall(0, CheckHealth, cr.Id);
+    Game.StartTimeEvent(ZERO_TIMESPAN, CheckHealth, cr.Id);
     return false;
 }
 
@@ -280,7 +283,11 @@ void r_BeginFight(Critter player, Critter npc, int newTeam, int hpPercent, int h
     fq.StartFight();
 }
 
-void answer_None(Critter player, uint answerI, string answerS)
+void answer_None(Critter player, int answerI, string answerS)
 {
     // заглушка для диалогового окна
+}
+
+#endif
+
 }

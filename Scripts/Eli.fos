@@ -1,11 +1,15 @@
-// FOS Server
+namespace Eli
+{
+
+#if SERVER
+
 // Author rifleman17
 // Странствующий путник, Илай.
 // Может брать с собой одного игрока в качестве спутника
 // Если путника убьет персонаж, у которого есть база, после этого Илай отведет следующего игрока на базу убийцы.
 // не надо ставить его в СФ, иначе не выберется
 
-///@ Property Critter PrivateServer uint EliTimeNextSing
+///@ Property Critter Server synctime EliTimeNextSing Mutable Persistent
 
 #define CTE_HEALSELF  (41)
 #define STR_ATTACKED  (1)
@@ -32,7 +36,7 @@ void _EliInit(Critter cr, bool firstTime)
     cr.IntellectBase = Game.Random(8, 10);
     cr.AgilityBase = Game.Random(8, 10);
     cr.LuckBase = Game.Random(8, 10);
-    for (uint i = 0; i < CritterPropertyGroup::ResistsBase.length(); i++) {
+    for (int i = 0; i < CritterPropertyGroup::ResistsBase.length(); i++) {
         if (CritterPropertyGroup::ResistsBase[i] != CritterProperty::EmpResistanceBase) {
             cr.SetAsInt(CritterPropertyGroup::ResistsBase[i], Game.Random(200, 280));
         }
@@ -47,7 +51,7 @@ void _EliInit(Critter cr, bool firstTime)
     cr.IsNoSteal = true;
     cr.IsNoBarter = true;
     cr.HealingRateBase = 100;
-    for (uint i = 0; i < CritterPropertyGroup::Skills.length(); i++) {
+    for (int i = 0; i < CritterPropertyGroup::Skills.length(); i++) {
         cr.SetAsInt(CritterPropertyGroup::Skills[i], Game.Random(100, 300));
     }
     cr.SkillOutdoorsman = 50;
@@ -68,11 +72,11 @@ void _EliInit(Critter cr, bool firstTime)
         Content::Location::geck_city,
     };
 
-    Traveller::SetTraveller(cr.Id, false, 0, 60 * 60 * 24, 60 * 60 * 2, locPids, true);
+    Traveller::SetTraveller(cr.Id, false, 0, Time::GameDays(1), Time::GameHours(2), locPids, true);
     cr.OnAttacked.Subscribe(_EliAttacked);
     cr.OnNpcPlaneBegin.Subscribe(_EliPlaneBegin);
     cr.OnNpcPlaneEnd.Subscribe(_EliPlaneEnd);
-    cr.OnIdle.Subscribe(_EliIdle);
+    cr.StartTimeEvent(Time::Asap(), Time::Seconds(1), _EliIdle);
     cr.OnSomeCritterDead.Subscribe(_EliSmthDead);
     cr.OnAttack.Subscribe(_EliAttack);
 }
@@ -84,17 +88,17 @@ bool _EliPlaneEnd(Critter cr, int planeId, int reason, Critter someCr, Item some
     if (plane.Identifier == PLANE_LOOT && reason == REASON_SUCCESS) {
         _CritAnimatePickUp(cr);
         if (Game.Random(1, 3) < 2) {
-            cr.SayMsg(SAY_NORM, TextPackName::Dialogs, DLGSTR(cr.DialogId, STR_PICK));
+            Messaging::Say(cr, TextPackName::Dialogs, DLGSTR(cr.DialogId, STR_PICK));
         }
-        NpcPlanes::AddMiscPlane(cr, AI_PLANE_ATTACK_PRIORITY - 2, 2 * Settings.TimeMultiplier, null);
+        NpcPlanes::AddMiscPlane(cr, AI_PLANE_ATTACK_PRIORITY - 2, Game.SynchronizedTime + Time::Seconds(2), null);
     }
     return true;
 }
 
-bool _EliAttack(Critter cr, Critter target, Item weapon, uint8 weaponMode, ProtoItem ammo)
+bool _EliAttack(Critter cr, Critter target, Item weapon, int weaponMode, ProtoItem ammo)
 {
     if (Game.Random(1, 10) < 2) {
-        cr.SayMsg(SAY_NORM, TextPackName::Dialogs, DLGSTR(cr.DialogId, STR_ATTACK));
+        Messaging::Say(cr, TextPackName::Dialogs, DLGSTR(cr.DialogId, STR_ATTACK));
     }
     return false;
 }
@@ -102,34 +106,34 @@ bool _EliAttack(Critter cr, Critter target, Item weapon, uint8 weaponMode, Proto
 void _EliSmthDead(Critter cr, Critter fromCr, Critter killer)
 {
     if (valid(killer) && killer.Id == cr.Id) {
-        cr.SayMsg(SAY_NORM, TextPackName::Dialogs, DLGSTR(cr.DialogId, STR_KILL));
-        NpcPlanes::AddWalkPlane(cr, 0, PLANE_LOOT, fromCr.Id, fromCr.HexX, fromCr.HexY, 6, false, 1);
+        Messaging::Say(cr, TextPackName::Dialogs, DLGSTR(cr.DialogId, STR_KILL));
+        NpcPlanes::AddWalkPlane(cr, 0, PLANE_LOOT, fromCr.Id, fromCr.Hex, 6, false, 1);
     }
 }
 
 void _EliIdle(Critter cr)
 {
     if (!valid(cr.GetMap()) || !NpcPlanes::IsNoPlanes(cr)) {
-        if (cr.EliTimeNextSing > 0) {
-            cr.EliTimeNextSing = 0;
+        if (cr.EliTimeNextSing != ZERO_SYNCTIME) {
+            cr.EliTimeNextSing = ZERO_SYNCTIME;
         }
         return;
     }
     // Сохраняется время следующей песни в EliTimeNextSing
-    if (Game.GetFullSecond() >= cr.EliTimeNextSing) {
-        if (cr.EliTimeNextSing > 0) {
+    if (Game.SynchronizedTime >= cr.EliTimeNextSing) {
+        if (cr.EliTimeNextSing != ZERO_SYNCTIME) {
             DL("sing!");
             Sing(cr);
         }
-        cr.EliTimeNextSing = Game.GetFullSecond() + Time::RealMinute(5); // раз в 5 реальных минут
+        cr.EliTimeNextSing = Game.SynchronizedTime + Time::Minutes(5); // раз в 5 реальных минут
     }
 }
 
 void Sing(Critter cr)
 {
-    uint8 song = Game.Random(1, 4);
-    uint16 firstStr = 0;
-    uint16 lastStr = 0;
+    int song = Game.Random(1, 4);
+    int firstStr = 0;
+    int lastStr = 0;
     switch (song) {
     case 1:
         firstStr = 5973;
@@ -150,7 +154,7 @@ void Sing(Critter cr)
     default:
         return;
     }
-    Monologue::SetMonologue(cr, firstStr, lastStr, 4 * Settings.TimeMultiplier, 0, SAY_EMOTE_ON_HEAD);
+    Monologue::SetMonologue(cr, firstStr, lastStr, Time::Seconds(4), ZERO_TIMESPAN, SayType::Emote);
 }
 
 // CRITTER_EVENT_PLANE_BEGIN
@@ -165,26 +169,26 @@ bool _EliPlaneBegin(Critter cr, int planeId, int reason, Critter someCr, Item so
 bool _EliAttacked(Critter cr, Critter attacker)
 {
     if (Game.Random(1, 10) < 3) {
-        cr.SayMsg(SAY_NORM, TextPackName::Dialogs, DLGSTR(cr.DialogId, STR_ATTACKED));
+        Messaging::Say(cr, TextPackName::Dialogs, DLGSTR(cr.DialogId, STR_ATTACKED));
     }
-    if (cr.GetTimeEvents(CTE_HEALSELF) == 0) {
-        cr.AddTimeEvent(cte_HealSelf, 0, CTE_HEALSELF);
+    if (cr.CountTimeEvent(cte_HealSelf) == 0) {
+        cr.StartTimeEvent(ZERO_TIMESPAN, cte_HealSelf);
     }
     return false;
 }
 
 // Поиск новой точки маршрута нпц, производится при заходе в локацию
-uint cte_HealSelf(Critter cr, any identifier, uint& rate)
+void cte_HealSelf(Critter cr)
 {
     cr.CurrentHp += 50;
     if (cr.CurrentHp * 2 > cr.MaxLife) {
-        return 0;
+        return;
     }
     Item drug = cr.AddItem(Content::Item::super_stimpak, 1);
     if (valid(drug)) {
         Drugs::UseDrug(cr, drug);
     }
-    return 0;
+    return;
 }
 
 // Debug
@@ -195,15 +199,15 @@ void WhereEli(Critter cr, int, int, int)
     }
     Critter eli = Game.GetCritter(EliId);
     if (!valid(eli)) {
-        cr.Say(SAY_NETMSG, "Eli can't be found");
+        Messaging::Info(cr, "Eli can't be found");
         return;
     }
     Map map = eli.GetMap();
     if (!valid(map)) {
-        cr.Say(SAY_NETMSG, "Eli on global. X:" + eli.WorldX + "; Y:" + eli.WorldY);
+        Messaging::Info(cr, "Eli on global. X:" + eli.WorldPos.x + "; Y:" + eli.WorldPos.y);
         return;
     }
-    cr.Say(SAY_NETMSG, "Eli found. MapPid = " + map.ProtoId + "; Id =" + map.Id);
+    Messaging::Info(cr, "Eli found. MapPid = " + map.ProtoId + "; Id =" + map.Id);
 }
 
 // ~getaccess admin hh
@@ -215,10 +219,14 @@ void AddEli(Critter cr, int, int, int)
 {
     Map map = cr.GetMap();
     if (!valid(map)) {
-        cr.Say(SAY_NETMSG, "Can't add Eli on global.");
+        Messaging::Info(cr, "Can't add Eli on global.");
         return;
     }
     int[] props = {CritterProperty::DialogId, Content::Dialog::eli.hash, CritterProperty::BagId, Bags::Eli, CritterProperty::ReplicationTime, -1};
-    Critter npc = map.AddNpc(Content::Critter::Eli, cr.HexX + 1, cr.HexY + 1, 6, Tla::GetCritPropsDict(props));
+    Critter npc = map.AddCritter(Content::Critter::Eli, mpos(cr.Hex.x + 1, cr.Hex.y + 1), 6, Tla::GetCritPropsDict(props));
     npc.SetupScript(_EliInit);
+}
+
+#endif
+
 }

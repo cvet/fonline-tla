@@ -1,14 +1,18 @@
-// FOS Server
+namespace NcrSmit
+{
+
+#if SERVER
+
 // Author: rifleman17
 
-///@ Property Critter PrivateServer uint NcrSmitVsVestinStatus Max = 6
-///@ Property Critter PrivateServer uint NcrSmitStringNum
-///@ Property Critter PrivateServer uint NcrSmitGateStringNum
-///@ Property Critter PrivateServer ident NcrSmitPlayerId
-///@ Property Critter PrivateServer uint NcrSmitIdleCount
+///@ Property Critter Server int32 NcrSmitVsVestinStatus Mutable Persistent Max = 6
+///@ Property Critter Server int32 NcrSmitStringNum Mutable Persistent
+///@ Property Critter Server int32 NcrSmitGateStringNum Mutable Persistent
+///@ Property Critter Server ident NcrSmitPlayerId Mutable Persistent
+///@ Property Critter Server int32 NcrSmitIdleCount Mutable Persistent
 
-///@ Property Game PrivateServer uint8 NcrSmitPosition Max = 12
-///@ Property Game PrivateServer bool  NcrSmitGateGuardAccessGranted
+///@ Property Game Server uint8 NcrSmitPosition Mutable Persistent Max = 12
+///@ Property Game Server bool NcrSmitGateGuardAccessGranted Mutable Persistent
 
 // положение Смита
 #define S_POS_BAZAAR_HOME    (0) // в исходной точке на Базаре
@@ -94,7 +98,7 @@ void _SmitInit(Critter smit, bool firstTime)
     smit.OnRespawn.Subscribe(_SmitRespawn);
     smit.OnDead.Subscribe(_SmitDead);
     smit.OnNpcPlaneEnd.Subscribe(_SmitPlaneEnd);
-    smit.OnIdle.Subscribe(_SmitIdle);
+    smit.StartTimeEvent(Time::Asap(), Time::Seconds(1), _SmitIdle);
     if (firstTime) {
         SetupRadioComm(smit);
     }
@@ -106,7 +110,7 @@ void _SmitInit(Critter smit, bool firstTime)
 /* ************************** Управление позицией Смита на картах **************************** */
 
 // текущее сохраненное значение
-uint8 GetSmitPos()
+int GetSmitPos()
 {
     return Game.NcrSmitPosition;
 }
@@ -117,7 +121,7 @@ void SetSmitPos(int val)
 }
 
 // проверка, нету других смитов на указанной позиции
-Critter GetFakeSmit(uint pos, Critter realSmit)
+Critter GetFakeSmit(int pos, Critter realSmit)
 {
     Map posmap = Game.GetMap(S_POS_MAP_PID(pos));
     if (!valid(posmap)) {
@@ -142,7 +146,7 @@ Critter GetFakeSmit(uint pos, Critter realSmit)
 }
 
 // проверяем, что смит на нужной карте, рядом с нужным гексом
-bool IsSmitRightPosition(Critter smit, uint pos)
+bool IsSmitRightPosition(Critter smit, int pos)
 {
     Map map = smit.GetMap();
     if (!valid(map)) {
@@ -153,18 +157,17 @@ bool IsSmitRightPosition(Critter smit, uint pos)
         return false;
     }
 
-    uint16 hx = smit.HexX;
-    uint16 hy = smit.HexY;
+    mpos hex = smit.Hex;
 
-    Entrance::GetNearEntry(map, S_POS_HEX(pos), hx, hy);
+    Entrance::GetNearEntry(map, S_POS_HEX(pos), hex);
 
-    return Game.GetDistance(hx, hy, smit.HexX, smit.HexY) <= MAX_HOME_DISTANCE;
+    return Game.GetDistance(hex, smit.Hex) <= MAX_HOME_DISTANCE;
 }
 
 // при респавне смита нужно его телепортировать домой, если он очутился не в том месте
 void _SmitRespawn(Critter smit)
 {
-    uint pos = GetSmitPos();
+    int pos = GetSmitPos();
 
     Critter cr = GetFakeSmit(pos, smit);
     if (valid(cr)) {
@@ -176,7 +179,7 @@ void _SmitRespawn(Critter smit)
         return;
     }
 
-    TransitToPos(smit, pos);
+    TransferToPos(smit, pos);
 }
 
 void _SmitDead(Critter smit, Critter killer)
@@ -185,7 +188,7 @@ void _SmitDead(Critter smit, Critter killer)
     SetSmitPos(S_POS_RES_POS(GetSmitPos()));
 }
 
-void TransitToPos(Critter smit, uint pos)
+void TransferToPos(Critter smit, int pos)
 {
     Map map = Game.GetMap(S_POS_MAP_PID(pos));
     if (!valid(map)) {
@@ -193,13 +196,10 @@ void TransitToPos(Critter smit, uint pos)
         return;
     }
 
-    uint16 hx = smit.HexX;
-    uint16 hy = smit.HexY;
+    mpos hex = smit.Hex;
 
-    if (Entrance::GetNearEntry(map, S_POS_HEX(pos), hx, hy)) {
-        if (!Obsolete::CritterTransitToMapCoords(smit, map.Id, hx, hy, 6)) {
-            Game.Log("Smit transit error. Position " + pos);
-        }
+    if (Entrance::GetNearEntry(map, S_POS_HEX(pos), hex)) {
+        smit.TransferToMap(map, hex, 6);
     }
     else {
         Game.Log("Smit transit failed. Can't find entry. Position " + pos);
@@ -209,10 +209,9 @@ void TransitToPos(Critter smit, uint pos)
     DL("Transit to map successful");
 }
 
-void WalkToPos(Critter smit, uint pos)
+void WalkToPos(Critter smit, int pos)
 {
-    uint16 hx = smit.HexX;
-    uint16 hy = smit.HexY;
+    mpos hex = smit.Hex;
 
     Map map = Game.GetMap(S_POS_MAP_PID(pos));
     if (!valid(map)) {
@@ -223,11 +222,11 @@ void WalkToPos(Critter smit, uint pos)
         return;
     }
 
-    if (!Entrance::GetNearEntry(map, S_POS_HEX_MOVETO(pos) == 0 ? S_POS_HEX(pos) : S_POS_HEX_MOVETO(pos), hx, hy)) {
+    if (!Entrance::GetNearEntry(map, S_POS_HEX_MOVETO(pos) == 0 ? S_POS_HEX(pos) : S_POS_HEX_MOVETO(pos), hex)) {
         return;
     }
 
-    if (!NpcPlanes::AddWalkPlane(smit, 0, pos, pos, hx, hy, Game.Random(0, 5), false, 0)) {
+    if (!NpcPlanes::AddWalkPlane(smit, 0, pos, pos, hex, Game.Random(0, 5), false, 0)) {
         return;
     }
 
@@ -239,10 +238,10 @@ void _SmitIdle(Critter smit)
     DL("EnterIdle" + S_POS_RES_POS(GetSmitPos()));
     if (!S_POS_IS_HOME(GetSmitPos()) || !IsSmitRightPosition(smit, GetSmitPos())) {
         // DL("WRONG Pos and no planes... ");
-        uint idleCount = smit.NcrSmitIdleCount;
+        int idleCount = smit.NcrSmitIdleCount;
         if (idleCount > 10) {
             if (S_POS_MAP_PID(S_POS_RES_POS(GetSmitPos())) != smit.GetMap().ProtoId) {
-                TransitToPos(smit, S_POS_RES_POS(GetSmitPos()));
+                TransferToPos(smit, S_POS_RES_POS(GetSmitPos()));
             }
             else {
                 WalkToPos(smit, S_POS_RES_POS(GetSmitPos()));
@@ -261,7 +260,7 @@ void _SmitPlaneEnd(Critter smit, int planeId, int reason, Critter someCr, Item s
 {
     NpcPlanes::NpcPlane plane = NpcPlanes::GetCritterPlane(smit, planeId);
 
-    // smit.Say(SAY_NORM_ON_HEAD,"reason="+reason);
+    // Messaging::SayOnHead(smit,"reason="+reason);
     if (reason == REASON_SUCCESS && plane.Identifier == S_POS_BAZAAR_M2GATES && plane.IdentifierExt == S_POS_BAZAAR_M2GATES) {
         OnGatesPlaneEnd(smit);
     }
@@ -281,16 +280,13 @@ void _SmitPlaneEnd(Critter smit, int planeId, int reason, Critter someCr, Item s
         SetSmitPos(S_POS_DWNTN_HOME);
     }
     else if (reason == REASON_HEX_BUSY && plane.IdentifierExt != 0 && plane.Type == AI_PLANE_WALK) {
-        DL("HEX BUSY...");
-        uint16 newX = plane.Walk_HexY;
-        uint16 newY = plane.Walk_HexY;
+        mpos newHex = plane.Walk_Hex;
         Map map = smit.GetMap();
         if (valid(map)) {
-            map.MoveHexByDir(newX, newY, Game.Random(0, 5), 1);
+            map.MoveHexByDir(newHex, Game.Random(0, 5), 1);
 
-            if (map.IsHexMovable(newX, newY)) {
-                plane.Walk_HexY = newX;
-                plane.Walk_HexY = newY;
+            if (map.IsHexMovable(newHex)) {
+                plane.Walk_Hex = newHex;
             }
         }
     }
@@ -306,17 +302,17 @@ void _SmitPlaneEnd(Critter smit, int planeId, int reason, Critter someCr, Item s
 void OnGatesPlaneEnd(Critter smit)
 {
     SetSmitPos(S_POS_BAZAAR_GATES);
-    uint8 pos = GetSmitPos();
+    int pos = GetSmitPos();
 
     DL("Закончен план перемещения к воротам");
 
     if (!valid(GetGatesGuard(smit))) {
-        smit.SayMsg(SAY_NORM_ON_HEAD, TextPackName::Text, STR_NO_GUARDS);
-        TransitToPos(smit, S_POS_DWNTN_HOME);
+        Messaging::SayOnHead(smit, TextPackName::Text, STR_NO_GUARDS);
+        TransferToPos(smit, S_POS_DWNTN_HOME);
     }
     else {
         smit.NcrSmitGateStringNum = STR_FIRST_GATESGUARD;
-        NpcPlanes::AddMiscPlane(smit, 0, Game.GetFullSecond() + 2 * 60, NcrSmit::plane_SayNextPhrase);
+        NpcPlanes::AddMiscPlane(smit, 0, Game.SynchronizedTime + Time::GameMinutes(2), NcrSmit::plane_SayNextPhrase);
     }
 }
 
@@ -330,11 +326,11 @@ void plane_SayNextPhrase(Critter smit)
         }
 
         smit.NcrSmitGateStringNum = 0;
-        TransitToPos(smit, S_POS_DWNTN_HOME);
+        TransferToPos(smit, S_POS_DWNTN_HOME);
     }
     else {
         if (smit.NcrSmitGateStringNum % 2 == 1) {
-            smit.SayMsg(SAY_NORM_ON_HEAD, TextPackName::Text, smit.NcrSmitGateStringNum);
+            Messaging::SayOnHead(smit, TextPackName::Text, smit.NcrSmitGateStringNum);
         }
         else {
             // говорит охранник
@@ -344,10 +340,10 @@ void plane_SayNextPhrase(Critter smit)
                 smit.NcrSmitGateStringNum = 0;
                 return;
             }
-            guard.SayMsg(SAY_NORM_ON_HEAD, TextPackName::Text, smit.NcrSmitGateStringNum);
+            Messaging::SayOnHead(guard, TextPackName::Text, smit.NcrSmitGateStringNum);
         }
         smit.NcrSmitGateStringNum += 1;
-        NpcPlanes::AddMiscPlane(smit, 0, Game.GetFullSecond() + 3 * 60, NcrSmit::plane_SayNextPhrase);
+        NpcPlanes::AddMiscPlane(smit, 0, Game.SynchronizedTime + Time::GameMinutes(3), NcrSmit::plane_SayNextPhrase);
     }
 }
 
@@ -362,12 +358,12 @@ Critter GetGatesGuard(Critter smit)
         return null;
     }
 
-    if (map.GetCritters(CritterProperty::NpcRole, NPC_ROLE_GATESGUARD, CritterFindType::AliveNpc).length() > 0) {
-        return map.GetCritter(CritterProperty::NpcRole, NPC_ROLE_GATESGUARD, CritterFindType::AliveNpc);
+    if (map.GetCritters(CritterProperty::NpcRole, NPC_ROLE_GATESGUARD, CritterFindType::NonDeadNpc).length() > 0) {
+        return map.GetCritter(CritterProperty::NpcRole, NPC_ROLE_GATESGUARD, CritterFindType::NonDeadNpc);
     }
 
-    if (map.GetCritters(CritterProperty::NpcRole, NPC_ROLE_GATESMAIN, CritterFindType::AliveNpc).length() > 0) {
-        return map.GetCritter(CritterProperty::NpcRole, NPC_ROLE_GATESMAIN, CritterFindType::AliveNpc);
+    if (map.GetCritters(CritterProperty::NpcRole, NPC_ROLE_GATESMAIN, CritterFindType::NonDeadNpc).length() > 0) {
+        return map.GetCritter(CritterProperty::NpcRole, NPC_ROLE_GATESMAIN, CritterFindType::NonDeadNpc);
     }
 
     return null;
@@ -381,7 +377,7 @@ Critter GetGatesGuard(Critter smit)
 
 void SetupRadioComm(Critter smit)
 {
-    Game.SavedDeferredCall(Time::GetNearFullSecond(0, 0, 0, 1, 0, 0) - Game.GetFullSecond(), BeginRadioComm, smit.Id);
+    Game.StartTimeEvent(Tla::GetNearSynchronizedTime(0, 0, 0, 1, 0, 0) - Game.SynchronizedTime, BeginRadioComm, smit.Id); //SavedDeferredCall
 }
 
 void BeginRadioComm(any value)
@@ -397,24 +393,22 @@ void BeginRadioComm(any value)
 void plane_SayNextRadio(Critter smit)
 {
     if (smit.NcrSmitStringNum % 3 == 0) {
-        smit.SayMsg(SAY_NORM_ON_HEAD, TextPackName::Text, smit.NcrSmitStringNum);
+        Messaging::SayOnHead(smit, TextPackName::Text, smit.NcrSmitStringNum);
         smit.NcrSmitStringNum += 1;
-        Game.RadioMessageMsg(RADIO_CHANNEL_SMIT, TextPackName::Text, smit.NcrSmitStringNum);
+        Radio::SendChannelRadioMessage(RADIO_CHANNEL_SMIT, TextPackName::Text, smit.NcrSmitStringNum);
         smit.NcrSmitStringNum += 1;
     }
     else {
-        Game.RadioMessageMsg(RADIO_CHANNEL_SMIT, TextPackName::Text, smit.NcrSmitStringNum);
+        Radio::SendChannelRadioMessage(RADIO_CHANNEL_SMIT, TextPackName::Text, smit.NcrSmitStringNum);
         smit.NcrSmitStringNum += 1;
     }
     if (smit.NcrSmitStringNum > STR_LAST_SMIT_RADIO) {
         smit.NcrSmitStringNum = 0;
         smit.SpyCathActive = 0;
         SetSmitPos(S_POS_DWNTN_HOME);
-        DL("Smit home pos: x=" + smit.HomeHexX + " y = " + smit.HomeHexY + "mapHome = " + smit.HomeMapId + "mapcur" + smit.GetMap().Id + "CurX = " + smit.HexX +
-           " CurY =" + smit.HexY);
     }
     else {
-        NpcPlanes::AddMiscPlane(smit, 0, Game.GetFullSecond() + 2 * 60, NcrSmit::plane_SayNextRadio);
+        NpcPlanes::AddMiscPlane(smit, 0, Game.SynchronizedTime + Time::GameMinutes(2), NcrSmit::plane_SayNextRadio);
     }
 }
 
@@ -439,14 +433,14 @@ void OnMove2RadioPlaneEnd(Critter smit)
                                      12,
                                      30,
                                      2,
-                                     uint(CritterProperty::SpyCathActive),
-                                     uint(CritterProperty::NcrSantiagaFindSpyStatus),
+                                     int(CritterProperty::SpyCathActive),
+                                     int(CritterProperty::NcrSantiagaFindSpyStatus),
                                      STR_PLAYER_SEEN_ALARM)) {
         DL("Cannot begin spy control");
     }
     DL("begin radio event");
     smit.NcrSmitStringNum = STR_FIRST_SMIT_RADIO;
-    NpcPlanes::AddMiscPlane(smit, 0, Game.GetFullSecond() + 2 * 60, NcrSmit::plane_SayNextRadio);
+    NpcPlanes::AddMiscPlane(smit, 0, Game.SynchronizedTime + Time::GameMinutes(2), NcrSmit::plane_SayNextRadio);
 }
 
 /* ******************* Перемещение Смита к полицейскому перед входом на Ранчо **************** */
@@ -458,7 +452,7 @@ void OnMove2RadioPlaneEnd(Critter smit)
 void OnMove2PolicePlaneEnd(Critter smit)
 {
     SetSmitPos(S_POS_DWNTN_POLICE);
-    // NpcPlanes::AddMiscPlane(smit, 0, Game.GetFullSecond()+WAIT_FORPLAYER_MINUTES*60, NcrSmit::plane_ComeBackNoPlayer);
+    // NpcPlanes::AddMiscPlane(smit, 0, Game.SynchronizedTime+ Time::GameMinutes(WAIT_FORPLAYER_MINUTES), NcrSmit::plane_ComeBackNoPlayer);
     // он сам через 10 идлов вернется на домашнюю позицию
 }
 
@@ -470,10 +464,10 @@ void plane_ComeBackNoPlayer(Critter smit)
 
 void OnExitDwnTnPlaneEnd(Critter smit)
 {
-    Critter[] critters = smit.GetMap().GetCritters(smit.HexX, smit.HexY, 10, CritterFindType::Npc);
-    for (uint i = 0; i < critters.length(); i++) {
+    Critter[] critters = smit.GetMap().GetCritters(smit.Hex, 10, CritterFindType::Npc);
+    for (int i = 0; i < critters.length(); i++) {
         if (critters[i].DialogId == Content::Dialog::ncr_grant) {
-            if (critters[i].GetTalkingCritters().length() > 0) {
+            if (Dialogs::IsTalking(critters[i])) {
                 Critter critter = Game.GetCritter(smit.NcrSmitPlayerId);
                 if (valid(critter) && critter.NcrSmitVsVestinStatus == 2) {
                     critter.NcrSmitVsVestinStatus = 3;
@@ -495,7 +489,7 @@ void OnExitDwnTnPlaneEnd(Critter smit)
         }
     }
 
-    smit.SayMsg(SAY_NORM_ON_HEAD, TextPackName::Text, STR_NO_GUARD_AT_RANCH);
+    Messaging::SayOnHead(smit, TextPackName::Text, STR_NO_GUARD_AT_RANCH);
     Smit2Ranch(smit);
 }
 
@@ -503,18 +497,18 @@ void plane_SayNexPolicePhrase(Critter smit)
 {
     if (smit.NcrSmitStringNum <= STR_LAST_GRANT) {
         if (smit.NcrSmitStringNum % 2 == 1) {
-            smit.SayMsg(SAY_NORM_ON_HEAD, TextPackName::Text, smit.NcrSmitStringNum);
+            Messaging::SayOnHead(smit, TextPackName::Text, smit.NcrSmitStringNum);
             smit.NcrSmitStringNum += 1;
-            NpcPlanes::AddMiscPlane(smit, 0, Game.GetFullSecond() + 3 * 60, NcrSmit::plane_SayNexPolicePhrase);
+            NpcPlanes::AddMiscPlane(smit, 0, Game.SynchronizedTime + Time::GameMinutes(3), NcrSmit::plane_SayNexPolicePhrase);
             return;
         }
         else {
             Critter cr = Game.GetCritter(smit.NcrSmitPlayerId);
             if (valid(cr)) {
                 if (cr.IsAlive()) {
-                    cr.SayMsg(SAY_NORM_ON_HEAD, TextPackName::Text, smit.NcrSmitStringNum);
+                    Messaging::SayOnHead(cr, TextPackName::Text, smit.NcrSmitStringNum);
                     smit.NcrSmitStringNum += 1;
-                    NpcPlanes::AddMiscPlane(smit, 0, Game.GetFullSecond() + 3 * 60, NcrSmit::plane_SayNexPolicePhrase);
+                    NpcPlanes::AddMiscPlane(smit, 0, Game.SynchronizedTime + Time::GameMinutes(3), NcrSmit::plane_SayNexPolicePhrase);
                     return;
                 }
             }
@@ -529,7 +523,7 @@ void plane_SayNexPolicePhrase(Critter smit)
 
 void Smit2Ranch(Critter smit)
 {
-    TransitToPos(smit, S_POS_RANCH_M2WESTIN);
+    TransferToPos(smit, S_POS_RANCH_M2WESTIN);
     WalkToPos(smit, S_POS_RANCH_WESTIN);
 }
 
@@ -544,11 +538,11 @@ void OnWestinMovePlaneEnd(Critter smit)
     smit.NcrSmitStringNum = STR_FIRST_WESTINSMIT;
     if (!valid(GetWestin(smit))) {
         DL("Westin=invalid");
-        smit.SayMsg(SAY_NORM_ON_HEAD, TextPackName::Text, STR_NO_WESTININHOME);
+        Messaging::SayOnHead(smit, TextPackName::Text, STR_NO_WESTININHOME);
         FailWestinKill(smit);
     }
     else {
-        NpcPlanes::AddMiscPlane(smit, 0, Game.GetFullSecond() + 3 * 60, NcrSmit::plane_SayNexWestinPhrase);
+        NpcPlanes::AddMiscPlane(smit, 0, Game.SynchronizedTime + Time::GameMinutes(3), NcrSmit::plane_SayNexWestinPhrase);
     }
 }
 
@@ -560,13 +554,13 @@ void plane_SayNexWestinPhrase(Critter smit)
     }
     if (smit.NcrSmitStringNum <= STR_LAST_WESTINSMIT) {
         if (smit.NcrSmitStringNum % 2 == 1) {
-            westin.SayMsg(SAY_NORM_ON_HEAD, TextPackName::Text, smit.NcrSmitStringNum);
+            Messaging::SayOnHead(westin, TextPackName::Text, smit.NcrSmitStringNum);
         }
         else {
-            smit.SayMsg(SAY_NORM_ON_HEAD, TextPackName::Text, smit.NcrSmitStringNum);
+            Messaging::SayOnHead(smit, TextPackName::Text, smit.NcrSmitStringNum);
         }
         smit.NcrSmitStringNum += 1;
-        NpcPlanes::AddMiscPlane(smit, 0, Game.GetFullSecond() + 3 * 60, NcrSmit::plane_SayNexWestinPhrase);
+        NpcPlanes::AddMiscPlane(smit, 0, Game.SynchronizedTime + Time::GameMinutes(3), NcrSmit::plane_SayNexWestinPhrase);
     }
     else {
         AttackWestin(smit, westin);
@@ -590,8 +584,8 @@ void AttackWestin(Critter smit, Critter westin)
 
 Critter GetWestin(Critter smit)
 {
-    Critter[] critters = smit.GetMap().GetCritters(smit.HexX, smit.HexY, WESTIN_FIND_RADIUS, CritterFindType::Npc);
-    for (uint i = 0; i < critters.length(); i++) {
+    Critter[] critters = smit.GetMap().GetCritters(smit.Hex, WESTIN_FIND_RADIUS, CritterFindType::Npc);
+    for (int i = 0; i < critters.length(); i++) {
         if (critters[i].DialogId == Content::Dialog::ncr_westin) {
             if (critters[i].IsAlive()) {
                 DL("westin founded");
@@ -634,18 +628,17 @@ void r_SmitGoToRanch(Critter player, Critter smit)
     }
 
     // if(GetSmitPos()!=S_POS_DWNTN_POLICE) return;
-    uint16 x = smit.HexX;
-    uint16 y = smit.HexY;
+    mpos hex = smit.Hex;
     Map map = smit.GetMap();
     if (!valid(map)) {
         return;
     }
 
-    if (!Entrance::GetNearEntry(map, HEX_NUM_DWNTN2RANCH, x, y)) {
+    if (!Entrance::GetNearEntry(map, HEX_NUM_DWNTN2RANCH, hex)) {
         return;
     }
 
-    if (!NpcPlanes::AddWalkPlane(smit, 0, HEX_NUM_DWNTN2RANCH, HEX_NUM_DWNTN2RANCH, x, y, Game.Random(0, 5), false, 1)) {
+    if (!NpcPlanes::AddWalkPlane(smit, 0, HEX_NUM_DWNTN2RANCH, HEX_NUM_DWNTN2RANCH, hex, Game.Random(0, 5), false, 1)) {
         return;
     }
 
@@ -662,3 +655,7 @@ void r_SmitGoToRanch(Critter player, Critter smit)
 // ~settime 20 2246 10 31 06 00
 // ~run test t2m 45 44 0 //  ксмиту домой на базар
 // ~run test t2m 42 46 0 //  ксмиту в бар
+
+#endif
+
+}

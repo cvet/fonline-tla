@@ -1,9 +1,13 @@
-// FOS Server
+namespace ReplicationHell
+{
+
+#if SERVER
+
 // Author: cvet
 
-///@ Property Critter PrivateServer uint8 ReplHellTurretHack Max = 100
+///@ Property Critter Server uint8 ReplHellTurretHack Mutable Persistent Max = 100
 
-#define TIME_TO_DEATH (Time::RealMinute(Game.Random(110, 130))) // Время самоубийства турели
+#define TIME_TO_DEATH (Time::Minutes(Game.Random(110, 130))) // Время самоубийства турели
 
 ident[] TurretIds = {};
 
@@ -25,8 +29,8 @@ void _TurretInit(Critter turret, bool firstTime)
     turret.OnSomeCritterUseSkill.Subscribe(_TurretSmthUseSkill);
     turret.OnSomeCritterAttack.Subscribe(_TurretSmthAttack);
 
-    if (turret.GetTimeEvents(Tla::CteAutokill) == 0) {
-        turret.AddTimeEvent(cte_KillTurret, TIME_TO_DEATH, Tla::CteAutokill);
+    if (turret.CountTimeEvent(cte_KillTurret) == 0) {
+        turret.StartTimeEvent(TIME_TO_DEATH, cte_KillTurret);
     }
 
     if (turret.CountItem(Content::Item::heavy_dual_minigun_long_range) == 0) {
@@ -36,17 +40,20 @@ void _TurretInit(Critter turret, bool firstTime)
     TurretIds.insertLast(turret.Id);
 }
 
-uint cte_KillTurret(Critter cr, any identifier, uint& rate)
+void cte_KillTurret(Critter cr)
 {
     if (!cr.IsDead()) {
         CritterState::ToDead(cr, CritterActionAnim::DeadFront, null);
     }
-    return TIME_TO_DEATH;
+    timespan delayTicks = TIME_TO_DEATH;
+    if (delayTicks != ZERO_TIMESPAN) {
+        Game.RepeatCurrentTimeEvent(delayTicks);
+    }
 }
 
 void t_Electro(Critter cr, StaticItem trigger, bool entered, uint8 dir)
 {
-    if (not entered || not cr.IsControlledByPlayer) {
+    if (not entered || not cr.ControlledByPlayer) {
         return;
     }
 
@@ -67,7 +74,7 @@ void t_Electro(Critter cr, StaticItem trigger, bool entered, uint8 dir)
     }
 
     if (attack) {
-        for (uint i = 0; i < TurretIds.length(); i++) {
+        for (int i = 0; i < TurretIds.length(); i++) {
             Critter turret = Game.GetCritter(TurretIds[i]);
             if (valid(turret) && not turret.IsDead()) {
                 NpcPlanes::AddAttackPlane(turret, 0, cr);
@@ -83,8 +90,8 @@ void _TurretSmthUseSkill(Critter turret, Critter hacker, CritterProperty skill, 
         sk = CLAMP(sk, 6, 95);
         if (sk >= Game.Random(1, 100)) {
             NpcPlanes::DropPlanes(turret);
-            NpcPlanes::AddMiscPlane(turret, 100, Game.GetFullSecond() + Time::RealSecond(10), null); // Wait 10 seconds
-            turret.Say(SAY_NORM_ON_HEAD, "!::#$%^*");
+            NpcPlanes::AddMiscPlane(turret, 100, Game.SynchronizedTime + Time::Seconds(10), null); // Wait 10 seconds
+            Messaging::SayOnHead(turret, "!::#$%^*");
             hacker.ReplHellTurretHack += 1;
             if (hacker.ReplHellTurretHack >= 100) {
                 hacker.ReplHellTurretHack = 0;
@@ -96,9 +103,13 @@ void _TurretSmthUseSkill(Critter turret, Critter hacker, CritterProperty skill, 
     }
 }
 
-void _TurretSmthAttack(Critter turret, Critter attacker, Critter target, Item weapon, uint8 weaponMode, ProtoItem ammo)
+void _TurretSmthAttack(Critter turret, Critter attacker, Critter target, Item weapon, int weaponMode, ProtoItem ammo)
 {
-    if (attacker.IsControlledByPlayer) {
+    if (attacker.ControlledByPlayer) {
         NpcPlanes::AddAttackPlane(turret, 0, attacker);
     }
+}
+
+#endif
+
 }

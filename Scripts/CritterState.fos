@@ -1,22 +1,28 @@
-// FOS Server
+namespace CritterState
+{
 
-///@ Property Critter PrivateServer uint KnockoutAp
-///@ Property Critter Protected uint WaitEndTick
-///@ Property Critter PrivateServer CritterActionAnim ActionAnimKnockoutEnd
+#if SERVER
+
+///@ Property Critter Common CritterActionAnim KnockoutActionAnim Mutable PublicSync Persistent
+///@ Property Critter Common CritterActionAnim DeadActionAnim Mutable PublicSync Persistent
+///@ Property Critter Server int32 KnockoutAp Mutable Persistent
+///@ Property Critter Common nanotime WaitEndTick Mutable OwnerSync
+///@ Property Critter Server CritterActionAnim ActionAnimKnockoutEnd Mutable Persistent
 ///@ Event Server Game OnCritterRespawn(Critter critter)
 ///@ Event Server Game OnCritterKnockout(Critter critter)
-///@ RemoteCall Server Rpc_Wait(uint ms)
+///@ RemoteCall Server Rpc_Wait(int32 ms)
 
 void ModuleInit()
 {
-    Game.OnCritterIdle.Subscribe(OnCritterIdle);
     Game.OnCritterInit.Subscribe(OnCritterInit);
 }
+
 void OnCritterInit(Critter cr, bool firstTime)
 {
     if (firstTime) {
-        cr.WaitEndTick = 0;
+        cr.WaitEndTick = ZERO_NANOTIME;
     }
+    cr.StartTimeEvent(Time::Milliseconds(Game.Random(0, 1000)), Time::Milliseconds(1000), OnCritterIdle);
 }
 
 void OnCritterIdle(Critter cr)
@@ -33,7 +39,6 @@ void ToDead(Critter cr, CritterActionAnim actionAnim, Critter killer)
         return;
     }
 
-    cr.CloseDialog();
     if (cr.InSneakMode) {
         cr.InSneakMode = false;
     }
@@ -41,7 +46,7 @@ void ToDead(Critter cr, CritterActionAnim actionAnim, Critter killer)
         cr.CurrentHp = 0;
     }
 
-    cr.SetConditionAnims(CritterCondition::Dead, cr.DeadStateAnim, actionAnim);
+    cr.DeadActionAnim = actionAnim;
     cr.SetCondition(CritterCondition::Dead, actionAnim, null);
 
     Game.OnCritterDead.Fire(cr, killer);
@@ -64,7 +69,7 @@ bool ToAlive(Critter cr)
             ThrowException("Critter on global map");
         }
 
-        if (!map.IsHexesMovable(cr.HexX, cr.HexY, cr.Multihex)) {
+        if (!map.IsHexesMovable(cr.Hex, cr.Multihex)) {
             ThrowException("Hexes is busy");
         }
 
@@ -95,53 +100,47 @@ bool ToAlive(Critter cr)
 class KnockoutTracer : LineTracer::ITraceContext
 {
     Critter Cr;
-    uint Multihex;
-    uint16 EndHx;
-    uint16 EndHy;
+    int Multihex;
+    mpos EndHex;
 
     KnockoutTracer(Critter cr)
     {
         Cr = cr;
         Multihex = cr.Multihex;
-        EndHx = cr.HexX;
-        EndHy = cr.HexY;
+        EndHex = cr.Hex;
     }
 
-    void StartExec(Map map, uint16 hx, uint16 hy, uint16 tx, uint16 ty, uint maxDist) override
+    void StartExec(Map map, mpos hex, mpos hexTo, int maxDist) override
     {
         // Nothing
     }
 
-    void FinishExec(Map map, uint resultDist) override
+    void FinishExec(Map map, int resultDist) override
     {
         // Nothing
     }
 
-    bool Exec(Map map, uint16 hx, uint16 hy) override
+    bool Exec(Map map, mpos hex) override
     {
-        if (!map.IsHexesMovable(hx, hy, Multihex)) {
+        if (!map.IsHexesMovable(hex, Multihex)) {
             return true;
         }
 
         // Stop before trigger
         hstring pid = Content::Item::Trigger;
-        if (!map.GetStaticItems(hx, hy, Multihex, pid).isEmpty()) {
+        if (!map.GetStaticItems(hex, Multihex, pid).isEmpty()) {
             return true;
         }
 
-        EndHx = hx;
-        EndHy = hy;
+        EndHex = hex;
         return false;
     }
 };
 
-void ToKnockout(Critter cr, CritterActionAnim actionAnimBegin, CritterActionAnim actionAnimIdle, CritterActionAnim actionAnimEnd, uint lostAp, uint16 knockHx,
-                uint16 knockHy)
+void ToKnockout(Critter cr, CritterActionAnim actionAnimBegin, CritterActionAnim actionAnimIdle, CritterActionAnim actionAnimEnd, int lostAp, mpos knockHex)
 {
     if (cr.IsKnockout()) {
         cr.KnockoutAp += lostAp;
-        cr.SetConditionAnims(CritterCondition::Knockout, cr.KnockoutStateAnim, actionAnimIdle);
-        cr.ActionAnimKnockoutEnd = actionAnimEnd;
         return;
     }
 
@@ -154,23 +153,22 @@ void ToKnockout(Critter cr, CritterActionAnim actionAnimBegin, CritterActionAnim
         ThrowException("Critter on global map");
     }
 
-    if (knockHx >= map.Width || knockHy >= map.Height) {
+    if (knockHex.x >= map.Size.width || knockHex.y >= map.Size.height) {
         ThrowException("Invalid hexes args");
     }
 
-    cr.CloseDialog();
     if (cr.InSneakMode) {
         cr.InSneakMode = false;
     }
 
     // Find destination
-    uint8 dir = Game.GetDirection(knockHx, knockHy, cr.HexX, cr.HexY);
+    uint8 dir = Game.GetDirection(knockHex, cr.Hex);
     KnockoutTracer tracer = KnockoutTracer(cr);
-    LineTracer::LineTracerHex(cr.HexX, cr.HexY, knockHx, knockHy, map, 0, tracer);
+    LineTracer::LineTracerHex(map, cr.Hex, knockHex, tracer);
 
     // Move to new place
-    cr.TransitToHex(tracer.EndHx, tracer.EndHy, dir);
-    cr.SetConditionAnims(CritterCondition::Knockout, cr.KnockoutStateAnim, actionAnimIdle);
+    cr.TransferToHex(tracer.EndHex, dir);
+    cr.KnockoutActionAnim = actionAnimIdle;
     cr.SetCondition(CritterCondition::Knockout, actionAnimBegin, null);
     cr.ActionAnimKnockoutEnd = actionAnimEnd;
     cr.KnockoutAp = lostAp;
@@ -208,30 +206,34 @@ void TryUpOnKnockout(Critter cr)
     CritterState::Wait(cr, Settings.Breaktime);
 }
 
-void Wait(Critter cr, uint ms)
+void Wait(Critter cr, int ms)
 {
-    cr.WaitEndTick = Game.GetTick() + ms;
+    cr.WaitEndTick = Game.FrameTime + Time::Milliseconds(ms);
 }
 
 bool IsBusy(Critter cr)
 {
-    return Game.GetTick() < cr.WaitEndTick;
+    return Game.FrameTime < cr.WaitEndTick;
 }
 
 bool IsWait(Critter cr)
 {
-    return Game.GetTick() < cr.WaitEndTick;
+    return Game.FrameTime < cr.WaitEndTick;
 }
 
 bool IsFree(Critter cr)
 {
-    return Game.GetTick() >= cr.WaitEndTick;
+    return Game.FrameTime >= cr.WaitEndTick;
 }
 
-void Rpc_Wait(Player player, uint ms)
+void Rpc_Wait(Player player, int ms)
 {
     Critter cr = player.GetControlledCritter();
     if (cr != null) {
         Wait(cr, ms);
     }
+}
+
+#endif
+
 }

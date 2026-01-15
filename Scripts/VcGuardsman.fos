@@ -1,9 +1,13 @@
-// FOS Server Sort 2
+namespace VcGuardsman // Sort 2
+{
+
+#if SERVER
+
 // Система отдачи приказов, выполнения для нпц и контроля выполнения для игроков
 // Приказы на перемещения по карте
 
-///@ Property Critter PrivateServer ident[] SquadMarchSquads
-///@ Property Critter PrivateServer uint8[] SquadMarchQueue
+///@ Property Critter Server ident[] SquadMarchSquads Mutable Persistent
+///@ Property Critter Server uint8[] SquadMarchQueue Mutable Persistent
 
 #define ORDER_TYPE_POS    (0)
 #define ORDER_TYPE_MOVE   (1)
@@ -18,21 +22,20 @@
 
 class MarchOrder // Вспомогательный класс. Приказ криттеру на выполнение некоторых действий
 {
-    uint8 Type;     // Тип приказа
-    uint16 HexX;    // Точка, в которой должен стоять игрок. Ось икс
-    uint16 HexY;    // Точка, в которой должен стоять игрок. Ось игрек
-    uint8 Steps;    // Число шагов, которые нужно сделать
-    uint8 Dir;      // Направление, в котором должен смотреть игрок
-    bool Armed;     // Вооружен
-    bool Run;       // Бежать во время перемещения
-    uint TimeCheck; // Относительное время проверки, когда игрок должен выполнить приказ TODO: Удалить это время
-    uint TimeNext;  // Относительное время отдачи следующего приказа
+    int Type;      // Тип приказа
+    mpos Hex;      // Точка, в которой должен стоять игрок.
+    int Steps;     // Число шагов, которые нужно сделать
+    int Dir;       // Направление, в котором должен смотреть игрок
+    bool Armed;    // Вооружен
+    bool Run;      // Бежать во время перемещения
+    int TimeCheck; // Относительное время проверки, когда игрок должен выполнить приказ TODO: Удалить это время
+    int TimeNext;  // Относительное время отдачи следующего приказа
 
     void Save(Serializator::Serializator save)
     {
         save.Set(Type);
-        save.Set(HexX);
-        save.Set(HexY);
+        save.Set(Hex.x);
+        save.Set(Hex.y);
         save.Set(Steps);
         save.Set(Dir);
         save.Set(Armed);
@@ -44,8 +47,10 @@ class MarchOrder // Вспомогательный класс. Приказ кр
     void Load(Serializator::Serializator load)
     {
         load.Get(Type);
-        load.Get(HexX);
-        load.Get(HexY);
+        mpos hex = mpos();
+        load.Get(hex.x);
+        load.Get(hex.y);
+        Hex = hex;
         load.Get(Steps);
         load.Get(Dir);
         load.Get(Armed);
@@ -60,8 +65,8 @@ class MarchOrder // Вспомогательный класс. Приказ кр
         s += "\n type     : " + (Type == ORDER_TYPE_POS ?
                                      "ORDER_TYPE_POS" :
                                      (Type == ORDER_TYPE_MOVE ? "ORDER_TYPE_MOVE" : (Type == ORDER_TYPE_DIR ? "ORDER_TYPE_DIR" : "ORDER_TYPE_ARM")));
-        s += "\n HexX     : " + HexX;
-        s += "\n HexY     : " + HexY;
+        s += "\n HexX     : " + Hex.x;
+        s += "\n HexY     : " + Hex.y;
         s += "\n Steps    : " + Steps;
         s += "\n Dir      : " + Dir;
         s += "\n Armed    : " + (Armed ? "true" : "false");
@@ -74,12 +79,11 @@ class MarchOrder // Вспомогательный класс. Приказ кр
 
 // Формулировки приказов
 // Приказ ЗАНЯТЬ ПОЗИЦИЮ
-MarchOrder DefineSetPosition(uint16 hexX, uint16 hexY, uint8 dir, bool run, uint timeCheck, uint timeNext)
+MarchOrder DefineSetPosition(mpos hex, uint8 dir, bool run, int timeCheck, int timeNext)
 {
     MarchOrder order = MarchOrder();
     order.Type = ORDER_TYPE_POS;
-    order.HexX = hexX;
-    order.HexY = hexY;
+    order.Hex = hex;
     order.Dir = dir;
     order.Run = run;
     order.TimeCheck = timeCheck;
@@ -88,7 +92,7 @@ MarchOrder DefineSetPosition(uint16 hexX, uint16 hexY, uint8 dir, bool run, uint
 }
 
 // Приказ ПЕРЕМЕСТИТЬСЯ
-MarchOrder DefineMove(uint8 steps, uint8 dir, bool run, uint timeCheck, uint timeNext)
+MarchOrder DefineMove(int steps, uint8 dir, bool run, int timeCheck, int timeNext)
 {
     MarchOrder order = MarchOrder();
     order.Type = ORDER_TYPE_MOVE;
@@ -101,7 +105,7 @@ MarchOrder DefineMove(uint8 steps, uint8 dir, bool run, uint timeCheck, uint tim
 }
 
 // Приказ ПОВОРОТ
-MarchOrder DefineDirection(uint8 dir, uint timeCheck, uint timeNext)
+MarchOrder DefineDirection(uint8 dir, int timeCheck, int timeNext)
 {
     MarchOrder order = MarchOrder();
     order.Type = ORDER_TYPE_DIR;
@@ -112,7 +116,7 @@ MarchOrder DefineDirection(uint8 dir, uint timeCheck, uint timeNext)
 }
 
 // Приказ ВЗЯТЬ/УБРАТЬ ОРУЖИЕ
-MarchOrder DefineArmWeapon(bool armed, uint timeCheck, uint timeNext)
+MarchOrder DefineArmWeapon(bool armed, int timeCheck, int timeNext)
 {
     MarchOrder order = MarchOrder();
     order.Type = ORDER_TYPE_ARM;
@@ -142,7 +146,7 @@ class MarchQueue
 
     bool Auto;                // Признак: все приказы назначаются автоматически, с помощью time_events
     ident CritterId;          // Исполнитель приказа
-    int8 OrderCurrent;        // Текущий номер приказа
+    int OrderCurrent;         // Текущий номер приказа
     MarchOrder[] Orders = {}; // Приказы в порядке выполнения
 
     void AddOrder(MarchOrder order)
@@ -159,14 +163,14 @@ class MarchQueue
         }
 
         Critter cr = Game.GetCritter(CritterId);
-        uint orders = Orders.length();
+        int orders = Orders.length();
         DL("orders saved:" + orders);
         auto save = Serializator::Serializator();
         save.Set(Auto);
         save.Set(CritterId);
         save.Set(OrderCurrent);
         save.Set(orders);
-        for (uint i = 0; i < orders; i++) {
+        for (int i = 0; i < orders; i++) {
             Orders[i].Save(save);
         }
         cr.SquadMarchQueue = save.GetData();
@@ -179,13 +183,13 @@ class MarchQueue
         if (load.SetData(cr.SquadMarchQueue) == 0) {
             return;
         }
-        uint orders = 0;
+        int orders = 0;
         load.Get(Auto);
         load.Get(CritterId);
         load.Get(OrderCurrent);
         load.Get(orders);
         Orders.clear();
-        for (uint i = 0; i < orders; i++) {
+        for (int i = 0; i < orders; i++) {
             MarchOrder o = MarchOrder();
             o.Load(load);
             AddOrder(o);
@@ -196,7 +200,7 @@ class MarchQueue
     {
         Critter cr = Game.GetCritter(CritterId);
         cr.SquadMarchQueue = array<uint8>();
-        if (!cr.IsControlledByPlayer) {
+        if (!cr.ControlledByPlayer) {
             cr.IsNoHome = false;
         }
     }
@@ -216,8 +220,7 @@ class MarchQueue
         if (!valid(order)) {
             return;
         }
-        order.HexX = cr.HexX;
-        order.HexY = cr.HexY;
+        order.Hex = cr.Hex;
         order.Dir = cr.Dir;
         Save();
     }
@@ -239,7 +242,7 @@ class MarchQueue
         Item weapon;
         switch (order.Type) {
         case ORDER_TYPE_POS:
-            return (cr.HexX == order.HexX && cr.HexY == cr.HexY);
+            return (cr.Hex == order.Hex);
         case ORDER_TYPE_MOVE:
             if (OrderCurrent == 0) // первый шаг, исходная координата неизвестна
             {
@@ -250,17 +253,16 @@ class MarchQueue
                 if (!valid(orderPrev)) {
                     return true;
                 }
-                uint16 hx = orderPrev.HexX;
-                uint16 hy = orderPrev.HexY;
+                mpos hex = orderPrev.Hex;
                 Map map = cr.GetMap();
                 if (!valid(map)) {
                     return true;
                 }
-                map.MoveHexByDir(hx, hy, order.Dir, order.Steps);
-                return (cr.HexX == hx && cr.HexY == hy);
+                map.MoveHexByDir(hex, order.Dir, order.Steps);
+                return (cr.Hex == hex);
             }
         case ORDER_TYPE_DIR:
-            return (cr.Dir == order.Dir);
+            return (int(cr.Dir) == order.Dir);
         case ORDER_TYPE_ARM:
             weapon = _CritGetItemHand(cr);
             if (valid(weapon)) {
@@ -281,7 +283,7 @@ class MarchQueue
     void ExecuteOrder()
     {
         Critter cr = Game.GetCritter(CritterId);
-        if (!valid(cr) || cr.IsControlledByPlayer) {
+        if (!valid(cr) || cr.ControlledByPlayer) {
             return; // Игроком выполнить приказ с помощью скрипта нельзя, разумеется
         }
         cr.IsNoHome = true;
@@ -297,14 +299,13 @@ class MarchQueue
 
         Item weapon = null;
         ProtoItem proto = null;
-        uint16 hx = 0;
-        uint16 hy = 0;
+        mpos hex;
         hstring pid1;
         hstring pid2;
 
         switch (order.Type) {
         case ORDER_TYPE_POS:
-            NpcPlanes::AddWalkPlane(cr, 0, order.HexX, order.HexY, order.Dir, order.Run, 0);
+            NpcPlanes::AddWalkPlane(cr, 0, order.Hex, order.Dir, order.Run, 0);
             break;
         case ORDER_TYPE_MOVE:
             if (OrderCurrent == 0) // первый шаг, исходная координата неизвестна
@@ -316,10 +317,9 @@ class MarchQueue
                 if (!valid(orderPrev)) {
                     return;
                 }
-                hx = orderPrev.HexX;
-                hy = orderPrev.HexY;
-                map.MoveHexByDir(hx, hy, order.Dir, order.Steps);
-                NpcPlanes::AddWalkPlane(cr, 0, hx, hy, order.Dir, order.Run, 0);
+                hex = orderPrev.Hex;
+                map.MoveHexByDir(hex, order.Dir, order.Steps);
+                NpcPlanes::AddWalkPlane(cr, 0, hex, order.Dir, order.Run, 0);
                 break;
             }
         case ORDER_TYPE_DIR:
@@ -337,7 +337,7 @@ class MarchQueue
                 proto = Game.GetProtoItem(pid2);
                 if (!valid(proto) || proto.Type != ItemType::Weapon) {
                     Item[] weapons = cr.GetItems(ItemProperty::Type, ItemType::Weapon);
-                    for (uint i = 0; i < weapons.length(); i++) {
+                    for (int i = 0; i < weapons.length(); i++) {
                         if (weapons[i].Type == ItemType::Weapon && !weapons[i].Weapon_IsUnarmed) {
                             pid2 = weapons[i].ProtoId;
                         }
@@ -371,7 +371,7 @@ class MarchQueue
         if (Orders.length() == 0) {
             return;
         }
-        uint newIndex = OrderCurrent + 1;
+        int newIndex = OrderCurrent + 1;
         MarchOrder order;
         if (newIndex >= Orders.length()) {
             order = Orders[OrderCurrent];
@@ -390,7 +390,7 @@ class MarchQueue
             order = Orders[OrderCurrent];
             if (valid(order)) {
                 any[] values = {CritterId, 0};
-                Game.DeferredCall(GAME_SECOND_TO_TICK(order.TimeNext), DoNextOrder, values);
+                Game.StartTimeEvent(Tla::GameSeconds(order.TimeNext), DoNextOrder, values);
             }
         }
     }
@@ -404,7 +404,7 @@ void DoNextOrder(any[] values)
 {
     DL("next order");
     Critter cr = Game.GetCritter(values[0]);
-    if (!valid(cr) || values[1] >= MAX_EXECUTE_TRIES || cr.IsControlledByPlayer) {
+    if (!valid(cr) || values[1] >= MAX_EXECUTE_TRIES || cr.ControlledByPlayer) {
         return;
     }
 
@@ -416,7 +416,7 @@ void DoNextOrder(any[] values)
         return;
     }
 
-    Game.DeferredCall(GAME_SECOND_TO_TICK(RECHECK_TICKS), DoNextOrder, values);
+    Game.StartTimeEvent(Tla::GameSeconds(RECHECK_TICKS), DoNextOrder, values);
 }
 
 class SquadCommander
@@ -441,7 +441,7 @@ class SquadCommander
 
     void Erase()
     {
-        for (uint i = 0; i < Squad.length(); i++) {
+        for (int i = 0; i < Squad.length(); i++) {
             MarchQueue q = MarchQueue(Squad[i]);
             q.Load();
             q.Erase();
@@ -452,28 +452,28 @@ class SquadCommander
 
     bool CheckCommandExecuted() // Проверка только для игроков
     {
-        for (uint i = 0, l = Squad.length(); i < l; i++) {
+        for (int i = 0, l = Squad.length(); i < l; i++) {
             MarchQueue q = MarchQueue(Squad[i]);
             q.Load();
             Critter cr = Game.GetCritter(Squad[i]);
             if (!valid(cr) || !valid(q)) {
                 return false;
             }
-            if (cr.IsControlledByPlayer && !q.CheckOrderCompleted()) {
-                cr.SayMsg(SAY_NETMSG, TextPackName::Text, STR_LOOSE);
+            if (cr.ControlledByPlayer && !q.CheckOrderCompleted()) {
+                Messaging::Info(cr, TextPackName::Text, STR_LOOSE);
                 return false;
             }
         }
         return true;
     }
 
-    void Command(uint strNum) // strNum - номер строки из диалога
+    void Command(int strNum) // strNum - номер строки из диалога
     {
         Critter cr = Game.GetCritter(CommanderId);
         if (valid(cr) && strNum >= 0) {
-            cr.SayMsg(SAY_SHOUT, TextPackName::Dialogs, DLGSTR(cr.DialogId, strNum));
+            Messaging::SayShout(cr, TextPackName::Dialogs, DLGSTR(cr.DialogId, strNum));
         }
-        for (uint i = 0, l = Squad.length(); i < l; i++) {
+        for (int i = 0, l = Squad.length(); i < l; i++) {
             MarchQueue q = MarchQueue(Squad[i]);
             q.Load();
             if (valid(q)) {
@@ -486,7 +486,7 @@ class SquadCommander
                 if (!valid(c)) {
                     return;
                 }
-                if (!c.IsControlledByPlayer) {
+                if (!c.ControlledByPlayer) {
                     q.ExecuteOrder();
                 }
             }
@@ -494,18 +494,16 @@ class SquadCommander
     }
 };
 
-// //Old script name: VcGuardsman.fos. Patched 01.10 21:59:42
-// //// FOS Server
 // Author: rifleman17
 // Скрипты для квестовой линии "Гвардеец Города-Убежища"
 
-///@ Property Critter Protected     uint8 VCHartmanMarch      Group = Quests Quest = 8823 Max = 4
-///@ Property Critter Protected     uint8 VCHartmannClearCave Group = Quests Quest = 8832 Max = 4
-///@ Property Critter PrivateServer uint8 VCDeadAllyCounter Max = 10
-///@ Property Critter PrivateServer uint8 VCGuardRank       Max = 4
-///@ Property Critter PrivateServer ident VCReconCaveId
-///@ Property Critter PrivateServer ident VCGuardsmanTriggerPlayerId
-///@ Property Game  PrivateServer bool  VCHartmanMarchStatus
+///@ Property Critter Common uint8 VCHartmanMarch Mutable OwnerSync Persistent Group = Quests Quest = 8823 Max = 4
+///@ Property Critter Common uint8 VCHartmannClearCave Mutable OwnerSync Persistent Group = Quests Quest = 8832 Max = 4
+///@ Property Critter Server uint8 VCDeadAllyCounter Mutable Persistent Max = 10
+///@ Property Critter Server uint8 VCGuardRank Mutable Persistent Max = 4
+///@ Property Critter Server ident VCReconCaveId Mutable Persistent
+///@ Property Critter Server ident VCGuardsmanTriggerPlayerId Mutable Persistent
+///@ Property Game Server bool VCHartmanMarchStatus Mutable Persistent
 
 // Квест "Самоделкин":
 //  Тренировка по надлежащему уходу за оружием
@@ -530,7 +528,7 @@ bool d_CheckWear(Critter player, Critter npc, int pidHash, int count, int deteri
 
     int num = 0;
     Item[] items = player.GetItems();
-    for (uint i = 0; i < items.length(); i++) {
+    for (int i = 0; i < items.length(); i++) {
         Item item = items[i];
         if (item.ProtoId == hstring_fromHash(pidHash) && Repair::GetDeteriorationProcent(item) <= deteriorationPercent) {
             num++;
@@ -557,24 +555,24 @@ bool d_CheckWear(Critter player, Critter npc, int pidHash, int count, int deteri
 // Служит сигналом к началу
 void t_Enter(Critter player, StaticItem trigger, bool entered, uint8 dir)
 {
-    if (!player.IsControlledByPlayer || !entered) {
+    if (!player.ControlledByPlayer || !entered) {
         return;
     }
     if (player.VCHartmanMarch != 1 || Game.VCHartmanMarchStatus) {
         return;
     }
     CritterState::Wait(player, 0);
-    player.SayMsg(SAY_NETMSG, TextPackName::Text, STR_RIGHT_POSITION);
+    Messaging::Info(player, TextPackName::Text, STR_RIGHT_POSITION);
     Map map = player.GetMap();
-    Critter cr = map.GetCritter(CritterProperty::NpcRole, ROLE_COMMANDER, CritterFindType::AliveNpc);
+    Critter cr = map.GetCritter(CritterProperty::NpcRole, ROLE_COMMANDER, CritterFindType::NonDeadNpc);
     if (!valid(cr) || cr.VCGuardsmanTriggerPlayerId != ZERO_IDENT) {
         return;
     }
     any[] values = {cr.Id, player.Id, 0};
     cr.VCGuardsmanTriggerPlayerId = player.Id; // Сохранение кода игрока, чтобы нпц не спамил свои реплики при многократных входах-выходах на гекс
     player.VCHartmanMarch = 2;
-    Game.DeferredCall(SECOND_TICKS(3), TimeToStart, values);
-    Game.SavedDeferredCall(MINUTE_TICKS(15), ResetCommander, values);
+    Game.StartTimeEvent(Time::Seconds(3), TimeToStart, values);
+    Game.StartTimeEvent(Time::GameMinutes(15), ResetCommander, values); //SavedDeferredCall
 }
 
 // Контрольная очистка переменных через 15 реальных минут, если что-то пошло не так, и все данные не удалились
@@ -610,7 +608,7 @@ void TimeToStart(any[] values)
     if (!valid(npc) || !valid(player)) {
         return;
     }
-    if (player.HexX != POS_X || player.HexY != POS_Y) // Игрок не находится в нужной позиции
+    if (player.Hex.x != POS_X || player.Hex.y != POS_Y) // Игрок не находится в нужной позиции
     {
         if (values[2] > 5) // Максимум 5 проверок, потом заново
         {
@@ -618,8 +616,8 @@ void TimeToStart(any[] values)
             return;
         }
         values[2] = int(values[2]) + 1;
-        npc.SayMsg(SAY_SHOUT_ON_HEAD, TextPackName::Text, STR_WRONG_POSITION);
-        Game.DeferredCall(SECOND_TICKS(5), TimeToStart, values);
+        Messaging::SayShoutOnHead(npc, TextPackName::Text, STR_WRONG_POSITION);
+        Game.StartTimeEvent(Time::Seconds(5), TimeToStart, values);
         return;
     }
     if (Game.VCHartmanMarchStatus) {
@@ -628,11 +626,11 @@ void TimeToStart(any[] values)
     }
     Game.VCHartmanMarchStatus = true;
     Map map = npc.GetMap(); // Поиск нпц-гвардейцев
-    Critter[] critters = map.GetCritters(CritterProperty::NpcRole, ROLE_MARCH, CritterFindType::AliveNpc);
+    Critter[] critters = map.GetCritters(CritterProperty::NpcRole, ROLE_MARCH, CritterFindType::NonDeadNpc);
     any[] valuesNew = {0, npc.Id, player.Id};
     SquadCommander cmdr = SquadCommander(npc);
     cmdr.Squad.insertLast(player.Id);
-    for (uint i = 0; i < critters.length(); i++) {
+    for (int i = 0; i < critters.length(); i++) {
         Critter cr = critters[i];
         MarchQueue q = MarchQueue(cr);
         q.Erase();
@@ -659,7 +657,7 @@ void TimeToStart(any[] values)
     q.AddOrder(DefineDirection(5, 0, 0));
     q.AddOrder(DefineMove(2, 5, false, 0, 0));
     q.Save();
-    Game.DeferredCall(SECOND_TICKS(3), NextGuardOrder, valuesNew);
+    Game.StartTimeEvent(Time::Seconds(3), NextGuardOrder, valuesNew);
 }
 
 // Время отдавать новый приказ
@@ -677,14 +675,14 @@ void NextGuardOrder(any[] values)
         values[0] = int(values[0]) + 1;
     }
     else {
-        cr.SayMsg(SAY_NORM, TextPackName::Dialogs, DLGSTR(cr.DialogId, STR_MARCH_FAILED));
+        Messaging::Say(cr, TextPackName::Dialogs, DLGSTR(cr.DialogId, STR_MARCH_FAILED));
         ResetCommander(cr);
         cmdr.Erase();
         return;
     }
 
     if (values[0] == LAST_ORDER) {
-        cr.SayMsg(SAY_NORM, TextPackName::Dialogs, DLGSTR(cr.DialogId, STR_MARCH_COMPLETED));
+        Messaging::Say(cr, TextPackName::Dialogs, DLGSTR(cr.DialogId, STR_MARCH_COMPLETED));
         ResetCommander(cr);
         cmdr.Erase();
         Critter player = Game.GetCritter(values[2]);
@@ -694,12 +692,11 @@ void NextGuardOrder(any[] values)
         return;
     }
 
-    Game.DeferredCall(SECOND_TICKS(6), NextGuardOrder, values);
+    Game.StartTimeEvent(Time::Seconds(6), NextGuardOrder, values);
 }
 
 // Бонусы Гвардии для игроков
 #define CTE_ID_SALARY     (224)
-#define GAME_DAY          #(days)(days * 24 * 60 * 60)
 #define PRIVATE_MONEY     (68)  // Жалование рядового
 #define JSERGEANT_MONEY   (98)  // Жалование младшего сержанта
 #define SSERGEANT_MONEY   (151) // Жалование старшего сержанта
@@ -713,18 +710,18 @@ void NextGuardOrder(any[] values)
 // Ежедневное жалование
 void r_SetGuardSalary(Critter player, Critter npc)
 {
-    player.AddTimeEvent(cte_GuardsmanSalary, GAME_DAY(1), CTE_ID_SALARY);
+    player.StartTimeEvent(Time::GameDays(1), cte_GuardsmanSalary);
 }
 
-uint8 GetRank(Critter cr)
+int GetRank(Critter cr)
 {
     return cr.VCGuardRank;
 }
 
-uint cte_GuardsmanSalary(Critter cr, any identifier, uint& rate)
+void cte_GuardsmanSalary(Critter cr)
 {
-    uint8 rank = GetRank(cr);
-    uint money = 0;
+    int rank = GetRank(cr);
+    int money = 0;
     switch (rank) {
     case RANK_PRIVATE:
         money = PRIVATE_MONEY;
@@ -763,11 +760,17 @@ uint cte_GuardsmanSalary(Critter cr, any identifier, uint& rate)
 
     Map map = cr.GetMap();
     if (valid(map) && mapPids.find(map.ProtoId) != -1) {
-        return GAME_DAY(5);
+        timespan delayTicks = Time::GameDays(5);
+        if (delayTicks != ZERO_TIMESPAN) {
+            Game.RepeatCurrentTimeEvent(delayTicks);
+        }
     }
 
     cr.ReplicationMoney += money;
-    return GAME_DAY(1);
+    timespan delayTicks = Time::GameDays(1);
+    if (delayTicks != ZERO_TIMESPAN) {
+        Game.RepeatCurrentTimeEvent(delayTicks);
+    }
 }
 
 // Квест Пойди туда - не знаю куда
@@ -782,8 +785,8 @@ void _CaveInCritter(Map map, Critter cr)
     if (valid(loc)) {
         loc.AutoGarbage = true;
     }
-    Critter[] mutants = map.GetCritters(CritterFindType::AliveNpc);
-    for (uint i = 0; i < mutants.length(); i++) {
+    Critter[] mutants = map.GetCritters(CritterFindType::NonDeadNpc);
+    for (int i = 0; i < mutants.length(); i++) {
         Critter npc = mutants[i];
         if (!EnemyStack::CheckEnemyInStack(npc, cr.Id)) {
             EnemyStack::AddEnemyToStack(npc, cr.Id);
@@ -799,7 +802,7 @@ void _MutantsOutGroundInit(Map map, bool firstTime)
     map.OnCritterIn.Subscribe(_OutGroundInCritter);
     Location loc = map.GetLocation();
     if (valid(loc)) {
-        Game.SavedDeferredCall(DAY_TICKS(3), DeleteQuestLocation, loc.Id);
+        Game.StartTimeEvent(Time::GameDays(3), DeleteQuestLocation, loc.Id); //SavedDeferredCall
     }
 }
 
@@ -813,7 +816,7 @@ void DeleteQuestLocation(any value)
 
 void _OutGroundInCritter(Map map, Critter cr)
 {
-    if (!cr.IsControlledByPlayer) {
+    if (!cr.ControlledByPlayer) {
         return;
     }
     if (cr.VCHartmannRecon != 2) {
@@ -837,8 +840,8 @@ void r_ShowCave(Critter player, Critter npc)
 
     Location loc = Game.GetLocation(player.VCReconCaveId);
     if (valid(loc) && loc.ProtoId == Content::Location::vc_recon_mutants) {
-        uint16 x = loc.WorldX;
-        uint16 y = loc.WorldY;
+        int x = loc.WorldPos.x;
+        int y = loc.WorldPos.y;
         Game.DestroyLocation(loc.Id);
         HostileLocationQuest::r_ShowLocation(player,
                                              npc,
@@ -849,8 +852,8 @@ void r_ShowCave(Critter player, Critter npc)
                                              y);
     }
     else {
-        uint16 x = 1168;
-        uint16 y = 418;
+        int x = 1168;
+        int y = 418;
         HostileLocationQuest::r_ShowLocation2(player,
                                               npc,
                                               int(CritterProperty::VCHartmannClearCave),
@@ -870,4 +873,8 @@ void _CharleyInit(Critter cr, bool firstTime)
     cr.SkillBarter = 1;
     cr.ActionPointsBase = 12;
     cr.SkillBigGuns = 250;
+}
+
+#endif
+
 }

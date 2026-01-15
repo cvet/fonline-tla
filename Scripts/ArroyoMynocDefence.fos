@@ -1,9 +1,12 @@
-// FOS Server Sort 3
+namespace ArroyoMynocDefence // Sort 3
+{
+
+#if SERVER
 
 // Name:	arroyo_mynoc_defence
 // Author:	Sufir
 
-///@ Property Game PrivateServer uint ArroyoMynocTimeout
+///@ Property Game Server synctime ArroyoMynocTimeout Mutable Persistent
 
 // Defines
 #define QUEST_TIMEOUT (1) // Количество игровых суток, которые даются на выполнение каждой из стадий квеста.
@@ -51,9 +54,9 @@ bool d_IsQuestGroupLevelRight(Critter player, Critter npc)
 
     // Проверяем уровни группы в которой состоит игрок берущий квест
     // если кто-то из участников группы не соответствует по уровню - отправляем на вариант диалога DIALOG_NUM_LVL
-    for (uint i = 0; i < group.length(); i++) {
+    for (int i = 0; i < group.length(); i++) {
         // Если в группе есть НПС - пропускаем его, он может быть любого уровня.
-        if (!group[i].IsControlledByPlayer) {
+        if (!group[i].ControlledByPlayer) {
             continue;
         }
 
@@ -80,13 +83,13 @@ bool d_IsQuestGroupHaveGoodKarma(Critter player, Critter npc)
     // Проверяем карму группы в которой состоит игрок берущий квест,
     // если суммарная карма или репутация в Арройо группы низкая - отправляем на вариант диалога DIALOG_NUM_KARMA
     int GroupKarma = 0;
-    for (uint i = 0; i < group.length(); i++) {
+    for (int i = 0; i < group.length(); i++) {
         GroupKarma = GroupKarma + group[i].Karma;
     }
 
     int ArroyoRep = 0;
-    for (uint i = 0; i < group.length(); i++) {
-        if (group[i].IsControlledByPlayer) {
+    for (int i = 0; i < group.length(); i++) {
+        if (group[i].ControlledByPlayer) {
             ArroyoRep = ArroyoRep + group[i].ReputationArroyo;
         }
     }
@@ -131,7 +134,7 @@ void r_StartQuest(Critter player, Critter npc)
 }
 
 // Запуск второй стадии квеста.
-uint r_StartStage2(Critter player, Critter npc)
+int r_StartStage2(Critter player, Critter npc)
 {
     // Находим группу в которой состоит игрок и лидера группы.
     Critter[] group = {};
@@ -153,7 +156,7 @@ uint r_StartStage2(Critter player, Critter npc)
 // ===== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ===== \\
 
 // Вспомогательная функция, для запуска квеста, используется в r_StartQuest
-void StartQuest(Critter player, uint stage)
+void StartQuest(Critter player, int stage)
 {
     // Находим группу в которой состоит игрок и лидера группы.
     Critter[] group = {};
@@ -180,7 +183,7 @@ void StartQuest(Critter player, uint stage)
 
     // Записываем текущий состав группы.
     auto lastDefenceGroup = array<ident>(group.length());
-    for (uint i = 0; i < group.length(); i++) {
+    for (int i = 0; i < group.length(); i++) {
         lastDefenceGroup[i] = group[i].Id;
     }
     Game.ArroyoLastDefenceGroup = lastDefenceGroup;
@@ -204,9 +207,9 @@ void StartQuest(Critter player, uint stage)
         // Проходимся по всей группе и инициализируем квест у игроков не выполнявших (q_arroyo_mynoc_defence = 0) его ранее
         // или проваливших его (q_arroyo_mynoc_defence = 4 или 8). Все прочие в группе могут помочь, но не могут выполнить квест
         // и не получают опыт, соответственно.
-        for (uint i = 0; i < group.length(); i++) {
+        for (int i = 0; i < group.length(); i++) {
             // Если в группе есть НПС - пропускаем его
-            if (!group[i].IsControlledByPlayer) {
+            if (!group[i].ControlledByPlayer) {
                 continue;
             }
             int quest = group[i].ArroyoMynocDefence;
@@ -227,9 +230,9 @@ void StartQuest(Critter player, uint stage)
         Game.ArroyoMynocMap = camp.Id;
 
         // Проходимся по всей группе и меняем стадию выполненности квеста.
-        for (uint i = 0; i < group.length(); i++) {
+        for (int i = 0; i < group.length(); i++) {
             // Если в группе есть НПС - пропускаем его
-            if (!group[i].IsControlledByPlayer) {
+            if (!group[i].ControlledByPlayer) {
                 continue;
             }
             if (group[i].ArroyoMynocDefence == 2) {
@@ -242,10 +245,10 @@ void StartQuest(Critter player, uint stage)
     }
 
     // Устанавливаем таймаут для квеста.
-    Game.ArroyoMynocTimeout = Game.GetFullSecond() + (60 * 60 * 24 * QUEST_TIMEOUT);
+    Game.ArroyoMynocTimeout = Game.SynchronizedTime + Time::Days(QUEST_TIMEOUT);
 
     // И создаем событие в котором будем отслеживать не просрочился ли квест. Времени на квест в двое больше если нет других соискателей.
-    Game.SavedDeferredCall(GAME_SECOND_TO_TICK(Game.ArroyoMynocTimeout + (60 * 24 * QUEST_TIMEOUT) - Game.GetFullSecond()), TimeExpired);
+    Game.StartTimeEvent(Time::Days(QUEST_TIMEOUT * 2), TimeExpired); //SavedDeferredCall
 
     // Если дожили до сюда, то всё в порядке. Возвращаем TRUE.
 }
@@ -254,13 +257,13 @@ void StartQuest(Critter player, uint stage)
 bool TimeOutIsFree()
 {
     // Квест ещё ни кем не брался.
-    if (Game.ArroyoMynocTimeout == 0) {
+    if (Game.ArroyoMynocTimeout == ZERO_SYNCTIME) {
         return true;
     }
 
     // Квест был взят игроками, но не выполнен.
-    if (Game.GetFullSecond() >= Game.ArroyoMynocTimeout) {
-        Game.ArroyoMynocTimeout = 0;
+    if (Game.SynchronizedTime >= Game.ArroyoMynocTimeout) {
+        Game.ArroyoMynocTimeout = ZERO_SYNCTIME;
         return true;
     }
     else {
@@ -277,7 +280,7 @@ void DeleteRaidersCamp(bool isFail)
 
         // Ищем пользователей бравших квест, устанавливаем переменные и чистим их карты.
         auto lastDefenceGroup = Game.ArroyoLastDefenceGroup;
-        for (uint i = 0; i < lastDefenceGroup.length(); i++) {
+        for (int i = 0; i < lastDefenceGroup.length(); i++) {
             Critter player = Game.GetCritter(lastDefenceGroup[i]);
 
             // Проверяем где находится пользователь. Если в удаляемой локации - выкидываем его от туда.
@@ -290,8 +293,8 @@ void DeleteRaidersCamp(bool isFail)
 
                 if (player_loc.ProtoId == loc.ProtoId) {
                     // В локации найден игрок - переносим его на глобал.
-                    player.TransitToGlobal();
-                    player.SayMsg(SAY_NETMSG, TextPackName::Text, 3483);
+                    player.TransferToGlobal();
+                    Messaging::Info(player, TextPackName::Text, 3483);
                 }
 
                 // Убираем локу с карты игрока
@@ -346,7 +349,7 @@ void TimeExpired()
     }
 
     // Устанавливаем таймаут для квеста в 0.
-    Game.ArroyoMynocTimeout = 0;
+    Game.ArroyoMynocTimeout = ZERO_SYNCTIME;
 }
 
 // Локация 1 "Лагерь рейдеров" для первой части квеста.
@@ -355,10 +358,9 @@ Location _GetRaidersCamp(Critter[] group)
     int x, y;
     x = Game.Random(0, 1);
     y = Game.Random(-2, -1);
-    Location camp = Game.CreateLocation(Content::Location::raiders_camp_1,
-                                        (ARROYO_POS_X + x * Settings.GlobalMapZoneLength),
-                                        (ARROYO_POS_Y + y * Settings.GlobalMapZoneLength),
-                                        group);
+    Location camp = Location::CreateLocation(Content::Location::raiders_camp_1,
+                                             ipos((ARROYO_POS_X + x * Settings.GlobalMapZoneLength), (ARROYO_POS_Y + y * Settings.GlobalMapZoneLength)),
+                                             group);
 
     if (!valid(camp)) {
         return null;
@@ -379,10 +381,10 @@ Location _GetRaidersForce(Critter[] group)
     int x, y;
     x = Game.Random(1, 2);
     y = Game.Random(-1, 2);
-    Location camp = Game.CreateLocation(
+    Location camp = Location::CreateLocation(
         Content::Location::raiders_camp_2,
-        (ARROYO_POS_X + x * Settings.GlobalMapZoneLength + Game.Random(-(Settings.GlobalMapZoneLength / 2), (Settings.GlobalMapZoneLength / 2))),
-        (ARROYO_POS_Y + y * Settings.GlobalMapZoneLength + Game.Random(-(Settings.GlobalMapZoneLength / 2), (Settings.GlobalMapZoneLength / 2))),
+        ipos((ARROYO_POS_X + x * Settings.GlobalMapZoneLength + Game.Random(-(Settings.GlobalMapZoneLength / 2), (Settings.GlobalMapZoneLength / 2))),
+             (ARROYO_POS_Y + y * Settings.GlobalMapZoneLength + Game.Random(-(Settings.GlobalMapZoneLength / 2), (Settings.GlobalMapZoneLength / 2)))),
         group);
 
     if (!valid(camp)) {
@@ -396,4 +398,8 @@ Location _GetRaidersForce(Critter[] group)
     // camp.Color = 0x3CFF0000;
 
     return camp;
+}
+
+#endif
+
 }

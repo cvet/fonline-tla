@@ -1,15 +1,18 @@
-// FOS Server
+namespace FighterPattern
+{
+
+#if SERVER
 
 // специализированный инструмент для настройки поведения нпц в команде на конкретной карте
 
-///@ Property Critter PrivateServer uint FighterPatternCanGenStim
-///@ Property Critter PrivateServer int  FighterPatternAllyAssistRadius
-///@ Property Critter PrivateServer int  FighterPatternAssistAlliesNum
-///@ Property Critter PrivateServer int  FighterPatternMustHealLvl
-///@ Property Critter PrivateServer int  FighterPatternLocalAlarmDeads
-///@ Property Critter PrivateServer int  FighterPatternGlobalAlarmDeads
-///@ Property Map PrivateServer bool FighterPatternEnemySpotted
-///@ Property Map PrivateServer uint=>uint FighterPatternDeadAllies
+///@ Property Critter Server int32 FighterPatternCanGenStim Mutable Persistent
+///@ Property Critter Server int32 FighterPatternAllyAssistRadius Mutable Persistent
+///@ Property Critter Server int32 FighterPatternAssistAlliesNum Mutable Persistent
+///@ Property Critter Server int32 FighterPatternMustHealLvl Mutable Persistent
+///@ Property Critter Server int32 FighterPatternLocalAlarmDeads Mutable Persistent
+///@ Property Critter Server int32 FighterPatternGlobalAlarmDeads Mutable Persistent
+///@ Property Map Server bool FighterPatternEnemySpotted Mutable Persistent
+///@ Property Map Server int32=>int32 FighterPatternDeadAllies Mutable Persistent
 
 #define MSG_KILLEM (17) // код сообщения "убить гада"
 
@@ -20,7 +23,7 @@ int DeadAllyCounter(Critter cr)
         return 0;
     }
 
-    if (cr.IsControlledByPlayer) {
+    if (cr.ControlledByPlayer) {
         return 0;
     }
 
@@ -37,7 +40,7 @@ void AddDeadAlly(Critter cr)
         return;
     }
 
-    if (cr.IsControlledByPlayer) {
+    if (cr.ControlledByPlayer) {
         return;
     }
 
@@ -59,7 +62,7 @@ void AddDeadAlly(Critter cr)
 // locAlarm - число смертей мобов после которого остальные подходят к нападающему
 // globAlarm - число смертей мобов, после которого все мобы на карте присоединяются к бою
 // fArmLvl - коэффициент усиления брони и резистов моба
-void SetMapMobsTemplate(Map map, uint teamId, int aDist, int alRadius, int alNum, int hLvl, int locAlarm, int globAlarm, int fArmLvl)
+void SetMapMobsTemplate(Map map, int teamId, int aDist, int alRadius, int alNum, int hLvl, int locAlarm, int globAlarm, int fArmLvl)
 {
     FighterPattern fp = FighterPattern();
     fp.AttackDist = aDist;
@@ -70,9 +73,9 @@ void SetMapMobsTemplate(Map map, uint teamId, int aDist, int alRadius, int alNum
     fp.GlobalAlarmDeads = globAlarm;
     fp.ForceArmourLvl = fArmLvl;
 
-    Critter[] critters = map.GetCritters(CritterFindType::AliveNpc);
-    for (uint i = 0; i < critters.length(); i++) {
-        if (uint(critters[i].TeamId) != teamId) {
+    Critter[] critters = map.GetCritters(CritterFindType::NonDeadNpc);
+    for (int i = 0; i < critters.length(); i++) {
+        if (int(critters[i].TeamId) != teamId) {
             continue;
         }
         fp.InitPattern(critters[i]);
@@ -121,7 +124,7 @@ class FighterPattern
             DL("Terminator");
         }
 
-        for (uint i = 0; i < CritterPropertyGroup::ResistsBase.length(); i++) {
+        for (int i = 0; i < CritterPropertyGroup::ResistsBase.length(); i++) {
             if (CritterPropertyGroup::ResistsBase[i] != CritterProperty::EmpResistanceBase) {
                 int r = Game.Random(1, ForceArmourLvl) * 20;
                 r = CLAMP(r, 30, 180);
@@ -167,8 +170,8 @@ class FighterPattern
 /************************Обработка событий*************************/
 void e_OnMapCritterDead(Map map, Critter cr, Critter killer)
 {
-    if (cr.IsControlledByPlayer) {
-        if (map.GetCritters(CritterFindType::AlivePlayers).isEmpty()) {
+    if (cr.ControlledByPlayer) {
+        if (map.GetCritters(CritterFindType::NonDeadPlayers).isEmpty()) {
             map.FighterPatternEnemySpotted = false;
             DL("All players dead");
         }
@@ -178,7 +181,7 @@ void e_OnMapCritterDead(Map map, Critter cr, Critter killer)
         if (!valid(killer)) {
             return;
         }
-        if (!killer.IsControlledByPlayer) {
+        if (!killer.ControlledByPlayer) {
             return;
         }
         if (DeadAllyCounter(cr) >= cr.FighterPatternGlobalAlarmDeads) {
@@ -196,7 +199,7 @@ void e_OnMapCritterDead(Map map, Critter cr, Critter killer)
 
 void e_ShowCritter1(Critter cr, Critter showCrit)
 {
-    if (!showCrit.IsControlledByPlayer) {
+    if (!showCrit.ControlledByPlayer) {
         return;
     }
 
@@ -217,16 +220,16 @@ void e_ShowCritter1(Critter cr, Critter showCrit)
 
     // DL("will attack Critter");
     e_CritterMessage(cr, cr, MSG_KILLEM, showCrit.Id);
-    uint dist = Game.GetDistance(cr, showCrit);
+    int dist = Game.GetDistance(cr, showCrit);
     if (cr.ShowCritterDist1 >= dist) {
         Map map = cr.GetMap();
         if (!valid(map)) {
             return;
         }
 
-        Critter[] critters = map.GetCritters(cr.HexX, cr.HexY, cr.FighterPatternAllyAssistRadius, CritterFindType::AliveNpc);
-        for (uint i = 0; i < critters.length(); i++) {
-            if (i >= uint(cr.FighterPatternAssistAlliesNum)) {
+        Critter[] critters = map.GetCritters(cr.Hex, cr.FighterPatternAllyAssistRadius, CritterFindType::NonDeadNpc);
+        for (int i = 0; i < critters.length(); i++) {
+            if (i >= int(cr.FighterPatternAssistAlliesNum)) {
                 break;
             }
             e_CritterMessage(critters[i], cr, MSG_KILLEM, showCrit.Id);
@@ -308,4 +311,8 @@ bool _TryHeal(Critter cr)
 bool _IsAlly(Critter cr1, Critter cr2)
 {
     return cr1.TeamId != 0 && cr1.TeamId == cr2.TeamId;
+}
+
+#endif
+
 }

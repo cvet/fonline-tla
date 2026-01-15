@@ -1,13 +1,17 @@
-// FOS Server Sort 2
+namespace Navarro // Sort 2
+{
+
+#if SERVER
+
 // Author: rifleman17
 // Navarro sub1 quests
 
-///@ Property Critter Protected uint8 NavHenryEmpTest Group = Quests Quest = 4507 Max = 7
-///@ Property Critter PrivateServer ident=>bool NavEmpTestedCritter
+///@ Property Critter Common uint8 NavHenryEmpTest Mutable OwnerSync Persistent Group = Quests Quest = 4507 Max = 7
+///@ Property Critter Server ident=>bool NavEmpTestedCritter Mutable Persistent
 
-///@ Property Item    PrivateServer uint NavarroCountUseScaner
-///@ Property Critter PrivateServer uint NavarroTimeOutScan
-///@ Property Critter PrivateServer ident NavarroChipUsedId
+///@ Property Item Server int32 NavarroCountUseScaner Mutable Persistent
+///@ Property Critter Server synctime NavarroTimeOutScan Mutable Persistent
+///@ Property Critter Server ident NavarroChipUsedId Mutable Persistent
 
 // Quest "Soft Job", Henry
 #define SCANER_INFO (2)
@@ -24,7 +28,7 @@ void _ScanerInit(Item item, bool firstTime)
 
     if (firstTime) {
         // Создаем событие удаления предмета через 1 игровой месяц
-        Game.SavedDeferredCall(GAME_MONTH_TO_TICK(1), DeleteScaner, item.Id);
+        Game.StartTimeEvent(Time::GameDays(30), DeleteScaner, item.Id); //SavedDeferredCall
     }
 }
 
@@ -36,7 +40,7 @@ void DeleteScaner(any value)
     }
 }
 
-bool _ScanerUse(Item item, Critter cr, Critter onCritter, Item onItem, StaticItem onScenery, uint param)
+bool _ScanerUse(Item item, Critter cr, Critter onCritter, Item onItem, StaticItem onScenery, int param)
 {
     if (valid(onCritter) && onCritter.IsDead() && onCritter.ModelNameBase == CRTYPE_ROBOT) {
         Map map = onCritter.GetMap();
@@ -47,13 +51,13 @@ bool _ScanerUse(Item item, Critter cr, Critter onCritter, Item onItem, StaticIte
         if (!valid(loc) || (loc.ProtoId != Content::Location::sierra_army_depot)) {
             return false;
         }
-        if (onCritter.NavarroTimeOutScan > Game.GetFullSecond()) {
-            cr.SayMsg(SAY_NETMSG, TextPackName::Text, STR_EMPTY);
+        if (onCritter.NavarroTimeOutScan > Game.SynchronizedTime) {
+            Messaging::Info(cr, TextPackName::Text, STR_EMPTY);
             return true;
         }
         // Каждого робота можно сканировать только раз в два реальных часа
-        onCritter.NavarroTimeOutScan = Game.GetFullSecond() + Settings.TimeMultiplier * 2 * 60 * 60;
-        uint value = 1;
+        onCritter.NavarroTimeOutScan = Game.SynchronizedTime + Time::Hours(2);
+        int value = 1;
         if (cr.SkillScience > 50) {
             value = Game.Random(5, 10);
         }
@@ -67,10 +71,10 @@ bool _ScanerUse(Item item, Critter cr, Critter onCritter, Item onItem, StaticIte
         item.NavarroCountUseScaner = CLAMP(item.NavarroCountUseScaner, 0, 100);
         item.Lexems = "$value" + item.NavarroCountUseScaner;
         if (item.NavarroCountUseScaner > 99) {
-            cr.SayMsg(SAY_NETMSG, TextPackName::Text, STR_FULL);
+            Messaging::Info(cr, TextPackName::Text, STR_FULL);
         }
         else {
-            cr.SayMsg(SAY_NETMSG, TextPackName::Text, STR_SCAN, "$value" + item.NavarroCountUseScaner);
+            Messaging::Info(cr, TextPackName::Text, STR_SCAN, "$value" + item.NavarroCountUseScaner);
         }
 
         return true;
@@ -81,7 +85,7 @@ bool _ScanerUse(Item item, Critter cr, Critter onCritter, Item onItem, StaticIte
 bool d_SoftJobComplete(Critter player, Critter npc)
 {
     Item[] items = player.GetItems();
-    for (uint i = 0; i < items.length(); i++) {
+    for (int i = 0; i < items.length(); i++) {
         if (items[i].ProtoId == Content::Item::elec_lockpick_mkii && items[i].Info == SCANER_INFO && items[i].NavarroCountUseScaner == 100) {
             return true;
         }
@@ -118,7 +122,7 @@ void _ChipInit(Item item, bool firstTime)
     item.OnCritterUseOn.Subscribe(_ChipUse);
 }
 
-bool _ChipUse(Item item, Critter cr, Critter onCritter, Item onItem, StaticItem onScenery, uint param)
+bool _ChipUse(Item item, Critter cr, Critter onCritter, Item onItem, StaticItem onScenery, int param)
 {
     if (valid(onCritter) && onCritter.IsDead() && onCritter.ModelNameBase == CRTYPE_ROBOT) {
         Map map = onCritter.GetMap();
@@ -130,10 +134,10 @@ bool _ChipUse(Item item, Critter cr, Critter onCritter, Item onItem, StaticItem 
             return false;
         }
         if (cr.SkillScience < 100) {
-            cr.SayMsg(SAY_NETMSG, TextPackName::Text, STR_CHIP_SET_FAIL);
+            Messaging::Info(cr, TextPackName::Text, STR_CHIP_SET_FAIL);
         }
         else {
-            cr.SayMsg(SAY_NETMSG, TextPackName::Text, STR_CHIP_SET_UP);
+            Messaging::Info(cr, TextPackName::Text, STR_CHIP_SET_UP);
             Game.DestroyItem(item);
             onCritter.OnSomeCritterUseSkill.Subscribe(_RobotSmthUseSkill);
             onCritter.NavarroChipUsedId = cr.Id; // Запоминаем, кто установил чип
@@ -147,10 +151,10 @@ void _RobotSmthUseSkill(Critter cr, Critter fromCr, CritterProperty skill, Critt
 {
     if (skill == CritterProperty::SkillRepair && valid(onCritter) && onCritter.Id == cr.Id && cr.NavarroChipUsedId == fromCr.Id) {
         if (fromCr.SkillRepair <= 100) {
-            fromCr.SayMsg(SAY_NETMSG, TextPackName::Text, STR_ROBOT_CANT_REPAIR);
+            Messaging::Info(fromCr, TextPackName::Text, STR_ROBOT_CANT_REPAIR);
         }
         else {
-            fromCr.SayMsg(SAY_NETMSG, TextPackName::Text, STR_ROBOT_REPAIRED);
+            Messaging::Info(fromCr, TextPackName::Text, STR_ROBOT_REPAIRED);
             EnemyStack::ClearEnemyStack(cr);
             CritterState::ToAlive(cr);
             cr.CurrentHp = cr.MaxLife;
@@ -171,4 +175,8 @@ void CountEmpRocketTests(Critter player, Critter target)
             player.NavEmpTestedCritter = navEmpTestedCritter;
         }
     }
+}
+
+#endif
+
 }

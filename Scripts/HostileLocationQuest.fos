@@ -1,4 +1,8 @@
-// FOS Server Sort 2
+namespace HostileLocationQuest // Sort 2
+{
+
+#if SERVER
+
 // Author: rifleman17
 // Скрипт для реализации квестов, целью которых является зачистка некоей локации от мобов
 // Особенности:
@@ -22,17 +26,17 @@
 //   - обработать убийство игроком союзников после того, как задача квеста выполнена
 //   - изменть реализацию поведения криттеров, чтобы они допускали использование своих скриптов
 
-///@ Property Critter PrivateServer bool HostileLQIsStoped
-///@ Property Critter PrivateServer uint=>uint8[] HostileLQData
-///@ Property Map PrivateServer ident HostileLQPlayerId
-///@ Property Map PrivateServer uint HostileLQVarNum
+///@ Property Critter Server bool HostileLQIsStoped Mutable Persistent
+///@ Property Critter Server int32=>uint8[] HostileLQData Mutable Persistent
+///@ Property Map Server ident HostileLQPlayerId Mutable Persistent
+///@ Property Map Server int32 HostileLQVarNum Mutable Persistent
 
 #define NPC_ROLE_HOSTILE       (400)
 #define NPC_ROLE_ALLY          (401)
 #define QUEST_ACTIVE           (1) // Квест получен
 #define QUEST_FAIL_LOC_DELETED (2) // Квест провален, удалена локация - истекло время на квест.
 #define QUEST_COMPLETE         (3) // Квест выполнен, все враждебные нпц уничтожены, локация удалена.
-#define TIME_RESET             (Time::RealDay(2)) // Время автоматического удаления локации и приведения квестовой переменной в состояние QUEST_FAIL_LOC_DELETED
+#define TIME_RESET             (Time::Days(2)) // Время автоматического удаления локации и приведения квестовой переменной в состояние QUEST_FAIL_LOC_DELETED
 #define MSG_KILL_EM            (144)
 
 #define _GetPlayerId           #(map)(map.HostileLQPlayerId)
@@ -60,13 +64,13 @@ class HostileLocationInfo
     }
 
     ident PlayerId; // Id игрока выполняющего квест
-    uint QVarNum;   // Номер квестовой переменной, связанной с квестом
-    uint CVarNum; // Номер локальной переменной для игрока - счетчика смертей союзников, если равна = 0, подсчет не происходит
-    ident LocId;  // Id локации
-    hstring LocPid;  // Код прототипа локации
-    uint LocX;       // Положение локации на глобальной карте по оси икс
-    uint LocY;       // Положение локации на глобальной карте по оси игрек
-    uint CoordDelta; // Относительное смещение по координатным осям глобальной карты, на которое может быть смещена точка положения локации
+    int QVarNum;    // Номер квестовой переменной, связанной с квестом
+    int CVarNum; // Номер локальной переменной для игрока - счетчика смертей союзников, если равна = 0, подсчет не происходит
+    ident LocId; // Id локации
+    hstring LocPid; // Код прототипа локации
+    int LocX;       // Положение локации на глобальной карте по оси икс
+    int LocY;       // Положение локации на глобальной карте по оси игрек
+    int CoordDelta; // Относительное смещение по координатным осям глобальной карты, на которое может быть смещена точка положения локации
     bool LocCreated; // Признак: Локация уже создана
 
     bool Serialized()
@@ -127,7 +131,9 @@ class HostileLocationInfo
         }
 
         Location loc =
-            Game.CreateLocation(LocPid, LocX + Game.Random(-1 * int(CoordDelta), CoordDelta), LocY + Game.Random(-1 * int(CoordDelta), CoordDelta), null);
+            Location::CreateLocation(LocPid,
+                                     ipos(LocX + Game.Random(-1 * int(CoordDelta), CoordDelta), LocY + Game.Random(-1 * int(CoordDelta), CoordDelta)),
+                                     null);
         if (loc == null) {
             return false; // Ошибка при создании локации
         }
@@ -141,7 +147,7 @@ class HostileLocationInfo
         Location::SetKnownLoc(player, LocId);
 
         // Прописывание скриптов для карт локации, а также сохранение ключевой информации о квесте в Map::Data
-        for (uint i = 0; i < loc.GetMapCount(); i++) {
+        for (int i = 0; i < loc.GetMapCount(); i++) {
             Map map = loc.GetMapByIndex(i);
             _SetPlayerId(map, PlayerId);
             _SetVarNum(map, QVarNum);
@@ -150,7 +156,7 @@ class HostileLocationInfo
 
         // Событие удаления локации через какое-то время, если игрок не успел выполнить квест
         any[] values = {PlayerId, QVarNum};
-        Game.SavedDeferredCall(GAME_SECOND_TO_TICK(TIME_RESET), ResetHostileLoc, values);
+        Game.StartTimeEvent(TIME_RESET, ResetHostileLoc, values); //SavedDeferredCall
 
         // Сериализация описания квеста и локации
         Save();
@@ -158,9 +164,9 @@ class HostileLocationInfo
         return true;
     }
 
-    uint CollectCritters(Critter[] critters, bool ally, CritterFindType findType)
+    int CollectCritters(Critter[] critters, bool ally, CritterFindType findType)
     {
-        uint len = critters.length(); // Первоначальная длина массива
+        int len = critters.length(); // Первоначальная длина массива
 
         if (LocId == ZERO_IDENT) {
             return 0;
@@ -172,11 +178,11 @@ class HostileLocationInfo
             return 0;
         }
 
-        for (uint i = 0; i < loc.GetMapCount(); i++) {
+        for (int i = 0; i < loc.GetMapCount(); i++) {
             DL("Map#" + i);
             Map map = loc.GetMapByIndex(i);
             Critter[] crits = map.GetCritters(CritterProperty::NpcRole, ally ? NPC_ROLE_ALLY : NPC_ROLE_HOSTILE, findType);
-            for (uint j = 0; j < crits.length(); j++) {
+            for (int j = 0; j < crits.length(); j++) {
                 DL("j =" + j);
                 critters.insertLast(crits[j]);
             }
@@ -186,13 +192,13 @@ class HostileLocationInfo
         return critters.length() - len;
     }
 
-    uint DeadPercent(bool ally)
+    int DeadPercent(bool ally)
     {
         Critter[] critters = {};
-        uint all = CollectCritters(critters, ally, CritterFindType::Npc);
-        uint dead = CollectCritters(critters, ally, CritterFindType::DeadNpc);
-        DL("perce" + (dead == 0 ? 0 : uint(100 * dead / all)) + "dead:" + dead + "; all:" + all);
-        return (dead == 0 ? 0 : uint(100 * dead / all));
+        int all = CollectCritters(critters, ally, CritterFindType::Npc);
+        int dead = CollectCritters(critters, ally, CritterFindType::DeadNpc);
+        DL("perce" + (dead == 0 ? 0 : int(100 * dead / all)) + "dead:" + dead + "; all:" + all);
+        return (dead == 0 ? 0 : int(100 * dead / all));
     }
 
     void ResetQuest()
@@ -222,7 +228,7 @@ class HostileLocationInfo
             if (CVarNum != 0 && player.GetAsInt(CritterProperty(CVarNum)) == 0) // Установка счетчика, если назначен
             {
                 Critter[] critters = {};
-                uint count = CollectCritters(critters, true, CritterFindType::DeadNpc);
+                int count = CollectCritters(critters, true, CritterFindType::DeadNpc);
                 player.SetAsInt(CritterProperty(CVarNum), count);
             }
         }
@@ -233,7 +239,7 @@ class HostileLocationInfo
         Critter[] critters = {};
         CollectCritters(critters, true, CritterFindType::Npc);
         CollectCritters(critters, false, CritterFindType::Npc);
-        for (uint i = 0, l = critters.length(); i < l; i++) {
+        for (int i = 0, l = critters.length(); i < l; i++) {
             critters[i].SetupScript(null);
         }
         Erase();
@@ -260,15 +266,15 @@ void _HostileMapInit(Map map, bool firstTime)
     }
     info.Load();
     Critter[] allies = {};
-    if (info.CollectCritters(allies, true, CritterFindType::AliveNpc) > 0) {
-        for (uint i = 0, l = allies.length(); i < l; i++) {
+    if (info.CollectCritters(allies, true, CritterFindType::NonDeadNpc) > 0) {
+        for (int i = 0, l = allies.length(); i < l; i++) {
             DL("Ally script set");
             allies[i].SetupScript(_AllyInit);
         }
     }
     Critter[] hostiles = {};
-    if (info.CollectCritters(hostiles, false, CritterFindType::AliveNpc) > 0) {
-        for (uint i = 0, l = hostiles.length(); i < l; i++) {
+    if (info.CollectCritters(hostiles, false, CritterFindType::NonDeadNpc) > 0) {
+        for (int i = 0, l = hostiles.length(); i < l; i++) {
             hostiles[i].SetupScript(_HostileInit);
         }
     }
@@ -286,7 +292,7 @@ void _HostileMapCritterDead(Map map, Critter cr, Critter killer)
     }
     info.Load();
     Critter[] hostiles = {};
-    if (info.CollectCritters(hostiles, false, CritterFindType::AliveNpc) == 0) // Все мобы мертвы
+    if (info.CollectCritters(hostiles, false, CritterFindType::NonDeadNpc) == 0) // Все мобы мертвы
     {
         DL("completed");
         info.CompleteQuest();
@@ -295,14 +301,14 @@ void _HostileMapCritterDead(Map map, Critter cr, Critter killer)
         map.OnCritterIn.Unsubscribe(_HostileMapInCritter);
         return;
     }
-    if (cr.IsControlledByPlayer && cr.Id == info.PlayerId) // Убит игрок. Союзники возвращаются на домашнюю позицию.
+    if (cr.ControlledByPlayer && cr.Id == info.PlayerId) // Убит игрок. Союзники возвращаются на домашнюю позицию.
     {
-        for (uint i = 0, l = hostiles.length(); i < l; i++) {
+        for (int i = 0, l = hostiles.length(); i < l; i++) {
             NpcPlanes::DropPlanes(hostiles[i]);
         }
         Critter[] allies = {};
-        if (info.CollectCritters(allies, true, CritterFindType::AliveNpc) > 0) {
-            for (uint i = 0, l = allies.length(); i < l; i++) {
+        if (info.CollectCritters(allies, true, CritterFindType::NonDeadNpc) > 0) {
+            for (int i = 0, l = allies.length(); i < l; i++) {
                 if (valid(allies[i])) {
                     SendAllyHome(allies[i]);
                 }
@@ -317,7 +323,7 @@ void _AllyInit(Critter cr, bool firstTime)
     DL("Ally init");
     cr.HostileLQIsStoped = true;
     cr.IsNoHome = false;
-    cr.OnIdle.Subscribe(_AllyIdle);
+    cr.StartTimeEvent(Time::Asap(), Time::Seconds(1), _AllyIdle);
     cr.OnSomeCritterAttacked.Subscribe(_AllySmthAttacked);
     cr.OnCritterAppeared.Subscribe(_AllyShowCritter);
 }
@@ -349,14 +355,13 @@ void _AllyIdle(Critter cr)
     }
     if (map.Id == cr.GetMap().Id) {
         if (Game.GetDistance(cr, player) > 20) {
-            NpcPlanes::AddWalkPlane(cr, 0, player.HexX, player.HexY, Game.Random(0, 5), true, 3);
+            NpcPlanes::AddWalkPlane(cr, 0, player.Hex, Game.Random(0, 5), true, 3);
         }
     }
     else {
-        uint16 hX = player.HexX;
-        uint16 hY = player.HexY;
-        if (Caravan::GetFreeHex(map, 4, hX, hY)) {
-            Obsolete::CritterTransitToMapCoords(cr, map.Id, hX, hY, Game.Random(0, 5));
+        auto hex = player.Hex;
+        if (Entrance::GetFreeHex(map, 4, hex)) {
+            cr.TransferToMap(map, hex, Game.Random(0, 5));
         }
     }
 }
@@ -366,7 +371,10 @@ void SendAllyHome(Critter cr)
     NpcPlanes::DropPlanes(cr);
     cr.HostileLQIsStoped = true;
     cr.IsNoHome = false;
-    Obsolete::CritterTransitToMapCoords(cr, cr.HomeMapId, cr.HomeHexX, cr.HomeHexY, cr.HomeDir);
+    auto map = Game.GetMap(cr.HomeMapId);
+    if (valid(map)) {
+        cr.TransferToMap(map, cr.HomeHex, cr.HomeDir);
+    }
 }
 
 void _AllySmthAttacked(Critter cr, Critter fromCr, Critter attacker)
@@ -386,7 +394,7 @@ void _AllyShowCritter(Critter cr, Critter showCrit)
     info.Load();
     DL("Info loaded");
     if (cr.HostileLQIsStoped) {
-        if (showCrit.IsControlledByPlayer && showCrit.Id == info.PlayerId) {
+        if (showCrit.ControlledByPlayer && showCrit.Id == info.PlayerId) {
             DL("Player remembered");
             cr.HostileLQIsStoped = false;
             cr.IsNoHome = true;
@@ -410,7 +418,7 @@ void r_SetFollow(Critter player, Critter npc, int val)
 // Скрипты противника
 void _HostileInit(Critter cr, bool firstTime)
 {
-    cr.OnIdle.Subscribe(_AllyIdle);
+    cr.StartTimeEvent(Time::Asap(), Time::Seconds(1), _AllyIdle);
     cr.OnAttacked.Subscribe(_HostileAttacked);
     cr.OnCritterAppearedDist1.Subscribe(_HostileShowCritter);
     cr.OnDead.Subscribe(_HostileDead);
@@ -427,14 +435,14 @@ void _HostileMessage(Critter cr, Critter fromCr, int message, any value)
 
 void _HostileShowCritter(Critter cr, Critter showCrit)
 {
-    if (showCrit.IsControlledByPlayer || showCrit.NpcRole == NPC_ROLE_ALLY) {
+    if (showCrit.ControlledByPlayer || showCrit.NpcRole == NPC_ROLE_ALLY) {
         NpcPlanes::AddAttackPlane(cr, 0, showCrit.Id);
     }
 }
 
 bool _HostileAttacked(Critter cr, Critter attacker)
 {
-    if (attacker.IsControlledByPlayer || attacker.NpcRole == NPC_ROLE_ALLY) {
+    if (attacker.ControlledByPlayer || attacker.NpcRole == NPC_ROLE_ALLY) {
         SendMessage::ToWhoSeesMe(cr, MSG_KILL_EM, attacker.Id);
     }
     return false;
@@ -492,4 +500,8 @@ void r_ShowLocation2(Critter player, Critter npc, int qVar, int counterVar, int 
     info.CoordDelta = Settings.GlobalMapZoneLength;
     info.Save();
     info.CreateHostileLocation();
+}
+
+#endif
+
 }

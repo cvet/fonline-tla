@@ -1,10 +1,14 @@
-// FOS Server
+namespace Radiation
+{
+
+#if SERVER
+
 // Author: cvet
 // Original Fallout2 system
 
 #define RADIATION_STAGES        (6)
 #define RADIATION_STATS         (8)
-#define RADIATION_DURATION      (10080 * 60)
+#define RADIATION_DURATION      (10080)
 #define RADIATION_DAMAGE_VALUE  (66)
 #define RADIATION_HIGH_DOSE     (66)
 #define RADIATION_DEAD_DOSE     (1800)
@@ -45,10 +49,7 @@ void AffectRadiation(Critter cr, int value)
         return;
     }
 
-    uint[] indexes = {};
-    tick_t[] durations = {};
-    uint[] rates = {};
-    bool isActive = cr.GetTimeEvents(Tla::CteRadiation, indexes, durations, rates) != 0;
+    bool isActive = cr.CountTimeEvent(cte_Radiation) != 0;
     int levelVal = cr.RadiationLevel;
     int resistVal = cr.DamageResistance[DamageTypes::Radiation];
 
@@ -59,7 +60,7 @@ void AffectRadiation(Critter cr, int value)
     levelVal = cr.RadiationLevel;
 
     if (value > RADIATION_HIGH_DOSE) {
-        cr.SayMsg(SAY_NETMSG, TextPackName::Game, STR_RADIATION_HIGH_DOSE);
+        Messaging::Info(cr, TextPackName::Game, STR_RADIATION_HIGH_DOSE);
     }
 
     if (levelVal >= RADIATION_DAMAGE_VALUE) {
@@ -75,33 +76,34 @@ void AffectRadiation(Critter cr, int value)
 
     if (isActive) // Try begin event with new effects
     {
-        uint stage = rates[0];
-        uint newStage = GetRadiationStage(levelVal);
+        /*int stage = rates[0];
+        int newStage = GetRadiationStage(levelVal);
         if (stage != newStage) {
             cr.ChangeTimeEvent(indexes[0], 0, stage);
-        }
+        }*/
+        cr.SetTimeEventData(cte_Radiation, GetRadiationStage(levelVal));
     }
     else // Try start new event
     {
         int stage1Val = TABLE_STAGE_VALUE(1);
         if (levelVal >= stage1Val) {
-            cr.AddTimeEvent(cte_Radiation, 0, Tla::CteRadiation);
+            cr.StartTimeEvent(ZERO_TIMESPAN, cte_Radiation, 1);
         }
     }
 
     if (levelVal >= RADIATION_DEAD_DOSE) {
         CritterState::ToDead(cr, CritterActionAnim::DeadFused, null);
-        cr.SayMsg(SAY_NETMSG, TextPackName::Game, STR_RADIATION_DIE);
+        Messaging::Info(cr, TextPackName::Game, STR_RADIATION_DIE);
     }
 }
 
 void DropRadiation(Critter cr)
 {
-    bool isActive = cr.GetTimeEvents(Tla::CteRadiation) != 0;
+    bool isActive = cr.CountTimeEvent(cte_Radiation) != 0;
     if (isActive) {
-        uint stage = GetRadiationStage(cr.RadiationLevel);
+        int stage = GetRadiationStage(cr.RadiationLevel);
         ChangeStage(cr, stage, false);
-        cr.RemoveTimeEvents(Tla::CteRadiation);
+        cr.StopTimeEvent(cte_Radiation);
     }
     cr.RadiationLevel = 0;
     if (cr.IsRadiated) {
@@ -109,32 +111,39 @@ void DropRadiation(Critter cr)
     }
 }
 
-uint cte_Radiation(Critter cr, any identifier, uint& stage)
+void cte_Radiation(Critter cr, any rate)
 {
     if (cr.IsDead()) {
-        return Time::RealMinute(5);
+        timespan delayTicks = Time::Minutes(5);
+        if (delayTicks != ZERO_TIMESPAN) {
+            Game.RepeatCurrentTimeEvent(delayTicks);
+        }
     }
 
-    uint newStage = GetRadiationStage(cr.RadiationLevel);
-    uint duration = RADIATION_DURATION;
+    int stage = rate;
+    int newStage = GetRadiationStage(cr.RadiationLevel);
+    int duration = RADIATION_DURATION;
 
     if (stage != newStage) // Set new effects
     {
         ChangeStage(cr, stage, false);
         ChangeStage(cr, newStage, true);
-        stage = newStage;
+        cr.SetTimeEventData(cte_Radiation, newStage);
     }
     else // Erase effects
     {
         ChangeStage(cr, stage, false);
         duration = 0;
     }
-    return duration;
+    timespan delayTicks = Tla::GameSeconds(duration);
+    if (delayTicks != ZERO_TIMESPAN) {
+        Game.RepeatCurrentTimeEvent(delayTicks);
+    }
 }
 
-uint GetRadiationStage(int level)
+int GetRadiationStage(int level)
 {
-    for (uint i = 0, j = RADIATION_STAGES; i <= j; i++) {
+    for (int i = 0, j = RADIATION_STAGES; i <= j; i++) {
         int valMin = (i > 0 ? TABLE_STAGE_VALUE(i) : 0);
         int valMax = (i < j ? TABLE_STAGE_VALUE(i + 1) : level + 1);
         if (level >= valMin && level < valMax) {
@@ -144,16 +153,16 @@ uint GetRadiationStage(int level)
     return 0;
 }
 
-void ChangeStage(Critter cr, uint stage, bool gain)
+void ChangeStage(Critter cr, int stage, bool gain)
 {
     if (stage == 0) {
         return;
     }
     if (gain) {
-        cr.SayMsg(SAY_NETMSG, TextPackName::Game, STR_RADIATION_STAGE(stage));
+        Messaging::Info(cr, TextPackName::Game, STR_RADIATION_STAGE(stage));
     }
 
-    for (uint i = 0, j = RADIATION_STATS; i < j; i++) {
+    for (int i = 0, j = RADIATION_STATS; i < j; i++) {
         CritterProperty statPropRead = TABLE_STAT_INDEX_READ(i);
         CritterProperty statPropWrite = TABLE_STAT_INDEX_WRITE(i);
         int statAmount = TABLE_STAT_AMOUNT(i, stage);
@@ -225,3 +234,7 @@ void ChangeStage(Critter cr, uint stage, bool gain)
    {12808}{}{The geiger counter is clicking.}
    {12809}{}{The geiger counter is clicking wildly.}
  */
+
+#endif
+
+}

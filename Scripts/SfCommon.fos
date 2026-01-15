@@ -1,31 +1,35 @@
-// FOS Server Sort 2
+namespace SfCommon // Sort 2
+{
+
+#if SERVER
+
 // Author: rifleman17
 // Common san-francisco scripts
 
-///@ Property Critter Protected     uint8 SFAhs7HubJudgement  Group = Quests Quest = 4430 Max = 8
-///@ Property Critter PrivateServer uint  SFLoPanBlackmailSum Max = 2000
-///@ Property Critter PrivateServer ident SFHububJudgementLocId
-///@ Property Critter PrivateServer uint8 SFHubJudgementKills Max = 4
-///@ Property Critter PrivateServer ident SfMercMaster
-///@ Property Critter PrivateServer ident SFCommonOneWeekInvokeId
-///@ Property Critter PrivateServer ident SFCommonFightPlayerId
-///@ Property Critter PrivateServer ident=>uint ClickCounter
+///@ Property Critter Common uint8 SFAhs7HubJudgement Mutable OwnerSync Persistent Group = Quests Quest = 4430 Max = 8
+///@ Property Critter Server int32 SFLoPanBlackmailSum Mutable Persistent Max = 2000
+///@ Property Critter Server ident SFHububJudgementLocId Mutable Persistent
+///@ Property Critter Server uint8 SFHubJudgementKills Mutable Persistent Max = 4
+///@ Property Critter Server ident SfMercMaster Mutable Persistent
+///@ Property Critter Server int32 SFCommonOneWeekInvokeId Mutable Persistent
+///@ Property Critter Server ident SFCommonFightPlayerId Mutable Persistent
+///@ Property Critter Server ident=>int32 ClickCounter Mutable Persistent
 
-///@ Property Game PrivateServer uint8 SFZax366StatusGlobal
-///@ Property Game PrivateServer bool  SFDevinHired
+///@ Property Game Server uint8 SFZax366StatusGlobal Mutable Persistent
+///@ Property Game Server bool SFDevinHired Mutable Persistent
 
 void _BosEvaInit(Critter eva, bool firstTime)
 {
     // Сброс глобального статуса для квеста "Чокнутый компьютер"
     eva.OnFinish.Subscribe(_EvaFinish);
     if (firstTime) {
-        eva.SFCommonOneWeekInvokeId = Game.SavedDeferredCall(GAME_DAY_TO_TICK(7), OneWeek, eva.Id);
+        eva.SFCommonOneWeekInvokeId = Game.StartTimeEvent(Time::GameDays(7), OneWeek, eva.Id); //SavedDeferredCall
     }
 }
 
 void _EvaFinish(Critter eva)
 {
-    Game.CancelDeferredCall(eva.SFCommonOneWeekInvokeId);
+    Game.StopTimeEvent(eva.SFCommonOneWeekInvokeId);
 }
 
 void OneWeek(any value)
@@ -34,7 +38,7 @@ void OneWeek(any value)
 
     Critter eva = Game.GetCritter(value);
     if (eva !is null) {
-        eva.SFCommonOneWeekInvokeId = Game.SavedDeferredCall(GAME_DAY_TO_TICK(7), OneWeek, value);
+        eva.SFCommonOneWeekInvokeId = Game.StartTimeEvent(Time::GameDays(7), OneWeek, value); //SavedDeferredCall
     }
 }
 
@@ -52,7 +56,7 @@ void r_ShowBlackmailSum(Critter player, Critter npc)
     }
 
     string lexems = "$money " + player.SFLoPanBlackmailSum;
-    player.SayMsg(SAY_NETMSG, TextPackName::Dialogs, DLGSTR(npc.DialogId, STR_GET_MONEY), lexems);
+    Messaging::Info(player, TextPackName::Dialogs, DLGSTR(npc.DialogId, STR_GET_MONEY), lexems);
 }
 
 // Функция вызывается из диалога, если крестьянин вступил в бой с игроком. При смерти крестьянина, если его убил тот самый игрок
@@ -70,10 +74,10 @@ void _citizenDead(Critter npc, Critter killer)
 {
     if (valid(killer)) {
         // Убить должен тот, кто пришел от Ло Пэна
-        if (killer.IsControlledByPlayer && npc.SFCommonFightPlayerId == killer.Id) {
+        if (killer.ControlledByPlayer && npc.SFCommonFightPlayerId == killer.Id) {
             npc.AddItem(Content::Item::bottle_caps, DEAD_SHOE_CAPS);
             // Для упрощения задачи, деньги начисляем сразу, несмотря на то, что игрок может их и не подобрать
-            killer.SayMsg(SAY_NETMSG, TextPackName::Dialogs, DLGSTR(npc.DialogId, STR_KILL_SHOE));
+            Messaging::Info(killer, TextPackName::Dialogs, DLGSTR(npc.DialogId, STR_KILL_SHOE));
             killer.SFLoPanBlackmailSum += DEAD_SHOE_CAPS;
             // Сообщение новой суммы игроку
             r_ShowBlackmailSum(killer, npc);
@@ -106,7 +110,10 @@ void _SFMercDead(Critter merc, Critter killer)
 // Отправление мерка домой.
 void SFMercToHome(Critter merc)
 {
-    Obsolete::CritterTransitToMapCoords(merc, merc.HomeMapId, merc.HomeHexX, merc.HomeHexY, merc.HomeDir);
+    auto map = Game.GetMap(merc.HomeMapId);
+    if (valid(map)) {
+        merc.TransferToMap(map, merc.HomeHex, merc.HomeDir);
+    }
     merc.IsGeck = false;
     merc.OnRespawn.Unsubscribe(_SFMercRespawn);
     merc.OnDead.Unsubscribe(_SFMercDead);
@@ -127,9 +134,9 @@ void r_SFMerc2Player(Critter player, Critter npc)
     }
 
     any[] values = {npc.Id, player.Id};
-    Game.SavedDeferredCall(GAME_SECOND_TO_TICK(CONTRACT_TIME), DoCancelContract, values); // Окончание контракта через полгода
+    Game.StartTimeEvent(Tla::GameSeconds(CONTRACT_TIME), DoCancelContract, values); // Окончание контракта через полгода//SavedDeferredCall
 
-    Merc::Merc2Player(player, npc, true, false, 0, Merc::MMDistMedium, Merc::MercGuardDefault, true, false, CONTRACT_TIME);
+    Merc::Merc2Player(player, npc, true, false, 0, Merc::MMDistMedium, Merc::MercGuardDefault, true, false, Tla::GameSeconds(CONTRACT_TIME));
     npc.SetupScript(_SFMercInit);
 }
 
@@ -162,10 +169,10 @@ void CancelContract(Critter merc)
 }
 
 // Использование науки на Императоре Ши
-bool s_UseImperor(Critter player, StaticItem scenery, Item item, int skill)
+bool s_UseImperor(Critter player, StaticItem scenery, Item item, any skill)
 {
     if (skill == CritterProperty::SkillScience) {
-        // Game.RunDialog( player, Content::Dialog::sf_emperor, scenery.HexX, scenery.HexY, false );
+        // Dialogs::RunDialog( player, Content::Dialog::sf_emperor, scenery.HexX, scenery.HexY, false );
     }
     return true;
 }
@@ -183,16 +190,16 @@ bool s_UseImperor(Critter player, StaticItem scenery, Item item, int skill)
 const string[] WhoAreYouKeywords = {"кто ты?", "ты кто?", "who are you?", "кто вы?", "вы кто?", "это кто"};
 const string[] WhereAreYouKeywords =
     {"где Сид", "где ты?", "где вы?", "вы где?", "ты где?", "where are you?", "Нэнси, где ты?", "Нэнси, где вы?", "Нэнси, вы где?", "Нэнси, ты где?"};
-uint radio_channel;
-uint message_counter; // текущее число сообщений
+int radio_channel;
+int message_counter; // текущее число сообщений
 bool name_asked;
 bool where_asked;
 ident who_asked_id; // Id игрока, спросившего "кто ты"
 
 void _TankerMapInit(Map map, bool firstTime)
 {
-    uint time = Time::GetNearFullSecond(0, 0, 0, 1, 0, 0);
-    Game.DeferredCall(GAME_SECOND_TO_TICK(time - Game.GetFullSecond()), BeginNancyBroadcast);
+    synctime time = Tla::GetNearSynchronizedTime(0, 0, 0, 1, 0, 0);
+    Game.StartTimeEvent(time - Game.SynchronizedTime, BeginNancyBroadcast);
     if (firstTime) {
         SfInvasion::SheduleSFInvasion();
     }
@@ -218,15 +225,15 @@ void BeginNancyBroadcast()
     where_asked = false;
     who_asked_id = ZERO_IDENT;
     // Первая реплика в рамках выхода на связь
-    Game.DeferredCall(GAME_SECOND_TO_TICK(NEXT_MESSAGE_SECONDS), TimeToBroadcast);
+    Game.StartTimeEvent(Tla::GameSeconds(NEXT_MESSAGE_SECONDS), TimeToBroadcast);
     // для всех ключевых слов добавляются прослушки
-    for (uint i = 0; i < WhoAreYouKeywords.length(); i++) {
-        Game.AddTextListener(SAY_RADIO, WhoAreYouKeywords[i], radio_channel, listen_BroadcastWho);
+    for (int i = 0; i < WhoAreYouKeywords.length(); i++) {
+        // Todo: Game.AddTextListener(SAY_RADIO, WhoAreYouKeywords[i], radio_channel, listen_BroadcastWho);
     }
-    for (uint i = 0; i < WhereAreYouKeywords.length(); i++) {
-        Game.AddTextListener(SAY_RADIO, WhereAreYouKeywords[i], radio_channel, listen_BroadcastWhere);
+    for (int i = 0; i < WhereAreYouKeywords.length(); i++) {
+        // Todo: Game.AddTextListener(SAY_RADIO, WhereAreYouKeywords[i], radio_channel, listen_BroadcastWhere);
     }
-    Game.DeferredCall(GAME_DAY_TO_TICK(1), BeginNancyBroadcast); // Через сутки
+    Game.StartTimeEvent(Time::GameDays(1), BeginNancyBroadcast); // Через сутки
 }
 
 // Регулярное радио-сообщение.
@@ -234,7 +241,7 @@ void BeginNancyBroadcast()
 void TimeToBroadcast()
 {
     if (where_asked) {
-        Game.RadioMessageMsg(radio_channel, TextPackName::Text, STR_WHERE_IS_NANCY);
+        Radio::SendChannelRadioMessage(radio_channel, TextPackName::Text, STR_WHERE_IS_NANCY);
         Critter player = Game.GetCritter(who_asked_id);
         if (valid(player) && player.SFSlimSidnancy == 1) {
             player.SFSlimSidnancy = 2;
@@ -244,24 +251,24 @@ void TimeToBroadcast()
         where_asked = false;
     }
     else if (name_asked) {
-        Game.RadioMessageMsg(radio_channel, TextPackName::Text, STR_NAME_NANCY);
+        Radio::SendChannelRadioMessage(radio_channel, TextPackName::Text, STR_NAME_NANCY);
         name_asked = false;
     }
     else {
         who_asked_id = ZERO_IDENT;
-        Game.RadioMessageMsg(radio_channel, TextPackName::Text, STR_SOS);
+        Radio::SendChannelRadioMessage(radio_channel, TextPackName::Text, STR_SOS);
     }
     message_counter++;
     if (message_counter > MAX_SESSION_MESSAGES) {
-        for (uint i = 0; i < WhoAreYouKeywords.length(); i++) {
-            Game.RemoveTextListener(SAY_RADIO, WhoAreYouKeywords[i], radio_channel);
+        for (int i = 0; i < WhoAreYouKeywords.length(); i++) {
+            // Todo: Game.RemoveTextListener(SAY_RADIO, WhoAreYouKeywords[i], radio_channel);
         }
-        for (uint i = 0; i < WhereAreYouKeywords.length(); i++) {
-            Game.RemoveTextListener(SAY_RADIO, WhereAreYouKeywords[i], radio_channel);
+        for (int i = 0; i < WhereAreYouKeywords.length(); i++) {
+            // Todo: Game.RemoveTextListener(SAY_RADIO, WhereAreYouKeywords[i], radio_channel);
         }
         return;
     }
-    Game.DeferredCall(GAME_SECOND_TO_TICK(NEXT_MESSAGE_SECONDS), TimeToBroadcast);
+    Game.StartTimeEvent(Tla::GameSeconds(NEXT_MESSAGE_SECONDS), TimeToBroadcast);
 }
 
 // Прослушка радиоканала, ловим вопрос "ты кто"?
@@ -295,7 +302,7 @@ void _NancyInit(Critter nancy, bool firstTime)
 
 void _NancySkill(Critter cr, Critter fromCr, CritterProperty skill, Critter onCritter, Item onItem, StaticItem onScenery)
 {
-    if (!fromCr.IsControlledByPlayer) {
+    if (!fromCr.ControlledByPlayer) {
         return;
     }
     Map map = cr.GetMap();
@@ -303,12 +310,12 @@ void _NancySkill(Critter cr, Critter fromCr, CritterProperty skill, Critter onCr
         return;
     }
     if (onCritter.Id == cr.Id) {
-        Critter[] critters = map.GetCritters(CritterFindType::AliveNpc);
-        for (uint i = 0; i < critters.length(); i++) {
+        Critter[] critters = map.GetCritters(CritterFindType::NonDeadNpc);
+        for (int i = 0; i < critters.length(); i++) {
             Critter npc = critters[i];
-            if (npc.TeamId == Teams::Slaver && !npc.IsControlledByPlayer) {
+            if (npc.TeamId == Teams::Slaver && !npc.ControlledByPlayer) {
                 // 84/85
-                NpcPlanes::AddWalkPlane(npc, 0, Game.Random(83, 85), Game.Random(83, 85), 0, true, 1);
+                NpcPlanes::AddWalkPlane(npc, 0, mpos(Game.Random(83, 85), Game.Random(83, 85)), 0, true, 1);
                 NpcPlanes::AddAttackPlane(npc, 0, fromCr);
                 npc.IsNoHome = true;
             }
@@ -321,7 +328,7 @@ void _NancyMapInit(Map mapNancy, bool firstTime)
     Location loc = mapNancy.GetLocation();
     if (valid(loc)) {
         Location[] locations = Game.GetLocations(Content::Location::nancy_and_sid);
-        for (uint i = 0; i < locations.length(); i++) {
+        for (int i = 0; i < locations.length(); i++) {
             if (locations[i].Id == loc.Id) {
                 continue;
             }
@@ -344,7 +351,7 @@ void _LockerInit(Item locker, bool firstTime)
     if (!valid(map)) {
         return;
     }
-    uint keyId = Game.Random(10000, 50000);
+    int keyId = Game.Random(10000, 50000);
     locker.LockerId = keyId;
     locker.LockerComplexity = Game.Random(120, 180);
     Critter[] critters = map.GetCritters(Content::Critter::AgileMaleThug, CritterFindType::Npc);
@@ -370,7 +377,7 @@ void _BoatInit(Item boat, bool firstTime)
     if (!valid(map)) {
         return;
     }
-    uint keyId = Game.Random(10000, 50000);
+    int keyId = Game.Random(10000, 50000);
     boat.Charge = boat.Car_TankVolume;
     boat.Deterioration = 0;
     boat.LockerId = keyId;
@@ -396,8 +403,6 @@ void _BoatInit(Item boat, bool firstTime)
 
 // Странствующий тоговец взрывчаткой Дэвин
 
-#define GAME_DAY       #(day)(24 * 60 * 60 * day)
-#define GAME_HOUR      #(hour)(60 * 60 * hour)
 #define CTE_NEW_TRAVEL (12)
 #define ENTRY_DEVIN    (23)
 
@@ -419,7 +424,7 @@ void _DevinInit(Critter cr, bool firstTime)
                              Content::Location::ncr,
                              Content::Location::new_reno,
                              Content::Location::redding};
-        Traveller::SetTraveller(cr.Id, true, ENTRY_DEVIN, GAME_DAY(20), GAME_HOUR(2), locPids, false);
+        Traveller::SetTraveller(cr.Id, true, ENTRY_DEVIN, Time::GameDays(20), Time::GameHours(2), locPids, false);
     }
     else {
         Traveller::CancelTraveller(cr.Id);
@@ -432,7 +437,7 @@ void _DevinInit(Critter cr, bool firstTime)
 
 void _DevinRespawn(Critter cr)
 {
-    Game.DeferredCall(3000, DevinSay, cr.Id);
+    Game.StartTimeEvent(Tla::GameSeconds(1), DevinSay, cr.Id);
 }
 
 void DevinSay(any value)
@@ -440,11 +445,11 @@ void DevinSay(any value)
     Critter cr = Game.GetCritter(value);
     if (valid(cr)) {
         if (Game.SFDevinHired) {
-            cr.SayMsg(SAY_NORM, TextPackName::Dialogs, DLGSTR(cr.DialogId, 2));
-            if (cr.GetTimeEvents(CTE_NEW_TRAVEL) != 0) {
-                cr.RemoveTimeEvents(CTE_NEW_TRAVEL);
+            Messaging::Say(cr, TextPackName::Dialogs, DLGSTR(cr.DialogId, 2));
+            if (cr.CountTimeEvent(Traveller::cte_Travel) != 0) {
+                cr.StopTimeEvent(Traveller::cte_Travel);
             }
-            cr.AddTimeEvent(Traveller::cte_Travel, Settings.TimeMultiplier * 2, CTE_NEW_TRAVEL);
+            cr.StartTimeEvent(Time::Seconds(2), Traveller::cte_Travel);
         }
     }
 }
@@ -506,10 +511,10 @@ void r_AddVictimsLocation(Critter player, Critter npc)
                                                       VICTIMS_X,
                                                       VICTIMS_Y,
                                                       Settings.GlobalMapZoneLength * 2,
-                                                      uint(CritterProperty::SFHububJudgementLocId));
+                                                      int(CritterProperty::SFHububJudgementLocId));
     if (valid(loc)) {
         // чтобы не использовали локацию для склада, нужно ее удалять
-        Location::SetLocationDeleteTime(loc, 60 * 60 * 24 * 4); // 4 дня
+        Location::SetLocationDeleteTime(loc, Time::GameDays(4)); // 4 дня
     }
 }
 
@@ -522,7 +527,7 @@ void _HubVictimInit(Critter cr, bool firstTime)
 
 void _HubVictimDead(Critter cr, Critter killer)
 {
-    if (!valid(killer) || !killer.IsControlledByPlayer) {
+    if (!valid(killer) || !killer.ControlledByPlayer) {
         return;
     }
     if (killer.SFAhs7HubJudgement > 0 && killer.SFAhs7HubJudgement < 4) {
@@ -543,21 +548,20 @@ bool _HubVictimAttacked(Critter cr, Critter attacker)
         return false;
     }
 
-    if (attacker.IsControlledByPlayer) {
+    if (attacker.ControlledByPlayer) {
         Critter[] family = map.GetCritters(CritterProperty::NpcRole, ROLE_FAMILY, CritterFindType::Npc);
-        for (uint i = 0; i < family.length(); i++) {
+        for (int i = 0; i < family.length(); i++) {
             Critter npc = family[i];
             if (!EnemyStack::CheckEnemyInStack(npc, attacker.Id)) {
                 EnemyStack::AddEnemyToStack(npc, attacker.Id);
             }
             if (npc.Id == cr.Id || npc.IsSee(cr)) {
-                uint16 hx = npc.HexX;
-                uint16 hy = npc.HexY;
-                if (Caravan::GetFreeHex(map, Game.Random(6, 20), hx, hy)) {
-                    NpcPlanes::AddWalkPlane(npc, 100, hx, hy, Game.Random(0, 5), true, 1);
+                mpos hex = npc.Hex;
+                if (Entrance::GetFreeHex(map, Game.Random(6, 20), hex)) {
+                    NpcPlanes::AddWalkPlane(npc, 100, hex, Game.Random(0, 5), true, 1);
                 }
                 if (Game.Random(1, 3) < 2) {
-                    npc.SayMsg(SAY_SHOUT, TextPackName::Text, STR_DONTKILL);
+                    Messaging::SayShout(npc, TextPackName::Text, STR_DONTKILL);
                 }
             }
         }
@@ -587,7 +591,7 @@ void r_ChangeStatus(Critter player, Critter npc)
 // при выходе игрока с карты, если все живы нпй, то игрок переключает статус квеста
 void _VictimsOutCritter(Map map, Critter cr)
 {
-    if (cr.SFAhs7HubJudgement == 2 && map.GetCritters(CritterProperty::NpcRole, ROLE_FAMILY, CritterFindType::AliveNpc).length() == 4) {
+    if (cr.SFAhs7HubJudgement == 2 && map.GetCritters(CritterProperty::NpcRole, ROLE_FAMILY, CritterFindType::NonDeadNpc).length() == 4) {
         cr.SFAhs7HubJudgement = 3;
     }
 }
@@ -612,12 +616,16 @@ bool _RecipeSkill(Item item, Critter cr, CritterProperty skill)
 {
     if (skill == CritterProperty::SkillScience && cr.SFChitinArmorRecipeKnown == 0) {
         if (cr.Intellect < 6 || cr.SkillScience < 90 || cr.SkillOutdoorsman < 100) {
-            cr.SayMsg(SAY_NETMSG, TextPackName::Text, STR_CANT_LEARN);
+            Messaging::Info(cr, TextPackName::Text, STR_CANT_LEARN);
             return true;
         }
-        cr.SayMsg(SAY_NETMSG, TextPackName::Text, STR_LEARNED);
+        Messaging::Info(cr, TextPackName::Text, STR_LEARNED);
         cr.SFChitinArmorRecipeKnown = 1;
         return true;
     }
     return false;
+}
+
+#endif
+
 }

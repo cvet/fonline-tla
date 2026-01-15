@@ -1,17 +1,21 @@
-// FOS Server Sort 2
+namespace NrWriKidnap // Sort 2
+{
+
+#if SERVER
+
 // Author: rifleman17
 // Квест "Проблемы мистера Райта: Заложник."
 
-///@ Property Critter Protected     uint8 NRWriKidnap     Group = Quests Quest = 3707 Max = 12
-///@ Property Critter Protected     uint8 NRSalvatoreKill Group = Quests Quest = 3710 Max = 3
-///@ Property Critter PrivateServer int   NRWriKidnapNotifyTime
-///@ Property Critter PrivateServer int   NRKidnapKillsCounter
-///@ Property Critter PrivateServer ident QNrWriKidnapInvokeId
-///@ Property Location PrivateServer bool LocDefendersHostile
-///@ Property Location PrivateServer ident NRWriGuardDead
-///@ Property Location PrivateServer bool NRKidnapAllMarodeursDead
+///@ Property Critter Common uint8 NRWriKidnap Mutable OwnerSync Persistent Group = Quests Quest = 3707 Max = 12
+///@ Property Critter Common uint8 NRSalvatoreKill Mutable OwnerSync Persistent Group = Quests Quest = 3710 Max = 3
+///@ Property Critter Server synctime NRWriKidnapNotifyTime Mutable Persistent
+///@ Property Critter Server int32 NRKidnapKillsCounter Mutable Persistent
+///@ Property Critter Server int32 QNrWriKidnapInvokeId Mutable Persistent
+///@ Property Location Server bool LocDefendersHostile Mutable Persistent
+///@ Property Location Server ident NRWriGuardDead Mutable Persistent
+///@ Property Location Server bool NRKidnapAllMarodeursDead Mutable Persistent
 
-#define NEXT_KIDNAP_TIME (60 * 60 * 24 * 30 * Game.Random(1, 3))
+#define NEXT_KIDNAP_TIME (Time::GameDays(30 * Game.Random(1, 3)))
 #define KIDNAP_LOC_PROTO (Content::Location::kidnappers_hideout)
 #define KINDAP_GLOBAL_X  (Game.Random(1229, 1359))
 #define KINDAP_GLOBAL_Y  (Game.Random(847, 942))
@@ -50,8 +54,8 @@ ident KidnapLocationId;
 
 void _OliverInit(Critter cr, bool firstTime)
 {
-    if (cr.QNrWriKidnapInvokeId == ZERO_IDENT) {
-        cr.QNrWriKidnapInvokeId = Game.SavedDeferredCall(GAME_SECOND_TO_TICK(NEXT_KIDNAP_TIME), Kidnap, cr.Id);
+    if (cr.QNrWriKidnapInvokeId == 0) {
+        cr.QNrWriKidnapInvokeId = Game.StartTimeEvent(NEXT_KIDNAP_TIME, Kidnap, cr.Id); //SavedDeferredCall
     }
     // cr.OnFinish.Subscribe(_OliverFinish);
 }
@@ -64,14 +68,14 @@ void Kidnap(any value)
     }
 
     if (!KidnapLocationExist()) {
-        ident locId = Game.CreateLocation(KIDNAP_LOC_PROTO, KINDAP_GLOBAL_X, KINDAP_GLOBAL_Y, null).Id;
+        ident locId = Location::CreateLocation(KIDNAP_LOC_PROTO, ipos(KINDAP_GLOBAL_X, KINDAP_GLOBAL_Y), null).Id;
         if (locId != ZERO_IDENT) {
             KidnapLocationId = locId;
             DL("Location:" + locId);
         }
     }
 
-    cr.QNrWriKidnapInvokeId = Game.SavedDeferredCall(GAME_SECOND_TO_TICK(NEXT_KIDNAP_TIME), Kidnap, value);
+    cr.QNrWriKidnapInvokeId = Game.StartTimeEvent(NEXT_KIDNAP_TIME, Kidnap, value); //SavedDeferredCall
 }
 
 bool KidnapLocationExist()
@@ -104,12 +108,11 @@ void _MapInit(Map map, bool firstTime)
     DL("Map init");
     Location loc = map.GetLocation();
     KidnapLocationId = loc.Id;
-    map.OnLoop.Subscribe(_MapLoop);
+    map.StartTimeEvent(Time::Milliseconds(0), Time::Milliseconds(6000), _MapLoop);
     map.OnCritterIn.Subscribe(_MapInCritter);
     map.OnCritterDead.Subscribe(_MapCritterDead);
 
     map.OnCritterOut.Subscribe(_MapOutCritter);
-    map.LoopTime1 = 6000;
 }
 
 void _MapInCritter(Map map, Critter cr)
@@ -122,15 +125,15 @@ void _MapInCritter(Map map, Critter cr)
 
     if (cr.NRWriKidnap == Q_QUEST_TAKEN) {
         if (loc.LocDefendersHostile) {
-            cr.SayMsg(SAY_NETMSG, TextPackName::Text, STR_MAP_IN_HOSTILE);
+            Messaging::Info(cr, TextPackName::Text, STR_MAP_IN_HOSTILE);
             return;
         }
 
         if (cr.SkillSneak > 50) {
-            cr.SayMsg(SAY_NETMSG, TextPackName::Text, STR_MAP_IN_SNEAK_OK);
+            Messaging::Info(cr, TextPackName::Text, STR_MAP_IN_SNEAK_OK);
         }
         else {
-            cr.SayMsg(SAY_NETMSG, TextPackName::Text, STR_MAP_IN_LOWSNEAK);
+            Messaging::Info(cr, TextPackName::Text, STR_MAP_IN_LOWSNEAK);
         }
     }
 }
@@ -151,7 +154,7 @@ void ResetHostileIfNoPlayers(Location loc)
     }
 
     Critter[] players = {};
-    for (uint i = 0; i < loc.GetMapCount(); i++) {
+    for (int i = 0; i < loc.GetMapCount(); i++) {
         Map map = loc.GetMapByIndex(i);
         if (valid(map)) {
             players.insertLast(map.GetCritters(CritterFindType::Players));
@@ -164,7 +167,7 @@ void ResetHostileIfNoPlayers(Location loc)
         // Если убит охранник, возрождаем его
         if (loc.NRWriGuardDead != ZERO_IDENT) {
             Critter cr = Game.GetCritter(loc.NRWriGuardDead);
-            if (valid(cr) && !cr.IsControlledByPlayer && cr.IsDead()) {
+            if (valid(cr) && !cr.ControlledByPlayer && cr.IsDead()) {
                 loc.NRWriGuardDead = ZERO_IDENT;
                 CritterState::ToAlive(cr);
             }
@@ -209,11 +212,11 @@ void AcceptAttack(Map map)
         SetHostile(map.GetLocation(), true);
     }
 
-    Critter[] marodeurs = map.GetCritters(CritterProperty::NpcRole, NPC_ROLE_MARODEUR, CritterFindType::AliveNpc);
-    Critter[] players = map.GetCritters(CritterFindType::AlivePlayers);
-    for (uint i = 0; i < marodeurs.length(); i++) {
+    Critter[] marodeurs = map.GetCritters(CritterProperty::NpcRole, NPC_ROLE_MARODEUR, CritterFindType::NonDeadNpc);
+    Critter[] players = map.GetCritters(CritterFindType::NonDeadPlayers);
+    for (int i = 0; i < marodeurs.length(); i++) {
         Critter marodeur = marodeurs[i];
-        for (uint j = 0; j < players.length(); j++) {
+        for (int j = 0; j < players.length(); j++) {
             Critter player = players[j];
             DL("target found");
             EnemyStack::AddEnemyToStack(marodeur, player.Id);
@@ -242,10 +245,10 @@ void _MapLoop(Map map)
         return;
     }
 
-    Critter[] players = map.GetCritters(CritterFindType::AlivePlayers);
-    for (uint i = 0; i < players.length(); i++) {
+    Critter[] players = map.GetCritters(CritterFindType::NonDeadPlayers);
+    for (int i = 0; i < players.length(); i++) {
         Critter player = players[i];
-        Critter[] marodeurs = map.GetCritters(player.HexX, player.HexY, RADIUS_SEARCH_MARODEUR, CritterFindType::AliveNpc);
+        Critter[] marodeurs = map.GetCritters(player.Hex, RADIUS_SEARCH_MARODEUR, CritterFindType::NonDeadNpc);
         if (!marodeurs.isEmpty()) {
             Critter npc = marodeurs[0];
             if (npc.NpcRole == NPC_ROLE_MARODEUR) {
@@ -257,32 +260,23 @@ void _MapLoop(Map map)
 
 void TryMarodeurDialog(Critter player, Critter marodeur, Map map)
 {
-    if (marodeur.GetTalkingCritters().length() > 0) {
+    if (Dialogs::IsTalking(marodeur)) {
         return; // НПЦ уже говорит с кем-то
     }
-    if (player.NRWriKidnapNotifyTime + Settings.TimeMultiplier * 20 > int(Game.GetFullSecond())) { // запросы к игрокам не реже раз в 20 сек
+    if (player.NRWriKidnapNotifyTime + Time::Seconds(20) > Game.SynchronizedTime) { // запросы к игрокам не реже раз в 20 сек
         return;
     }
 
     CritterState::Wait(player, 0);
 
-    Critter[] players = {};
-
     // проверка, что с игроком еще никто не разговаривает
-    Critter[] npc = map.GetCritters(CritterProperty::NpcRole, NPC_ROLE_MARODEUR, CritterFindType::AliveNpc);
-    for (uint i = 0; i < npc.length(); i++) {
-        players.insertLast(npc[i].GetTalkingCritters()); // собираем всех говорящих игроков с нпц
-    }
-
-    for (uint i = 0; i < players.length(); i++) {
-        if (players[i].Id == player.Id) { // С этим игроком кто-то уже заговорил
-            return;
-        }
+    if (Dialogs::IsTalking(player)) {
+        return;
     }
 
     // Все проверки пройдены, с игроком никто не говорит, время разрешения находиться на локации прошло. Запускаем еще один диалог
-    player.NRWriKidnapNotifyTime = Game.GetFullSecond();
-    Game.RunDialog(player, marodeur, true);
+    player.NRWriKidnapNotifyTime = Game.SynchronizedTime;
+    Dialogs::RunDialog(player, marodeur, true);
 }
 
 // ************************ Мародеры. **********************************************************************
@@ -298,12 +292,12 @@ void _HostileInit(Critter cr, bool firstTime)
     cr.PerkSniper = 1;
 }
 
-bool _HostileAttack(Critter cr, Critter target, Item weapon, uint8 weaponMode, ProtoItem ammo)
+bool _HostileAttack(Critter cr, Critter target, Item weapon, int weaponMode, ProtoItem ammo)
 {
-    if (target.IsControlledByPlayer && !target.IsDead() && !IsHostile(cr.GetMap())) {
+    if (target.ControlledByPlayer && !target.IsDead() && !IsHostile(cr.GetMap())) {
         if (Game.Random(1, 2) == 1) {
             AcceptAttack(cr.GetMap());
-            cr.SayMsg(SAY_SHOUT, TextPackName::Text, STR_GUARD_SHOUT);
+            Messaging::SayShout(cr, TextPackName::Text, STR_GUARD_SHOUT);
         }
     }
     return false;
@@ -311,7 +305,7 @@ bool _HostileAttack(Critter cr, Critter target, Item weapon, uint8 weaponMode, P
 
 void _HostileDead(Critter cr, Critter killer)
 {
-    if (valid(killer) && killer.IsControlledByPlayer) {
+    if (valid(killer) && killer.ControlledByPlayer) {
         killer.NRKidnapKillsCounter += 1;
     }
 }
@@ -369,7 +363,7 @@ bool _GuardAttacked(Critter cr, Critter attacker)
         // Атака не холодным оружием, остальные должны прибежать
         if (!IsHostile(cr.GetMap())) {
             SetHostile(cr.GetMap().GetLocation(), true);
-            cr.SayMsg(SAY_SHOUT, TextPackName::Text, STR_GUARD_SHOUT);
+            Messaging::SayShout(cr, TextPackName::Text, STR_GUARD_SHOUT);
         }
     }
     return false;
@@ -382,12 +376,12 @@ void t_Alarm(Critter player, StaticItem trigger, bool entered, uint8 dir)
     if (!valid(guard) || guard.IsDead() || !entered || IsHostile(player.GetMap())) {
         return;
     }
-    if (player.IsControlledByPlayer) {
+    if (player.ControlledByPlayer) {
         if (player.NRWriKidnap != 2 && player.NRWriKidnap != 4) {
             NpcPlanes::AddAttackPlane(guard, 0, player);
-            guard.SayMsg(SAY_SHOUT, TextPackName::Text, STR_GUARD_SHOUT);
+            Messaging::SayShout(guard, TextPackName::Text, STR_GUARD_SHOUT);
             SetHostile(guard.GetMap().GetLocation(), true);
-            Critter npc = map.GetCritter(CritterProperty::NpcRole, NPC_ROLE_MARODEUR, CritterFindType::AliveNpc);
+            Critter npc = map.GetCritter(CritterProperty::NpcRole, NPC_ROLE_MARODEUR, CritterFindType::NonDeadNpc);
             if (valid(npc)) {
                 NpcPlanes::AddAttackPlane(npc, 0, player);
             }
@@ -399,19 +393,19 @@ void t_CheckSneak(Critter player, StaticItem trigger, bool entered, uint8 dir)
 {
     Map map = player.GetMap();
     Critter guard = map.GetCritter(CritterProperty::NpcRole, NPC_ROLE_GUARD, CritterFindType::Npc);
-    if (!player.IsControlledByPlayer || !valid(guard) || guard.IsDead() || !entered || IsHostile(player.GetMap())) {
+    if (!player.ControlledByPlayer || !valid(guard) || guard.IsDead() || !entered || IsHostile(player.GetMap())) {
         return;
     }
 
-    uint8 questVar = player.NRWriKidnap;
+    int questVar = player.NRWriKidnap;
     if (questVar == 2) {
         CritterState::Wait(player, 0);
-        Game.RunDialog(player, guard, true);
+        Dialogs::RunDialog(player, guard, true);
         return;
     }
     if (questVar == 1) {
         if (player.InSneakMode && (player.Dir == 2 || player.Dir == 3)) {
-            guard.SayMsg(SAY_NORM, TextPackName::Text, 3354);
+            Messaging::Say(guard, TextPackName::Text, 3354);
             return;
         }
     }
@@ -420,9 +414,9 @@ void t_CheckSneak(Critter player, StaticItem trigger, bool entered, uint8 dir)
     }
 
     NpcPlanes::AddAttackPlane(guard, 0, player);
-    guard.SayMsg(SAY_SHOUT, TextPackName::Text, STR_GUARD_SHOUT);
+    Messaging::SayShout(guard, TextPackName::Text, STR_GUARD_SHOUT);
     SetHostile(guard.GetMap().GetLocation(), true);
-    Critter npc = map.GetCritter(CritterProperty::NpcRole, NPC_ROLE_MARODEUR, CritterFindType::AliveNpc);
+    Critter npc = map.GetCritter(CritterProperty::NpcRole, NPC_ROLE_MARODEUR, CritterFindType::NonDeadNpc);
     if (valid(npc)) {
         NpcPlanes::AddAttackPlane(npc, 0, player);
     }
@@ -476,7 +470,7 @@ void r_GiveWeaponHand(Critter player, Critter npc)
 void r_Fight(Critter player, Critter npc)
 {
     if (valid(npc)) {
-        npc.AddTimeEvent(cte_WrightAttack, Time::RealSecond(3), CTE_ATTACK);
+        npc.StartTimeEvent(Time::Seconds(3), cte_WrightAttack);
         npc.IsUnlimitedAmmo = true;
     }
 }
@@ -499,9 +493,9 @@ void _WrightInitMerc(Critter cr, bool firstTime)
     cr.OnGlobalMapProcess.Subscribe(_WrightGlobalProcess);
 }
 
-bool _WrightGlobalProcess(Critter cr, int, Item, float, float, float, float, float, uint, bool)
+bool _WrightGlobalProcess(Critter cr, int, Item, float, float, float, float, float, int, bool)
 {
-    cr.SayMsg(SAY_NORM, TextPackName::Dialogs, DLGSTR(cr.DialogId, 1));
+    Messaging::Say(cr, TextPackName::Dialogs, DLGSTR(cr.DialogId, 1));
     Game.DestroyCritter(cr);
     return false;
 }
@@ -512,9 +506,9 @@ void UpdateQuestStatus(Map map, Critter cr)
         return;
     }
 
-    bool wrightAlive = !map.GetCritters(CritterProperty::NpcRole, NPC_ROLE_WRIGHT, CritterFindType::AliveNpc).isEmpty();
+    bool wrightAlive = !map.GetCritters(CritterProperty::NpcRole, NPC_ROLE_WRIGHT, CritterFindType::NonDeadNpc).isEmpty();
     bool wrightDead = !map.GetCritters(CritterProperty::NpcRole, NPC_ROLE_WRIGHT, CritterFindType::DeadNpc).isEmpty();
-    bool marodeursAlive = !map.GetCritters(CritterProperty::NpcRole, NPC_ROLE_MARODEUR, CritterFindType::AliveNpc).isEmpty();
+    bool marodeursAlive = !map.GetCritters(CritterProperty::NpcRole, NPC_ROLE_MARODEUR, CritterFindType::NonDeadNpc).isEmpty();
 
     int status = 0;
     if (!wrightAlive && !wrightDead && marodeursAlive) {
@@ -538,7 +532,7 @@ void UpdateQuestStatus(Map map, Critter cr)
         players.insertLast(cr);
     }
 
-    for (uint i = 0; i < players.length(); i++) {
+    for (int i = 0; i < players.length(); i++) {
         Critter player = players[i];
         if (player.NRWriKidnap != 0 && player.NRWriKidnap != 11) {
             player.NRWriKidnap = status;
@@ -546,7 +540,7 @@ void UpdateQuestStatus(Map map, Critter cr)
     }
 
     if (wrightDead || !marodeursAlive || (!wrightDead && !wrightAlive)) {
-        Game.SavedDeferredCall(HOUR_TICKS(1), DeleteQuestLocation, map.Id);
+        Game.StartTimeEvent(Time::Hours(1), DeleteQuestLocation, map.Id); //SavedDeferredCall
     }
 
     if (!marodeursAlive) {
@@ -566,13 +560,13 @@ void DeleteQuestLocation(any value)
     }
 }
 
-uint cte_WrightAttack(Critter cr, any identifier, uint& stage)
+void cte_WrightAttack(Critter cr)
 {
     Map map = cr.GetMap();
     AcceptAttack(map);
 
-    Critter[] marodeurs = map.GetCritters(CritterProperty::NpcRole, NPC_ROLE_MARODEUR, CritterFindType::AliveNpc);
-    for (uint i = 0; i < marodeurs.length(); i++) {
+    Critter[] marodeurs = map.GetCritters(CritterProperty::NpcRole, NPC_ROLE_MARODEUR, CritterFindType::NonDeadNpc);
+    for (int i = 0; i < marodeurs.length(); i++) {
         Critter marodeur = marodeurs[i];
         if (valid(marodeur)) {
             EnemyStack::AddEnemyToStack(marodeur, cr.Id);
@@ -580,5 +574,9 @@ uint cte_WrightAttack(Critter cr, any identifier, uint& stage)
             NpcPlanes::AddAttackPlane(cr, 0, marodeur);
         }
     }
-    return 0;
+    return;
+}
+
+#endif
+
 }

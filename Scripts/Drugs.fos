@@ -1,13 +1,15 @@
-// FOS Server Client
+namespace Drugs
+{
+
 // Author: cvet
 // Original Fallout2 system
 
-///@ Property Critter Protected CritterProperty=>int DrugEffects
-///@ Property Critter Protected uint8 DoughnutsCounter Max = 20
+///@ Property Critter Common CritterProperty=>int32 DrugEffects Mutable OwnerSync Persistent
+///@ Property Critter Common uint8 DoughnutsCounter Mutable OwnerSync Persistent Max = 20
 
 #define LBS_TO_GRAMM #(lbs)((lbs) * 453)
 
-#ifdef __SERVER
+#if SERVER
 
 // Chem Reliant
 // benefit: Faster recovery from chem side effects
@@ -235,6 +237,80 @@ const int[] DrugEffects =
 
 // clang-format on
 
+class ActiveDrugEffect
+{
+    int Id;
+    hstring DrugProtoId;
+    int Stage;
+    int Flags;
+    int TimeEventId;
+}
+
+dict<ident, ActiveDrugEffect[]>
+    AllActiveDrugEffects = {};
+int LastDrugEffectId = 0;
+
+bool RemoveActiveDrugEffect(Critter cr, int effectId)
+{
+    ActiveDrugEffect[] effects = AllActiveDrugEffects.get(cr.Id, null);
+    if (effects != null && !effects.isEmpty()) {
+        for (int i = 0, l = effects.length(); i < l; i++) {
+            ActiveDrugEffect effect = effects[i];
+            if (effect != null) {
+                effects.removeAt(i);
+                AllActiveDrugEffects.set(cr.Id, effects);
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+ActiveDrugEffect GetActiveDrugEffect(Critter cr, int effectId)
+{
+    ActiveDrugEffect[] effects = AllActiveDrugEffects.get(cr.Id, null);
+    if (effects != null && !effects.isEmpty()) {
+        for (int i = 0, l = effects.length(); i < l; i++) {
+            if (effects[i].Id == effectId) {
+                return effects[i];
+            }
+        }
+    }
+    return null;
+}
+
+int GetActiveDrugEffects(Critter cr, hstring protoId, ActiveDrugEffect[] & drugEffects)
+{
+    ActiveDrugEffect[] effects = AllActiveDrugEffects.get(cr.Id, null);
+    if (effects != null && !effects.isEmpty()) {
+        for (int i = 0, l = effects.length(); i < l; i++) {
+            ActiveDrugEffect effect = effects[i];
+            if (effect.DrugProtoId == protoId) {
+                drugEffects.insertLast(effect);
+            }
+        }
+    }
+
+    return drugEffects.length();
+}
+
+int CreateActiveDrugEffect(Critter cr, hstring protoId, int flags)
+{
+    ActiveDrugEffect[] effects = {};
+    AllActiveDrugEffects.setIfNotExist(cr.Id, array<ActiveDrugEffect>());
+    effects = AllActiveDrugEffects.get(cr.Id, effects);
+
+    auto effect = ActiveDrugEffect();
+    effect.Id = LastDrugEffectId + 1;
+    effect.DrugProtoId = protoId;
+    effect.Stage = 1;
+    effect.Flags = flags;
+    effects.insertLast(effect);
+    LastDrugEffectId = effect.Id;
+
+    return effect.Id;
+}
+
 // Table offsets
 #define TABLE_DRUG_ADDICT (0)
 #define TABLE_DRUG_PROC   (1)
@@ -251,17 +327,17 @@ void UseDrug(Critter cr, Item drug)
 void UseDrugOn(Critter cr, Critter onCr, Item drug)
 {
     if (onCr.IsDead()) {
-        cr.SayMsg(SAY_NETMSG, TextPackName::Game, MsgStr::StrSkillNoressurect);
+        Messaging::Info(cr, TextPackName::Game, MsgStr::StrSkillNoressurect);
         return;
     }
 
     bool isStimpak = (drug.ProtoId == Content::Item::stimpak || drug.ProtoId == Content::Item::super_stimpak);
     if (isStimpak || onCr.IsKnockout()) {
-        onCr.SayMsg(SAY_NETMSG, TextPackName::Game, MsgStr::StrDrugUseOnSucc);
+        Messaging::Info(onCr, TextPackName::Game, MsgStr::StrDrugUseOnSucc);
         SetDrug(onCr, drug.ProtoId);
     }
     else {
-        onCr.SayMsg(SAY_NETMSG, TextPackName::Game, MsgStr::StrDrugUseOnFail);
+        Messaging::Info(onCr, TextPackName::Game, MsgStr::StrDrugUseOnFail);
     }
 
     Game.DestroyItem(drug, 1);
@@ -277,33 +353,32 @@ void SetDrug(Critter cr, hstring drugPid)
         if (cr.DoughnutsCounter < 20) {
             cr.DoughnutsCounter += 1;
             // Вы съели столько пончиков, что почуствовали себя немного сильнее. Переносимый вес увеличен на +1 пункт.
-            cr.SayMsg(SAY_NETMSG, TextPackName::Text, 70061);
+            Messaging::Info(cr, TextPackName::Text, 70061);
             cr.CarryWeightBase += LBS_TO_GRAMM(1);
         }
     }
     else if (drugPid == Content::Item::jet_antidote) {
-        uint[] indexes = {};
-        tick_t[] durations = {};
-        uint[] rates = {};
-        uint count = cr.GetTimeEvents(Content::Item::jet.hash, indexes, durations, rates);
-        for (uint i = 0; i < count; i++) {
-            DropDrug(cr, Content::Item::jet, RATE_TO_STAGE(rates[i]));
+        ActiveDrugEffect[] effects = {};
+        int count = GetActiveDrugEffects(cr, Content::Item::jet, effects);
+        for (int i = 0; i < count; i++) {
+            DropDrug(cr, Content::Item::jet, effects[i].Stage);
+            cr.StopTimeEvent(effects[i].TimeEventId);
+            RemoveActiveDrugEffect(cr, effects[i].Id);
         }
-        cr.RemoveTimeEvents(Content::Item::jet.hash);
         if (count > 0 && cr.Addictions[Addictions::Jet]) {
             bool[] addictions = cr.Addictions.clone();
             addictions[Addictions::Jet] = false;
             cr.Addictions = addictions;
-            cr.SayMsg(SAY_NETMSG, TextPackName::Game, MsgStr::StrDrugAddictionEnd);
+            Messaging::Info(cr, TextPackName::Game, MsgStr::StrDrugAddictionEnd);
         }
         else {
-            cr.SayMsg(SAY_NETMSG, TextPackName::Game, MsgStr::StrDrugNothingHappens);
+            Messaging::Info(cr, TextPackName::Game, MsgStr::StrDrugNothingHappens);
         }
         return;
     }
 
     // Chem flags
-    uint flags = 0;
+    int flags = 0;
     if (cr.IsTraitChemReliant) {
         flags |= DRUG_EFFECT_DIV2_WITHDRAWAL | DRUG_EFFECT_MUL2_ADDICTION;
     }
@@ -312,19 +387,17 @@ void SetDrug(Critter cr, hstring drugPid)
     }
 
     // Other drugs
-    uint[] indexes = {};
-    tick_t[] durations = {};
-    uint[] rates = {};
-    uint count = cr.GetTimeEvents(drugPid.hash, indexes, durations, rates);
+    ActiveDrugEffect[] effects;
+    int count = GetActiveDrugEffects(cr, drugPid, effects);
     int index = GetDrugTableIndex(drugPid);
 
     // Check
     if (DrugEffects[index + TABLE_DRUG_ADDICT] >= 0) // Addiction perk aviability
     {
-        uint positive = 0;
-        uint negative = 0;
-        for (uint i = 0; i < count; i++) {
-            uint stage = RATE_TO_STAGE(rates[i]);
+        int positive = 0;
+        int negative = 0;
+        for (int i = 0; i < count; i++) {
+            int stage = effects[i].Stage;
             if (stage <= 1) {
                 positive++;
             }
@@ -348,25 +421,28 @@ void SetDrug(Critter cr, hstring drugPid)
                 cr.Addictions = addictions;
             }
             else {
-                cr.SayMsg(SAY_NETMSG, TextPackName::Game, MsgStr::StrDrugNothingHappens);
+                Messaging::Info(cr, TextPackName::Game, MsgStr::StrDrugNothingHappens);
             }
             return;
         }
     }
 
     // Clear active addictions
-    uint deleted = 0; // After erase indexes decrement on one position
-    for (uint i = 0; i < count; i++) {
-        uint stage = RATE_TO_STAGE(rates[i]);
+    int deleted = 0; // After erase indexes decrement on one position
+    for (int i = 0; i < count; i++) {
+        int stage = effects[i].Stage;
         if (stage >= 3) {
             DropDrug(cr, drugPid, stage);
-            cr.RemoveTimeEvent(indexes[i] - deleted);
+            cr.StopTimeEvent(effects[i].TimeEventId);
+            RemoveActiveDrugEffect(cr, effects[i].Id);
             deleted++;
         }
     }
 
-    // Set critter time event
-    cr.AddTimeEvent(cte_Drug, 0, drugPid.hash, FORM_RATE(0, flags));
+    int id = CreateActiveDrugEffect(cr, drugPid, flags);
+    int eventId = cr.StartTimeEvent(ZERO_TIMESPAN, cte_Drug, id);
+    auto effect = GetActiveDrugEffect(cr, id);
+    effect.TimeEventId = eventId;
 }
 
 int GetDrugTableIndex(hstring drugPid)
@@ -406,20 +482,25 @@ int GetDrugTableIndex(hstring drugPid)
     return index != -1 ? index * 30 : 0;
 }
 
-uint ProcessDrug(Critter cr, hstring drugPid, uint rate)
+timespan ProcessDrug(Critter cr, int effectId)
 {
-    uint stage = RATE_TO_STAGE(rate);
-    uint flags = RATE_TO_FLAGS(rate);
+    auto effect = GetActiveDrugEffect(cr, effectId);
+    if (effect == null) {
+        return ZERO_TIMESPAN;
+    }
+    hstring drugPid = effect.DrugProtoId;
+    int stage = effect.Stage;
+    int flags = effect.Flags;
 
     if (cr.IsDead()) {
-        return Time::RealMinute(5); // Stop drug processing
+        return Time::Minutes(5); // Stop drug processing
     }
     if (drugPid == Content::Item::jet && stage >= 4) {
-        return Time::RealHour(5); // Only after Jet Antidote was used
+        return Time::Hours(5); // Only after Jet Antidote was used
     }
 
     int index = GetDrugTableIndex(drugPid);
-    uint duration = 0;
+    int duration = 0;
 
     if (stage == 0 || // Instant effect
         stage == 1 || // Withdrawal
@@ -427,13 +508,13 @@ uint ProcessDrug(Critter cr, hstring drugPid, uint rate)
         stage == 3 || // Addiction begin
         stage == 4)   // Addiction end
     {
-        for (uint i = 0; i < 4; i++) {
+        for (int i = 0; i < 4; i++) {
             int propInd = DrugEffects[index + TABLE_STAT(i)];
             int amount = DrugEffects[index + TABLE_AMOUNT(i, stage)];
             if (i == 1 && DrugEffects[index + TABLE_STAT(0)] == -2) {
                 amount = Game.Random(DrugEffects[index + TABLE_AMOUNT(0, stage)], amount); // Take first
             }
-            if (propInd == -1) {
+            if (propInd < 0) {
                 continue;
             }
 
@@ -457,10 +538,10 @@ uint ProcessDrug(Critter cr, hstring drugPid, uint rate)
 
             propVal = cr.GetAsInt(prop) - propVal;
             if (propVal > 0) {
-                cr.SayMsg(SAY_NETMSG, TextPackName::Game, MsgStr::StrDrugStatGain, "$name @text Game " + STR_PARAM_NAME(prop) + "@$value" + propVal);
+                Messaging::Info(cr, TextPackName::Game, MsgStr::StrDrugStatGain, "$name @text Game " + STR_PARAM_NAME(prop) + "@$value" + propVal);
             }
             else if (propVal < 0) {
-                cr.SayMsg(SAY_NETMSG, TextPackName::Game, MsgStr::StrDrugStatLose, "$name @text Game " + STR_PARAM_NAME(prop) + "@$value" + (-propVal));
+                Messaging::Info(cr, TextPackName::Game, MsgStr::StrDrugStatLose, "$name @text Game " + STR_PARAM_NAME(prop) + "@$value" + (-propVal));
             }
         }
 
@@ -495,13 +576,11 @@ uint ProcessDrug(Critter cr, hstring drugPid, uint rate)
         else if (stage == 2 && addict >= 0 && cr.Addictions[addict]) // To addiction
         {
             // Find already processed addiction
-            uint[] indexes = {};
-            tick_t[] durations = {};
-            uint[] rates = {};
-            uint count = cr.GetTimeEvents(drugPid.hash, indexes, durations, rates);
+            ActiveDrugEffect[] effects = {};
+            int count = GetActiveDrugEffects(cr, drugPid, effects);
             bool isPresent = false;
-            for (uint i = 0; i < count; i++) {
-                if (RATE_TO_STAGE(rates[i]) >= 3) {
+            for (int i = 0; i < count; i++) {
+                if (effects[i].Stage >= 3) {
                     isPresent = true;
                     break;
                 }
@@ -519,7 +598,7 @@ uint ProcessDrug(Critter cr, hstring drugPid, uint rate)
         }
         else if (stage == 4) // End of addiction
         {
-            cr.SayMsg(SAY_NETMSG, TextPackName::Game, MsgStr::StrDrugAddictionEnd);
+            Messaging::Info(cr, TextPackName::Game, MsgStr::StrDrugAddictionEnd);
             if (addict >= 0 && cr.Addictions[addict]) {
                 bool[] addictions = cr.Addictions.clone();
                 addictions[addict] = false;
@@ -529,11 +608,11 @@ uint ProcessDrug(Critter cr, hstring drugPid, uint rate)
     }
 
     stage++;
-    rate = FORM_RATE(stage, flags);
-    return duration * 60;
+    effect.Stage = stage;
+    return Time::Seconds(duration);
 }
 
-void DropDrug(Critter cr, hstring drugPid, uint stage)
+void DropDrug(Critter cr, hstring drugPid, int& stage)
 {
     if (stage == 0 || stage == 3) {
         return; // Instant effect not happens or already normalize or wait Addidional effect
@@ -545,7 +624,7 @@ void DropDrug(Critter cr, hstring drugPid, uint stage)
         stage == 2 || // Withdrawal already
         stage == 4)   // Addiction already
     {
-        for (uint i = 0; i < 4; i++) {
+        for (int i = 0; i < 4; i++) {
             int propInd = DrugEffects[index + TABLE_STAT(i)];
             int amount = DrugEffects[index + TABLE_AMOUNT(i, stage + (stage == 1 ? -1 : 0))]; // Turn
             if (stage == 1) {
@@ -561,9 +640,12 @@ void DropDrug(Critter cr, hstring drugPid, uint stage)
     }
 }
 
-uint cte_Drug(Critter cr, any identifier, uint& rate)
+void cte_Drug(Critter cr, any rate)
 {
-    return ProcessDrug(cr, hstring_fromHash(identifier), rate);
+    timespan delayTicks = ProcessDrug(cr, rate);
+    if (delayTicks != ZERO_TIMESPAN) {
+        Game.RepeatCurrentTimeEvent(delayTicks);
+    }
 }
 
 void SetDrugEffect(Critter cr, CritterProperty prop, int value)
@@ -589,20 +671,25 @@ void DropDrugEffects(Critter cr)
     cr.DrugEffects = drugEffects;
 
     // Erase all events
-    for (uint i = 0; i < DrugsIdentifiers.length(); i++) {
-        cr.RemoveTimeEvents(DrugsIdentifiers[i].hash);
-    }
+    cr.StopTimeEvent(cte_Drug);
+    AllActiveDrugEffects.set(cr.Id, null);
 
     // Unset addictions perks
     bool[] addictions = cr.Addictions.clone();
-    for (uint i = 0; i < addictions.length(); i++) {
+    for (int i = 0; i < addictions.length(); i++) {
         addictions[i] = false;
     }
     cr.Addictions = addictions;
 }
 #endif
 
+#if SERVER || CLIENT
+
 int GetDrugEffect(Critter cr, CritterProperty prop)
 {
     return cr.DrugEffects.get(prop, 0);
+}
+
+#endif
+
 }

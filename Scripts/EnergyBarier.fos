@@ -1,4 +1,7 @@
-// FOS Server Sort 2
+namespace EnergyBarier // Sort 2
+{
+
+#if SERVER
 
 // Author: Tab10id
 // Скрипт приписывается итему в прототипе, во время инициализации вокруг итема выставлются итемы, играющие роль триггеров.
@@ -6,15 +9,14 @@
 // если они найдены, игрок останавливается и начинается диалог с охраной.
 // Под широкими барьерами кладутся дополнительные итемы-блокирующие проход в запертом состоянии.
 
-///@ Property Critter PrivateServer uint16 EnergyBarierTerminalHx
-///@ Property Critter PrivateServer uint16 EnergyBarierTerminalHy
-///@ Property Critter PrivateServer uint   EnergyBarierNetNum
-///@ Property Critter PrivateServer int    EnergyBarierHackBonus
-///@ Property Critter PrivateServer int    EnergyBarierHitBonus
+///@ Property Critter Server mpos EnergyBarierTerminalHex Mutable Persistent
+///@ Property Critter Server int32 EnergyBarierNetNum Mutable Persistent
+///@ Property Critter Server int32 EnergyBarierHackBonus Mutable Persistent
+///@ Property Critter Server int32 EnergyBarierHitBonus Mutable Persistent
 
-///@ Property Map PrivateServer uint=>uint[] EnergyBarierHitBonus
-///@ Property Map PrivateServer uint=>any[] EnergyBarierTerminal
-///@ Property Map PrivateServer uint=>any[] EnergyBarierTerminalInfo
+///@ Property Map Server int32=>int32[] EnergyBarierHitBonus Mutable Persistent
+///@ Property Map Server int32=>any[] EnergyBarierTerminal Mutable Persistent
+///@ Property Map Server int32=>any[] EnergyBarierTerminalInfo Mutable Persistent
 
 #define DL #(str)
 // #define DL #(str) Game.Log(str)
@@ -36,10 +38,10 @@
 #define BM_HALF_ON                 (2)
 #define BM_OFF_NO_GUARD            (3)
 
-#define TIME_CARD_VALID            (24 * 60 * 60)
-#define TIME_BROKEN                (3 * 60 * 60)
-#define TIME_NOT_ACCESS            (3 * 60 * 60)
-#define TIME_BARIER_OPEN           (5 * 60)
+#define TIME_CARD_VALID            (Time::GameDays(1))
+#define TIME_BROKEN                (Time::GameHours(3))
+#define TIME_NOT_ACCESS            (Time::GameHours(3))
+#define TIME_BARIER_OPEN           (Time::GameMinutes(5))
 
 #define FD_NORMAL                  (2)
 #define FD_HACK_NOT_SUCC           (5)
@@ -86,13 +88,13 @@ const hstring[][] EBHalfOnMode = {
     { EMPTY_HSTRING,                  EMPTY_HSTRING,                   Content::Item::eb_short_hor1_red, Content::Item::eb_short_vert1_red, Content::Item::eb_short_hor2_red, Content::Item::eb_short_vert2_red, Content::Item::eb_short_hor3_red, Content::Item::eb_short_vert3_red, }
 };
 
-const uint8[][][] EBBlockers = {
+const int[][][] EBBlockers = {
     /* EB_LONG_HOR */
     {{4, 3, 4}, {0, 1, 0}},
     /* EB_LONG_VERT */
     {{5}, {2, 2}}};
 
-const uint8[][] EBTriggers = {
+const int[][] EBTriggers = {
     /* EB_LONG_HOR */
     {1, 1, 1, 1, 2, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4, 5, 5, 5, 0, 0, 0, 0},
     /* EB_LONG_VERT */
@@ -106,7 +108,7 @@ const uint8[][] EBTriggers = {
     /* EB_SHORT_VERT3 */
     {2, 2, 3, 3, 3, 4, 5, 5, 5, 0, 0, 0, 1, 2}};
 
-const uint8[][] EBEmitterCoords = {
+const int[][] EBEmitterCoords = {
     /* EB_EMITTER_HOR1 */
     /* EB_EMITTER_HOR2 */
     /* EB_EMITTER_HOR3 */
@@ -118,24 +120,24 @@ const uint8[][] EBEmitterCoords = {
 
 // clang-format on
 
-uint MakeTerminalKey(uint16 hx, uint16 hy, uint num = 0)
+int MakeTerminalKey(mpos hex, int num = 0)
 {
-    return ((hx << 16) | hy) + num;
+    return ((hex.x << 16) | hex.y) + num;
 }
 
 void InitBariers(Item barier)
 {
-    uint8[][] blockers = {{}};
-    uint8[] triggers = {};
-    uint8[] temp = {};
-    uint8 trigDir;
-    uint16 trigDest;
+    int[][] blockers = {{}};
+    int[] triggers = {};
+    int[] temp = {};
+    int trigDir;
+    int trigDest;
     hstring proto = barier.ProtoId;
     bool guarded = true;
     hstring haveHalfOnMode;
 
     if (barier.MapId == ZERO_IDENT) {
-        Game.DeferredCall(0, InitBarier, barier.Id);
+        Game.StartTimeEvent(ZERO_TIMESPAN, InitBarier, barier.Id);
         return;
     }
 
@@ -147,7 +149,7 @@ void InitBariers(Item barier)
     if (proto == Content::Item::eb_long_hor) {
         DL("Горизонтальный барьер");
         blockers.grow(2);
-        blockers.last() = array<uint8>();
+        blockers.last() = array<int>();
         push_back_array(blockers[0], EBBlockers[0][0]);
         push_back_array(blockers[1], EBBlockers[0][1]);
         trigDir = 5;
@@ -163,7 +165,7 @@ void InitBariers(Item barier)
     else if (proto == Content::Item::eb_long_vert) {
         DL("Вертикальный барьер");
         blockers.grow(2);
-        blockers.last() = array<uint8>();
+        blockers.last() = array<int>();
         push_back_array(blockers[0], EBBlockers[1][0]);
         push_back_array(blockers[1], EBBlockers[1][1]);
         trigDir = 5;
@@ -178,7 +180,7 @@ void InitBariers(Item barier)
     }
     else if (proto == Content::Item::eb_short_hor1 || proto == Content::Item::eb_short_hor2 || proto == Content::Item::eb_short_hor3) {
         blockers.grow(2);
-        blockers.last() = array<uint8>();
+        blockers.last() = array<int>();
         trigDir = 5;
         trigDest = 2;
         if (barier.Val3 != 0) {
@@ -200,7 +202,7 @@ void InitBariers(Item barier)
     }
     else if (proto == Content::Item::eb_short_vert1 || proto == Content::Item::eb_short_vert2 || proto == Content::Item::eb_short_vert3) {
         blockers.grow(2);
-        blockers.last() = array<uint8>();
+        blockers.last() = array<int>();
         trigDir = 0;
         trigDest = 2;
         if (barier.Val3 != 0) {
@@ -229,7 +231,7 @@ void InitEmitter(Item emitter)
     emitter.OnCritterUseOnSelf.Subscribe(_UseOnEmitter);
 }
 
-uint16 GetFieldCoord(uint16 coord, hstring proto, uint8 type)
+int GetFieldCoord(int coord, hstring proto, int type)
 {
     if (proto == Content::Item::eb_emitter_hor1 || proto == Content::Item::eb_emitter_hor2 || proto == Content::Item::eb_emitter_hor3) {
         return EBEmitterCoords[0][type];
@@ -246,25 +248,24 @@ class CBarier
     Item[] Blockers = {};   // Массив итемов блокираторов под основным итемом
     Item[] Triggers = {};   // Массив триггеров
     bool Guarded;           // Охраняемый ли барьер
-    uint8 BarierStat;       // Текущий режим работы барьера (Закрытый, открытый, снижена мощность)
+    int BarierStat;         // Текущий режим работы барьера (Закрытый, открытый, снижена мощность)
     hstring HaveHalfOnMode; // Имеет ли барьер режим половины мощности (если имеет, то свойство имеет прототип итема хранящего изображение данного барьера в
                             // данном режиме)
-    uint8 FieldMode;        // Текущий режим работы
+    int FieldMode;          // Текущий режим работы
 
-    CBarier(Item barier, uint8[][] blockers, uint8[] triggers, uint8 trigDir, uint16 trigDest, bool guarded, hstring modeHalfOn)
+    CBarier(Item barier, int[][] blockers, int[] triggers, int trigDir, int trigDest, bool guarded, hstring modeHalfOn)
     {
         DL("CBarier: barier.val1=" + barier.Val1 + ", blockers: [" + blockers[0].length() + "][" + blockers[1].length() + "], triggers: " + triggers.length() +
            ", trigDir: " + trigDir + ", trigDest: " + trigDest + ", medeHalfOn: " + modeHalfOn);
 
-        uint16 baseX, baseY;
-        uint16 newX, newY;
+        mpos baseHex;
+        mpos newHex;
         Item temp;
         Map map;
         Location loc;
 
         HaveHalfOnMode = modeHalfOn;
-        baseX = barier.HexX;
-        baseY = barier.HexY;
+        baseHex = barier.Hex;
         Barier = barier;
         Guarded = guarded;
         Blockers.insertLast(barier);
@@ -278,34 +279,32 @@ class CBarier
             return;
         }
 
-        for (uint k = 0; k < blockers.length(); k++) {
-            newX = baseX;
-            newY = baseY;
-            for (uint i = 0; i < blockers[k].length(); i++) {
-                map.MoveHexByDir(newX, newY, blockers[k][i], 1);
-                Critter crit = map.GetCritter(newX, newY);
-                if (map.IsHexMovable(newX, newY) or valid(crit)) {
-                    temp = map.GetItem(newX, newY, Content::Item::eb_blocker);
+        for (int k = 0; k < blockers.length(); k++) {
+            newHex = baseHex;
+            for (int i = 0; i < blockers[k].length(); i++) {
+                map.MoveHexByDir(newHex, blockers[k][i], 1);
+                Critter crit = map.GetCritter(newHex);
+                if (map.IsHexMovable(newHex) or valid(crit)) {
+                    temp = map.GetItem(newHex, Content::Item::eb_blocker);
                     if (not valid(temp) or temp.Val1 != Barier.Val1) {
-                        temp = map.AddItem(newX, newY, Content::Item::eb_blocker, 1);
+                        temp = map.AddItem(newHex, Content::Item::eb_blocker, 1);
                         Blockers.insertLast(temp);
                     }
                 }
             }
         }
 
-        newX = baseX;
-        newY = baseY;
-        map.MoveHexByDir(newX, newY, trigDir, trigDest);
+        newHex = baseHex;
+        map.MoveHexByDir(newHex, trigDir, trigDest);
         if (guarded) {
             DL("Триггеры для барьера №" + Blockers[0].Val1 + ": " + triggers.length());
-            for (uint k = 0; k < triggers.length(); k++) {
-                map.MoveHexByDir(newX, newY, triggers[k], 1);
-                Critter crit = map.GetCritter(newX, newY);
-                if (map.IsHexMovable(newX, newY) or valid(crit)) {
-                    temp = map.GetItem(newX, newY, Content::Item::eb_trigger);
+            for (int k = 0; k < triggers.length(); k++) {
+                map.MoveHexByDir(newHex, triggers[k], 1);
+                Critter crit = map.GetCritter(newHex);
+                if (map.IsHexMovable(newHex) or valid(crit)) {
+                    temp = map.GetItem(newHex, Content::Item::eb_trigger);
                     if (not valid(temp) or temp.Val1 != Barier.Val1) {
-                        temp = map.AddItem(newX, newY, Content::Item::eb_trigger, 1);
+                        temp = map.AddItem(newHex, Content::Item::eb_trigger, 1);
                         Triggers.insertLast(temp);
                     }
                 }
@@ -334,7 +333,7 @@ class CBarier
         net.AddBarier(this);
     }
 
-    void ChangeMode(uint8 mode)
+    void ChangeMode(int mode)
     {
         FieldMode = mode;
         if (mode == BM_HALF_ON) {
@@ -352,18 +351,18 @@ class CBarier
             }
         }
         if ((mode == BM_ON) or (mode == BM_HALF_ON)) {
-            for (uint i = 0; i < Blockers.length(); i++) {
-                Blockers[i].IsHidden = false;
+            for (int i = 0; i < Blockers.length(); i++) {
+                Blockers[i].Hidden = false;
             }
         }
         else {
-            for (uint i = 0; i < Blockers.length(); i++) {
-                Blockers[i].IsHidden = true;
+            for (int i = 0; i < Blockers.length(); i++) {
+                Blockers[i].Hidden = true;
             }
         }
-        for (uint i = 0; i < Blockers.length(); i++) {
+        for (int i = 0; i < Blockers.length(); i++) {
             if (mode == BM_ON) {
-                Blockers[i].IsNoBlock = false;
+                Blockers[i].NoBlock = false;
             }
             else {
                 if (mode == BM_HALF_ON) {
@@ -374,28 +373,28 @@ class CBarier
                 }
 
                 if (HaveHalfOnMode == EMPTY_HSTRING && mode == BM_HALF_ON) {
-                    Blockers[i].IsNoBlock = false;
+                    Blockers[i].NoBlock = false;
                 }
                 else {
-                    Blockers[i].IsNoBlock = true;
+                    Blockers[i].NoBlock = true;
                 }
             }
         }
     }
 
-    uint GetBarierNum()
+    int GetBarierNum()
     {
         return Barier.Val1;
     }
 
-    uint GetGuardNum()
+    int GetGuardNum()
     {
         return Barier.Val3;
     }
 
     hstring GetMainProto()
     {
-        for (uint i = 0; i < EBHalfOnMode[1].length(); i++) {
+        for (int i = 0; i < EBHalfOnMode[1].length(); i++) {
             if (Barier.ProtoId == EBHalfOnMode[1][i]) {
                 return EBHalfOnMode[0][i];
             }
@@ -403,7 +402,7 @@ class CBarier
         return EMPTY_HSTRING;
     }
 
-    uint8 GetFieldMode()
+    int GetFieldMode()
     {
         DL("Mode: " + FieldMode);
         return FieldMode;
@@ -415,10 +414,10 @@ class CBariersNet
     CBarier[] Bariers = {};
     int NetNum;
     ident LocId;
-    uint8 NetState;
+    int NetState;
     bool TerminalsDisabled;
 
-    CBariersNet(int netNum, ident locId, uint8 netState)
+    CBariersNet(int netNum, ident locId, int netState)
     {
         NetNum = netNum;
         LocId = locId;
@@ -431,12 +430,12 @@ class CBariersNet
         Bariers.insertLast(barier);
     }
 
-    void ChangeNetMode(uint8 mode, uint8 autoEnable)
+    void ChangeNetMode(int mode, int autoEnable)
     {
         CBarier barier;
         bool autoOn;
         bool autoOnHalf;
-        for (uint i = 0; i < Bariers.length(); i++) {
+        for (int i = 0; i < Bariers.length(); i++) {
             barier = Bariers[i];
             autoOn = (barier.Blockers[0].Val4 == 0) ? true : false;
             autoOnHalf = (barier.Blockers[0].Val5 == 0) ? true : false;
@@ -445,7 +444,7 @@ class CBariersNet
                 values.insertLast(LocId);
                 values.insertLast(NetNum);
                 values.insertLast(BM_ON);
-                Game.SavedDeferredCall(GAME_SECOND_TO_TICK(TIME_BARIER_OPEN), TurnOnBariers, values);
+                Game.StartTimeEvent(TIME_BARIER_OPEN, TurnOnBariers, values); //SavedDeferredCall
             }
             barier.ChangeMode(mode);
             NetState = mode;
@@ -457,7 +456,7 @@ CBariersNet[] BariersNets = {};
 
 CBariersNet GetBariersNet(int netNum, ident locId)
 {
-    for (uint i = 0; i < BariersNets.length(); i++) {
+    for (int i = 0; i < BariersNets.length(); i++) {
         if ((BariersNets[i].NetNum == netNum) and (BariersNets[i].LocId == locId)) {
             return BariersNets[i];
         }
@@ -467,9 +466,9 @@ CBariersNet GetBariersNet(int netNum, ident locId)
 
 CBarier GetBarier(ident mainItemId)
 {
-    for (uint i = 0; i < BariersNets.length(); i++) {
+    for (int i = 0; i < BariersNets.length(); i++) {
         if (valid(BariersNets[i])) {
-            for (uint k = 0; k < BariersNets[i].Bariers.length(); k++) {
+            for (int k = 0; k < BariersNets[i].Bariers.length(); k++) {
                 if (valid(BariersNets[i].Bariers[k])) {
                     CBarier barier = BariersNets[i].Bariers[k];
                     if (barier.Barier.Id == mainItemId) {
@@ -482,9 +481,9 @@ CBarier GetBarier(ident mainItemId)
     return null;
 }
 
-void push_back_array(uint8[] arr, uint8[] target)
+void push_back_array(int[] arr, int[] target)
 {
-    for (uint i = 0; i < target.length(); i++) {
+    for (int i = 0; i < target.length(); i++) {
         arr.insertLast(target[i]);
     }
 }
@@ -493,9 +492,9 @@ void InitBlockers(CBarier barier)
 {
     if (barier.Blockers[0].Val2 == BM_ON) {
         barier.Blockers[0].OnCritterUseSkill.Subscribe(_DamageCritterUse);
-        barier.Blockers[0].IsHidden = false;
-        for (uint i = 0; i < barier.Blockers.length(); i++) {
-            barier.Blockers[i].IsNoBlock = false;
+        barier.Blockers[0].Hidden = false;
+        for (int i = 0; i < barier.Blockers.length(); i++) {
+            barier.Blockers[i].NoBlock = false;
             if (i > 0) {
                 barier.Blockers[i].Val1 = barier.Blockers[0].Val1;
             }
@@ -505,10 +504,10 @@ void InitBlockers(CBarier barier)
     else {
         if (barier.Blockers[0].Val2 == BM_OFF) {
             barier.FieldMode = BM_OFF;
-            barier.Blockers[0].IsHidden = true;
-            for (uint i = 0; i < barier.Blockers.length(); i++) {
-                barier.Blockers[i].IsNoBlock = true;
-                barier.Blockers[i].IsHidden = true;
+            barier.Blockers[0].Hidden = true;
+            for (int i = 0; i < barier.Blockers.length(); i++) {
+                barier.Blockers[i].NoBlock = true;
+                barier.Blockers[i].Hidden = true;
                 if (i > 0) {
                     barier.Blockers[i].Val1 = barier.Blockers[0].Val1;
                 }
@@ -524,7 +523,7 @@ void InitBlockers(CBarier barier)
 bool CheckInven(Critter master)
 {
     Item[] items = master.GetItems(Content::Item::energy_barier_access_card);
-    for (uint i = 0; i < items.length(); i++) {
+    for (int i = 0; i < items.length(); i++) {
         if (CheckCard(items[i], master)) {
             return true;
         }
@@ -534,7 +533,7 @@ bool CheckInven(Critter master)
 
 bool CheckCard(Item card, Critter master)
 {
-    if ((card.Val4 < int(Game.GetFullSecond() - TIME_CARD_VALID)) || (card.Val5 != master.Id)) {
+    if ((card.Val4 < Game.SynchronizedTime - TIME_CARD_VALID) || (card.Val5 != master.Id)) {
         return false;
     }
     else {
@@ -542,9 +541,9 @@ bool CheckCard(Item card, Critter master)
     }
 }
 
-uint8 HackRoll(Critter master)
+int HackRoll(Critter master)
 {
-    uint8 res = Stdlib::RollVsSkill(master, CritterProperty::SkillScience, SCIENCE_PENALTY + master.EnergyBarierHackBonus);
+    int res = Stdlib::RollVsSkill(master, CritterProperty::SkillScience, SCIENCE_PENALTY + master.EnergyBarierHackBonus);
     return res;
 }
 
@@ -580,7 +579,7 @@ void InitBarier(any value)
 void InitTriggers(CBarier barier)
 {
     DL("Инициализация триггеров. Количество: " + barier.Triggers.length());
-    for (uint i = 0; i < barier.Triggers.length(); i++) {
+    for (int i = 0; i < barier.Triggers.length(); i++) {
         barier.Triggers[i].OnCritterWalk.Subscribe(_WalkOnTrigg);
         barier.Triggers[i].Val1 = barier.GetGuardNum();
         barier.Triggers[i].Val2 = barier.Barier.Id;
@@ -590,9 +589,9 @@ void InitTriggers(CBarier barier)
 
 void _WalkOnTrigg(Item item, Critter cr, bool entered, uint8 dir) // TODO
 {
-    uint netNum = 0;
+    int netNum = 0;
 
-    if (!cr.IsControlledByPlayer) {
+    if (!cr.ControlledByPlayer) {
         return;
     }
 
@@ -600,8 +599,8 @@ void _WalkOnTrigg(Item item, Critter cr, bool entered, uint8 dir) // TODO
         return;
     }
 
-    for (uint i = 0; i < BariersNets.length(); i++) {
-        for (uint k = 0; k < BariersNets[i].Bariers.length(); k++) {
+    for (int i = 0; i < BariersNets.length(); i++) {
+        for (int k = 0; k < BariersNets[i].Bariers.length(); k++) {
             if (BariersNets[i].Bariers[k].Barier.Id == item.Val2) {
                 netNum = BariersNets[i].Bariers[k].Barier.Val1;
                 if (BariersNets[i].Bariers[k].FieldMode == BM_OFF_NO_GUARD) {
@@ -616,8 +615,8 @@ void _WalkOnTrigg(Item item, Critter cr, bool entered, uint8 dir) // TODO
         return;
     }
 
-    Critter[] npcs = map.GetCritters(cr.HexX, cr.HexY, RADIUS, CritterFindType::AliveNpc);
-    for (uint i = 0; i < npcs.length(); i++) {
+    Critter[] npcs = map.GetCritters(cr.Hex, RADIUS, CritterFindType::NonDeadNpc);
+    for (int i = 0; i < npcs.length(); i++) {
         if (npcs[i].NpcRole != item.Val1) {
             npcs.removeAt(i);
             i--;
@@ -632,24 +631,24 @@ void _WalkOnTrigg(Item item, Critter cr, bool entered, uint8 dir) // TODO
         if (not g.CritIsAccessible(cr)) {
             CritterState::Wait(cr, 0);
             // cr.MoveToDir((cr.Dir+3)%6);
-            uint i = Game.Random(0, npcs.length() - 1);
-            Game.RunDialog(cr, npcs[i], Content::Dialog::all_energy_barier_guards, true);
+            int i = Game.Random(0, npcs.length() - 1);
+            Dialogs::RunDialog(cr, Content::Dialog::all_energy_barier_guards, npcs[i], true);
         }
     }
 }
 
-void DeleteBlockersAndTriggers(Map map, uint netNum)
+void DeleteBlockersAndTriggers(Map map, int netNum)
 {
     Item[] items = map.GetItems(Content::Item::eb_blocker);
-    for (uint i = 0; i < items.length(); i++) {
-        if (uint(items[i].Val1) == netNum) {
+    for (int i = 0; i < items.length(); i++) {
+        if (int(items[i].Val1) == netNum) {
             Game.DestroyItem(items[i]);
         }
     }
 
     items = map.GetItems(Content::Item::eb_trigger);
-    for (uint i = 0; i < items.length(); i++) {
-        if (uint(items[i].Val1) == netNum) {
+    for (int i = 0; i < items.length(); i++) {
+        if (int(items[i].Val1) == netNum) {
             Game.DestroyItem(items[i]);
         }
     }
@@ -660,7 +659,7 @@ bool CritIsAccessible(Critter cr)
     return CheckInven(cr);
 }
 
-uint8 GetNetState(ident locId, uint netNum)
+int GetNetState(ident locId, int netNum)
 {
     CBariersNet net = GetBariersNet(netNum, locId);
     if (valid(net)) {
@@ -689,33 +688,33 @@ bool _DamageCritterUse(Item item, Critter cr, CritterProperty skill)
                 Combat::InjureCritter(cr,
                                       Game.Random(MIN_DMG_USE_LOW, MAX_DMG_USE_LOW),
                                       DAMAGE_TYPE,
-                                      Game.GetDirection(item.HexX, item.HexY, cr.HexX, cr.HexY),
+                                      Game.GetDirection(item.Hex, cr.Hex),
                                       ZERO_IDENT,
                                       HF_BYPASS_ARMOR);
                 if (skill == CritterProperty::SkillScience) {
-                    cr.SayMsg(SAY_NETMSG, TextPackName::Text, MSG_FIELD_SCIENCE_USE_FAIL);
+                    Messaging::Info(cr, TextPackName::Text, MSG_FIELD_SCIENCE_USE_FAIL);
                 }
                 else {
-                    cr.SayMsg(SAY_NETMSG, TextPackName::Text, MSG_SHOCK_PAIN_FIELD_USE);
+                    Messaging::Info(cr, TextPackName::Text, MSG_SHOCK_PAIN_FIELD_USE);
                 }
             }
             else {
                 Combat::InjureCritter(cr,
                                       Game.Random(MIN_DMG_USE_HI, MAX_DMG_USE_HI),
                                       DAMAGE_TYPE,
-                                      Game.GetDirection(item.HexX, item.HexY, cr.HexX, cr.HexY),
+                                      Game.GetDirection(item.Hex, cr.Hex),
                                       ZERO_IDENT,
                                       HF_BYPASS_ARMOR);
                 if (skill == CritterProperty::SkillScience) {
-                    cr.SayMsg(SAY_NETMSG, TextPackName::Text, MSG_FIELD_SCIENCE_USE_FAIL);
+                    Messaging::Info(cr, TextPackName::Text, MSG_FIELD_SCIENCE_USE_FAIL);
                 }
                 else {
-                    cr.SayMsg(SAY_NETMSG, TextPackName::Text, MSG_SHOCK_FULL_FIELD_USE);
+                    Messaging::Info(cr, TextPackName::Text, MSG_SHOCK_FULL_FIELD_USE);
                 }
             }
         }
         else {
-            cr.SayMsg(SAY_NETMSG, TextPackName::Text, MSG_FIELD_SCIENCE_USE_WIN);
+            Messaging::Info(cr, TextPackName::Text, MSG_FIELD_SCIENCE_USE_WIN);
         }
     }
     return true;
@@ -725,30 +724,30 @@ bool _UseEmitter(Item item, Critter cr, CritterProperty skill)
 {
     CBarier field;
     bool autoOn;
-    uint8 fieldMode = GetFieldMode(item);
+    int fieldMode = GetFieldMode(item);
     if (skill == CritterProperty::SkillRepair) {
-        if (IS_TIMEOUT(cr.TimeoutSkRepair)) {
-            cr.SayMsg(SAY_NETMSG, TextPackName::Game, MsgStr::StrSkillWeariness);
+        if (Time::IsTimeoutActive(cr.TimeoutSkRepair)) {
+            Messaging::Info(cr, TextPackName::Game, MsgStr::StrSkillWeariness);
             return true;
         }
         if (SKILL_SUCCESS(cr, CritterProperty::SkillRepair, SCIENCE_PENALTY + int(item.Val0))) {
-            field = GetBarier(item.HexX, item.HexY, item.ProtoId);
+            field = GetBarier(item.Hex.x, item.Hex.y, item.ProtoId);
             if (!valid(field)) {
                 return false;
             }
             if ((fieldMode == BM_ON) or (fieldMode == BM_HALF_ON)) {
-                cr.SayMsg(SAY_NETMSG, TextPackName::Text, MSG_REPAIR_WIN_OFF);
+                Messaging::Info(cr, TextPackName::Text, MSG_REPAIR_WIN_OFF);
                 autoOn = (field.Blockers[0].Val4 == 0) ? true : false;
                 if (autoOn) {
                     DL("Автовключение");
                     any[] values = {};
                     values.insertLast(field.Blockers[0].Id);
-                    Game.SavedDeferredCall(GAME_SECOND_TO_TICK(TIME_BARIER_OPEN), TurnOnBarier, values);
+                    Game.StartTimeEvent(TIME_BARIER_OPEN, TurnOnBarier, values); //SavedDeferredCall
                 }
                 field.ChangeMode(BM_OFF);
             }
             else {
-                cr.SayMsg(SAY_NETMSG, TextPackName::Text, MSG_REPAIR_WIN_ON);
+                Messaging::Info(cr, TextPackName::Text, MSG_REPAIR_WIN_ON);
                 field.ChangeMode(BM_ON);
             }
             if (!GaveExp(cr, item.Id)) {
@@ -756,12 +755,12 @@ bool _UseEmitter(Item item, Critter cr, CritterProperty skill)
             }
         }
         else {
-            field = GetBarier(item.HexX, item.HexY, item.ProtoId);
+            field = GetBarier(item.Hex.x, item.Hex.y, item.ProtoId);
             if ((field.GetFieldMode() == BM_ON) or (field.GetFieldMode() == BM_HALF_ON)) {
-                cr.SayMsg(SAY_NETMSG, TextPackName::Text, MSG_REPAIR_FAIL_OFF);
+                Messaging::Info(cr, TextPackName::Text, MSG_REPAIR_FAIL_OFF);
             }
             else {
-                cr.SayMsg(SAY_NETMSG, TextPackName::Text, MSG_REPAIR_FAIL_ON);
+                Messaging::Info(cr, TextPackName::Text, MSG_REPAIR_FAIL_ON);
             }
         }
         cr.TimeoutSkRepair = REPAIR_TIMEOUT(cr);
@@ -772,7 +771,7 @@ bool _UseEmitter(Item item, Critter cr, CritterProperty skill)
     return true;
 }
 
-bool _UseOnEmitter(Item item, Critter cr, Item usedItem, uint param)
+bool _UseOnEmitter(Item item, Critter cr, Item usedItem, int param)
 {
     if (!valid(usedItem)) {
         return true;
@@ -795,8 +794,8 @@ bool ObjectUse(Critter cr, Item item, hstring proto)
 {
     CBarier field;
     bool autoOn;
-    uint8 fieldMode = GetFieldMode(item);
-    int8 bonus = 0;
+    int fieldMode = GetFieldMode(item);
+    int bonus = 0;
     if (proto == Content::Item::super_tool_kit) {
         bonus = SUPER_TOOL_BONUS;
     }
@@ -804,30 +803,30 @@ bool ObjectUse(Critter cr, Item item, hstring proto)
         bonus = TOOL_BONUS;
     }
 
-    if (IS_TIMEOUT(cr.TimeoutSkScience)) {
-        cr.SayMsg(SAY_NETMSG, TextPackName::Game, MsgStr::StrSkillWeariness);
+    if (Time::IsTimeoutActive(cr.TimeoutSkScience)) {
+        Messaging::Info(cr, TextPackName::Game, MsgStr::StrSkillWeariness);
         return true;
     }
 
     if (SKILL_SUCCESS(cr, CritterProperty::SkillScience, bonus + int(item.Val0))) {
-        field = GetBarier(item.HexX, item.HexY, item.ProtoId);
+        field = GetBarier(item.Hex.x, item.Hex.y, item.ProtoId);
         if (!valid(field)) {
             return false;
         }
 
         if ((fieldMode == BM_ON) or (fieldMode == BM_HALF_ON)) {
-            cr.SayMsg(SAY_NETMSG, TextPackName::Text, MSG_REPAIR_WIN_OFF);
+            Messaging::Info(cr, TextPackName::Text, MSG_REPAIR_WIN_OFF);
             autoOn = (field.Blockers[0].Val4 == 0) ? true : false;
             if (autoOn) {
                 DL("Автовключение");
                 any[] values = {};
                 values.insertLast(field.Blockers[0].Id);
-                Game.SavedDeferredCall(GAME_SECOND_TO_TICK(TIME_BARIER_OPEN), TurnOnBarier, values);
+                Game.StartTimeEvent(TIME_BARIER_OPEN, TurnOnBarier, values); //SavedDeferredCall
             }
             field.ChangeMode(BM_OFF);
         }
         else {
-            cr.SayMsg(SAY_NETMSG, TextPackName::Text, MSG_REPAIR_WIN_ON);
+            Messaging::Info(cr, TextPackName::Text, MSG_REPAIR_WIN_ON);
             field.ChangeMode(BM_ON);
         }
 
@@ -838,12 +837,12 @@ bool ObjectUse(Critter cr, Item item, hstring proto)
         cr.TimeoutSkScience = SCIENCE_TIMEOUT(cr);
     }
     else {
-        field = GetBarier(item.HexX, item.HexY, item.ProtoId);
+        field = GetBarier(item.Hex.x, item.Hex.y, item.ProtoId);
         if (field.GetFieldMode() == BM_ON or field.GetFieldMode() == BM_HALF_ON) {
-            cr.SayMsg(SAY_NETMSG, TextPackName::Text, MSG_REPAIR_FAIL_OFF);
+            Messaging::Info(cr, TextPackName::Text, MSG_REPAIR_FAIL_OFF);
         }
         else {
-            cr.SayMsg(SAY_NETMSG, TextPackName::Text, MSG_REPAIR_FAIL_ON);
+            Messaging::Info(cr, TextPackName::Text, MSG_REPAIR_FAIL_ON);
         }
 
         cr.TimeoutSkScience = SCIENCE_TIMEOUT(cr);
@@ -851,22 +850,23 @@ bool ObjectUse(Critter cr, Item item, hstring proto)
     return true;
 }
 
-uint8 GetFieldMode(Item item)
+int GetFieldMode(Item item)
 {
-    CBarier field = GetBarier(item.HexX, item.HexY, item.ProtoId);
+    CBarier field = GetBarier(item.Hex.x, item.Hex.y, item.ProtoId);
     if (valid(field)) {
         return field.GetFieldMode();
     }
     return 0;
 }
 
-CBarier GetBarier(uint16 hexX, uint16 hexY, hstring proto)
+CBarier GetBarier(int hexX, int hexY, hstring proto)
 {
     CBarier barier;
-    for (uint i = 0; i < BariersNets.length(); i++) {
-        for (uint k = 0; k < BariersNets[i].Bariers.length(); k++) {
+    for (int i = 0; i < BariersNets.length(); i++) {
+        for (int k = 0; k < BariersNets[i].Bariers.length(); k++) {
             barier = BariersNets[i].Bariers[k];
-            if ((barier.Barier.HexX == (hexX + GetFieldCoord(hexX, proto, COORD_X))) and (barier.Barier.HexY == (hexY + GetFieldCoord(hexX, proto, COORD_Y)))) {
+            if ((int(barier.Barier.Hex.x) == (hexX + GetFieldCoord(hexX, proto, COORD_X))) and
+                (int(barier.Barier.Hex.y) == (hexY + GetFieldCoord(hexX, proto, COORD_Y)))) {
                 DL("Барьер найден");
                 return barier;
             }
@@ -886,7 +886,7 @@ void _EmitterInit(Item emitter, bool firstTime)
     InitEmitter(emitter);
 }
 
-bool s_Terminal(Critter player, StaticItem terminal, Item item, int skill)
+bool s_Terminal(Critter player, StaticItem terminal, Item item, any skill)
 {
     Map map = player.GetMap();
     if (not valid(map)) {
@@ -899,7 +899,7 @@ bool s_Terminal(Critter player, StaticItem terminal, Item item, int skill)
     int hitBonus = params[2].hash;
 
     ident itemId;
-    uint mode = 0;
+    int mode = 0;
     if (valid(item)) {
         if (item.ProtoId == Content::Item::energy_barier_access_card) {
             mode = MODE_USE_CARD;
@@ -920,15 +920,14 @@ bool s_Terminal(Critter player, StaticItem terminal, Item item, int skill)
         return false;
     }
 
-    player.EnergyBarierTerminalHx = terminal.HexX;
-    player.EnergyBarierTerminalHy = terminal.HexY;
+    player.EnergyBarierTerminalHex = terminal.Hex;
     player.EnergyBarierNetNum = netNum;
     player.EnergyBarierHackBonus = hackBonus;
     player.EnergyBarierHitBonus = hitBonus;
 
-    uint timeBrocken = 0;
-    uint timeAccessDenied = 0;
-    any[] energyBarierTerminalInfo = map.EnergyBarierTerminalInfo[MakeTerminalKey(terminal.HexX, terminal.HexY, 0)];
+    synctime timeBrocken = ZERO_SYNCTIME;
+    synctime timeAccessDenied = ZERO_SYNCTIME;
+    any[] energyBarierTerminalInfo = map.EnergyBarierTerminalInfo[MakeTerminalKey(terminal.Hex, 0)];
     if (energyBarierTerminalInfo.length() > 0) {
         timeBrocken = energyBarierTerminalInfo[0];
         timeAccessDenied = energyBarierTerminalInfo[1];
@@ -940,21 +939,21 @@ bool s_Terminal(Critter player, StaticItem terminal, Item item, int skill)
     data.insertLast(timeBrocken);
     data.insertLast(timeAccessDenied);
     auto energyBarierTerminal = map.EnergyBarierTerminal.clone();
-    energyBarierTerminal[MakeTerminalKey(terminal.HexX, terminal.HexY, netNum)] = data;
+    energyBarierTerminal[MakeTerminalKey(terminal.Hex, netNum)] = data;
     map.EnergyBarierTerminal = energyBarierTerminal;
 
-    Game.RunDialog(player, Content::Dialog::all_energy_barier_terminal, terminal.HexX, terminal.HexY, true);
+    Dialogs::RunDialog(player, Content::Dialog::all_energy_barier_terminal, true);
     return true;
 }
 
 void r_GetAccessCard(Critter master, Critter slave)
 {
     Item item = master.AddItem(Content::Item::energy_barier_access_card, 1);
-    item.Val4 = Game.GetFullSecond();
+    item.Val4 = Game.SynchronizedTime;
     item.Val5 = master.Id;
 }
 
-uint r_Start(Critter master, Critter slave)
+int r_Start(Critter master, Critter slave)
 {
     Map map = master.GetMap();
     if (!valid(map)) {
@@ -972,13 +971,13 @@ uint r_Start(Critter master, Critter slave)
     }
 
     if (!net.TerminalsDisabled) {
-        uint key = MakeTerminalKey(master.EnergyBarierTerminalHx, master.EnergyBarierTerminalHy, master.EnergyBarierNetNum);
+        int key = MakeTerminalKey(master.EnergyBarierTerminalHex, master.EnergyBarierNetNum);
         any[] data = map.EnergyBarierTerminal[key];
         if (data.length() > 0) {
-            if (data[2] != 0 && tick_t(data[2]).value > Game.GetFullSecond().value) {
+            if (data[2] != 0 && synctime(data[2]) > Game.SynchronizedTime) {
                 return FD_TERM_BROKEN;
             }
-            else if (data[3] != 0 && tick_t(data[3]).value > Game.GetFullSecond().value) {
+            else if (data[3] != 0 && synctime(data[3]) > Game.SynchronizedTime) {
                 return FD_TERM_NOT_ACCESS;
             }
             else if (BarierOpen(master)) {
@@ -1007,7 +1006,7 @@ uint r_Start(Critter master, Critter slave)
                 }
                 else {
                     if (data[0] == MODE_HACK) {
-                        return doHack(master, master.EnergyBarierTerminalHx, master.EnergyBarierTerminalHy);
+                        return doHack(master, master.EnergyBarierTerminalHex.x, master.EnergyBarierTerminalHex.y);
                     }
                 }
             }
@@ -1019,12 +1018,12 @@ uint r_Start(Critter master, Critter slave)
     return 0;
 }
 
-uint r_doHack(Critter master, Critter slave)
+int r_doHack(Critter master, Critter slave)
 {
-    return doHack(master, master.EnergyBarierTerminalHx, master.EnergyBarierTerminalHy);
+    return doHack(master, master.EnergyBarierTerminalHex.x, master.EnergyBarierTerminalHex.y);
 }
 
-uint doHack(Critter master, int hexX, int hexY)
+int doHack(Critter master, int hexX, int hexY)
 {
     bool guardNotFound = true;
     Map map = master.GetMap();
@@ -1040,9 +1039,9 @@ uint doHack(Critter master, int hexX, int hexY)
     }
 
     CBariersNet net = GetBariersNet(master.EnergyBarierNetNum, loc.Id);
-    Critter[] npcs = map.GetCritters(master.HexX, master.HexY, RADIUS, CritterFindType::AliveNpc);
-    for (uint i = 0; i < npcs.length(); i++) {
-        for (uint k = 0; k < net.Bariers.length(); k++) {
+    Critter[] npcs = map.GetCritters(master.Hex, RADIUS, CritterFindType::NonDeadNpc);
+    for (int i = 0; i < npcs.length(); i++) {
+        for (int k = 0; k < net.Bariers.length(); k++) {
             if (npcs[i].NpcRole == int(net.Bariers[k].GetGuardNum())) {
                 guardNotFound = false;
             }
@@ -1060,21 +1059,21 @@ uint doHack(Critter master, int hexX, int hexY)
         }
 
         if (not g.CritIsAccessible(master)) {
-            for (uint i = 0; i < npcs.length(); i++) {
+            for (int i = 0; i < npcs.length(); i++) {
                 NpcPlanes::AddAttackPlane(npcs[i], AI_PLANE_ATTACK_PRIORITY + 1, master);
             }
         }
     }
 
-    uint8 hRoll = HackRoll(master);
+    int hRoll = HackRoll(master);
     if (!Stdlib::IsSuccessRvS(hRoll)) {
         if (Stdlib::IsCriticalRvS(hRoll)) {
             any[] adTermInfo = {};
-            adTermInfo.insertLast(0);
-            adTermInfo.insertLast(Game.GetFullSecond() + TIME_NOT_ACCESS);
+            adTermInfo.insertLast(ZERO_SYNCTIME);
+            adTermInfo.insertLast(Game.SynchronizedTime + TIME_NOT_ACCESS);
 
             auto energyBarierTerminalInfo = map.EnergyBarierTerminalInfo.clone();
-            energyBarierTerminalInfo[MakeTerminalKey(hexX, hexY, 0)] = adTermInfo;
+            energyBarierTerminalInfo[MakeTerminalKey(mpos(hexX, hexY), 0)] = adTermInfo;
             map.EnergyBarierTerminalInfo = energyBarierTerminalInfo;
             return FD_TERM_NOT_ACCESS;
         }
@@ -1085,7 +1084,7 @@ uint doHack(Critter master, int hexX, int hexY)
     return FD_HACK_SUCC;
 }
 
-uint r_TurnOfBarier(Critter master, Critter slave)
+int r_TurnOfBarier(Critter master, Critter slave)
 {
     Map map = master.GetMap();
     if (!valid(map)) {
@@ -1111,7 +1110,7 @@ void r_CheckHit(Critter master, Critter slave)
     // TODO
 }
 
-uint r_CheckAccessCard(Critter master, Critter slave)
+int r_CheckAccessCard(Critter master, Critter slave)
 {
     if (CheckInven(master)) {
         Map map = master.GetMap();
@@ -1144,8 +1143,8 @@ void TurnOnBariers(any[] values)
 
 void TurnOnBarier(any[] values)
 {
-    for (uint i = 0; i < BariersNets.length(); i++) {
-        for (uint k = 0; k < BariersNets[i].Bariers.length(); k++) {
+    for (int i = 0; i < BariersNets.length(); i++) {
+        for (int k = 0; k < BariersNets[i].Bariers.length(); k++) {
             CBarier barier = BariersNets[i].Bariers[k];
             if (barier.Barier.Id == values[0]) {
                 barier.ChangeMode(BM_ON);
@@ -1204,7 +1203,7 @@ void EnableForceField(any[] values)
 }
 
 // реализация охранников
-CGuards GetGuards(Critter[] guards, uint netNum, uint barierId)
+CGuards GetGuards(Critter[] guards, int netNum, int barierId)
 {
     if (guards.length() == 0) {
         return null;
@@ -1250,7 +1249,11 @@ class CGuards_GeckCity : CGuards
 {
     bool CritIsAccessible(Critter cr)
     {
-        cr.Say(SAY_NORM_ON_HEAD, "Hi there!");
+        Messaging::SayOnHead(cr, "Hi there!");
         return true;
     }
+}
+
+#endif
+
 }

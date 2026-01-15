@@ -1,12 +1,13 @@
-// FOS Server Client Sort 2
+namespace Elevator
+{
 
-///@ RemoteCall Server Rpc_SelectLevel(int level, int p1, int p2)
-///@ RemoteCall Client ShowScreenElevator(int elevatorType, int p1, int p2)
-///@ Property Map PrivateServer ident=>uint[] ElevatorData
+///@ RemoteCall Server Rpc_SelectLevel(int32 level, int32 p1, int32 p2)
+///@ RemoteCall Client ShowScreenElevator(int32 elevatorType, int32 p1, int32 p2)
+///@ Property Map Server ident=>int32[] ElevatorData Mutable Persistent
 
 #define RESET_DATA_AFTER (60 * 60)
 
-#ifdef __SERVER
+#if SERVER
 // лифт, всего существуют 8 типов лифтов. Максимум - 4 этажа
 // для четырехэтажного отдельный триггер
 // 1ый параметр - номер гекса, на который попадет игрок
@@ -24,11 +25,11 @@ void t_Elevator4(Critter player, StaticItem trigger, bool entered, uint8 dir)
     hstring map3Pid = params[3];
     hstring map4Pid = params[4];
 
-    if (IS_TIMEOUT(player.TimeoutTransfer)) {
-        player.SayMsg(SAY_NETMSG, TextPackName::Game, MsgStr::StrTimeoutTransferWait);
+    if (Time::IsTimeoutActive(player.TimeoutTransfer)) {
+        Messaging::Info(player, TextPackName::Game, MsgStr::StrTimeoutTransferWait);
     }
-    else if (IS_TIMEOUT(player.TimeoutBattle)) {
-        player.SayMsg(SAY_NETMSG, TextPackName::Game, MsgStr::StrTimeoutBattleWait);
+    else if (Time::IsTimeoutActive(player.TimeoutBattle)) {
+        Messaging::Info(player, TextPackName::Game, MsgStr::StrTimeoutBattleWait);
     }
     else {
         hstring[] pids = {map1Pid, map2Pid, map3Pid, map4Pid};
@@ -53,11 +54,11 @@ void t_Elevator(Critter player, StaticItem trigger, bool entered, uint8 dir)
     hstring map2Pid = params[3];
     hstring map3Pid = params[4];
 
-    if (IS_TIMEOUT(player.TimeoutTransfer)) {
-        player.SayMsg(SAY_NETMSG, TextPackName::Game, MsgStr::StrTimeoutTransferWait);
+    if (Time::IsTimeoutActive(player.TimeoutTransfer)) {
+        Messaging::Info(player, TextPackName::Game, MsgStr::StrTimeoutTransferWait);
     }
-    else if (IS_TIMEOUT(player.TimeoutBattle)) {
-        player.SayMsg(SAY_NETMSG, TextPackName::Game, MsgStr::StrTimeoutBattleWait);
+    else if (Time::IsTimeoutActive(player.TimeoutBattle)) {
+        Messaging::Info(player, TextPackName::Game, MsgStr::StrTimeoutBattleWait);
     }
     else {
         hstring[] pids = {map1Pid};
@@ -72,7 +73,7 @@ void t_Elevator(Critter player, StaticItem trigger, bool entered, uint8 dir)
 }
 
 // Работает только для карт в одном экземпляре
-void ShowElevator(Critter player, uint8 elevatorType, hstring[] mapPids, uint entryNum)
+void ShowElevator(Critter player, int elevatorType, hstring[] mapPids, int entryNum)
 {
     CritterState::Wait(player, 0);
 
@@ -82,7 +83,7 @@ void ShowElevator(Critter player, uint8 elevatorType, hstring[] mapPids, uint en
     }
 
     hstring mPid = playerMap.ProtoId;
-    uint curLevel = 0; // Этаж, на котором находится игрок
+    int curLevel = 0; // Этаж, на котором находится игрок
     switch (elevatorType) {
     case 0:
     case 2:
@@ -103,8 +104,8 @@ void ShowElevator(Critter player, uint8 elevatorType, hstring[] mapPids, uint en
         break;
     }
 
-    uint[] data = {entryNum, curLevel};
-    for (uint i = 0; i < mapPids.length(); i++) {
+    int[] data = {entryNum, curLevel};
+    for (int i = 0; i < mapPids.length(); i++) {
         if (mapPids[i] == mPid) {
             curLevel += i;
         }
@@ -118,7 +119,7 @@ void ShowElevator(Critter player, uint8 elevatorType, hstring[] mapPids, uint en
 
     // добавляем событие очистки (если игрок так и не воспользовался лифтом)
     any[] values = {player.Id, playerMap.Id};
-    Game.SavedDeferredCall(GAME_SECOND_TO_TICK(RESET_DATA_AFTER), ResetData, values);
+    Game.StartTimeEvent(Tla::GameSeconds(RESET_DATA_AFTER), ResetData, values); //SavedDeferredCall
     // player.ShowScreen( ShowScreenModes::Elevator, ELEVATOR_X( elevatorType, curLevel ), "answer_SelectLevel" );
     player.PlayerClientCall.ShowScreenElevator(ELEVATOR_X(elevatorType, curLevel), 0, 0);
 }
@@ -133,7 +134,7 @@ void ResetData(any[] values)
     }
 }
 
-void answer_SelectLevel(Critter player, uint answerI, string answerS)
+void answer_SelectLevel(Critter player, int answerI, string answerS)
 {
     Map map = player.GetMap();
     if (map is null) {
@@ -145,25 +146,25 @@ void answer_SelectLevel(Critter player, uint answerI, string answerS)
         return;
     }
 
-    uint[] params = elevatorData[player.Id];
+    int[] params = elevatorData[player.Id];
     elevatorData.remove(player.Id);
     if (params.length() == 0) {
         return;
     }
 
-    uint l = params.length();
-    uint entNum = params[0];
-    uint firstLevelNum = l <= 1 ? 0 : params[1];
+    int l = params.length();
+    int entNum = params[0];
+    int firstLevelNum = l <= 1 ? 0 : params[1];
     map.ElevatorData = elevatorData;
     if (answerI < firstLevelNum || answerI > l + firstLevelNum) {
         return;
     }
 
     Location loc = map.GetLocation();
-    for (uint j = 0; j < loc.GetMapCount(); j++) {
+    for (int j = 0; j < loc.GetMapCount(); j++) {
         Map newMap = loc.GetMapByIndex(j); // Game.GetMap(params[i-firstLevelNum+2]);
         if (newMap !is null && newMap.ProtoId.hash == int(params[answerI - firstLevelNum + 2])) {
-            Obsolete::CritterTransitToMapEntry(player, newMap.Id, HASHI(entNum));
+            Entrance::CritterTransferToMapEntry(player, newMap.Id, HASHI(entNum));
             return;
         }
     }
@@ -183,14 +184,14 @@ void Rpc_SelectLevel(Player player, int level, int p1, int p2)
         return;
     }
 
-    uint[] params = elevatorData[cr.Id];
+    int[] params = elevatorData[cr.Id];
     elevatorData.remove(cr.Id);
     if (params.length() == 0) {
         return;
     }
 
-    uint l = params.length();
-    uint entNum = params[0];
+    int l = params.length();
+    int entNum = params[0];
     int firstLevelNum = l <= 1 ? 0 : params[1];
     map.ElevatorData = elevatorData;
     if (level < firstLevelNum || level > l + firstLevelNum) {
@@ -198,21 +199,21 @@ void Rpc_SelectLevel(Player player, int level, int p1, int p2)
     }
 
     Location loc = map.GetLocation();
-    for (uint i = 0, j = loc.GetMapCount(); i < j; i++) {
+    for (int i = 0, j = loc.GetMapCount(); i < j; i++) {
         Map newMap = loc.GetMapByIndex(i); // Game.GetMap(params[i-firstLevelNum+2]);
         if (newMap !is null && newMap.ProtoId.hash == int(params[level - firstLevelNum + 2])) {
-            Obsolete::CritterTransitToMapEntry(cr, newMap.Id, HASHI(entNum));
+            Entrance::CritterTransferToMapEntry(cr, newMap.Id, HASHI(entNum));
             return;
         }
     }
 }
 #endif
 
-#ifdef __CLIENT
+#if CLIENT
 
 void ShowScreenElevator(int elevatorType, int p1, int p2)
 {
-    Game.ShowScreen(CLIENT_SCREEN_ELEVATOR, dict<string, any> = {{"ElevatorType", elevatorType}});
+    Gui::ShowScreen(GuiScreen::Elevator, dict<string, any> = {{"ElevatorType", elevatorType}});
 }
 
 // Elevator generation.
@@ -229,12 +230,12 @@ void ShowScreenElevator(int elevatorType, int p1, int p2)
 // 1 button down pic offset in INTRFACE.LST		// 12
 // 1 buttons count								// 13
 // 4 rect for every button						// 14+
-bool get_elevator(uint type, uint[] data)
+bool get_elevator(int type, int[] data)
 {
     // clang-format off
 
     const string iface = "art/intrface/Elevator/";
-    const        uint[][] elevators =
+    const        int[][] elevators =
     {
         //	 Level current, start, count               Main picture size                          Additional picture size                            Indicator animation size                  Buttons count
         //	         Main picture                               Additional picture                       Indicator animation                                  Button down picture                 Button coordinates
@@ -260,17 +261,19 @@ bool get_elevator(uint type, uint[] data)
 
     // clang-format on
 
-    uint index = (type & 0xFFFF);
-    uint currentLevel = (type >> 16);
+    int index = (type & 0xFFFF);
+    int currentLevel = (type >> 16);
 
     if (index > 8) {
         return false;
     }
     data.resize(elevators[index].length());
-    for (uint i = 0; i < data.length(); i++) {
+    for (int i = 0; i < data.length(); i++) {
         data[i] = elevators[index][i];
     }
     data[0] = currentLevel;
     return true;
 }
 #endif
+
+}

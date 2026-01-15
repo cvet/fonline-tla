@@ -1,13 +1,14 @@
-// FOS Server
+namespace ModocVampire
+{
+
+#if SERVER
+
 // Author: rifleman17
 // Квест "Ночь нежна" - выяснить, почему ослабли коровы на одной из ферм модока.
 
-///@ Property Critter PrivateServer int ModVampireFarmLocation
+///@ Property Critter Server int32 ModVampireFarmLocation Mutable Persistent
 
-///@ Property Location PrivateServer ident LocModVampireFarmQuesterId
-
-#define GAME_DAY            #(days)(days * 24 * 60 * 60)
-#define GAME_WEEK           #(weeks)(weeks * GAME_DAY(7))
+///@ Property Location Server ident LocModVampireFarmQuesterId Mutable Persistent
 
 #define FARM_X              (940)
 #define FARM_Y              (213)
@@ -33,9 +34,9 @@ void r_ShowVampireFarm(Critter player, Critter npc)
                                                       FARM_X,
                                                       FARM_Y,
                                                       Settings.GlobalMapZoneLength,
-                                                      uint(CritterProperty::ModVampireFarmLocation));
+                                                      int(CritterProperty::ModVampireFarmLocation));
     if (valid(loc)) {
-        Location::SetLocationDeleteTime(loc, GAME_DAY(2));
+        Location::SetLocationDeleteTime(loc, Time::GameDays(2));
         loc.LocModVampireFarmQuesterId = player.Id;
     }
 }
@@ -43,7 +44,6 @@ void r_ShowVampireFarm(Critter player, Critter npc)
 // Скрипт для карты ферма с вампиром
 void _VampireFarmInit(Map map, bool firstTime)
 {
-    map.LoopTime2 = 65000;
     map.OnFinish.Subscribe(_VampireFarmFinish);
 }
 
@@ -69,7 +69,7 @@ void _VampireFarmFinish(Map map)
 void _BrahminInit(Critter cr, bool firstTime)
 {
     cr.DialogId = Content::Dialog::mob_ill_brahmin;
-    CritterState::ToKnockout(cr, KNOCKOUT_ACTION_ANIM_DEFAULT(true), 1000, cr.HexX, cr.HexY);
+    CritterState::ToKnockout(cr, KNOCKOUT_ACTION_ANIM_DEFAULT(true), 1000, cr.Hex);
 }
 
 // Триггер, переключающий статус квеста. Должны быть расположены на карте в линию
@@ -78,7 +78,7 @@ void t_ChangeStatus(Critter player, StaticItem trigger, bool entered, uint8 dir)
     if (GameTime::GetHour() < 23 && GameTime::GetHour() > 4) // В дневное время ничего не происходит
     {
         if (entered) {
-            player.SayMsg(SAY_NETMSG, TextPackName::Text, STR_NOT_NIGHT);
+            Messaging::Info(player, TextPackName::Text, STR_NOT_NIGHT);
         }
         return;
     }
@@ -99,7 +99,7 @@ void t_ChangeStatus(Critter player, StaticItem trigger, bool entered, uint8 dir)
 
     // Игрок - нужный
     if (player.ModJoeVampire == QVAMP_FARM_KNOWN) {
-        uint8 p = player.Perception;
+        int p = player.Perception;
         if (p < 5) {
             player.ModJoeVampire = QVAMP_VAMP_MISSED;
         }
@@ -122,15 +122,14 @@ void t_ChangeStatus(Critter player, StaticItem trigger, bool entered, uint8 dir)
 // Пролетающая говорящая мышь
 void ShowVamp(Map map)
 {
-    uint16 hx = 0;
-    uint16 hy = 0;
-    if (Entrance::GetNearEntry(map, ENTRY_SPAWN_BAT, hx, hy)) {
-        Critter bat = map.AddNpc(Content::Critter::VBBat, hx, hy, Game.Random(0, 5));
+    mpos hex;
+    if (Entrance::GetNearEntry(map, ENTRY_SPAWN_BAT, hex)) {
+        Critter bat = map.AddCritter(Content::Critter::VBBat, hex, Game.Random(0, 5));
         bat.SetupScript(_BatInit);
         if (valid(bat)) {
-            bat.SayMsg(SAY_NORM, TextPackName::Text, STR_SEENPLAYER);
-            if (Entrance::GetNearEntry(map, ENTRY_MOVETO_BAT, hx, hy)) {
-                NpcPlanes::AddWalkPlane(bat, 0, hx, hy, Game.Random(0, 5), true, 1);
+            Messaging::Say(bat, TextPackName::Text, STR_SEENPLAYER);
+            if (Entrance::GetNearEntry(map, ENTRY_MOVETO_BAT, hex)) {
+                NpcPlanes::AddWalkPlane(bat, 0, hex, Game.Random(0, 5), true, 1);
             }
             bat.SetupScript(_BatInit);
         }
@@ -139,7 +138,7 @@ void ShowVamp(Map map)
 
 void _BatInit(Critter cr, bool firstTime)
 {
-    cr.OnIdle.Subscribe(_BatIdle); // Удаление вампира сразу, как дойдет до нужной точки
+    cr.StartTimeEvent(Time::Asap(), Time::Seconds(1), _BatIdle); // Удаление вампира сразу, как дойдет до нужной точки
 }
 
 void _BatIdle(Critter cr)
@@ -156,11 +155,10 @@ void _VampireCaveInit(Map map, bool firstTime)
             return;
         }
 
-        Location::SetLocationDeleteTime(loc, GAME_WEEK(2));
+        Location::SetLocationDeleteTime(loc, Time::GameDays(2 * 7));
         loc.AutoGarbage = false;
     }
 
-    map.LoopTime2 = 65000;
     map.OnCritterIn.Subscribe(_VampireCaveInCritter);
 }
 
@@ -190,7 +188,7 @@ void _VampireDead(Critter cr, Critter killer)
     if (valid(loc) && !loc.AutoGarbage) {
         loc.AutoGarbage = true;
     }
-    if (valid(killer) && killer.IsControlledByPlayer && killer.ModJoeVampire == QVAMP_VAMP_FOUNDED) {
+    if (valid(killer) && killer.ControlledByPlayer && killer.ModJoeVampire == QVAMP_VAMP_FOUNDED) {
         killer.ModJoeVampire = QVAMP_VAMP_KILLED;
     }
 }
@@ -198,13 +196,13 @@ void _VampireDead(Critter cr, Critter killer)
 // Вампир видит игрока на расстоянии 10 гексов
 void _VampireShowCritter1(Critter cr, Critter showCrit)
 {
-    cr.SayMsg(SAY_SHOUT, TextPackName::Text, STR_DONT_SHOOT);
+    Messaging::SayShout(cr, TextPackName::Text, STR_DONT_SHOOT);
 }
 
 // Попытка излечения вампира
-uint r_TryCureVampire(Critter cr, Critter npc, int val)
+int r_TryCureVampire(Critter cr, Critter npc, int val)
 {
-    uint forceDialog = FD_CURE_FAIL;
+    int forceDialog = FD_CURE_FAIL;
     int sk = cr.SkillDoctor;
     hstring activePid = cr.GetItem(ItemProperty::CritterSlot, CritterItemSlot::Main).ProtoId;
     if (activePid == Content::Item::doctors_bag) {
@@ -236,4 +234,8 @@ uint r_TryCureVampire(Critter cr, Critter npc, int val)
     }
     // Game.Log("fd=" + forceDialog);
     return forceDialog;
+}
+
+#endif
+
 }

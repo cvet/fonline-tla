@@ -1,4 +1,7 @@
-// FOS Server
+namespace Pet
+{
+
+#if SERVER
 
 // Author: rifleman17
 /*
@@ -12,11 +15,11 @@
    тогда пет будет провожать игрока до глобала, потом удаляться
 */
 
-///@ Property Critter PrivateServer ident PetOwnerId
-///@ Property Critter PrivateServer uint PetLifeTime
+///@ Property Critter Server ident PetOwnerId Mutable Persistent
+///@ Property Critter Server synctime PetLifeTime Mutable Persistent
 
-///@ Property Item PrivateServer ident PetId
-///@ Property Item PrivateServer hstring PetProto
+///@ Property Item Server ident PetId Mutable Persistent
+///@ Property Item Server hstring PetProto Mutable Persistent
 
 #define OwnerLostDist (8) // Расстояние в гексах до хозяина, после превышения которого пет бежит за ним
 
@@ -44,7 +47,7 @@ void _PetInit(Critter cr, bool firstTime)
     cr.OnNpcPlaneEnd.Subscribe(_PetPlanEnd);
     cr.OnSomeUseItemOnMe.Subscribe(_PetUseItemOnMe);
     cr.OnAttacked.Subscribe(_PetAttacked);
-    cr.OnIdle.Subscribe(_PetIdle);
+    cr.StartTimeEvent(Time::Asap(), Time::Seconds(1), _PetIdle);
 
     cr.ShowCritterDist1 = OwnerLostDist;
 }
@@ -58,7 +61,7 @@ void _PetIdle(Critter cr)
         return;
     }
     else {
-        if (cr.PetLifeTime + Time::RealSecond(10) < Game.GetFullSecond()) {
+        if (cr.PetLifeTime + Time::Seconds(10) < Game.SynchronizedTime) {
             DL("Deleting");
             Game.DestroyCritter(cr);
         }
@@ -72,7 +75,7 @@ bool _PetAttacked(Critter cr, Critter attacker)
     return true;
 }
 
-bool _PetUseItemOnMe(Critter cr, Critter whoUse, Item item, uint param)
+bool _PetUseItemOnMe(Critter cr, Critter whoUse, Item item, int param)
 {
     return UseItem(cr, whoUse, item);
 }
@@ -112,15 +115,14 @@ bool FollowMaster(Critter pet, ident idMaster)
         Map mapCr = cr.GetMap();
         Map mapPet = pet.GetMap();
         if (valid(mapCr) && valid(mapPet) && mapCr.Id == mapPet.Id) {
-            uint dist = Game.GetDistance(cr, pet);
+            int dist = Game.GetDistance(cr, pet);
             if (dist <= OwnerLostDist) {
                 return true;
             }
             if (dist > OwnerLostDist && dist < MAX_DISTANCE) {
-                uint16 x = cr.HexX;
-                uint16 y = cr.HexY;
-                if (Caravan::GetFreeHex(mapCr, 2, x, y)) {
-                    NpcPlanes::AddWalkPlane(pet, 0, x, y, Game.Random(0, 5), true, 0);
+                mpos hex = cr.Hex;
+                if (Entrance::GetFreeHex(mapCr, 2, hex)) {
+                    NpcPlanes::AddWalkPlane(pet, 0, hex, Game.Random(0, 5), true, 0);
                     return true;
                 }
             }
@@ -148,7 +150,7 @@ void _BoxInit(Item item, bool firstTime)
     item.OnCritterUse.Subscribe(_BoxUse);
 }
 
-bool _BoxUse(Item item, Critter cr, uint param)
+bool _BoxUse(Item item, Critter cr, int param)
 {
     if (item.PetId != ZERO_IDENT) {
         Critter pet = Game.GetCritter(item.PetId);
@@ -161,11 +163,10 @@ bool _BoxUse(Item item, Critter cr, uint param)
 
     Map map = cr.GetMap();
     if (valid(map) && item.PetProto != EMPTY_HSTRING) {
-        uint16 x = cr.HexX;
-        uint16 y = cr.HexY;
-        if (Caravan::GetFreeHex(map, 2, x, y)) {
-            int[] props = {CritterProperty::NpcRole, ROLE_PET /*, CritterProperty::Var2, cr.Id, CritterProperty::Var1, Game.GetFullSecond() */};
-            Critter pet = map.AddNpc(item.PetProto, x, y, Game.GetDirection(x, y, cr.HexX, cr.HexY), Tla::GetCritPropsDict(props));
+        mpos hex = cr.Hex;
+        if (Entrance::GetFreeHex(map, 2, hex)) {
+            int[] props = {CritterProperty::NpcRole, ROLE_PET /*, CritterProperty::Var2, cr.Id, CritterProperty::Var1, Game.SynchronizedTime */};
+            Critter pet = map.AddCritter(item.PetProto, hex, Game.GetDirection(hex, cr.Hex), Tla::GetCritPropsDict(props));
             pet.SetupScript(_PetInit);
             if (valid(pet)) {
                 item.PetId = pet.Id;
@@ -185,4 +186,8 @@ void AddPetBox(Critter cr, hstring boxPid, hstring petPid)
         box.IsCanUse = true;
         box.SetupScript(_BoxInit);
     }
+}
+
+#endif
+
 }

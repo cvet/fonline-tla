@@ -1,23 +1,26 @@
-// FOS Server Client
+namespace SayExtended
+{
 
-///@ RemoteCall Client ShowSayExtended(int msgIdHeader, int p1, int p2)
-///@ RemoteCall Client ShowSayExtendedScreenFromScenery(int msgIdHeader,int msgIdInputText, int sceneryPid, uint16 hexX, uint16 hexY);
+#if SERVER || CLIENT
+
+///@ RemoteCall Client ShowSayExtended(int32 msgIdHeader, int32 p1, int32 p2)
+///@ RemoteCall Client ShowSayExtendedScreenFromScenery(int32 msgIdHeader, int32 msgIdInputText, hstring sceneryPid, mpos hex);
 
 // Перевести диалог на указанный результат
-///@ RemoteCall Client ForceDialogResult(ident talkerId, hstring dialogId, bool isNpc, int result, bool refresh)
+///@ RemoteCall Client ForceDialogResult(ident talkerId, hstring dialogId, bool isNpc, int32 result, bool refresh)
 // Добавить к тексту диалога строку из FODLG_MSG
-///@ RemoteCall Client AddDialogStr(uint msg, string lexems, bool append)
+///@ RemoteCall Client AddDialogStr(int32 msg, string lexems, bool append)
 
 ///@ RemoteCall Server Rpc_ProcessSayExtended(string text)
 
 ///@ RemoteCall Server Rpc_ProcessSay(string text, bool fromDialog, ident talkerId, bool isNpc)
-///@ RemoteCall Server ProcessSayExtendedFromScenery(string text, int sceneryPid, uint16 hexX, uint16 hexY)
+///@ RemoteCall Server ProcessSayExtendedFromScenery(string text, hstring sceneryPid, mpos hex)
 ///@ Event Common Game OnPlayerSaidText(Critter critter, string text, bool fromDialog, ident talkerId, bool isNpc)
-///@ Event Server Critter OnPlayerSaidTextFromScenery(int sceneryPid, uint16 hexX, uint16 hexY, string text)
+///@ Event Server Critter OnPlayerSaidTextFromScenery(hstring sceneryPid, mpos hex, string text)
 
 // Игрок может отправлять текст на сервер. Переменную нужно уставлять вручную в dlg_ - функциях
 // введена, чтобы не отправляли любые тексты из любых диалогов
-///@ Property Critter Protected bool CanSendSay
+///@ Property Critter Common bool CanSendSay Mutable OwnerSync Persistent
 #define MAX_SAY_TEXT_LENGTH (100)
 
 // Answer
@@ -25,7 +28,7 @@
 #define ANSWER_END    (0xF1)
 #define ANSWER_BARTER (0xF2)
 
-#ifdef __SERVER
+#if SERVER
 
 void ShowScreenEx(Critter cr, int msgIdHeader)
 {
@@ -60,7 +63,7 @@ void Rpc_ProcessSay(Player player, string text, bool fromDialog, ident talkerId,
     Game.OnPlayerSaidText.Fire(cr, text, fromDialog, talkerId, isNpc);
 }
 
-void ProcessSayExtendedFromScenery(Player player, string text, int sceneryPid, uint16 hexX, uint16 hexY)
+void ProcessSayExtendedFromScenery(Player player, string text, hstring sceneryPid, mpos hex)
 {
     Critter cr = player.GetControlledCritter();
 
@@ -80,18 +83,17 @@ void ProcessSayExtendedFromScenery(Player player, string text, int sceneryPid, u
     Map @map = cr.GetMap();
 
     if (valid(map)) {
-        hstring sceneryProto = hstring_fromHash(sceneryPid);
-        StaticItem scenery = map.GetStaticItem(hexX, hexY, sceneryProto);
+        StaticItem scenery = map.GetStaticItem(hex, sceneryPid);
 
         if (valid(scenery)) {
-            cr.OnPlayerSaidTextFromScenery.Fire(sceneryPid, hexX, hexY, text);
+            cr.OnPlayerSaidTextFromScenery.Fire(sceneryPid, hex, text);
         }
     }
 }
 
 #endif
 
-#ifdef __CLIENT
+#if CLIENT
 
 void ForceDialogResult(ident talkerId, hstring dialogId, bool isNpc, int result, bool refresh)
 {
@@ -103,11 +105,11 @@ void ForceDialogResult(ident talkerId, hstring dialogId, bool isNpc, int result,
     //Game.Log(">>DialogAnswer " + isNpc + " " + (isNpc ? talkerId.value : dialogId.uhash) + " " + result);
 }
 
-void AddDialogStr(uint msg, string lexems, bool append)
+void AddDialogStr(int msg, string lexems, bool append)
 {
     //Game.Log("MSG NUM recieved " + msg);
-    auto screen = Gui::GetActiveScreen();
-    if (screen.Index == CLIENT_SCREEN_DIALOG) {
+    auto screen = Gui::GetActiveScreen(GuiScreen::Dialog);
+    if (screen != null) {
         auto dialog = cast<GuiScreens::Dialog::Dialog>(screen);
         if (dialog != null) {
             string text = Game.GetText(TextPackName::Dialogs, msg);
@@ -117,9 +119,10 @@ void AddDialogStr(uint msg, string lexems, bool append)
             text = append ? dialog.Text + "##" + text : text + "##" + dialog.Text;
             text = Game.FormatTags(text, lexems);
 
-            int tw = 0, th = 0, lines = 0;
-            Game.GetTextInfo(text, textbox.Width, 1000, textbox.TextFont, textbox.TextFlags, tw, th, lines);
-            textbox.SetSize(textbox.Parent.Width, Math::Max(th, textbox.Parent.Height));
+            int lines = 0;
+            isize box;
+            Game.GetTextInfo(text, isize(textbox.Size.width, 1000), textbox.TextFont, textbox.TextFlags, box, lines);
+            textbox.SetSize(textbox.Parent.Size.width, Math::Max(box.height, textbox.Parent.Size.height));
             textbox.SetText(text);
         }
     }
@@ -127,17 +130,21 @@ void AddDialogStr(uint msg, string lexems, bool append)
 
 void ShowSayExtended(int msgIdHeader, int p1, int p2)
 {
-    Game.ShowScreen(CLIENT_SCREEN_SAY_EXTENDED, dict<string, any> = {{"MsgHeaderId", msgIdHeader}});
+    Gui::ShowScreen(GuiScreen::SayExtended, dict<string, any> = {{"MsgHeaderId", msgIdHeader}});
 }
 
-void ShowSayExtendedScreenFromScenery(int msgIdHeader, int msgIdInputText, int sceneryPid, uint16 hexX, uint16 hexY)
+void ShowSayExtendedScreenFromScenery(int msgIdHeader, int msgIdInputText, hstring sceneryPid, mpos hex)
 {
     Critter chosen = Game.GetChosen();
     if (valid(CurMap) && valid(chosen)) {
-        Game.ShowScreen(
-            CLIENT_SCREEN_SAY_EXTENDED,
-            dict<string, any> = {{"MsgHeaderId", msgIdHeader}, {"InputMessageID", msgIdInputText}, {"ProtoID", sceneryPid}, {"HexX", hexX}, {"HexY", hexY}});
+        Gui::ShowScreen(
+            GuiScreen::SayExtended,
+            dict<string, any> = {{"MsgHeaderId", msgIdHeader}, {"InputMessageID", msgIdInputText}, {"ProtoID", sceneryPid}, {"HexX", hex.x}, {"HexY", hex.y}});
     }
 }
 
 #endif
+
+#endif
+
+}

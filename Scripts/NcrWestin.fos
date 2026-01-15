@@ -1,13 +1,17 @@
-// FOS Server Sort 2
+namespace NcrWestin // Sort 2
+{
+
+#if SERVER
+
 // Скрипты советника Вейстина
 // rifleman17
 
-///@ Property Critter PrivateServer hstring NcrWestinMapPidTo
-///@ Property Critter PrivateServer uint NcrWestinHexNumTo
-///@ Property Critter PrivateServer ident NcrWestinEveryEveningInvokeId
-///@ Property Critter PrivateServer ident NcrWestinEveryMorningInvokeId
+///@ Property Critter Server hstring NcrWestinMapPidTo Mutable Persistent
+///@ Property Critter Server int32 NcrWestinHexNumTo Mutable Persistent
+///@ Property Critter Server int32 NcrWestinEveryEveningInvokeId Mutable Persistent
+///@ Property Critter Server int32 NcrWestinEveryMorningInvokeId Mutable Persistent
 
-///@ Property Game PrivateServer uint8 NcrWestinPositionGlobal
+///@ Property Game Server uint8 NcrWestinPositionGlobal Mutable Persistent
 
 #define PLANE_MOVE_TO_EXIT_GRID    (17) // план: Вейстин идет к выходу из локации для последующего телепорта.
 #define MAP_PID_NCR_COUNCIL        (Content::Map::ncr_council) // прототип карты НКР - здание правительства
@@ -38,12 +42,14 @@ void _WestinInit(Critter westin, bool firstTime)
     // ~settime 99 2246 11 3 20 50
     if (firstTime) {
         // каждые игровые сутки Вейстин уходит с работы до своего Ранчо в 21:00
-        westin.NcrWestinEveryEveningInvokeId =
-            Game.SavedDeferredCall(GAME_SECOND_TO_TICK(Time::GetNearFullSecond(0, 0, 0, 21, 0, 0) - Game.GetFullSecond()), EveryEvening, westin.Id);
+        westin.NcrWestinEveryEveningInvokeId = Game.StartTimeEvent((Tla::GetNearSynchronizedTime(0, 0, 0, 21, 0, 0) - Game.SynchronizedTime),
+                                                                   EveryEvening,
+                                                                   westin.Id); //SavedDeferredCall
 
         // каждые игровые сутки Вейстин пытается дойти до здания правительства в 07:00
-        westin.NcrWestinEveryMorningInvokeId =
-            Game.SavedDeferredCall(GAME_SECOND_TO_TICK(Time::GetNearFullSecond(0, 0, 0, 7, 0, 0) - Game.GetFullSecond()), EveryMorning, westin.Id);
+        westin.NcrWestinEveryMorningInvokeId = Game.StartTimeEvent((Tla::GetNearSynchronizedTime(0, 0, 0, 7, 0, 0) - Game.SynchronizedTime),
+                                                                   EveryMorning,
+                                                                   westin.Id); //SavedDeferredCall
     }
     westin.NpcRole = NPC_ROLE_WESTIN;
     westin.OnFinish.Subscribe(_WestinFinish);
@@ -52,8 +58,8 @@ void _WestinInit(Critter westin, bool firstTime)
 // при удалении нпц удаляются обработчики временных событий, чтобы не было ошибок о null ptr
 void _WestinFinish(Critter westin)
 {
-    Game.CancelDeferredCall(westin.NcrWestinEveryEveningInvokeId);
-    Game.CancelDeferredCall(westin.NcrWestinEveryMorningInvokeId);
+    Game.StopTimeEvent(westin.NcrWestinEveryEveningInvokeId);
+    Game.StopTimeEvent(westin.NcrWestinEveryMorningInvokeId);
     // если Вейстин был на карте Ранчо, его нужно телепортировать в консульство
 }
 
@@ -63,35 +69,34 @@ void EveryEvening(any value)
     // Game.Log("вечерняя прогулка вейстина");
 
     Critter westin = Game.GetCritter(value);
-    uint time = GAME_SECOND_TO_TICK(Time::GetNearFullSecond(0, 0, 0, 21, 0, 0) - Game.GetFullSecond());
+    auto time = (Tla::GetNearSynchronizedTime(0, 0, 0, 21, 0, 0) - Game.SynchronizedTime);
 
     if (!valid(westin)) {
-        westin.NcrWestinEveryEveningInvokeId = Game.SavedDeferredCall(time, EveryEvening, value);
+        westin.NcrWestinEveryEveningInvokeId = Game.StartTimeEvent(time, EveryEvening, value); //SavedDeferredCall
         return;
     }
     if (!westin.IsAlive()) {
-        westin.NcrWestinEveryEveningInvokeId = Game.SavedDeferredCall(time, EveryEvening, value);
+        westin.NcrWestinEveryEveningInvokeId = Game.StartTimeEvent(time, EveryEvening, value); //SavedDeferredCall
         return;
     }
 
-    westin.SayMsg(SAY_NORM_ON_HEAD, TextPackName::Text, STR_NUM_GO_HOME);
+    Messaging::SayOnHead(westin, TextPackName::Text, STR_NUM_GO_HOME);
     // куда телепортироваться
     westin.NcrWestinMapPidTo = MAP_PID_RANCH;
     westin.NcrWestinHexNumTo = ENT_HEX_ID_RANCH_HOME;
     // координаты гекса, до которого должен дойти Вейстин перед телепортом
 
     if (westin.GetMap().ProtoId == MAP_PID_RANCH) {
-        westin.NcrWestinEveryEveningInvokeId = Game.SavedDeferredCall(time, EveryEvening, value);
+        westin.NcrWestinEveryEveningInvokeId = Game.StartTimeEvent(time, EveryEvening, value); //SavedDeferredCall
         return;
     }
 
-    uint16 hx = westin.HexX;
-    uint16 hy = westin.HexY;
-    Entrance::GetNearEntry(westin.GetMap(), ENT_HEX_ID_COUNSIL_TRANSIT, hx, hy);
-    NpcPlanes::AddWalkPlane(westin, WESTIN_PLANE_MOVE_PRIORITY, PLANE_MOVE_TO_EXIT_GRID, 0, hx, hy, Game.Random(0, 5), false, Game.Random(0, 1));
-    NpcPlanes::AddMiscPlane(westin, WESTIN_PLANE_TRANSIT_PRIORITY, 0, NcrWestin::plane_Transit);
+    mpos hex = westin.Hex;
+    Entrance::GetNearEntry(westin.GetMap(), ENT_HEX_ID_COUNSIL_TRANSIT, hex);
+    NpcPlanes::AddWalkPlane(westin, WESTIN_PLANE_MOVE_PRIORITY, PLANE_MOVE_TO_EXIT_GRID, 0, hex, Game.Random(0, 5), false, Game.Random(0, 1));
+    NpcPlanes::AddMiscPlane(westin, WESTIN_PLANE_TRANSIT_PRIORITY, ZERO_SYNCTIME, NcrWestin::plane_Transit);
 
-    westin.NcrWestinEveryEveningInvokeId = Game.SavedDeferredCall(time, EveryEvening, value);
+    westin.NcrWestinEveryEveningInvokeId = Game.StartTimeEvent(time, EveryEvening, value); //SavedDeferredCall
 }
 
 // утреннее событие
@@ -100,34 +105,33 @@ void EveryMorning(any value)
     // Game.Log("утренняя прогулка вейстина");
 
     Critter westin = Game.GetCritter(value);
-    uint time = GAME_SECOND_TO_TICK(Time::GetNearFullSecond(0, 0, 0, 7, 0, 0) - Game.GetFullSecond());
+    auto time = (Tla::GetNearSynchronizedTime(0, 0, 0, 7, 0, 0) - Game.SynchronizedTime);
     if (!valid(westin)) {
-        westin.NcrWestinEveryMorningInvokeId = Game.SavedDeferredCall(time, EveryMorning, westin.Id);
+        westin.NcrWestinEveryMorningInvokeId = Game.StartTimeEvent(time, EveryMorning, westin.Id); //SavedDeferredCall
         return;
     }
     if (!westin.IsAlive()) {
-        westin.NcrWestinEveryMorningInvokeId = Game.SavedDeferredCall(time, EveryMorning, westin.Id);
+        westin.NcrWestinEveryMorningInvokeId = Game.StartTimeEvent(time, EveryMorning, westin.Id); //SavedDeferredCall
         return;
     }
 
-    westin.SayMsg(SAY_NORM_ON_HEAD, TextPackName::Text, STR_NUM_GO_WORK);
+    Messaging::SayOnHead(westin, TextPackName::Text, STR_NUM_GO_WORK);
 
     westin.NcrWestinMapPidTo = MAP_PID_NCR_COUNCIL;
     westin.NcrWestinHexNumTo = ENT_HEX_ID_COUNCIL_HOME;
 
     if (westin.GetMap().ProtoId == MAP_PID_NCR_COUNCIL) {
-        westin.NcrWestinEveryMorningInvokeId = Game.SavedDeferredCall(time, EveryMorning, westin.Id);
+        westin.NcrWestinEveryMorningInvokeId = Game.StartTimeEvent(time, EveryMorning, westin.Id); //SavedDeferredCall
         return;
     }
 
     // координаты гекса, до которого должен дойти Вейстин перед телепортом
-    uint16 hx = westin.HexX;
-    uint16 hy = westin.HexY;
-    Entrance::GetNearEntry(westin.GetMap(), ENT_HEX_ID_RANCH_TRANSIT, hx, hy);
-    NpcPlanes::AddWalkPlane(westin, WESTIN_PLANE_MOVE_PRIORITY, PLANE_MOVE_TO_EXIT_GRID, 0, hx, hy, Game.Random(0, 5), false, Game.Random(0, 1));
-    NpcPlanes::AddMiscPlane(westin, WESTIN_PLANE_TRANSIT_PRIORITY, 0, NcrWestin::plane_Transit);
+    mpos hex = westin.Hex;
+    Entrance::GetNearEntry(westin.GetMap(), ENT_HEX_ID_RANCH_TRANSIT, hex);
+    NpcPlanes::AddWalkPlane(westin, WESTIN_PLANE_MOVE_PRIORITY, PLANE_MOVE_TO_EXIT_GRID, 0, hex, Game.Random(0, 5), false, Game.Random(0, 1));
+    NpcPlanes::AddMiscPlane(westin, WESTIN_PLANE_TRANSIT_PRIORITY, ZERO_SYNCTIME, NcrWestin::plane_Transit);
 
-    westin.NcrWestinEveryMorningInvokeId = Game.SavedDeferredCall(time, EveryMorning, westin.Id);
+    westin.NcrWestinEveryMorningInvokeId = Game.StartTimeEvent(time, EveryMorning, westin.Id); //SavedDeferredCall
 }
 
 // телепортация на карту с прототипом, сохраненным в NcrWestinMapPidTo
@@ -154,7 +158,7 @@ void plane_Transit(Critter westin)
     auto westins = mapTo.GetCritters(CritterProperty::NpcRole, NPC_ROLE_WESTIN, CritterFindType::Npc);
     if (!westins.isEmpty()) {
         Game.Log("Multiple westins founded. Kill'em all");
-        for (uint i = 0; i < westins.length(); i++) {
+        for (int i = 0; i < westins.length(); i++) {
             auto westin2 = westins[i];
             if (westin2.DialogId == westin.DialogId) {
                 Game.Log("Fake Westin successfully terminated!");
@@ -164,11 +168,14 @@ void plane_Transit(Critter westin)
         }
     }
 
-    if (Obsolete::CritterTransitToMapEntry(westin, mapTo.Id, HASHI(westin.NcrWestinHexNumTo))) {
+    if (Entrance::CritterTransferToMapEntry(westin, mapTo.Id, HASHI(westin.NcrWestinHexNumTo))) {
         westin.HomeMapId = mapTo.Id;
-        westin.HomeHexX = westin.HexX;
-        westin.HomeHexY = westin.HexY;
+        westin.HomeHex = westin.Hex;
         westin.HomeDir = westin.Dir;
         Game.NcrWestinPositionGlobal = westin.NcrWestinMapPidTo == MAP_PID_NCR_COUNCIL ? WESTIN_POS_VAR_COUNCIL : WESTIN_POS_VAR_RANCH;
     }
+}
+
+#endif
+
 }

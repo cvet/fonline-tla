@@ -1,12 +1,16 @@
-// FOS Server Sort 2
+namespace Explode // Sort 2
+{
+
+#if SERVER
+
 // Author: cvet, rifleman17
 
-///@ Property Item PrivateServer ident ExplodeInvokeId
-///@ Property Item PrivateServer ident ExplodeSwitcherExplodeId
-///@ Property Item PrivateServer ident ExplodeOwnerId
-///@ Property Item PrivateServer int  ExplodeBonusDamage
-///@ Property Item PrivateServer int  ExplodeBonusRadius
-///@ Property Item PrivateServer uint ExplodeTimeRespawnMine
+///@ Property Item Server int32 ExplodeInvokeId Mutable Persistent
+///@ Property Item Server ident ExplodeSwitcherExplodeId Mutable Persistent
+///@ Property Item Server ident ExplodeOwnerId Mutable Persistent
+///@ Property Item Server int32 ExplodeBonusDamage Mutable Persistent
+///@ Property Item Server int32 ExplodeBonusRadius Mutable Persistent
+///@ Property Item Server int32 ExplodeTimeRespawnMine Mutable Persistent
 
 #define TRAPS_HIDE                   #(traps)((traps) / 5 + 10)
 #define EXPLODE_CLEARANCE_EXPERIENCE (50)
@@ -16,7 +20,7 @@
 #define TIMER_MAX_VALUE (599)
 
 // Global on use, export
-bool OnUseExplode(Critter cr, Item explode, Critter targetCr, Item targetItem, StaticItem targetScen, uint timer)
+bool OnUseExplode(Critter cr, Item explode, Critter targetCr, Item targetItem, StaticItem targetScen, int timer)
 {
     if (valid(targetCr) || valid(targetItem) || valid(targetScen)) {
         return false;
@@ -53,15 +57,15 @@ bool OnUseExplode(Critter cr, Item explode, Critter targetCr, Item targetItem, S
             timer = timer * Game.Random(80, 120) / 100;
         }
 
-        activateExpl.ExplodeInvokeId = Game.SavedDeferredCall(GAME_SECOND_TO_TICK(timer), DeferredExplode, activateExpl.Id);
+        activateExpl.ExplodeInvokeId = Game.StartTimeEvent(Tla::GameSeconds(timer), DeferredExplode, activateExpl.Id); //SavedDeferredCall
         activateExpl.IsTrap = true;
         activateExpl.ExplodeOwnerId = cr.Id;
         activateExpl.TrapValue = TRAPS_HIDE(cr.SkillTraps);
         activateExpl.ExplodeBonusDamage = trapsSkill;
         activateExpl.ExplodeBonusRadius = isExpert ? 1 : 0;
 
-        if (cr.TimeoutRemoveFromGame < Time::RealMinute(5) + timer) {
-            cr.TimeoutRemoveFromGame = Game.GetFullSecond() + Time::RealMinute(5) + timer;
+        if (cr.TimeoutRemoveFromGame < Game.SynchronizedTime + Time::Minutes(5) + Time::Seconds(timer)) {
+            cr.TimeoutRemoveFromGame = Game.SynchronizedTime + Time::Minutes(5) + Time::Seconds(timer);
         }
     }
     // Activate plastic explosion
@@ -91,10 +95,10 @@ bool OnUseExplode(Critter cr, Item explode, Critter targetCr, Item targetItem, S
     else if (pid == Content::Item::toggle_switch) {
         Item expl = Game.GetItem(explode.ExplodeSwitcherExplodeId);
         if (valid(expl)) {
-            uint16 hexX = 0, hexY = 0;
-            Map map = expl.GetMapPosition(hexX, hexY);
+            mpos hex;
+            Map map = expl.GetMapPosition(hex);
             Critter crExpl = (expl.Ownership == ItemOwnership::CritterInventory ? Game.GetCritter(expl.CritterId) : null);
-            Explode(map, hexX, hexY, crExpl, Content::Item::active_plastic_explosive, expl.ExplodeOwnerId, expl.ExplodeBonusDamage, expl.ExplodeBonusRadius);
+            Explode(map, hex, crExpl, Content::Item::active_plastic_explosive, expl.ExplodeOwnerId, expl.ExplodeBonusDamage, expl.ExplodeBonusRadius);
             Game.DestroyItem(expl);
         }
     }
@@ -115,7 +119,7 @@ bool OnUseExplode(Critter cr, Item explode, Critter targetCr, Item targetItem, S
     // Deactivate dynamite explosion, plastic explosion or mine
     else if (pid == Content::Item::active_dynamite || pid == Content::Item::active_plastic_explosive || pid == Content::Item::active_mine) {
         if (pid == Content::Item::active_dynamite) {
-            Game.CancelDeferredCall(explode.ExplodeInvokeId);
+            Game.StopTimeEvent(DeferredExplode);
         }
 
         int chance = cr.SkillTraps - (explode.TrapValue - 10) * (cr.Id == explode.ExplodeOwnerId ? 5 : 10);
@@ -137,7 +141,7 @@ bool OnUseExplode(Critter cr, Item explode, Critter targetCr, Item targetItem, S
         // Fail
         else {
             Map map = cr.GetMap();
-            Explode(map, cr.HexX, cr.HexY, cr, pid, explode.ExplodeOwnerId, explode.ExplodeBonusDamage, explode.ExplodeBonusRadius);
+            Explode(map, cr.Hex, cr, pid, explode.ExplodeOwnerId, explode.ExplodeBonusDamage, explode.ExplodeBonusRadius);
         }
     }
 
@@ -158,7 +162,7 @@ void _ExplodeInit(Item item, bool firstTime)
 void _MineWalk(Item mine, Critter cr, bool entered, uint8 dir)
 {
     if (entered && cr.LocomotionType != Tla::LocomotionFly && (cr.PerkLightStep == 0 || Game.Random(0, 1) == 0)) {
-        Game.DeferredCall(0, DeferredExplode, mine.Id);
+        Game.StartTimeEvent(ZERO_TIMESPAN, DeferredExplode, mine.Id);
     }
 }
 
@@ -174,30 +178,29 @@ void DeferredExplode(any value)
     ident ownerId = item.ExplodeOwnerId;
     int bonusDamage = item.ExplodeBonusDamage;
     int bonusRadius = item.ExplodeBonusRadius;
-    uint16 hexX = 0;
-    uint16 hexY = 0;
-    Map map = item.GetMapPosition(hexX, hexY);
+    mpos hex;
+    Map map = item.GetMapPosition(hex);
     Game.DestroyItem(item);
 
     if (valid(map)) {
-        Explode(map, hexX, hexY, null, explodePid, ownerId, bonusDamage, bonusRadius);
+        Explode(map, hex, null, explodePid, ownerId, bonusDamage, bonusRadius);
     }
     else if (item.Ownership == ItemOwnership::CritterInventory) // Global map
     {
         Critter cr = Game.GetCritter(item.CritterId);
         if (valid(cr)) {
-            Explode(null, 0, 0, cr, explodePid, ownerId, bonusDamage, bonusRadius);
+            Explode(null, mpos(), cr, explodePid, ownerId, bonusDamage, bonusRadius);
         }
     }
 }
 
-void Explode(Map map, uint16 hexX, uint16 hexY, Critter cr, hstring explodePid, ident ownerId, int bonusDamage, int bonusRadius)
+void Explode(Map map, mpos hex, Critter cr, hstring explodePid, ident ownerId, int bonusDamage, int bonusRadius)
 {
     hstring effectPid;
-    uint effectRadius;
-    uint damage;
+    int effectRadius;
+    int damage;
     DamageTypes damageType;
-    uint damageRadius;
+    int damageRadius;
 
     if (explodePid == Content::Item::active_dynamite) {
         effectPid = Content::Item::explode_rocket;
@@ -235,24 +238,24 @@ void Explode(Map map, uint16 hexX, uint16 hexY, Critter cr, hstring explodePid, 
     }
 
     if (valid(map)) {
-        ExplodeEx(map, hexX, hexY, effectPid, effectRadius, damage, damageType, damageRadius, ownerId);
+        ExplodeEx(map, hex, effectPid, effectRadius, damage, damageType, damageRadius, ownerId);
     }
     else if (valid(cr)) {
         Combat::InjureCritter(cr, damage, damageType, cr.Dir, ownerId);
     }
 }
 
-void ExplodeEx(Map map, uint16 hexX, uint16 hexY, hstring effectPid, uint effectRadius, uint damage, DamageTypes damageType, uint damageRadius, ident ownerId)
+void ExplodeEx(Map map, mpos hex, hstring effectPid, int effectRadius, int damage, DamageTypes damageType, int damageRadius, ident ownerId)
 {
-    map.RunEffect(effectPid, hexX, hexY, effectRadius);
-    map.PlaySound(Game.Random(0, 1) == 0 ? "WHN1XXX1.ACM" : "WHN1XXX2.ACM");
+    Effects::RunEffect(map, effectPid, hex, effectRadius);
+    Effects::PlaySound(map, Game.Random(0, 1) == 0 ? "WHN1XXX1.ACM" : "WHN1XXX2.ACM");
     Effects::QuakeScreen(map);
 
-    Critter[] critters = map.GetCritters(hexX, hexY, damageRadius, CritterFindType::Alive);
-    for (uint i = 0; i < critters.length(); i++) {
+    Critter[] critters = map.GetCritters(hex, damageRadius, CritterFindType::NonDead);
+    for (int i = 0; i < critters.length(); i++) {
         Critter cr = critters[i];
-        uint dist = Game.GetDistance(hexX, hexY, cr.HexX, cr.HexY);
-        int dir = (dist == 0 ? (cr.Dir + 3) % 6 : Game.GetDirection(hexX, hexY, cr.HexX, cr.HexY));
+        int dist = Game.GetDistance(hex, cr.Hex);
+        uint8 dir = (dist == 0 ? (cr.Dir + 3) % 6 : Game.GetDirection(hex, cr.Hex));
         Combat::InjureCritter(cr, damage, damageType, dir, ownerId);
         if (ownerId != ZERO_IDENT) {
             EnemyStack::AddEnemyToStack(cr, ownerId);
@@ -288,20 +291,20 @@ void _TimerMineWalk(Item mine, Critter cr, bool entered, uint8 dir)
 {
     // Cкопировано из _MineWalk
     if (entered && cr.LocomotionType != Tla::LocomotionFly && (cr.PerkLightStep == 0 || Game.Random(0, 1) == 0)) {
-        Game.DeferredCall(0, DeferredExplode, mine.Id);
+        Game.StartTimeEvent(ZERO_TIMESPAN, DeferredExplode, mine.Id);
 
         // Respawn
         if (mine.ExplodeTimeRespawnMine > 0) {
-            any[] values = {mine.MapId,                  // 0
-                            mine.HexX,                   // 1
-                            mine.HexY,                   // 2
-                            mine.ProtoId.hash,           // 3
-                            mine.ExplodeTimeRespawnMine, // 4
-                            mine.ExplodeOwnerId,         // 5
-                            mine.TrapValue,              // 6
-                            mine.ExplodeBonusDamage,     // 7
-                            mine.ExplodeBonusRadius};    // 8
-            Game.SavedDeferredCall(GAME_MINUTE_TO_TICK(mine.ExplodeTimeRespawnMine), RespawnTimerMine, values);
+            any[] values = {mine.MapId,                                                                    // 0
+                            mine.Hex.x,                                                                    // 1
+                            mine.Hex.y,                                                                    // 2
+                            mine.ProtoId.hash,                                                             // 3
+                            mine.ExplodeTimeRespawnMine,                                                   // 4
+                            mine.ExplodeOwnerId,                                                           // 5
+                            mine.TrapValue,                                                                // 6
+                            mine.ExplodeBonusDamage,                                                       // 7
+                            mine.ExplodeBonusRadius};                                                      // 8
+            Game.StartTimeEvent(Time::GameMinutes(mine.ExplodeTimeRespawnMine), RespawnTimerMine, values); //SavedDeferredCall
         }
     }
 }
@@ -310,7 +313,7 @@ void RespawnTimerMine(any[] values)
 {
     Map map = Game.GetMap(ident(values[0]));
     if (valid(map)) {
-        Item mine = map.AddItem(values[1], values[2], hstring_fromHash(values[3]), 1);
+        Item mine = map.AddItem(mpos(values[1], values[2]), hstring_fromHash(values[3]), 1);
         if (valid(mine)) {
             mine.ExplodeTimeRespawnMine = values[4];
             mine.ExplodeOwnerId = values[5];
@@ -345,22 +348,26 @@ bool _OnSkillTimerMine(Item mine, Critter cr, CritterProperty skill)
     // Fail
     else {
         Map map = cr.GetMap();
-        Explode(map, cr.HexX, cr.HexY, cr, pid, mine.ExplodeOwnerId, mine.ExplodeBonusDamage, mine.ExplodeBonusRadius);
+        Explode(map, cr.Hex, cr, pid, mine.ExplodeOwnerId, mine.ExplodeBonusDamage, mine.ExplodeBonusRadius);
     }
 
     if (mine.ExplodeTimeRespawnMine > 0) {
-        any[] values = {mine.MapId,                  // 0
-                        mine.HexX,                   // 1
-                        mine.HexY,                   // 2
-                        mine.ProtoId.hash,           // 3
-                        mine.ExplodeTimeRespawnMine, // 4
-                        mine.ExplodeOwnerId,         // 5
-                        mine.TrapValue,              // 6
-                        mine.ExplodeBonusDamage,     // 7
-                        mine.ExplodeBonusRadius};    // 8
-        Game.SavedDeferredCall(GAME_MINUTE_TO_TICK(mine.ExplodeTimeRespawnMine + Game.Random(120, 240)), RespawnTimerMine, values);
+        any[] values = {mine.MapId,                                                                                            // 0
+                        mine.Hex.x,                                                                                            // 1
+                        mine.Hex.y,                                                                                            // 2
+                        mine.ProtoId.hash,                                                                                     // 3
+                        mine.ExplodeTimeRespawnMine,                                                                           // 4
+                        mine.ExplodeOwnerId,                                                                                   // 5
+                        mine.TrapValue,                                                                                        // 6
+                        mine.ExplodeBonusDamage,                                                                               // 7
+                        mine.ExplodeBonusRadius};                                                                              // 8
+        Game.StartTimeEvent(Time::GameMinutes(mine.ExplodeTimeRespawnMine + Game.Random(120, 240)), RespawnTimerMine, values); //SavedDeferredCall
     }
 
     Game.DestroyItem(mine, 1);
     return false;
+}
+
+#endif
+
 }

@@ -1,4 +1,8 @@
-// FOS Server
+namespace MirelurkCombat
+{
+
+#if SERVER
+
 // Author: rifleman17
 // Поведение болотников во время нашествия на сан-франциско
 /* Стадия №1
@@ -10,10 +14,10 @@
 #define DL
 #define ENTRY_EXIT_SF (160)
 
-///@ Property Critter PrivateServer uint8 MirelurkCombatCurStage
-///@ Property Critter PrivateServer uint  MirelurkCombatTimeNextStage
-///@ Property Critter PrivateServer uint  MirelurkCombatLastBrokenBag
-///@ Property Critter PrivateServer ident MirelurkCombatDestroyingItem
+///@ Property Critter Server uint8 MirelurkCombatCurStage Mutable Persistent
+///@ Property Critter Server synctime MirelurkCombatTimeNextStage Mutable Persistent
+///@ Property Critter Server synctime MirelurkCombatLastBrokenBag Mutable Persistent
+///@ Property Critter Server ident MirelurkCombatDestroyingItem Mutable Persistent
 
 #define SRCH_RADIUS_STAGE_1     (15) // Радиус поиска целей для первого этапа
 #define SRCH_RADIUS_STAGE_2     (25) // Радиус поиска целей для второго этапа
@@ -35,19 +39,19 @@
 #define STR_STAGE2_MSG_RECIEVED  (5101) // Строка, которую произносит болоник в состоянии 1, когда получает сообщение о переходе в состояние 2
 #define PLANE_ID_DESTROY         (121)  // Id плана - разрушения мешков
 #define PLANE_ID_MOVEOUT         (122)  // Id плана - выход из доков наружу
-#define TIME_TO_NEXT_STAGE       (30 * 60) // Базовое время перехода в следующее состояние (30 игровых минут)
-#define MAX_STAGE_NUM            (3)       // Последняя стадия модели поведения
+#define MINUTES_TO_NEXT_STAGE    (30)   // Базовое время перехода в следующее состояние (30 игровых минут)
+#define MAX_STAGE_NUM            (3)    // Последняя стадия модели поведения
 
 #define _SearchRadius            #(stage)(stage == 1 ? SRCH_RADIUS_STAGE_1 : (stage == 2 ? SRCH_RADIUS_STAGE_2 : SRCH_RADIUS_STAGE_3)) // Радиус поиска врагов
 #define _AttackPriority \
-    #(target)(target.IsControlledByPlayer ? ATTACK_PLAYER_PRIORITY : (target.TeamId == Teams::BoSTrooper ? ATTACK_BOS_DEF_PRIORITY : ATTACK_NPC_PRIORITY))
+    #(target)(target.ControlledByPlayer ? ATTACK_PLAYER_PRIORITY : (target.TeamId == Teams::BoSTrooper ? ATTACK_BOS_DEF_PRIORITY : ATTACK_NPC_PRIORITY))
 
 void _MirelurkInit(Critter cr, bool firstTime)
 {
     cr.MirelurkCombatCurStage = 1;
-    cr.MirelurkCombatTimeNextStage = Game.GetFullSecond() + TIME_TO_NEXT_STAGE;
+    cr.MirelurkCombatTimeNextStage = Game.SynchronizedTime + Time::GameMinutes(MINUTES_TO_NEXT_STAGE);
     cr.IsNoHome = true;
-    cr.OnIdle.Subscribe(_MirelurkIdle);
+    cr.StartTimeEvent(Time::Asap(), Time::Seconds(1), _MirelurkIdle);
     cr.OnNpcPlaneEnd.Subscribe(_MirelurkPlaneEnd);
     // cr.OnDead.Subscribe(_Dead);
 }
@@ -117,11 +121,11 @@ bool _MirelurkPlaneEnd(Critter cr, int planeId, int reason, Critter someCr, Item
 void ChangeStageIfNeaded(Critter cr)
 {
     if (cr.MirelurkCombatCurStage < MAX_STAGE_NUM) {
-        if (Game.GetFullSecond() >= cr.MirelurkCombatTimeNextStage) {
+        if (Game.SynchronizedTime >= cr.MirelurkCombatTimeNextStage) {
             // Game.Log("Stage changed"+cr.MirelurkCombatCurStage);
             cr.MirelurkCombatCurStage += 1;
-            cr.SayMsg(SAY_EMOTE, TextPackName::Text, STR_ALL2STAGE_2);
-            cr.MirelurkCombatTimeNextStage = Game.GetFullSecond() + TIME_TO_NEXT_STAGE * cr.MirelurkCombatCurStage;
+            Messaging::SayEmote(cr, TextPackName::Text, STR_ALL2STAGE_2);
+            cr.MirelurkCombatTimeNextStage = Game.SynchronizedTime + Time::GameMinutes(MINUTES_TO_NEXT_STAGE * cr.MirelurkCombatCurStage);
         }
     }
 }
@@ -130,15 +134,14 @@ void ChangeStageIfNeaded(Critter cr)
 void TryFoundAccessibleTarget(Critter cr, Map map)
 {
     DL("searching target");
-    uint radius = _SearchRadius(cr.MirelurkCombatCurStage);
-    uint16 crX = cr.HexX;
-    uint16 crY = cr.HexY;
+    int radius = _SearchRadius(cr.MirelurkCombatCurStage);
+    mpos crhex = cr.Hex;
     // Первоочередная цель - игроки
     Critter[] crits = {};
-    crits.insertLast(map.GetCritters(crX, crY, radius, CritterFindType::AlivePlayers));
-    crits.insertLast(map.GetCritters(crX, crY, radius, CritterFindType::AliveNpc));
+    crits.insertLast(map.GetCritters(crhex, radius, CritterFindType::NonDeadPlayers));
+    crits.insertLast(map.GetCritters(crhex, radius, CritterFindType::NonDeadNpc));
     Critter target;
-    for (uint i = 0, l = crits.length(); i < l; i++) {
+    for (int i = 0, l = crits.length(); i < l; i++) {
         target = crits[i];
         if (!valid(target)) {
             continue;
@@ -146,12 +149,12 @@ void TryFoundAccessibleTarget(Critter cr, Map map)
         if (cr.Id == target.Id) {
             continue;
         }
-        // DL("CheckPathLen cr.Id"+target.Id+"crX:"+crX+";crY:"+crY+"; target X:"+target.HexX+";Y:"+target.HexY+".
+        // DL("CheckPathLen cr.Id"+target.Id+"crX:"+crhex.x+";crY:"+crhex.+"; target X:"+target.Hex.x+";Y:"+target.HexY+".
         // Distance:"+Game.GetDistance(cr,target));//TODO COMMENT
-        uint16 len = map.GetPathLength(cr, target.HexX, target.HexY, 1 + cr.Multihex);
+        int len = map.GetPathLength(cr, target.Hex, 1 + cr.Multihex);
         DL("len=" + len);
         if (len > 0) {
-            if (target.IsControlledByPlayer || cr.TeamId != target.TeamId) {
+            if (target.ControlledByPlayer || cr.TeamId != target.TeamId) {
                 DL("Attack plane added");
                 NpcPlanes::AddAttackPlane(cr, _AttackPriority(target), target);
             }
@@ -162,10 +165,10 @@ void TryFoundAccessibleTarget(Critter cr, Map map)
         return;
     }
     // Если таймаут на поломку баррикады - выход
-    if (Game.GetFullSecond() < cr.MirelurkCombatLastBrokenBag) {
+    if (Game.SynchronizedTime < cr.MirelurkCombatLastBrokenBag) {
         return;
     }
-    cr.MirelurkCombatLastBrokenBag = Game.GetFullSecond() + Game.Random(1, 8) * 60; // Следующая попытка поломать будет через 1..8 игровых минут
+    cr.MirelurkCombatLastBrokenBag = Game.SynchronizedTime + Time::GameMinutes(Game.Random(1, 8)); // Следующая попытка поломать будет через 1..8 игровых минут
     // Проверяем, не было ли уже попыток что-то сломать, если было, код предмета сохранен в cr.MirelurkCombatDestroyingItem
     if (cr.MirelurkCombatDestroyingItem != ZERO_IDENT) {
         Item sb = map.GetItem(cr.MirelurkCombatDestroyingItem);
@@ -181,15 +184,15 @@ void TryFoundAccessibleTarget(Critter cr, Map map)
     }
     // Собираем элементы баррикады в радиусе атаки
     Item[] gagItems = {};
-    gagItems.insertLast(map.GetItems(crX, crY, radius, Content::Item::sandbag_1));
-    gagItems.insertLast(map.GetItems(crX, crY, radius, Content::Item::sandbag_2));
-    gagItems.insertLast(map.GetItems(crX, crY, radius, Content::Item::sandbag_3));
-    gagItems.insertLast(map.GetItems(crX, crY, radius, Content::Item::sandbag_4));
-    gagItems.insertLast(map.GetItems(crX, crY, radius, Content::Item::sandbag_5));
+    gagItems.insertLast(map.GetItems(crhex, radius, Content::Item::sandbag_1));
+    gagItems.insertLast(map.GetItems(crhex, radius, Content::Item::sandbag_2));
+    gagItems.insertLast(map.GetItems(crhex, radius, Content::Item::sandbag_3));
+    gagItems.insertLast(map.GetItems(crhex, radius, Content::Item::sandbag_4));
+    gagItems.insertLast(map.GetItems(crhex, radius, Content::Item::sandbag_5));
 
     DL("trying found sandbags");
-    uint16 counter = 0; // максимум 300 попыток
-    for (uint i = 0; i < crits.length() && counter < 300; i++) {
+    int counter = 0; // максимум 300 попыток
+    for (int i = 0; i < crits.length() && counter < 300; i++) {
         target = crits[i];
         if (target.IsDead()) {
             continue;
@@ -198,7 +201,7 @@ void TryFoundAccessibleTarget(Critter cr, Map map)
             continue;
         }
 
-        for (uint j = 0; j < gagItems.length(); j++) {
+        for (int j = 0; j < gagItems.length(); j++) {
             if (counter++ > 300) {
                 DL("too many tries");
                 break;
@@ -211,12 +214,12 @@ void TryFoundAccessibleTarget(Critter cr, Map map)
 
             // НПЦ может дойти до мешка?
             DL("npc can reach sandbag?");
-            if (map.GetPathLength(cr, item.HexX, item.HexY, 1 + cr.Multihex) == 0) {
+            if (map.GetPathLength(cr, item.Hex, 1 + cr.Multihex) == 0) {
                 continue; // не пройдет
             }
 
             // От мешка можно дайти до игрока?
-            if (map.GetPathLength(target, item.HexX, item.HexY, 1 + cr.Multihex) == 0) {
+            if (map.GetPathLength(target, item.Hex, 1 + cr.Multihex) == 0) {
                 continue; // нет
             }
 
@@ -229,22 +232,18 @@ void TryFoundAccessibleTarget(Critter cr, Map map)
 // Добавление плана "подойти, чтобы сломать баррикаду в таком-то месте"
 bool AddDestroyBarricadePlane(Critter cr, Map map, Item barricade)
 {
-    uint16 bX = barricade.HexX;
-    uint16 bY = barricade.HexY;
+    mpos barrHex = barricade.Hex;
     // Находим координаты гекса, к которому можно подойти
-    uint16 crX = cr.HexX;
-    uint16 crY = cr.HexY;
-    uint16 x = bX;
-    uint16 y = bY;
+    mpos crHex = cr.Hex;
+    mpos hex = barrHex;
     for (uint8 dir = 0; dir < 6; dir++) {
         // TODO: выбор кратчайшего маршрута из возможных
-        map.MoveHexByDir(x, y, dir, 1);
-        if (map.GetPathLength(cr, x, y, 0 + cr.Multihex) > 0) {
-            return NpcPlanes::AddWalkPlane(cr, DESTROY_SANDBAG_PRIORITY, PLANE_ID_DESTROY, barricade.Id, x, y, Game.GetDirection(x, y, bX, bY), false, 0);
+        map.MoveHexByDir(hex, dir, 1);
+        if (map.GetPathLength(cr, hex, 0 + cr.Multihex) > 0) {
+            return NpcPlanes::AddWalkPlane(cr, DESTROY_SANDBAG_PRIORITY, PLANE_ID_DESTROY, barricade.Id, hex, Game.GetDirection(hex, barrHex), false, 0);
             // Подходящий гекс найден
         }
-        x = bX;
-        y = bY;
+        hex = barrHex;
     }
     DL("can't destroy");
     return false;
@@ -256,24 +255,23 @@ void TryMoveOut(Map map, Critter cr)
     if (cr.MirelurkCombatCurStage < 3) {
         return;
     }
-    if (Game.GetFullSecond() < cr.MirelurkCombatTimeNextStage) {
+    if (Game.SynchronizedTime < cr.MirelurkCombatTimeNextStage) {
         return;
     }
-    uint16 x = cr.HexX;
-    uint16 y = cr.HexY;
+    mpos hex = cr.Hex;
     bool pathFounded = false;
-    if (Entrance::GetNearEntry(map, ENTRY_EXIT_SF, x, y)) {
-        uint tries = 0;
-        while (!map.IsHexMovable(x, y) && tries < 10) {
-            cr.SayMsg(SAY_EMOTE, TextPackName::Text, STR_STAGE2_MSG_RECIEVED);
-            if (Caravan::GetFreeHex(map, tries, x, y)) {
+    if (Entrance::GetNearEntry(map, ENTRY_EXIT_SF, hex)) {
+        int tries = 0;
+        while (!map.IsHexMovable(hex) && tries < 10) {
+            Messaging::SayEmote(cr, TextPackName::Text, STR_STAGE2_MSG_RECIEVED);
+            if (Entrance::GetFreeHex(map, tries, hex)) {
                 pathFounded = true;
                 break;
             }
             tries++;
         }
         if (pathFounded) {
-            NpcPlanes::AddWalkPlane(cr, MOVE_OUT_PRIORITY, PLANE_ID_MOVEOUT, 0, x, y, Game.Random(0, 5), false, 0);
+            NpcPlanes::AddWalkPlane(cr, MOVE_OUT_PRIORITY, PLANE_ID_MOVEOUT, 0, hex, Game.Random(0, 5), false, 0);
             return;
         }
     }
@@ -298,11 +296,15 @@ void DestroyBarricade(Critter cr, ident itemId)
     Item sandbag = Game.GetItem(itemId);
     if (valid(sandbag)) {
         if (Sandbag::IsSandBag(sandbag.ProtoId)) {
-            cr.SayMsg(SAY_EMOTE, TextPackName::Text, STR_DESTROY_SANDBAGS);
+            Messaging::SayEmote(cr, TextPackName::Text, STR_DESTROY_SANDBAGS);
             cr.MirelurkCombatDestroyingItem = sandbag.Id;
-            cr.SetDir(Game.GetDirection(cr.HexX, cr.HexY, sandbag.HexX, sandbag.HexY));
+            cr.SetDir(Game.GetDirection(cr.Hex, sandbag.Hex));
             _CritAnimateUse(cr);
             Sandbag::_SandBagSkill(sandbag, cr, CritterProperty::SkillRepair);
         }
     }
+}
+
+#endif
+
 }

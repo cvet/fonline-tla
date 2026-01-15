@@ -1,7 +1,10 @@
-// FOS Server Client
+namespace ItemMovement
+{
 
-///@ Event Client Game OnItemCheckMove(Item item, uint count, Entity from, Entity to)
-///@ Event Server Game OnItemCheckMove(Item item, uint count, Entity from, Entity to)
+#if SERVER || CLIENT
+
+///@ Event Client Game OnItemCheckMove(Item item, int32 count, Entity from, Entity to)
+///@ Event Server Game OnItemCheckMove(Item item, int32 count, Entity from, Entity to)
 ///@ Event Client Game OnCritterCheckMoveItem(Critter cr, Item item, CritterItemSlot toSlot)
 ///@ Event Server Game OnCritterCheckMoveItem(Critter cr, Item item, CritterItemSlot toSlot)
 ///@ Event Server Game OnCritterItemIn(Critter cr, Item item)
@@ -17,12 +20,12 @@ void ModuleInit()
 {
     Game.OnItemCheckMove.Subscribe(OnItemCheckMove);
     Game.OnCritterCheckMoveItem.Subscribe(OnCritterCheckMoveItem);
-#ifdef __SERVER
+#if SERVER
     Game.OnCritterItemMoved.Subscribe(OnCritterItemMoved);
 #endif
 }
 
-bool OnItemCheckMove(Item item, uint count, Entity from, Entity to)
+bool OnItemCheckMove(Item item, int count, Entity from, Entity to)
 {
     return true;
 }
@@ -43,7 +46,7 @@ bool OnCritterCheckMoveItem(Critter cr, Item item, CritterItemSlot toSlot)
 
     // Weapon animation
     if (toSlot == CritterItemSlot::Main) {
-        if (item.Type == ItemType::Weapon && !CritterAnims::IsCritterStateAnim(cr, uint(item.Weapon_StateAnim))) {
+        if (item.Type == ItemType::Weapon && !CritterAnims::IsCritterStateAnim(cr, int(item.Weapon_StateAnim))) {
             Game.Log("Can not use weapon: Critter " + cr.ModelName + "; anim: " + item.Weapon_StateAnim);
             return false;
         }
@@ -73,7 +76,7 @@ bool OnCritterCheckMoveItem(Critter cr, Item item, CritterItemSlot toSlot)
     return true;
 }
 
-#ifdef __SERVER
+#if SERVER
 
 void OnCritterItemMoved(Critter cr, Item item, CritterItemSlot fromSlot)
 {
@@ -127,10 +130,6 @@ void OnCritterItemMoved(Critter cr, Item item, CritterItemSlot fromSlot)
         cr.CurrentArmorPerk = toSlot == CritterItemSlot::Armor ? item.Armor_Perk : 0;
     }
 
-    AbstractItem activeItem = CritterItem::GetActive(cr);
-    CritterStateAnim stateAnim = activeItem.Type == ItemType::Weapon ? activeItem.Weapon_StateAnim : CritterStateAnim::Unarmed;
-    cr.SetConditionAnims(CritterCondition::Alive, stateAnim, CritterActionAnim::Idle);
-
     // Todo: Slot modifiers, Armor_Perk
     // SLOT_PERK_MIRROR_SHADES // +1 charisma
     // SLOT_PERK_COSMETIC_CASE // +1 charisma to female
@@ -139,7 +138,7 @@ void OnCritterItemMoved(Critter cr, Item item, CritterItemSlot fromSlot)
 
     // Callbacks
     bool isDrop = item.CritterId == ZERO_IDENT;
-    Critter[] other = cr.GetCritters(true, CritterFindType::Any);
+    Critter[] other = cr.GetCritters(CritterSeeType::WhoSeeMe, CritterFindType::Any);
 
     cr.OnMoveItem.Fire(item, fromSlot);
     item.OnCritterMove.Fire(cr, fromSlot);
@@ -151,7 +150,7 @@ void OnCritterItemMoved(Critter cr, Item item, CritterItemSlot fromSlot)
         Game.OnCritterItemOut.Fire(cr, item);
     }
 
-    for (uint i = 0; i < other.length(); i++) {
+    for (int i = 0; i < other.length(); i++) {
         other[i].OnSomeCritterMoveItem.Fire(cr, item, fromSlot);
     }
 
@@ -159,13 +158,13 @@ void OnCritterItemMoved(Critter cr, Item item, CritterItemSlot fromSlot)
         item.OnCritterDrop.Fire(cr);
         cr.OnDropItem.Fire(item);
 
-        for (uint i = 0; i < other.length(); i++) {
+        for (int i = 0; i < other.length(); i++) {
             other[i].OnSomeCritterDropItem.Fire(cr, item);
         }
     }
 }
 
-void MoveItem(Item item, uint count, Critter toCr)
+void MoveItem(Item item, int count, Critter toCr)
 {
     Entity holder = GetItemHolder(item);
     Critter holderCr = cast<Critter>(holder);
@@ -180,10 +179,17 @@ void MoveItem(Item item, uint count, Critter toCr)
         return;
     }
 
+    if (toCr.ControlledByPlayer) {
+        ItemSorting::SortDown(item, toCr);
+    }
+    else {
+        ItemSorting::ResetSort(item);
+    }
+
     Game.MoveItem(item, count, toCr);
 }
 
-void MoveItem(Item item, uint count, Item toCont, ContainerItemStack stack)
+void MoveItem(Item item, int count, Item toCont, any stack)
 {
     Entity holder = GetItemHolder(item);
     Critter holderCr = cast<Critter>(holder);
@@ -198,7 +204,7 @@ void MoveItem(Item item, uint count, Item toCont, ContainerItemStack stack)
     Game.MoveItem(item, count, toCont, stack);
 }
 
-void MoveItem(Item item, uint count, Map toMap, uint16 hexX, uint16 hexY)
+void MoveItem(Item item, int count, Map toMap, mpos hex)
 {
     Entity holder = GetItemHolder(item);
     Critter holderCr = cast<Critter>(holder);
@@ -210,27 +216,27 @@ void MoveItem(Item item, uint count, Map toMap, uint16 hexX, uint16 hexY)
         return;
     }
 
-    Game.MoveItem(item, count, toMap, hexX, hexY);
+    Game.MoveItem(item, count, toMap, hex);
 }
 
 void MoveItems(Item[] items, Critter toCr)
 {
-    for (uint i = 0; i < items.length(); i++) {
+    for (int i = 0; i < items.length(); i++) {
         MoveItem(items[i], items[i].Count, toCr);
     }
 }
 
-void MoveItems(Item[] items, Item toCont, ContainerItemStack stack)
+void MoveItems(Item[] items, Item toCont, any stack)
 {
-    for (uint i = 0; i < items.length(); i++) {
+    for (int i = 0; i < items.length(); i++) {
         MoveItem(items[i], items[i].Count, toCont, stack);
     }
 }
 
-void MoveItems(Item[] items, Map toMap, uint16 hexX, uint16 hexY)
+void MoveItems(Item[] items, Map toMap, mpos hex)
 {
-    for (uint i = 0; i < items.length(); i++) {
-        MoveItem(items[i], items[i].Count, toMap, hexX, hexY);
+    for (int i = 0; i < items.length(); i++) {
+        MoveItem(items[i], items[i].Count, toMap, hex);
     }
 }
 
@@ -257,3 +263,7 @@ Entity GetItemHolder(Item item)
 }
 
 #endif
+
+#endif
+
+}

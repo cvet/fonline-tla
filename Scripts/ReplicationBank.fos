@@ -1,14 +1,18 @@
-// FOS Server Sort 2
+namespace ReplicationBank // Sort 2
+{
+
+#if SERVER
+
 //
 // Author: cvet, rifleman17
 // Replication Bank
 //
 
-///@ Property Critter PrivateServer bool ReplBankIsCanEnter
-///@ Property Critter PrivateServer bool ReplBankeIsAttackGagPlayer
+///@ Property Critter Server bool ReplBankIsCanEnter Mutable Persistent
+///@ Property Critter Server bool ReplBankeIsAttackGagPlayer Mutable Persistent
 
 #define ENTER_MONEY_NEED              (100)
-#define MAX_TIME_FOR_ENTER            (Time::RealMinute(2)) // Время отпущенное игроку на манипуляции с контейнером.
+#define MAX_TIME_FOR_ENTER            (Time::Minutes(2)) // Время отпущенное игроку на манипуляции с контейнером.
 
 #define MESSAGE_TRY_PASS_PLAYER       (0) // Спросить у охраны можно ли запустить нового игрока
 #define MESSAGE_BEGIN_PASS_PLAYER     (1) // Уведомить охрану что бы пропустили игрока.
@@ -43,8 +47,8 @@
 // Борьба с затыканием проходов в банках.
 #define FORCE_DIALOG_PLAYER_NOTFOUND (5)
 #define FORCE_DIALOG_PLAYER_FOUND    (4)
-#define WARN_TIME                    (Time::RealSecond(60))
-#define ATTACK_TIME                  (WARN_TIME + Time::RealSecond(10))
+#define WARN_TIME                    (Time::Seconds(60))
+#define ATTACK_TIME                  (Time::Seconds(60 + 10))
 #define STR_WARN_PLAYER              (1)
 #define STR_ATTACK_PLAYER            (2)
 
@@ -57,7 +61,7 @@ class CBank
     Entrance::Entry[] ShowContPos = {};  // Координаты видимых контейнеров.
     Entrance::Entry[] DoorHexPos = {};   // Координаты хекса двери.
     Entrance::Entry[] DoorGuardPos = {}; // Координаты хекса, где стоят охранники у двери.
-    uint PassedTime;                     // Время пропуска.
+    synctime PassedTime;                 // Время пропуска.
     bool PlayerNotify;                   // Предупрежден ли игрок о том, что задерживается.
     bool PlayerEntered;                  // Вошел ли игрок в помещение.
     ident PassedPlayerId;                // Id пропущенного к контейнерам игрока.
@@ -68,7 +72,7 @@ class CBank
 
     void Init(Map map)
     {
-        PassedTime = 0;
+        PassedTime = ZERO_SYNCTIME;
         PlayerNotify = false;
         PlayerEntered = false;
         PassedPlayerId = ZERO_IDENT;
@@ -91,7 +95,7 @@ CBank GetBank(Critter cr)
         return null;
     }
 
-    for (uint i = 0; i < BanksMapId.length(); i++) {
+    for (int i = 0; i < BanksMapId.length(); i++) {
         if (id == BanksMapId[i]) {
             return Banks[i];
         }
@@ -117,7 +121,7 @@ void ParseBank(Critter cr)
 void _BankerInit(Critter banker, bool firstTime)
 {
     banker.OnFinish.Subscribe(_BankerFinish);
-    banker.OnIdle.Subscribe(_BankerIdle);
+    banker.StartTimeEvent(Time::Asap(), Time::Seconds(1), _BankerIdle);
     banker.OnMessage.Subscribe(_BankerOnMessage);
     ParseBank(banker);
     banker.NpcRole = ROLE_BANKER;
@@ -145,20 +149,20 @@ void _BankerIdle(Critter banker)
     }
 
     // Проверим вошел ли игрок.
-    if (not bank.PlayerEntered && Game.GetFullSecond() > bank.PassedTime + Time::RealSecond(15)) {
-        banker.SayMsg(SAY_NORM_ON_HEAD, TextPackName::Text, STR_NEXT);
+    if (not bank.PlayerEntered && Game.SynchronizedTime > bank.PassedTime + Time::Seconds(15)) {
+        Messaging::SayOnHead(banker, TextPackName::Text, STR_NEXT);
         EndEnter(banker, bank.PassedPlayerId);
     }
     // Время игрока подходит к концу.
-    else if (bank.PlayerEntered && not bank.PlayerNotify && Game.GetFullSecond() > bank.PassedTime + MAX_TIME_FOR_ENTER - Time::RealSecond(20)) {
-        banker.SayMsg(SAY_NORM, TextPackName::Text, STR_TIME_LEFT);
+    else if (bank.PlayerEntered && not bank.PlayerNotify && Game.SynchronizedTime > bank.PassedTime + MAX_TIME_FOR_ENTER - Time::Seconds(20)) {
+        Messaging::Say(banker, TextPackName::Text, STR_TIME_LEFT);
         bank.PlayerNotify = true;
         CritterState::Wait(banker, 5000);
     }
     // Игрок задержался больше положенного.
-    else if (Game.GetFullSecond() > bank.PassedTime + MAX_TIME_FOR_ENTER) {
+    else if (Game.SynchronizedTime > bank.PassedTime + MAX_TIME_FOR_ENTER) {
         SendMessage::ToAllOnMap(banker, MESSAGE_THROW_OUT_PLAYER, bank.PassedPlayerId);
-        banker.SayMsg(SAY_SHOUT_ON_HEAD, TextPackName::Text, STR_TIME_END);
+        Messaging::SayShoutOnHead(banker, TextPackName::Text, STR_TIME_END);
         EndEnter(banker, bank.PassedPlayerId);
     }
     // Ждем дальше
@@ -189,7 +193,7 @@ void _BankerOnMessage(Critter banker, Critter player, int num, any val)
         if (not bank.PlayerEntered) {
             return;
         }
-        banker.SayMsg(SAY_NORM_ON_HEAD, TextPackName::Text, STR_NEXT);
+        Messaging::SayOnHead(banker, TextPackName::Text, STR_NEXT);
         EndEnter(banker, bank.PassedPlayerId);
     }
     else if (num == MESSAGE_PLAYER_ON_ATTACK_HEX) {
@@ -218,7 +222,7 @@ bool IsCanEnter(Critter player, Critter banker)
     return banker.ReplBankIsCanEnter;
 }
 
-uint r_TryEnter(Critter player, Critter banker)
+int r_TryEnter(Critter player, Critter banker)
 {
     // Прверим можно ли войти в комнату.
     if (IsCanEnter(banker, player) == false) {
@@ -243,7 +247,7 @@ uint r_TryEnter(Critter player, Critter banker)
     // Пропускаем игрока.
     player.DestroyItem(Content::Item::bottle_caps, ENTER_MONEY_NEED);
     bank.PassedPlayerId = player.Id;
-    bank.PassedTime = Game.GetFullSecond();
+    bank.PassedTime = Game.SynchronizedTime;
     bank.PlayerNotify = false;
     bank.PlayerEntered = false;
     SendMessage::ToAllOnMap(banker, MESSAGE_BEGIN_PASS_PLAYER, player.Id);
@@ -300,7 +304,7 @@ bool TransferItems(Critter banker, ident playerId, bool hide)
         return false;
     }
     // Находим контейнеры.
-    uint num = playerId.value % 10;
+    int num = playerId.value % 10;
     if (num >= bank.ShowContPos.length()) {
         num = 0;
     }
@@ -311,11 +315,11 @@ bool TransferItems(Critter banker, ident playerId, bool hide)
     if (not valid(map)) {
         return false;
     }
-    Item contHide = map.GetItem(bank.HideContPos[0].HexX, bank.HideContPos[0].HexY, HIDE_CONTAINER_PID);
+    Item contHide = map.GetItem(bank.HideContPos[0].Hex, HIDE_CONTAINER_PID);
     if (not valid(contHide)) {
         return false;
     }
-    Item contShow = map.GetItem(bank.ShowContPos[num].HexX, bank.ShowContPos[num].HexY, SHOW_CONTAINER_PID);
+    Item contShow = map.GetItem(bank.ShowContPos[num].Hex, SHOW_CONTAINER_PID);
     if (not valid(contShow)) {
         return false;
     }
@@ -323,7 +327,7 @@ bool TransferItems(Critter banker, ident playerId, bool hide)
     // +heX
     // Fix: запираем ящики - чтобы игроки не тупили.
     for (int i = 0; i < 10; i++) {
-        Item contTmp = map.GetItem(bank.ShowContPos[i].HexX, bank.ShowContPos[i].HexY, SHOW_CONTAINER_PID);
+        Item contTmp = map.GetItem(bank.ShowContPos[i].Hex, SHOW_CONTAINER_PID);
         if (valid(contTmp)) {
             contTmp.LockerId = 1;
         }
@@ -333,12 +337,12 @@ bool TransferItems(Critter banker, ident playerId, bool hide)
 
     // Перемещаем итемы.
     if (hide) {
-        Item[] items = contShow.GetItems(ContainerItemStack::Root);
-        ItemMovement::MoveItems(items, contHide, ContainerItemStack(playerId.value));
+        Item[] items = contShow.GetItems(ROOT_CONTAINER_STACK);
+        ItemMovement::MoveItems(items, contHide, MAKE_CONTAINER_STACK(playerId));
     }
     else {
-        Item[] items = contHide.GetItems(ContainerItemStack(playerId.value));
-        ItemMovement::MoveItems(items, contShow, ContainerItemStack::Root);
+        Item[] items = contHide.GetItems(MAKE_CONTAINER_STACK(playerId));
+        ItemMovement::MoveItems(items, contShow, ROOT_CONTAINER_STACK);
     }
     return true;
 }
@@ -348,7 +352,7 @@ bool TransferItems(Critter banker, ident playerId, bool hide)
 //
 void _GuardInit(Critter guard, bool firstTime)
 {
-    guard.OnIdle.Subscribe(_GuardIdle);
+    guard.StartTimeEvent(Time::Asap(), Time::Seconds(1), _GuardIdle);
     guard.OnMessage.Subscribe(_GuardOnMessage);
     guard.OnSomeCritterAttack.Subscribe(_GuardSmthAttack);     // Добавил Дагнир, 11.02.2010.
     guard.OnSomeCritterStealing.Subscribe(_GuardSmthStealing); // Добавил rifleman17, 22.02.2010.
@@ -389,7 +393,7 @@ void _GuardOnMessage(Critter guard, Critter crit, int num, any val)
 
     // Обработка сообщений игрока.
     // Убедимся игрок ли это послал сообщение.
-    if (crit.IsControlledByPlayer) {
+    if (crit.ControlledByPlayer) {
         if (num == MESSAGE_PLAYER_ON_WARNING_HEX) {
             // Предупреждаем игрока, если прошел без предупреждения.
             if (bank.PassedPlayerId == crit.Id || bank.ThrowOutPlayerId == crit.Id) {
@@ -399,11 +403,11 @@ void _GuardOnMessage(Critter guard, Critter crit, int num, any val)
                 return;
             }
             // Ищем охранника около двери.
-            for (uint i = 0; i < bank.DoorGuardPos.length(); i++) {
-                if (guard.HexX != bank.DoorGuardPos[i].HexX || guard.HexY != bank.DoorGuardPos[i].HexY) {
+            for (int i = 0; i < bank.DoorGuardPos.length(); i++) {
+                if (guard.Hex != bank.DoorGuardPos[i].Hex) {
                     continue;
                 }
-                guard.SayMsg(SAY_SHOUT_ON_HEAD, TextPackName::Text, STR_STOP);
+                Messaging::SayShoutOnHead(guard, TextPackName::Text, STR_STOP);
                 bank.DoorGuardSayWarning = true;
                 break;
             }
@@ -445,33 +449,34 @@ void _GuardOnMessage(Critter guard, Critter crit, int num, any val)
         if (not valid(map)) {
             return;
         }
-        Critter player = map.GetCritter(val);
+        ident playerId = val;
+        Critter player = map.GetCritter(playerId);
         if (valid(player)) {
             NpcPlanes::AddAttackPlane(guard, 0, player);
-            bank.ThrowOutPlayerId = val;
+            bank.ThrowOutPlayerId = playerId;
         }
     }
 }
 
-void _GuardSmthAttack(Critter guard, Critter attacker, Critter target, Item weapon, uint8 weaponMode, ProtoItem ammo)
+void _GuardSmthAttack(Critter guard, Critter attacker, Critter target, Item weapon, int weaponMode, ProtoItem ammo)
 {
-    if (attacker.IsControlledByPlayer) {
+    if (attacker.ControlledByPlayer) {
         NpcPlanes::AddAttackPlane(guard, 0, attacker);
     }
 }
 
-void _GuardSmthStealing(Critter guard, Critter thief, Critter fromCr, Item, uint)
+void _GuardSmthStealing(Critter guard, Critter thief, Critter fromCr, Item, int)
 {
     bool success = true;
-    if (thief.IsControlledByPlayer && guard.IsAlive()) {
-        guard.SayMsg(SAY_SHOUT_ON_HEAD, TextPackName::Text, STR_THIEF);
+    if (thief.ControlledByPlayer && guard.IsAlive()) {
+        Messaging::SayShoutOnHead(guard, TextPackName::Text, STR_THIEF);
         NpcPlanes::AddAttackPlane(guard, 0, thief, 1);
     }
 }
 
 void _GuardSmthDropItem(Critter npc, Critter fromCr, Item item)
 {
-    if (fromCr.IsControlledByPlayer && npc.IsAlive()) {
+    if (fromCr.ControlledByPlayer && npc.IsAlive()) {
         hstring pid = item.ProtoId;
         if (pid == Content::Item::active_plastic_explosive || pid == Content::Item::active_mine || pid == Content::Item::active_dynamite) {
             NpcPlanes::AddAttackPlane(npc, 0, fromCr);
@@ -479,9 +484,9 @@ void _GuardSmthDropItem(Critter npc, Critter fromCr, Item item)
     }
 }
 
-void _GuardSmthUseItem(Critter npc, Critter fromCr, Item item, Critter onCritter, Item onItem, StaticItem onScenery, uint param)
+void _GuardSmthUseItem(Critter npc, Critter fromCr, Item item, Critter onCritter, Item onItem, StaticItem onScenery, int param)
 {
-    if (fromCr.IsControlledByPlayer && npc.IsAlive()) {
+    if (fromCr.ControlledByPlayer && npc.IsAlive()) {
         hstring pid = item.ProtoId;
         if (pid == Content::Item::plastic_explosives || pid == Content::Item::mine || pid == Content::Item::toggle_switch || pid == Content::Item::dynamite) {
             NpcPlanes::AddAttackPlane(npc, 0, fromCr);
@@ -495,7 +500,7 @@ void t_DangerHex(Critter player, StaticItem trigger, bool entered, uint8 dir)
         return;
     }
     // Проверяем игрок ли это и тот кторого пустил банкир.
-    if (!player.IsControlledByPlayer) {
+    if (!player.ControlledByPlayer) {
         return;
     }
 
@@ -515,7 +520,7 @@ void t_AttackHex(Critter player, StaticItem trigger, bool entered, uint8 dir)
         return;
     }
     // Проверяем игрок ли это и тот которого пустил банкир.
-    if (!player.IsControlledByPlayer) {
+    if (!player.ControlledByPlayer) {
         return;
     }
     // Посылаем сообщение о том, что наступили на этот хекс.
@@ -525,14 +530,10 @@ void t_AttackHex(Critter player, StaticItem trigger, bool entered, uint8 dir)
 //
 // Keeper
 //
-uint16[] ShowContPos = {}; // Координаты видимых контейнеров.
-uint16[] DoorHexPos = {};  // Координаты хекса двери.
-bool PlayerPassed = false; // Id пропущенного к контейнерам игрока.
-hstring DoorPid;
 
 void _KeeperInit(Critter keeper, bool firstTime)
 {
-    keeper.OnIdle.Subscribe(_KeeperIdle);
+    keeper.StartTimeEvent(Time::Asap(), Time::Seconds(1), _KeeperIdle);
     keeper.OnMessage.Subscribe(_KeeperOnMessage);
     ParseBank(keeper);
     keeper.NpcRole = ROLE_KEEPER;
@@ -564,7 +565,7 @@ void _KeeperOnMessage(Critter keeper, Critter banker, int num, any val)
 
     // Сообщает что игрок начал манипуляции с контейнерами.
     if (num == MESSAGE_BEGIN_PASS_PLAYER) {
-        uint contNum = uint(val) % 10;
+        int contNum = int(val) % 10;
         if (contNum >= bank.ShowContPos.length()) {
             contNum = 0;
         }
@@ -572,7 +573,7 @@ void _KeeperOnMessage(Critter keeper, Critter banker, int num, any val)
             return;
         }
         bank.PlayerPassed = true;
-        NpcPlanes::AddWalkPlane(keeper, 0, bank.ShowContPos[contNum].HexX, bank.ShowContPos[contNum].HexY, 0xFF, false, 1);
+        NpcPlanes::AddWalkPlane(keeper, 0, bank.ShowContPos[contNum].Hex, 0xFF, false, 1);
         // NpcPlanes::AddPickPlane(keeper,0,ShowContPos[contNum*2],ShowContPos[contNum*2+1],SHOW_CONTAINER_PID);
     }
     // Сообщает что игрок завершил манипуляции с контейнерами или просит выкинуть зеваку.
@@ -586,15 +587,15 @@ void _KeeperOnMessage(Critter keeper, Critter banker, int num, any val)
 
         // Закрываем дверь.
         if (bank.DoorHexPos.length() > 0) {
-            Item door = Obsolete::MapGetDoor(map, bank.DoorHexPos[0].HexX, bank.DoorHexPos[0].HexY);
+            Item door = Maps::MapGetDoor(map, bank.DoorHexPos[0].Hex);
             if (valid(door) && door.Opened) {
                 NpcPlanes::AddPickPlane(keeper, 0, door, ZERO_IDENT, false);
             }
         }
 
         // Закрываем открытые контейнеры.
-        for (uint i = 0; i < bank.ShowContPos.length(); i++) {
-            Item cont = map.GetItem(bank.ShowContPos[i].HexX, bank.ShowContPos[i].HexY, SHOW_CONTAINER_PID);
+        for (int i = 0; i < bank.ShowContPos.length(); i++) {
+            Item cont = map.GetItem(bank.ShowContPos[i].Hex, SHOW_CONTAINER_PID);
             if (not valid(cont) || cont.Opened) {
                 continue;
             }
@@ -603,7 +604,7 @@ void _KeeperOnMessage(Critter keeper, Critter banker, int num, any val)
     }
 }
 
-uint dlg_TalkAboutGagPlayer(Critter player, Critter npc, string& playerName)
+int dlg_TalkAboutGagPlayer(Critter player, Critter npc, string& playerName)
 {
     if (!IS_DIALOG_SAY_MODE(playerName)) {
         return 0;
@@ -635,9 +636,9 @@ bool AddCheckPlayerPosition(Critter guard, Critter player)
         return false;
     }
 
-    any[] values = {guard.Id, player.Id, player.HexX, player.HexY};
-    Game.DeferredCall(GAME_SECOND_TO_TICK(WARN_TIME), WarnGagPlayer, values);
-    Game.DeferredCall(GAME_SECOND_TO_TICK(ATTACK_TIME), AttackGagPlayer, values);
+    any[] values = {guard.Id, player.Id, player.Hex.x, player.Hex.y};
+    Game.StartTimeEvent(WARN_TIME, WarnGagPlayer, values);
+    Game.StartTimeEvent(ATTACK_TIME, AttackGagPlayer, values);
     guard.ReplBankeIsAttackGagPlayer = true;
     return true;
 }
@@ -658,7 +659,7 @@ void WarnGagPlayer(any[] values)
         return;
     }
 
-    guard.SayMsg(SAY_SHOUT, TextPackName::Dialogs, DLGSTR(guard.DialogId, STR_WARN_PLAYER), "$pname " + Obsolete::GetPlayerName(player.Id));
+    Messaging::SayShout(guard, TextPackName::Dialogs, DLGSTR(guard.DialogId, STR_WARN_PLAYER), "$pname " + PlayerRegistration::GetPlayerName(player.Id));
 }
 
 void AttackGagPlayer(any[] values)
@@ -668,7 +669,7 @@ void AttackGagPlayer(any[] values)
         guard.ReplBankeIsAttackGagPlayer = false;
         Critter player = Game.GetCritter(values[1]);
         if (valid(player)) {
-            if (player.IsControlledByPlayer) {
+            if (player.ControlledByPlayer) {
                 Map guardMap = guard.GetMap();
                 Map playerMap = player.GetMap();
                 if (!valid(guardMap) || !valid(playerMap)) {
@@ -678,17 +679,21 @@ void AttackGagPlayer(any[] values)
                     return;
                 }
 
-                uint oldX = values[2];
-                uint oldY = values[3];
-                uint newX = player.HexX;
-                uint newY = player.HexY;
+                int oldX = values[2];
+                int oldY = values[3];
+                int newX = player.Hex.x;
+                int newY = player.Hex.y;
 
                 if (oldX == newX && oldY == newY) {
-                    guard.SayMsg(SAY_SHOUT, TextPackName::Dialogs, DLGSTR(guard.DialogId, STR_ATTACK_PLAYER));
+                    Messaging::SayShout(guard, TextPackName::Dialogs, DLGSTR(guard.DialogId, STR_ATTACK_PLAYER));
                     NpcPlanes::AddAttackPlane(guard, 0, player);
                     SendMessage::ToAllOnMap(player, MESSAGE_PLAYER_ON_ATTACK_HEX, 0);
                 }
             }
         }
     }
+}
+
+#endif
+
 }

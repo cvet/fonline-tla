@@ -1,4 +1,8 @@
-// FOS Server
+namespace MainPlanes
+{
+
+#if SERVER
+
 // Authors: cvet, Atom
 
 void ModuleInit()
@@ -55,12 +59,11 @@ bool npc_plane_end(Critter npc, int planeId, int reason, Critter someCr, Item so
         CritterState::Wait(npc, 20000);
     }
     else if (reason == REASON_CANT_SEE_TARGET) {
-        if (valid(someCr) && plane.Attack_LastHexX > 0 && plane.Attack_LastHexY > 0) {
+        if (valid(someCr) && plane.Attack_LastHex.x > 0 && plane.Attack_LastHex.y > 0) {
             NpcPlanes::NpcPlane child = NpcPlanes::CreatePlane();
             child.Type = AI_PLANE_WALK;
             child.Priority = (plane.Priority == 0 ? AI_PLANE_WALK_PRIORITY : plane.Priority);
-            child.Walk_HexX = plane.Attack_LastHexX;
-            child.Walk_HexY = plane.Attack_LastHexY;
+            child.Walk_Hex = plane.Attack_LastHex;
             child.Walk_Dir = 1;
             child.Run = plane.Run;
             child.Walk_Cut = npc.LookDistance / 2;
@@ -69,17 +72,15 @@ bool npc_plane_end(Critter npc, int planeId, int reason, Critter someCr, Item so
         }
     }
     else if (reason == REASON_GAG_CRITTER) {
-        if (valid(someCr) && someCr.IsControlledByPlayer && someCr.Id != npc.MercMasterId) {
+        if (valid(someCr) && someCr.ControlledByPlayer && someCr.Id != npc.MercMasterId) {
             NpcPlanes::NpcPlane child = NpcPlanes::CreatePlane();
             child.Type = AI_PLANE_ATTACK;
             child.Priority = 0;
             child.Attack_TargId = someCr.Id;
             child.Attack_MinHp = Settings.DeadHitPoints;
             child.Attack_IsGag = true;
-            child.Attack_GagHexX = someCr.HexX;
-            child.Attack_GagHexY = someCr.HexY;
-            child.Attack_LastHexX = someCr.HexX;
-            child.Attack_LastHexY = someCr.HexY;
+            child.Attack_GagHex = someCr.Hex;
+            child.Attack_LastHex = someCr.Hex;
             child.Run = plane.Run;
             plane.SetChild(child);
         }
@@ -94,8 +95,7 @@ bool npc_plane_end(Critter npc, int planeId, int reason, Critter someCr, Item so
                 NpcPlanes::NpcPlane child = NpcPlanes::CreatePlane();
                 child.Type = AI_PLANE_PICK;
                 child.Priority = 0;
-                child.Pick_HexX = someItem.HexX;
-                child.Pick_HexY = someItem.HexY;
+                child.Pick_Hex = someItem.Hex;
                 child.Pick_Pid = someItem.ProtoId;
                 child.Pick_UseItemId = Lockers::GetKeyId(npc, someItem.LockerId);
                 child.Pick_ToOpen = true;
@@ -107,8 +107,7 @@ bool npc_plane_end(Critter npc, int planeId, int reason, Critter someCr, Item so
                 NpcPlanes::NpcPlane child = NpcPlanes::CreatePlane();
                 child.Type = AI_PLANE_PICK;
                 child.Priority = 0;
-                child.Pick_HexX = someItem.HexX;
-                child.Pick_HexY = someItem.HexY;
+                child.Pick_Hex = someItem.Hex;
                 child.Pick_Pid = someItem.ProtoId;
                 child.Run = plane.Run;
                 plane.SetChild(child);
@@ -120,19 +119,18 @@ bool npc_plane_end(Critter npc, int planeId, int reason, Critter someCr, Item so
         Map map = npc.GetMap();
         Critter cr = Game.GetCritter(plane.Attack_TargId);
         if (valid(map) && valid(cr)) {
-            int awayDir = Game.GetDirection(cr.HexX, cr.HexY, npc.HexX, npc.HexY);
-            uint awayDist = Game.Random(30, 50); // Todo: resolve correct distantion
-            uint16 baseHx = npc.HexX;
-            uint16 baseHy = npc.HexY;
-            map.MoveHexByDir(baseHx, baseHy, awayDir, 1);
+            int awayDir = Game.GetDirection(cr.Hex, npc.Hex);
+            int awayDist = Game.Random(30, 50); // Todo: resolve correct distantion
+            mpos hexBase = npc.Hex;
+            map.MoveHexByDir(hexBase, awayDir, 1);
 
             float angle = 0.0f;
-            uint reverse = Game.Random(0, 1);
-            for (uint i = 0; i < 5; i++) {
-                uint16 hx = baseHx, hy = baseHy;
-                map.GetHexInPath(npc.HexX, npc.HexY, hx, hy, angle, awayDist);
-                if (Game.GetDistance(npc.HexX, npc.HexY, hx, hy) > 1) {
-                    NpcPlanes::AddWalkPlane(npc, 100, hx, hy, 6, true, 0);
+            int reverse = Game.Random(0, 1);
+            for (int i = 0; i < 5; i++) {
+                mpos hex = hexBase;
+                map.GetHexInPath(npc.Hex, hex, angle, awayDist);
+                if (Game.GetDistance(npc.Hex, hex) > 1) {
+                    NpcPlanes::AddWalkPlane(npc, 100, hex, 6, true, 0);
                     break;
                 }
                 angle += float(i + 1) * 45.0f * ((i % 2) == reverse ? 1.0f : -1.0f);
@@ -140,7 +138,7 @@ bool npc_plane_end(Critter npc, int planeId, int reason, Critter someCr, Item so
             AiSettings::AI_TrySayCombatText(npc, CombatText::RunAway);
         }
 
-        uint npcTimeout = BATTLE_TIMEOUT(npc);
+        auto npcTimeout = BATTLE_TIMEOUT(npc);
         if (npc.TimeoutBattle < npcTimeout) {
             npc.TimeoutBattle = npcTimeout;
         }
@@ -148,7 +146,7 @@ bool npc_plane_end(Critter npc, int planeId, int reason, Critter someCr, Item so
     else if (reason == REASON_NO_UNARMED) {
         // Repair first broken weapon
         Item[] items = npc.GetItems(ItemProperty::Type, ItemType::Weapon);
-        for (uint i = 0; i < items.length(); i++) {
+        for (int i = 0; i < items.length(); i++) {
             Item item = items[i];
             if (item.IsBroken) {
                 Repair::SetDeterioration(item, 0);
@@ -209,7 +207,7 @@ bool npc_plane_run(Critter npc, int planeId, int reason, any& r0, any& r1, any& 
         }
 
         // No use weapon
-        uint aiId = npc.AiId;
+        int aiId = npc.AiId;
         int bestWeapon = AI_BEST_WEAPON(aiId);
         if (bestWeapon == BestWeap::Never) {
             return true;
@@ -246,7 +244,7 @@ bool npc_plane_run(Critter npc, int planeId, int reason, any& r0, any& r1, any& 
                                     CritterProperty::SkillUnarmed,
                                     CritterProperty::SkillMeleeWeapons,
                                     CritterProperty::SkillThrowing};
-        uint skillsCount = skills.length();
+        int skillsCount = skills.length();
         SkillsSort(npc, skills, 0, skillsCount);
 
         // Advanced sort
@@ -254,7 +252,7 @@ bool npc_plane_run(Critter npc, int planeId, int reason, any& r0, any& r1, any& 
         case BestWeap::NoPref:
             break;
         case BestWeap::Random:
-            for (uint i = 0; i < skillsCount; i++) {
+            for (int i = 0; i < skillsCount; i++) {
                 int i0 = Game.Random(0, skillsCount - 1);
                 int i1 = Game.Random(0, skillsCount - 1);
                 if (i0 != i1) {
@@ -297,17 +295,17 @@ bool npc_plane_run(Critter npc, int planeId, int reason, any& r0, any& r1, any& 
 
         // Get all weapons and check it
         Item[] allWeapons = npc.GetItems(ItemProperty::Type, ItemType::Weapon);
-        for (uint i = 0; i < allWeapons.length(); i++) {
+        for (int i = 0; i < allWeapons.length(); i++) {
             if (not CheckBattleWeapon(npc, allWeapons[i])) {
                 allWeapons[i] = null;
             }
         }
 
         // Choose one weapon
-        for (uint i = 0; i < skillsCount; i++) {
+        for (int i = 0; i < skillsCount; i++) {
             CritterProperty skill = skills[i];
 
-            for (uint k = 0; k < allWeapons.length(); k++) {
+            for (int k = 0; k < allWeapons.length(); k++) {
                 weapon = allWeapons[k];
                 if (not valid(weapon)) {
                     continue;
@@ -342,7 +340,7 @@ bool npc_plane_run(Critter npc, int planeId, int reason, any& r0, any& r1, any& 
         int multihex = npc.Multihex + target.Multihex;
 
         if (npc.IsNoMove) {
-            int dist = Game.GetDistance(npc.HexX, npc.HexY, target.HexX, target.HexY);
+            int dist = Game.GetDistance(npc.Hex, target.Hex);
             if (wpnDist < dist) {
                 dist = wpnDist;
             }
@@ -469,7 +467,7 @@ bool npc_plane_run(Critter npc, int planeId, int reason, any& r0, any& r1, any& 
 
             if (!npc.IsNoAim) {
                 if (weapon.Weapon_Aim_0) {
-                    uint reduction = (int(r0) * 3 * npc.Intellect) / 100;
+                    int reduction = (int(r0) * 3 * npc.Intellect) / 100;
                     reduction = MIN(15, reduction);
                     r0 = int(r0) - reduction;
                 }
@@ -499,8 +497,8 @@ bool npc_plane_run(Critter npc, int planeId, int reason, any& r0, any& r1, any& 
         }
     }
     else if (reason == REASON_ATTACK_USE_AIM) {
-        uint mode = 0;
-        uint aim = 0;
+        int mode = 0;
+        int aim = 0;
         if (CogitateFiring(npc, ident(r0), mode, aim)) {
             r0 = mode;
             r1 = aim;
@@ -549,7 +547,7 @@ bool npc_plane_run(Critter npc, int planeId, int reason, any& r0, any& r1, any& 
     return false;
 }
 
-bool CogitateFiring(Critter cr, ident targetId, uint& mode, uint& aim) // in: targetId, 0; out: mode, aim
+bool CogitateFiring(Critter cr, ident targetId, int& mode, int& aim) // in: targetId, 0; out: mode, aim
 {
     if (Game.Random(1, 10) > cr.Intellect) {
         return false; // too stupid to think about this
@@ -600,24 +598,24 @@ bool CogitateFiring(Critter cr, ident targetId, uint& mode, uint& aim) // in: ta
     {
         bool forceBurst = false;
         if (weapon.Weapon_Round_0 > 1) {
-            // cr.Say(SAY_NORM, "Burst is the only mode");
+            // Messaging::Say(cr, "Burst is the only mode");
             forceBurst = true;
             mode = 0;
         }
         else {
             if (weapon.Weapon_DmgType_1 == -1) {
-                // cr.Say(SAY_NORM, "Single shot is the only mode");
+                // Messaging::Say(cr, "Single shot is the only mode");
                 mode = 0;
             }
             else {
-                // cr.Say(SAY_NORM, "Second mode available");
+                // Messaging::Say(cr, "Second mode available");
                 if (ValidateBurst(cr, target, weapon, mode)) {
-                    // cr.Say(SAY_NORM, "Burst forced by check");
+                    // Messaging::Say(cr, "Burst forced by check");
                     forceBurst = true;
                     mode = 1;
                 }
                 else {
-                    // cr.Say(SAY_NORM, "Single shot forced by check");
+                    // Messaging::Say(cr, "Single shot forced by check");
                     mode = 0;
                 }
             }
@@ -638,7 +636,7 @@ bool CogitateFiring(Critter cr, ident targetId, uint& mode, uint& aim) // in: ta
     }
 }
 
-int ChooseAim(Critter cr, Critter target, Item weapon, uint8 mode, ProtoItem ammo)
+int ChooseAim(Critter cr, Critter target, Item weapon, int mode, ProtoItem ammo)
 {
     int tohit = Combat::RawToHit(cr, target, weapon, mode, ammo);
     if (tohit < 26) {
@@ -646,7 +644,7 @@ int ChooseAim(Critter cr, Critter target, Item weapon, uint8 mode, ProtoItem amm
     }
 
     int ap = valid(weapon) ? _WeaponApCost(weapon, mode) : 3;
-    CritterProperty skill = valid(weapon) ? _WeaponSkill(weapon, mode) : CritterProperty::Invalid;
+    CritterProperty skill = valid(weapon) ? _WeaponSkill(weapon, mode) : CritterProperty::None;
     int pendiv = valid(weapon) ? (skill == CritterProperty::SkillMeleeWeapons || skill == CritterProperty::SkillUnarmed ? 2 : 1) : 2;
     int maxap = cr.ActionPoints;
 
@@ -698,7 +696,7 @@ int ChooseAim(Critter cr, Critter target, Item weapon, uint8 mode, ProtoItem amm
         max = next;
     }
 
-    // cr.Say(SAY_NORM, "Aimed shot: "+max);
+    // Messaging::Say(cr, "Aimed shot: "+max);
 
     switch (max) {
     case 1:
@@ -730,47 +728,45 @@ int ChooseAim(Critter cr, Critter target, Item weapon, uint8 mode, ProtoItem amm
 class CTraceFirstCritter : LineTracer::ITraceContext
 {
     Critter Cr;
-    uint MinDist;
-    uint16 Gx;
-    uint16 Gy;
+    int MinDist;
+    mpos GHex;
 
-    CTraceFirstCritter(uint16 gx, uint16 gy, uint16 minDist)
+    CTraceFirstCritter(mpos hex, int minDist)
     {
-        Gx = gx;
-        Gy = gy;
+        GHex = hex;
         Cr = null;
         MinDist = minDist;
     }
 
-    bool Exec(Map map, uint16 hx, uint16 hy) override
+    bool Exec(Map map, mpos hex) override
     {
-        if (!map.IsHexShootable(hx, hy)) {
+        if (!map.IsHexShootable(hex)) {
             return true;
         }
 
-        Critter cr = map.GetCritter(hx, hy);
+        Critter cr = map.GetCritter(hex);
         if (valid(cr)) {
             Cr = Game.GetCritter(cr.Id);
         }
 
-        return valid(Cr) && Cr.Condition == CritterCondition::Alive && Game.GetDistance(Gx, Gy, Cr.HexX, Cr.HexY) >= MinDist;
+        return valid(Cr) && Cr.Condition == CritterCondition::Alive && Game.GetDistance(GHex, Cr.Hex) >= MinDist;
     }
 
-    void StartExec(Map map, uint16 hx, uint16 hy, uint16 tx, uint16 ty, uint maxDist) override
+    void StartExec(Map map, mpos hexFrom, mpos hexTo, int maxDist) override
     {
         // Nothing
     }
 
-    void FinishExec(Map map, uint resultDist) override
+    void FinishExec(Map map, int resultDist) override
     {
         // Nothing
     }
 };
 
-Critter TraceFirstCritter(uint16 hx, uint16 hy, uint16 tx, uint16 ty, Map map, int dist, uint16 gx, uint16 gy, uint mindist)
+Critter TraceFirstCritter(mpos hexFrom, mpos hexTo, Map& map, int dist, mpos hexCr, int mindist)
 {
-    CTraceFirstCritter Tracer = CTraceFirstCritter(gx, gy, mindist);
-    LineTracer::LineTracerHex(hx, hy, tx, ty, map, dist, Tracer);
+    CTraceFirstCritter Tracer = CTraceFirstCritter(hexCr, mindist);
+    LineTracer::LineTracerHex(map, hexFrom, hexTo, dist, Tracer);
     return Tracer.Cr;
 }
 
@@ -782,7 +778,7 @@ bool IsCurrentEnemy(Critter crit, ident targetId)
     }
     array<NpcPlanes::NpcPlane> plans = {};
     NpcPlanes::GetPlanes(cr, plans); // cr.GetPlanesByType(AI_PLANE_ATTACK, plans);
-    for (uint i = 0, j = plans.length(); i < j; i++) {
+    for (int i = 0, j = plans.length(); i < j; i++) {
         if (plans[i].Type == AI_PLANE_ATTACK && plans[i].Attack_TargId == targetId) {
             return true;
         }
@@ -790,7 +786,7 @@ bool IsCurrentEnemy(Critter crit, ident targetId)
     return false;
 }
 
-bool ValidateBurst(Critter cr, Critter target, AbstractItem weapon, uint mode)
+bool ValidateBurst(Critter cr, Critter target, AbstractItem weapon, int mode)
 {
     if (Game.Random(0, 2) == 0) {
         return false; // force normal shot, for a little diversity
@@ -801,51 +797,45 @@ bool ValidateBurst(Critter cr, Critter target, AbstractItem weapon, uint mode)
         return false;
     }
 
-    uint maxDist = _WeaponMaxDist(weapon, mode);
+    int maxDist = _WeaponMaxDist(weapon, mode);
 
-    uint16 hx = cr.HexX;
-    uint16 hy = cr.HexY;
-    uint16 tx = target.HexX;
-    uint16 ty = target.HexY;
-    Critter blocker = TraceFirstCritter(hx, hy, tx, ty, Game.GetMap(map.Id), maxDist, hx, hy, 0);
+    mpos hex = cr.Hex;
+    mpos hexTarget = target.Hex;
+    Critter blocker = TraceFirstCritter(hex, hexTarget, Game.GetMap(map.Id), maxDist, hex, 0);
     if (valid(blocker) && !IsCurrentEnemy(cr, blocker.Id)) {
-        /*blocker.Say(SAY_NORM, "I blocked the burst check");*/
+        /*Messaging::Say(blocker, "I blocked the burst check");*/
+        return false;
+    }
+    mpos hexStart = hex;
+    mpos hexEnd = hexTarget;
+
+    uint8 dir = Game.GetDirection(hex, hexTarget, 89.0f);
+    map.MoveHexByDir(hexStart, dir, 1);
+    map.MoveHexByDir(hexEnd, dir, 1);
+    blocker = TraceFirstCritter(hexStart, hexEnd, Game.GetMap(map.Id), maxDist, hex, 3);
+    if (valid(blocker) && !IsCurrentEnemy(cr, blocker.Id)) {
+        /*Messaging::Say(blocker, "I blocked the burst check");*/
         return false;
     }
 
-    uint16 sx = hx;
-    uint16 sy = hy;
-    uint16 ex = tx;
-    uint16 ey = hy;
-    uint8 dir = Game.GetDirection(hx, hy, tx, ty, 89.0f);
-    map.MoveHexByDir(sx, sy, dir, 1);
-    map.MoveHexByDir(ex, ey, dir, 1);
-    blocker = TraceFirstCritter(sx, sy, ex, ey, Game.GetMap(map.Id), maxDist, hx, hy, 3);
+    hexStart = hex;
+    hexEnd = hexTarget;
+    dir = Game.GetDirection(hex, hexTarget, -89.0f);
+    map.MoveHexByDir(hexStart, dir, 1);
+    map.MoveHexByDir(hexEnd, dir, 1);
+    blocker = TraceFirstCritter(hexStart, hexEnd, Game.GetMap(map.Id), maxDist, hex, 3);
     if (valid(blocker) && !IsCurrentEnemy(cr, blocker.Id)) {
-        /*blocker.Say(SAY_NORM, "I blocked the burst check");*/
-        return false;
-    }
-
-    sx = hx;
-    sy = hy;
-    ex = tx;
-    ey = hy;
-    dir = Game.GetDirection(hx, hy, tx, ty, -89.0f);
-    map.MoveHexByDir(sx, sy, dir, 1);
-    map.MoveHexByDir(ex, ey, dir, 1);
-    blocker = TraceFirstCritter(sx, sy, ex, ey, Game.GetMap(map.Id), maxDist, hx, hy, 3);
-    if (valid(blocker) && !IsCurrentEnemy(cr, blocker.Id)) {
-        /*blocker.Say(SAY_NORM, "I blocked the burst check");*/
+        /*Messaging::Say(blocker, "I blocked the burst check");*/
         return false;
     }
 
     return true;
 }
 
-void SkillsSort(Critter npc, CritterProperty[] skills, uint first, uint count)
+void SkillsSort(Critter npc, CritterProperty[] skills, int first, int count)
 {
-    for (uint i = first, j = first + count; i < j; i++) {
-        uint max = i;
+    for (int i = first, j = first + count; i < j; i++) {
+        int max = i;
         for (int k = i + 1, l = first + count; k < l; k++) {
             if (npc.GetAsInt(skills[k]) > npc.GetAsInt(skills[max])) {
                 max = k;
@@ -861,9 +851,9 @@ void SkillsSort(Critter npc, CritterProperty[] skills, uint first, uint count)
 
 void SkillToBegin(CritterProperty[] skills, CritterProperty skill)
 {
-    for (uint i = 1, j = skills.length(); i < j; i++) {
+    for (int i = 1, j = skills.length(); i < j; i++) {
         if (skills[i] == skill) {
-            for (uint k = i; k > 0; k--) {
+            for (int k = i; k > 0; k--) {
                 skills[k] = skills[k - 1];
             }
             skills[0] = skill;
@@ -902,7 +892,7 @@ bool IsAmmoForWeapon(Critter npc, Item weapon)
     }
 
     Item[] ammo = npc.GetItems(ItemProperty::Type, ItemType::Ammo);
-    for (uint i = 0; i < ammo.length(); i++) {
+    for (int i = 0; i < ammo.length(); i++) {
         if (ammo[i].Ammo_Caliber == weapon.Weapon_Caliber) {
             return true;
         }
@@ -911,3 +901,7 @@ bool IsAmmoForWeapon(Critter npc, Item weapon)
 }
 
 // //////////////////////////////////////////////////////////////////////////////////////////////////
+
+#endif
+
+}

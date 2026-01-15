@@ -1,4 +1,7 @@
-// FOS Server
+namespace NukeMachine
+{
+
+#if SERVER
 
 /*
    Автомат нюка-колы
@@ -8,10 +11,9 @@
    Если на пути бутылки стоит другой криттер, получить повреждения может он. Игрок, использовавший монетку будет считаться атакующим.
  */
 
-///@ Property Critter PrivateServer uint NukeStock
-///@ Property Critter PrivateServer uint NukeRestockTime
+///@ Property Critter Server int32 NukeStock Mutable Persistent
+///@ Property Critter Server synctime NukeRestockTime Mutable Persistent
 
-#define ONE_GAME_WEEK       (60 * 60 * 24 * 7)
 #define MAX_STOCK           (10)
 #define HIT_RANGE           (3) // расстояние, на которое "стреляет" автомат
 #define MIN_DMG             (1)
@@ -34,20 +36,20 @@ bool _UseCapsOnNukeMachine(Critter player, Item scenery, int skill, Item item)
         return false;
     }
 
-    if (player.NukeRestockTime < Game.GetFullSecond()) {
-        player.NukeStock = uint(Game.Random(MAX_STOCK / 2, MAX_STOCK));
-        player.NukeRestockTime = Game.GetFullSecond() + ONE_GAME_WEEK;
+    if (player.NukeRestockTime < Game.SynchronizedTime) {
+        player.NukeStock = int(Game.Random(MAX_STOCK / 2, MAX_STOCK));
+        player.NukeRestockTime = Game.SynchronizedTime + Time::GameDays(7);
     }
 
     if (player.NukeStock > 0) {
         player.DestroyItem(Content::Item::bottle_caps, 1);
 
         player.NukeStock -= 1;
-        player.SayMsg(SAY_NETMSG, TextPackName::Text, STR_USE_CAPS);
+        Messaging::Info(player, TextPackName::Text, STR_USE_CAPS);
 
         if (_CheckStat(player, CritterProperty::Luck, 0)) {
             player.AddItem(Content::Item::nuka_cola, 1);
-            player.SayMsg(SAY_NETMSG, TextPackName::Text, STR_GET_NUKE);
+            Messaging::Info(player, TextPackName::Text, STR_GET_NUKE);
             return true;
         }
         else {
@@ -56,7 +58,7 @@ bool _UseCapsOnNukeMachine(Critter player, Item scenery, int skill, Item item)
         }
     }
     else {
-        player.SayMsg(SAY_NETMSG, TextPackName::Text, STR_EMPTY);
+        Messaging::Info(player, TextPackName::Text, STR_EMPTY);
         return true;
     }
 }
@@ -68,46 +70,47 @@ void TryHitSomeOne(Critter player, Item nukeMashine)
         return;
     }
 
-    uint16 x0 = nukeMashine.HexX;
-    uint16 y0 = nukeMashine.HexY;
+    mpos hex0 = nukeMashine.Hex;
+    mpos hex1 = hex0;
 
-    uint16 x1 = x0;
-    uint16 y1 = y0;
-
-    uint dir = Game.GetDirection(x0, y0, player.HexX, player.HexY);
+    uint8 dir = Game.GetDirection(hex0, player.Hex);
     bool targetHitted = false;
 
-    map.MoveHexByDir(x1, y1, dir, 3);
-    map.RunFlyEffect(Content::Item::flying_knife, null, null, x0, y0, x1, y1);
+    map.MoveHexByDir(hex1, dir, 3);
+    Effects::RunFlyEffect(map, Content::Item::flying_knife, hex0, hex1);
 
-    for (uint i = 0; i < HIT_RANGE; i++) {
-        map.MoveHexByDir(x0, y0, dir, 1);
-        Critter target = map.GetCritter(x0, y0);
+    for (int i = 0; i < HIT_RANGE; i++) {
+        map.MoveHexByDir(hex0, dir, 1);
+        Critter target = map.GetCritter(hex0);
         if (valid(target) && !targetHitted) {
             if (target.IsAlive()) {
                 if (_CheckStat(target, CritterProperty::Agility, 0)) {
-                    target.SayMsg(SAY_NETMSG, TextPackName::Text, STR_DODGE);
+                    Messaging::Info(target, TextPackName::Text, STR_DODGE);
                     _CritAnimate(target, CritterActionAnim::DodgeFront);
-                    Critter[] critters = map.GetCritters(target.HexX, target.HexY, PLAYERS_SRCH_RADIUS, CritterFindType::Players);
+                    Critter[] critters = map.GetCritters(target.Hex, PLAYERS_SRCH_RADIUS, CritterFindType::Players);
                     if (!critters.isEmpty()) {
-                        string lexems = "$name " + (target.IsControlledByPlayer ?
-                                                        Obsolete::GetPlayerName(target.Id) :
+                        string lexems = "$name " + (target.ControlledByPlayer ?
+                                                        PlayerRegistration::GetPlayerName(target.Id) :
                                                         (target.DialogId != EMPTY_HSTRING ? "@text Dialogs " + STR_NPC_NAME_DLG(target.DialogId) + " @" : ""));
-                        for (uint j = 0; j < critters.length(); j++) {
+                        for (int j = 0; j < critters.length(); j++) {
                             if (critters[j].Id != target.Id) {
-                                critters[j].SayMsg(SAY_NETMSG, TextPackName::Text, STR_SOMEBODY_DODGE, lexems);
+                                Messaging::Info(critters[j], TextPackName::Text, STR_SOMEBODY_DODGE, lexems);
                             }
                         }
                     }
                 }
                 else {
-                    target.SayMsg(SAY_SHOUT, TextPackName::Text, STR_HITTED);
+                    Messaging::SayShout(target, TextPackName::Text, STR_HITTED);
                     targetHitted = true;
                     Combat::InjureCritter(target, Game.Random(MIN_DMG, MAX_DMG), DamageTypes::Normal, dir, player.Id);
-                    map.AddItem(x0, y0, Content::Item::nuka_cola, 1);
+                    map.AddItem(hex0, Content::Item::nuka_cola, 1);
                     break;
                 }
             }
         }
     }
+}
+
+#endif
+
 }

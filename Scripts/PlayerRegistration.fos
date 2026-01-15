@@ -1,11 +1,11 @@
-// FOS Common
+namespace PlayerRegistration
+{
 
-///@ Property Game Protected CritterProperty[] RegProperties
-///@ Property Critter Protected bool IsGenerated
-///@ RemoteCall Server AddRegistrationProperty(CritterProperty property)
-///@ RemoteCall Server GeneratePlayer(CritterProperty=>int props)
+///@ Property Game Common CritterProperty[] RegProperties Mutable OwnerSync Persistent
+///@ Property Critter Common bool IsGenerated Mutable OwnerSync Persistent
+///@ RemoteCall Server GeneratePlayer(CritterProperty=>int32 props)
 
-#ifdef __SERVER
+#if SERVER
 
 void ModuleInit()
 {
@@ -19,7 +19,7 @@ void ModuleInit()
     AddRegistrationProperty(CritterProperty::TagSkill1);
     AddRegistrationProperty(CritterProperty::TagSkill2);
     AddRegistrationProperty(CritterProperty::TagSkill3);
-    for (uint i = 0; i < CritterPropertyGroup::Traits.length(); i++) {
+    for (int i = 0; i < CritterPropertyGroup::Traits.length(); i++) {
         AddRegistrationProperty(CritterPropertyGroup::Traits[i]);
     }
     AddRegistrationProperty(CritterProperty::Age);
@@ -28,14 +28,9 @@ void ModuleInit()
 
 void AddRegistrationProperty(CritterProperty prop)
 {
-    auto properies = array<CritterProperty>(Game.RegProperties);
+    auto properies = Game.RegProperties;
     properies.insertLast(prop);
     Game.RegProperties = properies;
-}
-
-void AddRegistrationProperty(Player player, CritterProperty prop)
-{
-    AddRegistrationProperty(prop);
 }
 
 void GeneratePlayer(Player player, dict<CritterProperty, int> props)
@@ -48,7 +43,7 @@ void GeneratePlayer(Player player, dict<CritterProperty, int> props)
 
     Parameters::CritterGenerate(props);
 
-    for (uint i = 0; i < props.length(); i++) {
+    for (int i = 0; i < props.length(); i++) {
         cr.SetAsInt(props.getKey(i), props.getValue(i));
     }
 
@@ -60,13 +55,24 @@ void GeneratePlayer(Player player, dict<CritterProperty, int> props)
     Game.Log("Player generated");
 }
 
+string GetPlayerName(ident crId)
+{
+    Critter cr = Game.GetCritter(crId);
+    if (valid(cr) && cr.ControlledByPlayer) {
+        return cr.Name;
+    }
+
+    return "";
+}
+
 #endif
 
-#ifdef __CLIENT
+#if CLIENT
 
 void ModuleInit()
 {
     Game.OnCritterIn.Subscribe(OnCritterIn);
+    Game.OnRegistrationSuccess.Subscribe(OnRegistrationSuccess);
 }
 
 dict<CritterProperty, int> RegProps = {};
@@ -77,15 +83,15 @@ void CallRegisterPlayer(string name, string pass, dict<CritterProperty, int> pro
     Game.SetCacheText("RegName__", name);
     Game.SetCacheText("RegPassword__", pass);
     RegProps = props.clone();
-    Game.CustomCall("Register\n" + name + "\n" + pass, "\n");
+    Game.Register(name, pass);
     GuiScreensExt::TryExit();
 
     // Wait disconnection and login
     while (true) {
         Yield(10);
 
-        if (!Settings.IsConnected && !Settings.IsConnecting && !Settings.IsUpdating) {
-            Game.CustomCall("Login\n" + Game.GetCacheText("RegName__") + "\n" + Game.GetCacheText("RegPassword__"), "\n");
+        if (!Game.IsConnected() && !Game.IsConnecting()) {
+            Game.Login(Game.GetCacheText("RegName__"), Game.GetCacheText("RegPassword__"));
             break;
         }
     }
@@ -99,11 +105,14 @@ void OnCritterIn(Critter cr)
 
     Assert(RegProps.length() > 0);
     CurPlayer.ServerCall.GeneratePlayer(RegProps.clone());
+    Game.Log("critter in2 DisplayName " + cr.DisplayName);
 }
 
-void AddRegistrationProperty(CritterProperty prop)
+void OnRegistrationSuccess()
 {
-    CurPlayer.ServerCall.AddRegistrationProperty(prop);
+    Game.Login(Game.GetCacheText("RegName__"), Game.GetCacheText("RegPassword__"));
 }
 
 #endif
+
+}

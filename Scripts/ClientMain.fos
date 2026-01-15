@@ -1,4 +1,7 @@
-// FOS Client Sort 2
+namespace ClientMain // Sort 2
+{
+
+#if CLIENT
 
 ///@ RemoteCall Client CombatResult(any[] data)
 
@@ -8,8 +11,6 @@ void ModuleInit()
     Game.OnFinish.Subscribe(finish);
     Game.OnLoop.Subscribe(loop);
     Game.OnMouseMove.Subscribe(mouse_move);
-    Game.OnGetActiveScreens.Subscribe(get_active_screens);
-    Game.OnScreenChange.Subscribe(screen_change);
     Game.OnRenderIface.Subscribe(render_iface);
     Game.OnRenderMap.Subscribe(render_map);
     Game.OnCritterIn.Subscribe(critter_in);
@@ -21,15 +22,11 @@ void ModuleInit()
     Game.OnItemInvChanged.Subscribe(item_inv_changed);
     Game.OnItemInvOut.Subscribe(item_inv_out);
     Game.OnContainerChanged.Subscribe(container_changed);
-    Game.OnMapMessage.Subscribe(map_message);
-    Game.OnInMessage.Subscribe(in_message);
-    Game.OnOutMessage.Subscribe(out_message);
-    Game.OnMessageBox.Subscribe(message_box);
     Game.OnCritterAction.Subscribe(critter_action);
     Game.OnCritterActionEx.Subscribe(critter_action);
-    Game.OnCritterAnimationProcess.Subscribe(critter_animation_process);
     Game.OnItemsCollection.Subscribe(items_collection);
     Game.OnScreenSizeChanged.Subscribe(on_screen_size_changed);
+    Game.OnInfoMessage.Subscribe(OnInfoMessage);
 }
 
 // //////////////////////////////////////////////////////////////////////////////////////////////////
@@ -70,18 +67,13 @@ void finish()
 
 // //////////////////////////////////////////////////////////////////////////////////////////////////
 // Main loop function. Next call every cycle.
-uint MouseStayTick = 0;
+nanotime MouseStayTick = ZERO_NANOTIME;
 
-void loop() // (uint& wait)
+void loop()
 {
-    Critter chosen = Game.GetChosen();
-    if (chosen != null) {
-        chosen.AttackDistanceHint = Parameters::GetActiveItemAttackDistance(chosen);
-    }
-
     // Description under cursor
-    if (Settings.Cursor == CursorType::Default && Game.GetTick() - 1200 >= MouseStayTick && MouseStayTick != 0) {
-        MouseStayTick = 0;
+    if (Settings.Cursor == CursorType::Default && Game.FrameTime - Time::Milliseconds(1200) >= MouseStayTick && MouseStayTick != ZERO_NANOTIME) {
+        MouseStayTick = ZERO_NANOTIME;
         Gui::Screen screen = Gui::GetActiveScreen();
         if (screen == null) {
             return;
@@ -97,48 +89,29 @@ void loop() // (uint& wait)
             }
         }
         else if (CurMap != null && !screen.IsModal) {
-            Entity entity = CurMap.GetEntityAtScreenPos(Settings.MouseX, Settings.MouseY);
+            Entity entity = CurMap.GetEntityAtScreenPos(Settings.MousePos);
             item = cast<Item>(entity);
             cr = cast<Critter>(entity);
         }
 
         if (item != null) {
-            Game.Message(item_description(item, ItemLookTypes::OnlyName));
+            Messaging::Info(item_description(item, ItemLookTypes::OnlyName));
         }
         else if (cr != null) {
-            Game.Message(critter_description(cr, CritterLookTypes::LookShort));
+            Messaging::Info(critter_description(cr, CritterLookTypes::LookShort));
         }
     }
 
     Gui::EngineCallback_Loop();
 }
 
-void mouse_move(int offsetX, int offsetY)
+void mouse_move(ipos offset)
 {
     if (Settings.Cursor == CursorType::Default) {
-        MouseStayTick = Game.GetTick();
+        MouseStayTick = Game.FrameTime;
     }
     else {
-        MouseStayTick = 0;
-    }
-}
-
-// //////////////////////////////////////////////////////////////////////////////////////////////////
-// Say to engine what screens is active.
-void get_active_screens(int[] & result)
-{
-    Gui::EngineCallback_GetActiveScreens(result);
-}
-
-// //////////////////////////////////////////////////////////////////////////////////////////////////
-// Show/hide screen behaviour.
-void screen_change(bool show, int screen, dict<string, any> params)
-{
-    if (show) {
-        Gui::EngineCallback_ShowScreen(screen, params);
-    }
-    else {
-        Gui::EngineCallback_HideScreen(screen);
+        MouseStayTick = ZERO_NANOTIME;
     }
 }
 
@@ -156,19 +129,11 @@ void screen_change(bool show, int screen, dict<string, any> params)
 //    100 (over map), 101 (over all)
 void render_iface()
 {
-    Gui::Screen mainScreen = Gui::GetActiveMainScreen();
-    bool needDrawMap = mainScreen != null && mainScreen.Index == CLIENT_MAIN_SCREEN_GAME && CurMap != null;
-
-    if (needDrawMap) {
+    if (Gui::IsScreenActive(GuiScreen::Game) && CurMap != null) {
         CurMap.DrawMap();
     }
 
     Game.OnPreRenderIface.Fire();
-
-    if (needDrawMap) {
-        CurMap.DrawMapTexts();
-    }
-
     ChosenTabs::DrawChosenTabs();
     CritterIcons::DrawIcons();
     Gui::EngineCallback_Draw();
@@ -178,10 +143,10 @@ void render_iface()
     // Help info
     if (Settings.HelpInfo) {
         // About
-        string aboutText = "FOnline " + (Settings.Singleplayer ? "Singleplayer" : "") + "\n" + "by Gamers for Gamers\n" + "version " + Game.GetGameVersion() +
+        string aboutText = "FOnline " + (Settings.Singleplayer ? "Singleplayer" : "") + "\n" + "by Gamers for Gamers\n" + "version " + Settings.GameVersion +
                            "\n" + "\n" + "Traffic, bytes:\n" + "Send: " + Game.CustomCall("BytesSend") + "\n" + "Receive: " + Game.CustomCall("BytesReceive") +
                            "\n" + "Sum: " + (Game.CustomCall("BytesSend").toInt() + Game.CustomCall("BytesReceive").toInt()) + "\n" + "\n" +
-                           "FPS: " + Settings.FPS + " (" + (!Settings.VSync ? "" + math::abs(Settings.FixedFPS) : "VSync") +
+                           "FPS: " + Settings.FixedFPS + " (" + (!Settings.VSync ? "" + math::abs(Settings.FixedFPS) : "VSync") +
                            (!Settings.VSync && Settings.FixedFPS < 0 ? ", sleep" : "") + ")\n" + "Ping: " + Settings.Ping + "\n" + "\n" +
                            "Sound: " + Settings.SoundVolume + "\n" + "Music: " + Settings.MusicVolume + "\n";
         if (Settings.DebugInfo) {
@@ -189,18 +154,23 @@ void render_iface()
                          "Pressed object: " + (Gui::GetPressedObject() !is null ? Gui::GetPressedObject().Name : "None") + "\n" +
                          "Hovered object: " + (Gui::GetHoveredObject() !is null ? Gui::GetHoveredObject().Name : "None");
         }
-        Game.DrawText(aboutText, 30, 30, Settings.ScreenWidth, Settings.ScreenHeight, ucolor(187, 187, 187), Fonts::Big, 0);
+        Game.DrawText(aboutText, ipos(30, 30), isize(Settings.ScreenWidth, Settings.ScreenHeight), ucolor(187, 187, 187), Fonts::Big, 0);
 
         // Help
-        Game.DrawText(MSG_GAME(MsgStr::StrGameHelp), 0, 0, Settings.ScreenWidth, Settings.ScreenHeight, COLOR_WHITE, Fonts::Default, FT_CENTERX | FT_CENTERY);
+        Game.DrawText(MSG_GAME(MsgStr::StrGameHelp),
+                      ipos(0, 0),
+                      isize(Settings.ScreenWidth, Settings.ScreenHeight),
+                      COLOR_WHITE,
+                      Fonts::Default,
+                      FT_CENTERX | FT_CENTERY);
     }
 
     // Zoom text
-    if (Settings.MapZooming && Settings.SpritesZoomMin != Settings.SpritesZoomMax) {
+    if (Settings.MapZoomEnabled && Settings.MapZoomInProgress && CurMap != null) {
         string zoomText = MSG_GAME(MsgStr::StrZoom);
         zoomText = Game.ReplaceText(zoomText, "%d", "" + int(1.0 / CurMap.SpritesZoom * 100.0));
         zoomText = Game.ReplaceText(zoomText, "%%", "%");
-        Game.DrawText(zoomText, 0, 0, Settings.ScreenWidth, Settings.ScreenHeight, COLOR_SAND, Fonts::Big, FT_CENTERX | FT_CENTERY);
+        Game.DrawText(zoomText, ipos(0, 0), isize(Settings.ScreenWidth, Settings.ScreenHeight), COLOR_SAND, Fonts::Big, FT_CENTERX | FT_CENTERY);
     }
 
     Gui::EngineCallback_DrawCursor();
@@ -227,29 +197,34 @@ void render_iface()
 // Render map function. You can use DrawMap* functions only there.
 void render_map()
 {
-    Game.Log("render_map");
-    auto wellSprite = Sprite::Sprite();
-    uint sprId = Game.LoadSprite("art/scenery/MODWELL1.FRM");
-    Game.StopSprite(sprId);
-    Game.Log("render_map 2");
-    sprId = Game.LoadMapSprite("art/scenery/MODWELL1.FRM");
-    Game.StopSprite(sprId);
 }
 
 // //////////////////////////////////////////////////////////////////////////////////////////////////
 // Called on something critter in/out game.
 void critter_in(Critter cr)
 {
-    // Default colors
-    cr.NameColor = COLOR_CRITTER_NAME;
-    cr.ContourColor = (cr.IsControlledByPlayer ? COLOR_CONTOUR_YELLOW : COLOR_CONTOUR_RED);
+    if (cr.ControlledByPlayer) {
+        Game.Log("critter in DisplayName " + cr.DisplayName);
+        cr.SetName(cr.DisplayName);
+        cr.ContourColor = COLOR_CONTOUR_YELLOW;
+    }
+    else {
+        cr.SetName(critter_description(cr, CritterLookTypes::OnlyName));
+        cr.ContourColor = COLOR_CONTOUR_RED;
+    }
 
-    // Karma voting
-    int highlight = cr.PlayerKarma / 10;
-    cr.NameColor = ucolor(COLOR_CRITTER_NAME.red + highlight, COLOR_CRITTER_NAME.green + highlight, COLOR_CRITTER_NAME.blue + highlight);
+    if (!cr.IsChosen) {
+        cr.NameOffset = -10;
+    }
+
+    cr.SexTagFemale = cr.Gender == GenderType::Female;
+
+    if (cr.IsChosen) {
+        Gui::EngineCallback_ItemChanged(false);
+    }
 
     // For correct dialog formatting (male/female)
-    cr.IsSexTagFemale = cr.Gender == GenderType::Female;
+    cr.SexTagFemale = cr.Gender == GenderType::Female;
 }
 
 void critter_out(Critter cr)
@@ -297,119 +272,8 @@ void container_changed()
 }
 
 // //////////////////////////////////////////////////////////////////////////////////////////////////
-// Call on receive message on map.
-// By default delay == [TextDelay + message length * 100] ms
-bool map_message(string& message, uint16& hexX, uint16& hexY, ucolor& color, uint& delay)
-{
-    // Detect radio
-    if (color == 0xFFFFFFFE) {
-        message = ".." + message + "..";
-    }
-    return true;
-}
-
-// //////////////////////////////////////////////////////////////////////////////////////////////////
-// Call on receive message.
-// By default delay == [TextDelay + message length * 100] ms
-bool in_message(string message, int& sayType, ident critterId, uint& delay)
-{
-    if (sayType == SAY_DIALOG) {
-        Gui::Screen screen = Gui::GetActiveScreen();
-        if (screen != null) {
-            if (screen.Index == CLIENT_SCREEN_BARTER) {
-                auto barterScreen = cast<GuiScreens::Barter::Barter>(screen);
-                barterScreen.SetDialogText(message);
-            }
-            if (screen.Index == CLIENT_SCREEN_DIALOG) {
-                auto dialogScreen = cast<GuiScreens::Dialog::Dialog>(screen);
-                dialogScreen.SetDialogText(message);
-            }
-        }
-    }
-    return true;
-}
-
-// //////////////////////////////////////////////////////////////////////////////////////////////////
-// Call on send message.
-bool out_message(string& message, int& sayType)
-{
-    string cmdPrefix = "~";
-    if (message[0] == cmdPrefix) // Command
-    {
-        message[0] = "";
-
-        if (Test::ParseMessage(message)) {
-            return false;
-        }
-
-        if (message == "globalmap") {
-            CurPlayer.ServerCall.Rpc_CritterToGlobal();
-            return false;
-        }
-
-        string separator = "#";
-        string result = Game.CustomCall("Command" + separator + message, separator);
-        if (result == "UNKNOWN") {
-            Game.Message("Unknown command.");
-        }
-        else if (result.length() > 0) {
-            string[] msg = result.split(separator);
-            for (uint i = 0; i < msg.length(); i++) {
-                Game.Message(Game.ReplaceText(result, "<", "<" + cmdPrefix));
-            }
-        }
-
-        return false;
-    }
-
-    if (sayType == SAY_NORM) {
-        if (message.length() > 2 && (message[0] == "/" || message[0] == ".")) {
-            string ch = message[1];
-            if (ch == "к" || ch == "К" || ch == "s" || ch == "S") {
-                sayType = SAY_SHOUT;
-            }
-            else if (ch == "э" || ch == "Э" || ch == "e" || ch == "E") {
-                sayType = SAY_EMOTE;
-            }
-            else if (ch == "ш" || ch == "Ш" || ch == "w" || ch == "W") {
-                sayType = SAY_WHISP;
-            }
-            else if (ch == "с" || ch == "С" || ch == "$") {
-                sayType = SAY_SOCIAL;
-            }
-            else if (ch == "р" || ch == "Р" || ch == "r" || ch == "R") {
-                sayType = SAY_RADIO;
-            }
-
-            if (sayType != SAY_NORM) {
-                message[0] = "";
-                message[0] = "";
-                while (message[0] == " ") {
-                    message[0] = "";
-                }
-            }
-        }
-        else if ( // RegExp: [*]([^*].*[^*])[*]
-            message.length() >= 4 && message[0] == "*" && message[1] != "*" && message[message.length() - 2] != "*" && message[message.length() - 1] == "*") {
-            sayType = SAY_EMOTE;
-            message = message.substr(1, message.length() - 2);
-        }
-    }
-
-    bool result = false;
-    for (uint i = 0, j = message.length(); i < j; i++) {
-        if (message[i] != " ") {
-            result = true;
-            break;
-        }
-    }
-
-    return result;
-}
-
-// //////////////////////////////////////////////////////////////////////////////////////////////////
 // To-hit chance.
-int to_hit(Critter chosen, Critter target, ProtoItem weapon, uint8 weaponMode)
+int to_hit(Critter chosen, Critter target, ProtoItem weapon, int weaponMode)
 {
     int use = _WeaponModeUse(weaponMode);
     int hitLocation = _WeaponModeAim(weaponMode);
@@ -465,7 +329,7 @@ int to_hit(Critter chosen, Critter target, ProtoItem weapon, uint8 weaponMode)
             acc += distmod2;
         }
         else {
-            if (chosen.IsControlledByPlayer) {
+            if (chosen.ControlledByPlayer) {
                 acc -= (perception - 2) * distmod1; // we want to keep it, because fo2238 might use it to display NPCs chance (via possessing)
             }
             else {
@@ -493,7 +357,7 @@ int to_hit(Critter chosen, Critter target, ProtoItem weapon, uint8 weaponMode)
 
         toHit += acc;
 
-        blockers = CurMap.GetCrittersInPath(chosen.HexX, chosen.HexY, target.HexX, target.HexY, 0.0f, dist, CritterFindType::Alive).length();
+        blockers = CurMap.GetCrittersInPath(chosen.Hex, target.Hex, 0.0f, dist, CritterFindType::NonDead).length();
         if (!target.IsKnockout()) {
             blockers--;
         }
@@ -528,7 +392,7 @@ int to_hit(Critter chosen, Critter target, ProtoItem weapon, uint8 weaponMode)
     if (chosen.IsDamagedEye) {
         toHit -= 25;
     }
-    if (chosen.PerkVampireAccuracy != 0 && IS_NIGHT(Game.Hour)) {
+    if (chosen.PerkVampireAccuracy != 0 && IS_NIGHT(GameTime::GetHour())) {
         toHit += 13;
     }
     if (target.IsKnockout()) {
@@ -546,7 +410,7 @@ int to_hit(Critter chosen, Critter target, ProtoItem weapon, uint8 weaponMode)
     return toHit;
 }
 
-uint GetHitAim(int hitLocation)
+int GetHitAim(int hitLocation)
 {
     switch (hitLocation) {
     case HitLocations::LocationNone:
@@ -575,7 +439,7 @@ uint GetHitAim(int hitLocation)
 
 // //////////////////////////////////////////////////////////////////////////////////////////////////
 // Override aim location set by player through targetting screen or simple click on target.
-void hit_aim(uint8& aim)
+void hit_aim(int& aim)
 {
 }
 
@@ -583,7 +447,7 @@ void hit_aim(uint8& aim)
 // Combat results.
 void CombatResult(any[] data)
 {
-    uint datalen = data.length();
+    int datalen = data.length();
     if (datalen == 0) {
         return;
     }
@@ -591,15 +455,15 @@ void CombatResult(any[] data)
         return;
     }
 
-    uint current = 1;
+    int current = 1;
 
     while (current < datalen) {
         int damage = -1;
-        uint effect = 0;
-        uint loc = 0;
+        int effect = 0;
+        int loc = 0;
         int message = -1;
 
-        uint mode = data[current++];
+        int mode = data[current++];
         ident who = data[current++];
         ident who2;
         Critter originalTarget;
@@ -620,7 +484,7 @@ void CombatResult(any[] data)
             }
         }
 
-        uint offset;
+        int offset;
         if (self) {
             if (cr.Gender == GenderType::Male) {
                 offset = 506;
@@ -851,7 +715,7 @@ void CombatResult(any[] data)
             ext.insertLast(Game.GetText(TextPackName::Combat, offset + 7 - 306));
         }
 
-        for (uint m = 0, n = ext.length(); m < n; m++) {
+        for (int m = 0, n = ext.length(); m < n; m++) {
             if (m == n - 1) {
                 result += Game.GetText(TextPackName::Combat, 108);
             }
@@ -864,15 +728,17 @@ void CombatResult(any[] data)
 
         result += ".";
 
-        Game.Message(FOMB_COMBAT_RESULT, result);
+        Messaging::Info(MessageBoxType::Combat, result);
 
         if (8 <= mode && mode <= 11 && isVerbose && message != -1) {
-            Game.Message(FOMB_COMBAT_RESULT, name + " " + Game.GetText(TextPackName::Combat, offset + 7 - 306) + ".");
+            Messaging::Info(MessageBoxType::Combat, name + " " + Game.GetText(TextPackName::Combat, offset + 7 - 306) + ".");
         }
 
         // On head indication
         if (Settings.DamageHitDelay > 0 && damage > 0) {
-            CurMap.Message("-" + damage, cr.HexX, cr.HexY, Settings.DamageHitDelay, 0xFFC80000, true, Game.Random(-5, 5), -20);
+            mpos hex = cr.Hex;
+            Yield(Settings.DamageHitDelay);
+            MapText::AddFlyingText(hex, 0xFFC80000, "-" + damage);
         }
     }
 }
@@ -1058,7 +924,7 @@ string item_description(Item item, ItemLookTypes lookType)
     if (lookType == ItemLookTypes::WmCar) {
         string fuel = Game.GetText(TextPackName::Game, MsgStr::StrInvCarFuel);
         fuel = Game.ReplaceText(fuel, "VALUE", item.Charge / 100);
-        fuel = Game.ReplaceText(fuel, "MAX_VALUE", item.Car_TankVolume / 100);
+        fuel = Game.ReplaceText(fuel, "MAXVAL", item.Car_TankVolume / 100);
         string deterioration = Game.GetText(TextPackName::Game, MsgStr::StrInvCarDeterioration);
         deterioration = Game.ReplaceText(deterioration, "VALUE", item.Deterioration * 100 / item.Car_MaxDeterioration);
         result = fuel + "\n" + deterioration;
@@ -1090,15 +956,15 @@ string item_description(Item item, ItemLookTypes lookType)
                 result += "\n";
                 string str = Game.GetText(TextPackName::Game, MsgStr::StrInvHasShots);
                 str = Game.ReplaceText(str, "VALUE", item.AmmoCount);
-                str = Game.ReplaceText(str, "MAX_VALUE", item.Weapon_MaxAmmoCount);
+                str = Game.ReplaceText(str, "MAXVAL", item.Weapon_MaxAmmoCount);
                 str = Game.ReplaceText(str, "AMMO", Game.GetText(TextPackName::Game, STR_CALIBER(item.Weapon_Caliber)));
                 result += str;
             }
 
             // Deterioration
             if (item.Deteriorable) {
-                uint8 brokenCount = item.BrokenCount;
-                uint16 deterioration = item.Deterioration;
+                int brokenCount = item.BrokenCount;
+                int deterioration = item.Deterioration;
 
                 // Broken level, procent
                 result += "\n";
@@ -1159,7 +1025,7 @@ string critter_description(Critter& cr, CritterLookTypes lookType)
     int gender = cr.Gender;
 
     // Player
-    if (cr.IsControlledByPlayer) {
+    if (cr.ControlledByPlayer) {
         // Only name
         if (lookType == CritterLookTypes::OnlyName) {
             result = cr.Name; // No change
@@ -1175,7 +1041,7 @@ string critter_description(Critter& cr, CritterLookTypes lookType)
             result += Game.GetText(TextPackName::Game, STR_CRIT_LOOK1(gender));
 
             // Age
-            uint ageStr = Game.GetTextNumUpper(TextPackName::Game, STR_CRIT_LOOK_AGE(gender, cr.Age));
+            int ageStr = Game.GetTextNumUpper(TextPackName::Game, STR_CRIT_LOOK_AGE(gender, cr.Age));
             if (ageStr != 0) {
                 result += Game.GetText(TextPackName::Game, ageStr);
             }
@@ -1336,19 +1202,10 @@ string critter_description(Critter& cr, CritterLookTypes lookType)
 }
 
 // //////////////////////////////////////////////////////////////////////////////////////////////////
-// Call to determine cost of single item.
-// To allow function set Settings.CustomItemCost to true.
-// Don't forgot specify this function in client script.
-uint item_cost(Item item, Critter& chosen, Critter& npc, bool sell)
-{
-    return sell ? 1 : 2;
-}
-
-// //////////////////////////////////////////////////////////////////////////////////////////////////
 // Call to determine available timeouts.
 void get_available_timeouts(CritterProperty[] & timeouts)
 {
-    for (uint i = 0; i < CritterPropertyGroup::Timeouts.length(); i++) {
+    for (int i = 0; i < CritterPropertyGroup::Timeouts.length(); i++) {
         timeouts.insertLast(CritterPropertyGroup::Timeouts[i]);
     }
 }
@@ -1387,8 +1244,6 @@ void critter_action(bool localCall, Critter cr, CritterAction action, int action
             CritterItemSlot fromSlot = CritterItemSlot(actionExt);
             CritterItemSlot toSlot = item.CritterSlot;
 
-            cr.StopAnim();
-
             if (toSlot == CritterItemSlot::Main) {
                 if (proto.Type == ItemType::Weapon) {
                     cr.Animate(proto.Weapon_StateAnim, CritterActionAnim::ShowWeapon, item);
@@ -1409,8 +1264,6 @@ void critter_action(bool localCall, Critter cr, CritterAction action, int action
         break;
     case CritterAction::UseItem:
         if (cr.IsAlive() && valid(proto)) {
-            cr.StopAnim();
-
             if (proto.Type == ItemType::Weapon && cr.IsAnimAvailable(proto.Weapon_StateAnim, proto.Weapon_ActionAnim_0)) {
                 cr.Animate(proto.Weapon_StateAnim, proto.Weapon_ActionAnim_0, item);
             }
@@ -1421,7 +1274,6 @@ void critter_action(bool localCall, Critter cr, CritterAction action, int action
         break;
     case CritterAction::DropItem:
         if (cr.IsAlive()) {
-            cr.StopAnim();
             cr.Animate(CritterStateAnim::None, CritterActionAnim::PickUp);
         }
         break;
@@ -1430,8 +1282,6 @@ void critter_action(bool localCall, Critter cr, CritterAction action, int action
             int use = (actionExt & 0xF);
             int aim = ((actionExt >> 4) & 0xF);
             bool fail = (((actionExt >> 8) & 1) != 0);
-
-            cr.StopAnim();
 
             cr.Animate(CritterStateAnim::None, CritterActionAnim::PrepareWeapon);
 
@@ -1448,27 +1298,22 @@ void critter_action(bool localCall, Critter cr, CritterAction action, int action
         break;
     case CritterAction::ReloadWeapon:
         if (cr.IsAlive() && valid(proto)) {
-            cr.StopAnim();
             // Game.PlaySound( 'W', SOUND_WEAPON_RELOAD, proto.Weapon_SoundId_0, '1' );
             cr.Animate(item.Weapon_StateAnim, CritterActionAnim::Reload, item);
         }
         break;
     case CritterAction::UseSkill:
         if (cr.IsAlive() && actionExt != CritterProperty::SkillSneak) {
-            cr.StopAnim();
             cr.Animate(CritterStateAnim::None, CritterActionAnim::Use);
         }
         break;
     case CritterAction::PickItem:
         if (cr.IsAlive() && valid(proto)) {
-            cr.StopAnim();
             cr.Animate(CritterStateAnim::None, proto.GroundLevel ? CritterActionAnim::PickUp : CritterActionAnim::Use);
         }
         break;
     case CritterAction::PickCritter:
         if (cr.IsAlive()) {
-            cr.StopAnim();
-
             switch (actionExt) // 0 - loot, 1 - steal, 2 - push
             {
             case 0:
@@ -1487,7 +1332,6 @@ void critter_action(bool localCall, Critter cr, CritterAction action, int action
         break;
     case CritterAction::OperateContainer:
         if (cr.IsAlive()) {
-            cr.StopAnim();
             int transferType = actionExt / 10;
             int directionType = actionExt % 10;
 
@@ -1525,23 +1369,19 @@ void critter_action(bool localCall, Critter cr, CritterAction action, int action
         break;
     case CritterAction::DamageForce:
         if (cr.IsAlive()) {
-            cr.StopAnim();
             cr.Animate(CritterStateAnim::None, actionExt == 0 ? CritterActionAnim::DamageFront : CritterActionAnim::DamageBack);
         }
         else if (cr.IsKnockout()) {
-            cr.StopAnim();
             cr.Animate(CritterStateAnim::None, actionExt == 0 ? CritterActionAnim::DamageProneFront : CritterActionAnim::DamageProneBack);
         }
         break;
     case CritterAction::Knockout:
         if (not cr.IsKnockout()) {
-            cr.StopAnim();
             cr.Animate(CritterStateAnim::None, CritterActionAnim(actionExt));
         }
         break;
     case CritterAction::StandUp:
         if (cr.IsKnockout()) {
-            cr.StopAnim();
             cr.Animate(CritterStateAnim::None, CritterActionAnim(actionExt));
         }
         break;
@@ -1552,7 +1392,6 @@ void critter_action(bool localCall, Critter cr, CritterAction action, int action
         break;
     case CritterAction::Dead:
         if (not cr.IsDead()) {
-            cr.StopAnim();
             cr.Animate(CritterStateAnim::None, CritterActionAnim(actionExt));
         }
         break;
@@ -1570,15 +1409,6 @@ void critter_action(bool localCall, Critter cr, CritterAction action, int action
 }
 
 // //////////////////////////////////////////////////////////////////////////////////////////////////
-// Call before critter animation playing.
-void critter_animation_process(bool animateStay, Critter cr, CritterStateAnim stateAnim, CritterActionAnim actionAnim, AbstractItem item)
-{
-    if (!animateStay) {
-        Animation::PlayAnimSound(cr.ModelName, cr.Gender, stateAnim, actionAnim);
-    }
-}
-
-// //////////////////////////////////////////////////////////////////////////////////////////////////
 // Called on some items collection generating.
 // To force function call use RefreshItemsCollection(int collection)
 // Collection constants see in Items collections _client_defines.fos
@@ -1589,36 +1419,25 @@ void items_collection(int collection, Item[] items)
     // Disable showing of all weapons in USE mode:
     /*if(collection == ITEMS_USE)
        {
-            for(uint i = 0, j = items.length(); i < j; i++)
+            for(int i = 0; i < items.length(); i++)
                     if(items[i].Type == ItemType::Weapon)
                             items[i] = null;
        }*/
 }
 
 // //////////////////////////////////////////////////////////////////////////////////////////////////
-// Call on message added to message box.
-// Parameters messageText and messageType can be changed for engine handler.
-void message_box(int messageType, string messageText)
-{
-    Gui::MessageBox[] messageBoxes = Gui::CollectMessageBoxes();
-    for (uint i = 0; i < messageBoxes.length(); i++) {
-        messageBoxes[i].AddMessage(messageText, messageType);
-    }
-}
-
-// //////////////////////////////////////////////////////////////////////////////////////////////////
 // Called to check interface hit.
 bool check_interface_hit(int x, int y)
 {
-    return Gui::CheckHit(x, y);
+    return Gui::CheckHit(ipos(x, y));
 }
 
 // //////////////////////////////////////////////////////////////////////////////////////////////////
 // Called to check current container item under mouse.
 bool get_cont_item(ident& itemId, bool& isEnemy)
 {
-    Gui::Screen screen = Gui::GetActiveScreen();
-    if (screen is null || screen.Index != CLIENT_SCREEN_INVENTORY) { // screen.IsHardcoded ||
+    Gui::Screen screen = Gui::GetActiveScreen(GuiScreen::Inventory);
+    if (screen == null) {
         return false;
     }
 
@@ -1680,7 +1499,7 @@ bool ItemsDragAndDropHandler(Gui::Object obj, Gui::Object target)
     // Drop item
     if (targetItemView is null) {
         if (objItem.Stackable && objItem.Count > 1) {
-            Game.ShowScreen(CLIENT_SCREEN_SPLIT, dict<string, any> = {{"TargetItemId", objItem.Id}, {"ItemsCollection", ITEMS_CHOSEN_ALL}});
+            Gui::ShowScreen(GuiScreen::Split, dict<string, any> = {{"TargetItemId", objItem.Id}, {"ItemsCollection", ITEMS_CHOSEN_ALL}});
         }
         else {
             ChosenActions::SetChosenActions(array<any> = {Tla::ChosenMoveItem, objItem.Id, objItem.Count, CritterItemSlot::Outside, 0, 0, 0});
@@ -1694,7 +1513,7 @@ bool ItemsDragAndDropHandler(Gui::Object obj, Gui::Object target)
         (objItemView.UserDataExt == ITEMS_BARTER_OFFER && targetItemView.UserDataExt == ITEMS_BARTER) ||
         (objItemView.UserDataExt == ITEMS_BARTER_OPPONENT_OFFER && targetItemView.UserDataExt == ITEMS_BARTER_OPPONENT)) {
         if (objItem.Stackable && objItem.Count > 1) {
-            Game.ShowScreen(CLIENT_SCREEN_SPLIT, dict<string, any> = {{"TargetItemId", objItem.Id}, {"ItemsCollection", objItemView.UserDataExt}});
+            Gui::ShowScreen(GuiScreen::Split, dict<string, any> = {{"TargetItemId", objItem.Id}, {"ItemsCollection", objItemView.UserDataExt}});
         }
         else {
             ClientItems::BarterTransfer(objItem.Id, objItemView.UserDataExt, objItem.Count);
@@ -1708,13 +1527,13 @@ bool ItemsDragAndDropHandler(Gui::Object obj, Gui::Object target)
         (objItemView.UserDataExt == ITEMS_PICKUP_FROM && targetItemView.UserDataExt == ITEMS_PICKUP)) {
         if (objItem.Stackable && objItem.Count > 1) {
             // Game.CustomCall( "SplitItem " + objItem.Id + " " + objItemView.UserDataExt );
-            Game.ShowScreen(CLIENT_SCREEN_SPLIT, dict<string, any> = {{"TargetItemId", objItem.Id}, {"ItemsCollection", objItemView.UserDataExt}});
+            Gui::ShowScreen(GuiScreen::Split, dict<string, any> = {{"TargetItemId", objItem.Id}, {"ItemsCollection", objItemView.UserDataExt}});
         }
         else {
             any[] actions = {};
             ChosenActions::GetChosenActions(actions);
             any[] useItemAction = {Tla::ChosenMoveItemCont, objItem.Id, objItemView.UserDataExt, objItem.Count, 0, 0, 0};
-            for (uint i = 0; i < useItemAction.length(); i++) {
+            for (int i = 0; i < useItemAction.length(); i++) {
                 actions.insertLast(useItemAction[i]);
             }
             ChosenActions::SetChosenActions(actions);
@@ -1730,7 +1549,7 @@ bool ItemsDragAndDropHandler(Gui::Object obj, Gui::Object target)
             any[] actions = {};
             ChosenActions::GetChosenActions(actions);
             any[] useItemAction = {Tla::ChosenUseItem, targetItem.Id, 0, TARGET_SELF_ITEM, objItem.Id, USE_RELOAD, 0};
-            for (uint i = 0; i < useItemAction.length(); i++) {
+            for (int i = 0; i < useItemAction.length(); i++) {
                 actions.insertLast(useItemAction[i]);
             }
             ChosenActions::SetChosenActions(actions);
@@ -1744,7 +1563,7 @@ bool ItemsDragAndDropHandler(Gui::Object obj, Gui::Object target)
         any[] actions = {};
         ChosenActions::GetChosenActions(actions);
         any[] useItemAction = {Tla::ChosenMoveItem, objItem.Id, objItem.Count, targetSlot, 0, 0, 0};
-        for (uint i = 0; i < useItemAction.length(); i++) {
+        for (int i = 0; i < useItemAction.length(); i++) {
             actions.insertLast(useItemAction[i]);
         }
         ChosenActions::SetChosenActions(actions);
@@ -1772,4 +1591,21 @@ bool lmenu_node_select(int nodeType, Critter cr, Item item)
 void on_screen_size_changed()
 {
     Gui::Callback_OnResolutionChanged();
+}
+
+void OnInfoMessage(EngineInfoMessage infoMessage, string extraText)
+{
+    if (infoMessage == EngineInfoMessage::ServerLog) {
+        Messaging::Info(extraText);
+    }
+    else if (Game.IsTextPresent(TextPackName::Game, int(infoMessage))) {
+        Messaging::Info(Game.GetText(TextPackName::Game, int(infoMessage)));
+    }
+    else {
+        Messaging::Info(Game.EnumToString(infoMessage));
+    }
+}
+
+#endif
+
 }

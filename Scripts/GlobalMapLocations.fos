@@ -1,6 +1,9 @@
-// FOS Server Client
+namespace GlobalMapLocations
+{
 
-///@ RemoteCall Client GetGlobalMapData(uint flags, uint8[] data)
+#if SERVER || CLIENT
+
+///@ RemoteCall Client GetGlobalMapData(int32 flags, uint8[] data)
 
 #define GM_INFO_LOCATIONS   (0x01)
 #define GM_INFO_CRITTERS    (0x02)
@@ -13,13 +16,13 @@
 // На клиенте неизвестен класс Location, поэтому данные о локациях передаются отдельной структурой.
 class LocationData
 {
-#ifdef __SERVER
+#if SERVER
     LocationData(Location loc)
     {
         LocId = loc.Id;
         LocPid = loc.ProtoId;
-        LocWx = loc.WorldX;
-        LocWy = loc.WorldY;
+        LocWx = loc.WorldPos.x;
+        LocWy = loc.WorldPos.y;
         Radius = loc.Radius;
         Color = loc.Color;
     }
@@ -27,9 +30,9 @@ class LocationData
 
     ident LocId;
     hstring LocPid;
-    uint16 LocWx;
-    uint16 LocWy;
-    uint16 Radius;
+    int LocWx;
+    int LocWy;
+    int Radius;
     ucolor Color;
 
     void Save(Serializator::Serializator save)
@@ -58,40 +61,27 @@ class LocationData
     }
 };
 
-#ifdef __SERVER
+#if SERVER
 
 void ModuleInit()
 {
     Game.OnGlobalMapCritterIn.Subscribe(OnGlobalMapCritterIn);
-    Game.OnPlayerLogin.Subscribe(OnPlayerLogin);
+    Game.OnCritterSendInitialInfo.Subscribe(OnCritterSendInitialInfo);
 
-    AddPropertyDeferredSetter(CritterProperty::KnownLocations, OnPlayerSetKnownLocations);
+    Game.AddPropertyDeferredSetter(CritterProperty::KnownLocations, OnPlayerSetKnownLocations);
 }
 
 void OnPlayerSetKnownLocations(Critter cr)
 {
     if (!valid(cr.GetMap())) {
-        any[] values = {cr.Id, GM_INFO_LOCATIONS};
-        Game.DeferredCall(0, DeferredSendGlobalMapData, values);
+        SetGlobalMapData(GM_INFO_LOCATIONS, cr);
     }
 }
 
-void OnPlayerLogin(Player player, string name, ident id, TextPackName& textMsg, uint& strNum, string& lexems)
+void OnCritterSendInitialInfo(Critter cr)
 {
-    any[] values = {id, GM_INFO_ALL};
-    Game.DeferredCall(0, DeferredSendGlobalMapData, values);
-}
-
-void DeferredSendGlobalMapData(any[] values)
-{
-    Assert(values.length() == 2);
-
-    ident id = values[0];
-    uint flags = values[1];
-
-    Critter cr = Game.GetCritter(id);
-    if (valid(cr) && !valid(cr.GetMap()) && cr.IsControlledByPlayer) {
-        SetGlobalMapData(flags, cr);
+    if (!valid(cr.GetMap())) {
+        SetGlobalMapData(GM_INFO_ALL, cr);
     }
 }
 
@@ -100,7 +90,7 @@ void OnGlobalMapCritterIn(Critter cr)
     SetGlobalMapData(GM_INFO_LOCATIONS, cr);
 }
 
-void SetGlobalMapData(uint flags, Critter cr)
+void SetGlobalMapData(int flags, Critter cr)
 {
     auto save = Serializator::Serializator();
 
@@ -109,7 +99,7 @@ void SetGlobalMapData(uint flags, Critter cr)
 
         ident[] locations = cr.KnownLocations.clone();
         save.Set(locations.length());
-        for (uint i = 0, l = locations.length(); i < l; i++) {
+        for (int i = 0, l = locations.length(); i < l; i++) {
             Location loc = Game.GetLocation(locations[i]);
             if (valid(loc)) {
                 auto locData = LocationData(loc);
@@ -128,13 +118,13 @@ void SetGlobalMapData(uint flags, Critter cr)
 
 #endif
 
-#ifdef __CLIENT
+#if CLIENT
 
 LocationData[] GMLocations = {};
 
-bool GetLocationCoordinates(hstring locPid, uint16& locWx, uint16& locWy)
+bool GetLocationCoordinates(hstring locPid, int& locWx, int& locWy)
 {
-    for (uint i = 0, l = GMLocations.length(); i < l; i++) {
+    for (int i = 0, l = GMLocations.length(); i < l; i++) {
         if (GMLocations[i].LocPid == locPid) {
             locWx = GMLocations[i].LocWx;
             locWy = GMLocations[i].LocWy;
@@ -145,12 +135,12 @@ bool GetLocationCoordinates(hstring locPid, uint16& locWx, uint16& locWy)
     return false;
 }
 
-LocationData GetHoveredLocationData(uint16 x, uint16 y) //TODO: проверить, почему так часто вызывается
+LocationData GetHoveredLocationData(int x, int y) //TODO: проверить, почему так часто вызывается
 {
-    for (uint i = 0, l = GMLocations.length(); i < l; i++) {
+    for (int i = 0, l = GMLocations.length(); i < l; i++) {
         auto locInfo = GMLocations[i];
         // TODO: проверка наложения локаций
-        if (valid(locInfo) && uint(math::sqrt(float(Math::Pow2(x - locInfo.LocWx) + Math::Pow2(y - locInfo.LocWy)))) <= locInfo.Radius) {
+        if (valid(locInfo) && int(math::sqrt(float(Math::Pow2(x - locInfo.LocWx) + Math::Pow2(y - locInfo.LocWy)))) <= locInfo.Radius) {
             return locInfo;
         }
     }
@@ -158,7 +148,7 @@ LocationData GetHoveredLocationData(uint16 x, uint16 y) //TODO: проверит
     return null;
 }
 
-void GetGlobalMapData(uint flags, uint8[] data)
+void GetGlobalMapData(int flags, uint8[] data)
 {
     auto load = Serializator::Serializator();
     if (load.SetData(data) == 0) {
@@ -167,9 +157,9 @@ void GetGlobalMapData(uint flags, uint8[] data)
 
     if (FLAG(flags, GM_INFO_LOCATIONS)) {
         GMLocations.clear();
-        uint count = 0;
+        int count = 0;
         load.Get(count);
-        for (uint i = 0; i < count; i++) {
+        for (int i = 0; i < count; i++) {
             auto locData = LocationData();
             locData.Load(load);
             GMLocations.insertLast(locData);
@@ -198,3 +188,7 @@ bool TryEnterHoveredLocation()
     return false;
 }
 #endif
+
+#endif
+
+}

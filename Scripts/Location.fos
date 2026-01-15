@@ -1,10 +1,15 @@
-// FOS Server
+namespace Location
+{
 
-///@ Property Location PrivateServer uint MaxPlayers
-///@ Property Location PrivateServer bool AutoGarbage
-///@ Property Location PrivateServer bool GeckVisible // Todo: improve GeckVisible mechanics
-///@ Property Critter PrivateServer bool IsGeck
-///@ Property Item PrivateServer bool IsGeck
+#if SERVER
+
+///@ Property Location Server hstring[] MapProtos
+///@ Property Location Server int32 MaxPlayers Mutable Persistent
+///@ Property Location Server bool AutoGarbage Mutable Persistent
+///@ Property Location Server bool GeckVisible Mutable Persistent // Todo: improve GeckVisible mechanics
+///@ Property Location Server hstring[] Automaps Mutable Persistent
+///@ Property Critter Server bool IsGeck Mutable Persistent
+///@ Property Item Server bool IsGeck Mutable Persistent
 
 void ModuleInit()
 {
@@ -13,7 +18,26 @@ void ModuleInit()
 
 void OnLocationInit(Location loc, bool firstTime)
 {
-    Game.DeferredCall(1000, LocationGarbager, loc.Id);
+    Game.StartTimeEvent(Time::Seconds(1), LocationGarbager, loc.Id);
+}
+
+Location CreateLocation(hstring protoId, ipos wpos, Critter[] critters = null, dict<LocationProperty, any> props = null)
+{
+    ProtoLocation proto = Game.GetProtoLocation(protoId);
+    Assert(proto != null, protoId);
+
+    props = props != null ? props.clone() : dict<LocationProperty, any>();
+    props[LocationProperty::WorldPos] = wpos;
+
+    Location loc = Game.CreateLocation(protoId, proto.MapProtos, props);
+
+    if (critters != null) {
+        for (int i = 0; i < critters.length(); i++) {
+            Location::SetKnownLoc(critters[i], loc.Id);
+        }
+    }
+
+    return loc;
 }
 
 void LocationGarbager(any locId)
@@ -27,13 +51,13 @@ void LocationGarbager(any locId)
         Game.DestroyLocation(loc);
     }
     else {
-        Game.DeferredCall(1000, LocationGarbager, loc.Id);
+        Game.StartTimeEvent(Time::Seconds(1), LocationGarbager, loc.Id);
     }
 }
 
 bool CheckLocationForGarbage(Location loc)
 {
-    for (uint i = 0; i < loc.GetMapCount(); i++) {
+    for (int i = 0; i < loc.GetMapCount(); i++) {
         Map map = loc.GetMapByIndex(i);
 
         if (!CheckMapForGarbage(map)) {
@@ -59,7 +83,7 @@ bool CheckMapForGarbage(Map map)
 
     Critter[] nonPlayerCritters = map.GetCritters(CritterFindType::Npc);
 
-    for (uint i = 0; i < nonPlayerCritters.length(); i++) {
+    for (int i = 0; i < nonPlayerCritters.length(); i++) {
         Critter npc = nonPlayerCritters[i];
 
         if (npc.IsGeck) {
@@ -81,7 +105,7 @@ bool CheckMapForGarbage(Map map)
 // Позволяет определить, знает ли игрок об указанной локации или нет.
 bool IsKnownLoc(Critter cr, ident locId)
 {
-    return cr.IsKnownLocation(locId);
+    return cr.KnownLocations.find(locId) != -1;
 }
 
 bool IsKnownLoc(Critter cr, Location loc)
@@ -105,7 +129,9 @@ void SetKnownLoc(Critter cr, ident locId)
         return;
     }
 
-    cr.SetKnownLocation(locId);
+    auto knownLocations = cr.KnownLocations.clone();
+    knownLocations.insertLast(locId);
+    cr.KnownLocations = knownLocations;
 }
 
 void SetKnownLoc(Critter cr, Location loc)
@@ -125,7 +151,9 @@ void SetKnownLoc(Critter cr, hstring locPid)
 // Делает локацию невидимой для криттера.
 void UnsetKnownLoc(Critter cr, ident locId)
 {
-    cr.RemoveKnownLocation(locId);
+    auto knownLocations = cr.KnownLocations.clone();
+    knownLocations.remove(locId);
+    cr.KnownLocations = knownLocations;
 }
 
 void UnsetKnownLoc(Critter cr, Location loc)
@@ -146,9 +174,9 @@ void UnsetKnownLoc(Critter cr, hstring locPid)
 // Установка даты удаления локации в переменную. Внимание, одной установки переменной недостаточно для удаления локации.
 // Location - локация, для которой назначается переменная
 // time - игровое время в секундах,
-void SetLocationDeleteTime(Location loc, uint time)
+void SetLocationDeleteTime(Location loc, timespan time)
 {
-    Game.SavedDeferredCall(GAME_SECOND_TO_TICK(time), DeferredDestroyLocation, loc.Id);
+    Game.StartTimeEvent(time, DeferredDestroyLocation, loc.Id); //SavedDeferredCall
 }
 
 void DeferredDestroyLocation(any value)
@@ -165,9 +193,9 @@ void DeferredDestroyLocation(any value)
 // worldX, worldY - координаты локации на глобальной карте
 // delta - максимальное смещение локации относительно указанных координат
 // varNum - номер переменной игрока в которую сохраняется код Id локации
-Location CreateLocationForCritter(Critter player, hstring locPid, int worldX, int worldY, int delta, uint varNum)
+Location CreateLocationForCritter(Critter player, hstring locPid, int worldX, int worldY, int delta, int varNum)
 {
-    Location loc = Game.CreateLocation(locPid, worldX + Game.Random(-1 * delta, delta), worldY + Game.Random(-1 * delta, delta), null);
+    Location loc = Location::CreateLocation(locPid, ipos(worldX + Game.Random(-1 * delta, delta), worldY + Game.Random(-1 * delta, delta)), null);
     if (!valid(loc)) {
         return null;
     }
@@ -180,10 +208,10 @@ Location CreateLocationForCritter(Critter player, hstring locPid, int worldX, in
     return loc;
 }
 
-bool IsCanEnter(Location loc, uint playersCount)
+bool IsCanEnter(Location loc, int playersCount)
 {
     if (loc.MaxPlayers != 0) {
-        for (uint i = 0; i < loc.GetMapCount(); i++) {
+        for (int i = 0; i < loc.GetMapCount(); i++) {
             playersCount += loc.GetMapByIndex(i).GetCritters(CritterFindType::Players).length();
             if (playersCount >= loc.MaxPlayers) {
                 return false;
@@ -195,7 +223,7 @@ bool IsCanEnter(Location loc, uint playersCount)
 
 void _DeadInit(Critter cr, bool firstTime)
 {
-    CritterState::ToDead(cr, cr.AliveActionAnim, null);
+    CritterState::ToDead(cr, CritterActionAnim::DeadFront, null);
     cr.ReplicationTime = -1;
 }
 
@@ -208,4 +236,75 @@ void ValidateKnownLocations(Critter cr)
         }
     }
     cr.KnownLocations = knownLocs;
+}
+
+Location[] GetLocationsInRadius(ipos wpos, int radius)
+{
+    Location[] result = {};
+    Location[] locations = Game.GetLocations();
+
+    for (int i = 0; i < locations.length(); i++) {
+        Location loc = locations[i];
+
+        if (Math::Distance(wpos, loc.WorldPos) <= loc.Radius + radius) {
+            result.insertLast(loc);
+        }
+    }
+
+    return result;
+}
+
+Location[] GetVisibleLocations(ipos wpos, int radius, Critter cr)
+{
+    Location[] result = {};
+    Location[] locations = Game.GetLocations();
+    auto knownLocations = cr.KnownLocations;
+
+    for (int i = 0; i < locations.length(); i++) {
+        Location loc = locations[i];
+
+        if (Math::Distance(wpos, loc.WorldPos) <= loc.Radius + radius && !loc.Hidden) {
+            if (knownLocations.find(loc.Id) != -1) {
+                result.insertLast(loc);
+            }
+        }
+    }
+
+    return result;
+}
+
+Location[] GetZoneLocations(int zx, int zy, int zoneRadius)
+{
+    Location[] result = {};
+    int wx = zx * Settings.GlobalMapZoneLength;
+    int wy = zy * Settings.GlobalMapZoneLength;
+    Location[] locations = Game.GetLocations();
+
+    for (int i = 0; i < locations.length(); i++) {
+        Location loc = locations[i];
+
+        if (!loc.Hidden && IsIntersectZone(wx, wy, 0, loc.WorldPos.x, loc.WorldPos.y, loc.Radius, zoneRadius)) {
+            result.insertLast(loc);
+        }
+    }
+
+    return result;
+}
+
+bool IsIntersectZone(int wx1, int wy1, int w1Radius, int wx2, int wy2, int w2Radius, int zones)
+{
+    int z = Settings.GlobalMapZoneLength;
+    int r1L = (wx1 - w1Radius) / z - zones;
+    int r1T = (wy1 - w1Radius) / z - zones;
+    int r1R = (wx1 + w1Radius) / z + zones;
+    int r1B = (wy1 + w1Radius) / z + zones;
+    int r2L = (wx1 - w1Radius) / z - zones;
+    int r2T = (wy1 - w1Radius) / z - zones;
+    int r2R = (wx1 + w1Radius) / z + zones;
+    int r2B = (wy1 + w1Radius) / z + zones;
+    return r1L <= r2R && r2L <= r1R && r1T <= r2B && r2T <= r1B;
+}
+
+#endif
+
 }

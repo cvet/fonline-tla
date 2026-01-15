@@ -1,16 +1,20 @@
-// FOS Server Sort 2
+namespace MapGeckCity // Sort 2
+{
+
+#if SERVER
+
 // Author: rifleman17
 // Скрипты для города, который можно построить, использовав ГЕКК.
 // ГЭКК нужно использовать на пустынном энкаунтере (Content::Location::desert_1..Content::Location::desert_12)
 
 // Свойство, по которому будет проверяться, житель ли это города из ГЕКК или нет
-///@ Property Critter PrivateServer ident GCityCitizen
-///@ Property Critter PrivateServer uint MapGeckCityTraderSkillBarter
-///@ Property Location PrivateServer ident[] GeckCityMembers
-///@ Property Location PrivateServer ident GeckCityLeader
-///@ Property Map PrivateServer ident GeckCityDoor
-///@ Property Map PrivateServer uint GeckCityCharges
-///@ Property Map PrivateServer uint GeckCityTimeBroken
+///@ Property Critter Server ident GCityCitizen Mutable Persistent
+///@ Property Critter Server int32 MapGeckCityTraderSkillBarter Mutable Persistent
+///@ Property Location Server ident[] GeckCityMembers Mutable Persistent
+///@ Property Location Server ident GeckCityLeader Mutable Persistent
+///@ Property Map Server ident GeckCityDoor Mutable Persistent
+///@ Property Map Server int32 GeckCityCharges Mutable Persistent
+///@ Property Map Server synctime GeckCityTimeBroken Mutable Persistent
 
 #define STR_WRONG_LOC            (5500) // Это место совершенно не подходит для строительства города из Г.Э.К.К.
 #define STR_WRONG_PASS           (5501) // Код неверный. Активация отменена.
@@ -25,7 +29,7 @@
 #define STR_CONSOLE_OUT_OF_ORDER (5510) // Терминал не функционирует. Система перезагружается.
 #define STR_BRAKE_CONSOLE        (5511) // Посмотрим, что здесь можно сделать...
 #define LOC_PID_GECK_CITY        (Content::Location::geck_city)
-#define CLOSE_DOOR_TIME          (Game.GetFullSecond() + (60 * 20)) // Время в игровых секундах до автоматического закрытия двери. (одна реальная минута
+#define CLOSE_DOOR_TIME          (Time::Minutes(1)) // Время в игровых секундах до автоматического закрытия двери. (одна реальная минута
 // В этой переменной сохраняется Id локации с городом из Гекка
 #define HOMEPOS_RADIUS               (10) // Радиус, в котором от домашней позиции должен находиться НПЦ, чтобы считалось, что он добрался до места.
 #define XP_CREATE_CITY               (25000) // Опыт за создание города
@@ -47,7 +51,7 @@
 #define ENTRY_REPLICATOR_TANK        (30)  // Номер гекса, на котором устанавливается репликатор
 #define ENTRY_REPLICATOR_SPAWN       hstring("31") // Номер гекса, на котором появляется возрожденный игрок
 #define MAPLOOP_0                    (65000) // Период, на который тратится 1 батарейка в генераторе, при расчете: активен барьер на входе или нет
-#define _GetUptime                   #(charges)(uint(charges * (MAPLOOP_0 / 1000) / 3600)) // Время в часах игровое в зависимости от числа зарядов
+#define _GetUptime                   #(charges)(int(charges * (MAPLOOP_0 / 1000) / 3600)) // Время в часах игровое в зависимости от числа зарядов
 #define CHARGES_MFC                  (10) // Число зарядов генератора c одного реактора
 #define CHARGES_CEC                  (1)  // Число зарядов генератора c одной малой батареи
 #define MAX_CELLS                    (100) // Максимальное число батареек за раз, которые можно загрузить в генератор
@@ -64,7 +68,7 @@ void ModuleInit()
     Game.OnGlobalMapCheckEntranceAllowed.Subscribe(entrance_Geck);
 }
 
-bool entrance_Geck(Location geck, Critter[] critters, uint8 entrance)
+bool entrance_Geck(Location geck, Critter[] critters, int entrance)
 {
     if (geck.ProtoId == Content::Location::geck_city) {
         if (entrance == ENTANCE_CITYHALL) {
@@ -94,7 +98,7 @@ void _GeckInit(Item geck, bool firstTime)
     geck.OnCritterUse.Subscribe(_GeckUse);
 }
 
-bool _GeckUse(Item geck, Critter cr, uint param)
+bool _GeckUse(Item geck, Critter cr, int param)
 {
     Map map = cr.GetMap();
     if (!valid(map)) {
@@ -111,7 +115,7 @@ bool _GeckUse(Item geck, Critter cr, uint param)
     }
 
     if (PidsGroups::Pids_MapDeserts.find(loc.ProtoId) == -1) {
-        cr.SayMsg(SAY_NETMSG, TextPackName::Text, STR_WRONG_LOC);
+        Messaging::Info(cr, TextPackName::Text, STR_WRONG_LOC);
         return true;
     }
 
@@ -130,9 +134,9 @@ void CreateCity(Critter player, Item geck)
     }
 
     grp.insertLast(leader);
-    GlobalmapGroupExtended::GetFollowGroup(leader, CritterFindType::Alive, grp);
+    GlobalmapGroupExtended::GetFollowGroup(leader, CritterFindType::NonDead, grp);
 
-    Location loc = Game.CreateLocation(LOC_PID_GECK_CITY, player.WorldX, player.WorldY, grp);
+    Location loc = Location::CreateLocation(LOC_PID_GECK_CITY, ipos(player.WorldPos.x, player.WorldPos.y), grp);
     if (!valid(loc)) {
         return;
     }
@@ -142,12 +146,12 @@ void CreateCity(Critter player, Item geck)
     loc.Radius = 6;
 
     ident[] acceptedPlayers = {};
-    for (uint i = 0, l = grp.length(); i < l; i++) {
+    for (int i = 0, l = grp.length(); i < l; i++) {
         Critter cr = grp[i];
         if (!valid(cr)) {
             continue;
         }
-        if (!cr.IsControlledByPlayer) {
+        if (!cr.ControlledByPlayer) {
             continue;
         }
 
@@ -157,16 +161,16 @@ void CreateCity(Critter player, Item geck)
 
         cr.GCityCitizen = loc.Id;
         acceptedPlayers.insertLast(cr.Id);
-        leader.SayMsg(SAY_NETMSG, TextPackName::Text, STR_ACCESS_LEADER, "$pname" + Obsolete::GetPlayerName(cr.Id));
-        cr.SayMsg(SAY_NETMSG, TextPackName::Text, STR_ACCESS_MEMBER);
+        Messaging::Info(leader, TextPackName::Text, STR_ACCESS_LEADER, "$pname" + PlayerRegistration::GetPlayerName(cr.Id));
+        Messaging::Info(cr, TextPackName::Text, STR_ACCESS_MEMBER);
         cr.Experience += XP_CREATE_CITY;
-        cr.SayMsg(SAY_NETMSG, TextPackName::Text, 3480, "$exp" + XP_CREATE_CITY);
+        Messaging::Info(cr, TextPackName::Text, 3480, "$exp" + XP_CREATE_CITY);
     }
-    player.SayMsg(SAY_NETMSG, TextPackName::Text, STR_CREATION_END);
+    Messaging::Info(player, TextPackName::Text, STR_CREATION_END);
     player.AddItem(Content::Item::used_geck, 1);
     loc.GeckCityLeader = player.Id;
     loc.GeckCityMembers = acceptedPlayers;
-    leader.TransitToGlobal();
+    leader.TransferToGlobal();
 }
 
 // Проверка, является ли криттер жителем данного города из ГЕККА
@@ -196,7 +200,7 @@ bool IsPlayerCitizen(Critter cr, Location loc)
     }
 
     ident[] acceptedPlayers = loc.GeckCityMembers.clone();
-    for (uint i = 0; i < acceptedPlayers.length(); i++) {
+    for (int i = 0; i < acceptedPlayers.length(); i++) {
         if (cr.Id == acceptedPlayers[i]) {
             return true;
         }
@@ -243,7 +247,7 @@ bool AddCitizen(Critter leader, Critter player)
     }
 
     ident[] acceptedPlayers = loc.GeckCityMembers.clone();
-    for (uint i = 0; i < acceptedPlayers.length(); i++) {
+    for (int i = 0; i < acceptedPlayers.length(); i++) {
         if (player.Id == acceptedPlayers[i]) {
             return true;
         }
@@ -273,7 +277,7 @@ bool RemoveCitizen(Critter leader, Critter player)
     }
 
     ident[] acceptedPlayers = loc.GeckCityMembers.clone();
-    for (uint i = 0; i < acceptedPlayers.length(); i++) {
+    for (int i = 0; i < acceptedPlayers.length(); i++) {
         if (player.Id == acceptedPlayers[i]) {
             acceptedPlayers.removeAt(i);
             loc.GeckCityMembers = acceptedPlayers;
@@ -314,7 +318,7 @@ bool d_IsPlayerLeader(Critter player, Critter none)
     return IsPlayerLeader(player);
 }
 
-uint dlg_RemoveCitizen(Critter player, Critter npc, string& playerName)
+int dlg_RemoveCitizen(Critter player, Critter npc, string& playerName)
 {
     if (!IS_DIALOG_SAY_MODE(playerName)) {
         return 0;
@@ -331,14 +335,14 @@ uint dlg_RemoveCitizen(Critter player, Critter npc, string& playerName)
     }
 
     if (RemoveCitizen(player, cr)) {
-        cr.SayMsg(SAY_NETMSG, TextPackName::Text, STR_CITIZEN_REMOVED, "$leadername" + Obsolete::GetPlayerName(player.Id));
+        Messaging::Info(cr, TextPackName::Text, STR_CITIZEN_REMOVED, "$leadername" + PlayerRegistration::GetPlayerName(player.Id));
         return FORCE_DIALOG_PLAYER_REMOVED;
     }
 
     return FORCE_DIALOG_ERROR;
 }
 
-uint dlg_AddCitizen(Critter player, Critter npc, string& playerName)
+int dlg_AddCitizen(Critter player, Critter npc, string& playerName)
 {
     if (!IS_DIALOG_SAY_MODE(playerName)) {
         return 0;
@@ -350,7 +354,7 @@ uint dlg_AddCitizen(Critter player, Critter npc, string& playerName)
             return FORCE_DIALOG_PLAYER_NOTFOUND;
         }
         if (AddCitizen(player, cr)) {
-            cr.SayMsg(SAY_NETMSG, TextPackName::Text, STR_CITIZEN_ADDED, "$leadername" + Obsolete::GetPlayerName(player.Id));
+            Messaging::Info(cr, TextPackName::Text, STR_CITIZEN_ADDED, "$leadername" + PlayerRegistration::GetPlayerName(player.Id));
             return FORCE_DIALOG_PLAYER_ADDED;
         }
         else {
@@ -368,13 +372,14 @@ void r_ClearCitizens(Critter player, Critter none)
 // Двери центрального здания (Штабквартиры)
 // К штабквартире имеют доступ только граждане города. Гражданами считаются те, кто был в группе, установившей ГЕКК, а также добавленные лидером позже.
 // bool s_UseDoorComputer( Critter player, StaticItem scenery, CritterProperty skill, Item item )
-bool s_UseDoorComputer(Critter player, StaticItem scenery, Item item, int skill)
+bool s_UseDoorComputer(Critter player, StaticItem scenery, Item item, any skill)
 {
     if (valid(item) || skill != CritterProperty::SpecialSkillPickOnGround) {
         return true;
     }
 
-    return Game.RunDialog(player, Content::Dialog::geck_door_outer, scenery.HexX, scenery.HexY, false);
+    Dialogs::RunDialog(player, Content::Dialog::geck_door_outer, false);
+    return true;
 }
 
 bool d_IsCitizen(Critter player, Critter npc)
@@ -403,7 +408,7 @@ bool _DoorSkill(Item door, Critter cr, CritterProperty skill)
         return false;
     }
 
-    cr.SayMsg(SAY_NETMSG, TextPackName::Text, STR_CANT_OPEN_DOOR);
+    Messaging::Info(cr, TextPackName::Text, STR_CANT_OPEN_DOOR);
     return true;
 }
 
@@ -415,7 +420,7 @@ void r_OpenDoor(Critter player, Critter none)
     }
 
     Lockers::SwitchLocker(door, true);
-    Game.SavedDeferredCall(GAME_SECOND_TO_TICK(CLOSE_DOOR_TIME), Item::AutoCloseDoor, door.Id);
+    Game.StartTimeEvent(CLOSE_DOOR_TIME, Item::AutoCloseDoor, door.Id); //SavedDeferredCall
 }
 
 void r_CloseDoor(Critter player, Critter none)
@@ -471,12 +476,12 @@ bool d_CanHireNpc(Critter player, Critter npc, int npcPidHash, int maxNum, int h
         return false;
     }
 
-    uint count = map.GetCritters(hstring_fromHash(npcPidHash), CritterFindType::Any).length();
-    if (count >= uint(maxNum)) {
+    int count = map.GetCritters(hstring_fromHash(npcPidHash), CritterFindType::Any).length();
+    if (count >= int(maxNum)) {
         return false;
     }
 
-    return Entrance::MapCountEntry(map, uint8(homeEntry)) > count;
+    return Entrance::MapCountEntry(map, homeEntry) > count;
 }
 
 bool d_CanNotHireNpc(Critter player, Critter npc, int npcPidHash, int maxNum, int homeEntry)
@@ -526,8 +531,8 @@ bool d_HomeFound(Critter player, Critter npc, int homeEntry)
     }
 
     Entrance::Entry[] entries = Entrance::ParseEntries(map, homeEntry);
-    for (uint i = 0; i < entries.length(); i++) {
-        if (Game.GetDistance(npc.HexX, npc.HexY, entries[i].HexX, entries[i].HexY) <= HOMEPOS_RADIUS) {
+    for (int i = 0; i < entries.length(); i++) {
+        if (Game.GetDistance(npc.Hex, entries[i].Hex) <= HOMEPOS_RADIUS) {
             return true;
         }
     }
@@ -553,12 +558,11 @@ void r_SetNewHome(Critter player, Critter npc, int homeEntry)
     }
 
     Entrance::Entry[] entries = Entrance::ParseEntries(map, homeEntry);
-    for (uint i = 0; i < entries.length(); i++) {
-        if (Game.GetDistance(npc.HexX, npc.HexY, entries[i].HexX, entries[i].HexY) <= HOMEPOS_RADIUS) {
+    for (int i = 0; i < entries.length(); i++) {
+        if (Game.GetDistance(npc.Hex, entries[i].Hex) <= HOMEPOS_RADIUS) {
             npc.HomeMapId = map.Id;
-            npc.HomeHexX = entries[i].HexX;
-            npc.HomeHexY = entries[i].HexY;
-            npc.HomeDir = Game.GetDirection(entries[i].HexX, entries[i].HexY, npc.HexX, npc.HexY);
+            npc.HomeHex = entries[i].Hex;
+            npc.HomeDir = Game.GetDirection(entries[i].Hex, npc.Hex);
             return;
         }
     }
@@ -568,8 +572,7 @@ void r_SetNewHome(Critter player, Critter npc, int homeEntry)
 void _MapInit(Map map, bool firstTime)
 {
     map.OnCritterIn.Subscribe(_GeckMapInCritter);
-    map.OnLoop.Subscribe(_GeckMapLoop);
-    map.LoopTime1 = MAPLOOP_0;
+    map.StartTimeEvent(Time::Milliseconds(0), Time::Milliseconds(MAPLOOP_0), _GeckMapLoop);
 }
 
 void _GeckMapLoop(Map map)
@@ -580,14 +583,14 @@ void _GeckMapLoop(Map map)
     }
 
     if (EnergyBarier::GetNetState(loc.Id, GATES_NET_NUM) == BM_ON) {
-        uint charges = map.GeckCityCharges;
+        int charges = map.GeckCityCharges;
         if (charges > 0) {
             charges--;
             map.GeckCityCharges = charges;
         }
         else {
             any[] values = {GATES_NET_NUM, loc.Id};
-            Game.DeferredCall(0, EnergyBarier::DisableForceField, values);
+            Game.StartTimeEvent(ZERO_TIMESPAN, EnergyBarier::DisableForceField, values);
         }
     }
 }
@@ -597,24 +600,23 @@ void _GeckMapLoop(Map map)
 // Оставлено на будущее, возможно будет логика для автомобилей
 void _GeckMapInCritter(Map map, Critter cr) // obsolete
 {
-    if (cr.IsControlledByPlayer && !cr.IsControlledByPlayer) {
+    if (cr.ControlledByPlayer && !cr.ControlledByPlayer) {
         if (IsPlayerCitizen(cr)) {
             // Проверка, что игрок ближе к обычному гексу, чем к выходу для граждан
-            uint16 hx = 0;
-            uint16 hy = 0;
-            uint16 distDefault = 0;
-            uint16 distCitizen = 0;
-            if (Entrance::GetEntryFreeHex(map, ENTRY_DEFAULT, hx, hy)) {
-                distDefault = Game.GetDistance(cr.HexX, cr.HexY, hx, hy);
+            mpos hex;
+            int distDefault = 0;
+            int distCitizen = 0;
+            if (Entrance::GetEntryFreeHex(map, ENTRY_DEFAULT, hex)) {
+                distDefault = Game.GetDistance(cr.Hex, hex);
             }
-            if (Entrance::GetEntryFreeHex(map, ENTRY_CITIZEN_EXIT, hx, hy)) {
-                distCitizen = Game.GetDistance(cr.HexX, cr.HexY, hx, hy);
+            if (Entrance::GetEntryFreeHex(map, ENTRY_CITIZEN_EXIT, hex)) {
+                distCitizen = Game.GetDistance(cr.Hex, hex);
             }
             if (distDefault > distCitizen) {
                 return;
             }
-            if (Entrance::GetEntryFreeHex(map, ENTRY_CITYHALL, hx, hy)) {
-                cr.TransitToHex(hx, hy, Game.Random(0, 5));
+            if (Entrance::GetEntryFreeHex(map, ENTRY_CITYHALL, hex)) {
+                cr.TransferToHex(hex, Game.Random(0, 5));
                 TryMoveCar(cr, map);
             }
         }
@@ -625,19 +627,19 @@ void _GeckMapInCritter(Map map, Critter cr) // obsolete
 void TryMoveCar(Critter cr, Map map)
 {
     Item[] items = {}; // cr.GetItems(ItemProperty::Type, ItemType::Key);
-    for (uint k = 0; k < items.length(); k++) {
+    for (int k = 0; k < items.length(); k++) {
         Item key = items[k];
         Entrance::Entry[] entries = {};
         entries.insertLast(Entrance::ParseEntries(map, ENTRY_CAR));
         entries.insertLast(Entrance::ParseEntries(map, ENTRY_BIG_CAR));
-        for (uint i = 0; i < entries.length(); i++) {
-            Item car = Obsolete::GetMapCar(map, entries[i].HexX, entries[i].HexY);
+        for (int i = 0; i < entries.length(); i++) {
+            Item car = Maps::GetMapCar(map, entries[i].Hex);
             if (valid(car) && car.LockerId == key.LockerId) {
                 Entrance::Entry[] entries2 = Entrance::ParseEntries(map, ENTRY_CITIZEN_CAR);
-                for (uint j = 0; j < entries2.length(); j++) {
+                for (int j = 0; j < entries2.length(); j++) {
                     Entrance::Entry ent = entries[j];
-                    if (map.CheckPlaceForItem(ent.HexX, ent.HexY, car.ProtoId)) {
-                        ItemMovement::MoveItem(car, 1, map, ent.HexX, ent.HexY);
+                    if (map.CheckPlaceForItem(ent.Hex, car.ProtoId)) {
+                        ItemMovement::MoveItem(car, 1, map, ent.Hex);
                         return;
                     }
                 }
@@ -667,11 +669,11 @@ bool d_NoGeneratoreCharges(Critter player, Critter npc)
 }
 
 // bool s_TerminalOuter( Critter player, StaticItem terminal, CritterProperty skill, Item item )
-bool s_TerminalOuter(Critter player, StaticItem terminal, Item item, int skill)
+bool s_TerminalOuter(Critter player, StaticItem terminal, Item item, any skill)
 {
     Map map = player.GetMap();
-    if (valid(map) && map.GeckCityTimeBroken > Game.GetFullSecond()) {
-        player.SayMsg(SAY_NETMSG, TextPackName::Text, STR_CONSOLE_OUT_OF_ORDER);
+    if (valid(map) && map.GeckCityTimeBroken > Game.SynchronizedTime) {
+        Messaging::Info(player, TextPackName::Text, STR_CONSOLE_OUT_OF_ORDER);
         return true;
     }
     return EnergyBarier::s_Terminal(player, terminal, item, skill);
@@ -683,7 +685,7 @@ bool d_IsTerminalBroken(Critter player, Critter npc)
     if (!valid(map)) {
         return false;
     }
-    return map.GeckCityTimeBroken > Game.GetFullSecond();
+    return map.GeckCityTimeBroken > Game.SynchronizedTime;
 }
 
 bool d_NotTerminalBroken(Critter player, Critter npc)
@@ -699,31 +701,30 @@ void r_BrakeTerminal(Critter player, Critter npc)
     }
 
     Map map = npc.GetMap();
-    uint16 hx = 0;
-    uint16 hy = 0;
-    if (!valid(map) || !Entrance::GetEntryFreeHex(map, ENTRY_OUTER_TERMINAL, hx, hy)) {
+    mpos hex;
+    if (!valid(map) || !Entrance::GetEntryFreeHex(map, ENTRY_OUTER_TERMINAL, hex)) {
         return;
     }
 
-    if (map.GetPathLength(npc, hx, hy, 1) > 0) {
-        if (NpcPlanes::AddWalkPlane(npc, 0, hx, hy, 0, true, 1)) {
-            NpcPlanes::AddMiscPlane(npc, 0, 20, MapGeckCity::plane_Brake);
+    if (map.GetPathLength(npc, hex, 1) > 0) {
+        if (NpcPlanes::AddWalkPlane(npc, 0, hex, 0, true, 1)) {
+            NpcPlanes::AddMiscPlane(npc, 0, Time::Seconds(1), MapGeckCity::plane_Brake);
         }
     }
 }
 
 void plane_Brake(Critter npc)
 {
-    npc.SayMsg(SAY_NORM, TextPackName::Text, STR_BRAKE_CONSOLE);
+    Messaging::Say(npc, TextPackName::Text, STR_BRAKE_CONSOLE);
     Map map = npc.GetMap();
     if (valid(map)) {
-        map.GeckCityTimeBroken = Game.GetFullSecond() + Time::RealHour(16);
+        map.GeckCityTimeBroken = Game.SynchronizedTime + Time::Hours(16);
     }
 }
 
 // Использование батарей на генератор
 // bool s_UseGenerator( Critter cr, StaticItem scen, CritterProperty skill, Item item )
-bool s_UseGenerator(Critter cr, StaticItem scen, Item item, int skill)
+bool s_UseGenerator(Critter cr, StaticItem scen, Item item, any skill)
 {
     if (!valid(item)) {
         return false;
@@ -735,8 +736,8 @@ bool s_UseGenerator(Critter cr, StaticItem scen, Item item, int skill)
     }
 
     hstring itemPid = item.ProtoId;
-    uint charges = 0;
-    uint itemCount = CLAMP(item.Count, 0, MAX_CELLS);
+    int charges = 0;
+    int itemCount = CLAMP(item.Count, 0, MAX_CELLS);
     if (itemPid == Content::Item::small_energy_cell) {
         charges = CHARGES_CEC * itemCount;
     }
@@ -749,7 +750,7 @@ bool s_UseGenerator(Critter cr, StaticItem scen, Item item, int skill)
 
     charges = map.GeckCityCharges + charges;
     map.GeckCityCharges = charges;
-    cr.SayMsg(SAY_NETMSG, TextPackName::Text, STR_GENERATOR_CHARGED, "$charges" + charges + "$time" + _GetUptime(charges));
+    Messaging::Info(cr, TextPackName::Text, STR_GENERATOR_CHARGED, "$charges" + charges + "$time" + _GetUptime(charges));
     Game.DestroyItem(item, itemCount);
     return true;
 }
@@ -781,7 +782,7 @@ bool d_BarrierOff(Critter player, Critter npc)
         return false;
     }
 
-    uint8 state = EnergyBarier::GetNetState(loc.Id, GATES_NET_NUM);
+    int state = EnergyBarier::GetNetState(loc.Id, GATES_NET_NUM);
     return (state == BM_OFF || state == BM_OFF_NO_GUARD);
 }
 
@@ -799,10 +800,10 @@ void r_SwitchBarrierMode(Critter player, Critter npc, int mode)
 
     any[] values = {GATES_NET_NUM, loc.Id};
     if (mode == BM_ON) {
-        Game.DeferredCall(0, EnergyBarier::EnableForceField, values);
+        Game.StartTimeEvent(ZERO_TIMESPAN, EnergyBarier::EnableForceField, values);
     }
     else {
-        Game.DeferredCall(0, EnergyBarier::DisableForceField, values);
+        Game.StartTimeEvent(ZERO_TIMESPAN, EnergyBarier::DisableForceField, values);
     }
 }
 
@@ -813,7 +814,7 @@ void _GeckTraderInit(Critter cr, bool firstTime)
     cr.OnBarter.Subscribe(_GeckTraderBarter);
 }
 
-bool _GeckTraderBarter(Critter cr, Critter player, bool attach, uint barterCount)
+bool _GeckTraderBarter(Critter cr, Critter player, bool attach, int barterCount)
 {
     // Для сохранения оригинального значения навыка торговли НПЦ используется VAR_0
     if (cr.MapGeckCityTraderSkillBarter == 0) {
@@ -838,7 +839,7 @@ bool d_ItemExist(Critter player, Critter npc, int pidItem)
         return false;
     }
 
-    for (uint i = 0; i < loc.GetMapCount(); i++) {
+    for (int i = 0; i < loc.GetMapCount(); i++) {
         Map map = loc.GetMapByIndex(i);
         if (map.GetItems(hstring_fromHash(pidItem)).length > 0) {
             return true;
@@ -861,14 +862,12 @@ void r_AddReplicator(Critter player, Critter npc)
     }
 
     // ENTRY_REPLICATOR_TANK
-    uint16 x;
-    uint16 y;
-    for (uint i = 0, l = loc.GetMapCount(); i < l; i++) {
+    for (int i = 0, l = loc.GetMapCount(); i < l; i++) {
         Map map = loc.GetMapByIndex(i);
         if (valid(map)) {
             Entrance::Entry entry = Entrance::GetEntry(map, ENTRY_REPLICATOR_TANK, 0);
-            if (valid(entry) && !valid(map.GetItem(entry.HexX, entry.HexY, Content::Item::replicator_tank))) {
-                map.AddItem(entry.HexX, entry.HexY, Content::Item::replicator_tank, 1);
+            if (valid(entry) && !valid(map.GetItem(entry.Hex, Content::Item::replicator_tank))) {
+                map.AddItem(entry.Hex, Content::Item::replicator_tank, 1);
                 return;
             }
         }
@@ -882,7 +881,7 @@ void r_SetGeckReplication(Critter player, Critter npc)
         return;
     }
 
-    for (uint i = 0, l = loc.GetMapCount(); i < l; i++) {
+    for (int i = 0, l = loc.GetMapCount(); i < l; i++) {
         Map map = loc.GetMapByIndex(i);
         if (valid(map) && !loc.AutoGarbage) {
             Entrance::Entry entry = Entrance::GetEntry(map, ENTRY_REPLICATOR_SPAWN, 0);
@@ -901,4 +900,8 @@ void AddGeck(Critter cr, int, int, int)
     if (valid(geck)) {
         geck.SetupScript(_GeckInit);
     }
+}
+
+#endif
+
 }

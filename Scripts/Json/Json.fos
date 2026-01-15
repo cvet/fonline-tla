@@ -1,4 +1,6 @@
-// FOS Common
+namespace Json
+{
+
 /******************************************************************************
  *                                                                            *
  *  FOnline-JSON                                                  10-08-2014  *
@@ -18,7 +20,7 @@
 #define _CharAdd \
     #(s, v) \
     { \
-        uint len = s.rawLength(); \
+        int len = s.rawLength(); \
         s.rawResize(len + 1); \
         s.rawSet(len, v); \
     }
@@ -49,32 +51,6 @@ JSON @JSONParse(const string& text)
     if (JsonTokenizer::tokenize(text, tokens)) {
         return parse(@tokens);
     }
-    return @undefined;
-}
-
-/**
- *  Loads a JSON file.
- *
- *  Loads a JSON text from a file and produces a structure of JSON values.
- *  @param  path Path to the JSON file.
- *  @return If parsing was successful returns a structure of JSON values,
- *  if there was an error returns Undefined value.
- */
-JSON @JSONLoad(const string& path)
-{
-    if (@undefined == null) {
-        @undefined = @Undefined();
-    }
-    file f = file();
-    if (f.open(path, "r") == 0) {
-        int size = f.getSize();
-
-        string text = f.readString(size);
-        f.close();
-
-        return JSONParse(text);
-    }
-
     return @undefined;
 }
 
@@ -164,9 +140,9 @@ shared interface JSON
 
     //  Stuff for JSON Arrays.
     //
-    uint length();
+    int length();
     void push(JSON @value);
-    JSON @opIndex(const uint index);
+    JSON @opIndex(const int index);
 
     //  Because of a bug in old AngelScript, JSON::forEach is available only in
     //  FOnline revisions 400+. Earlier revisions can use equivalent functions
@@ -182,13 +158,8 @@ shared interface JSON
     //  Use space argument to control style of the indentation.
     //
     string stringify();
-    string stringify(uint space);
+    string stringify(int space);
     string stringify(const string& space);
-
-    //  File saving
-    //
-    //
-    bool save(const string& path);
 }
 
 // //////////////////////////////////////////////////////////////////////////////
@@ -197,8 +168,8 @@ shared interface JSON
 //
 funcdef void JSONForEachKey(JSON @value, const string& key);
 funcdef void JSONForEachKeyAll(JSON @value, const string& key, JSON @all);
-funcdef void JSONForEachIndex(JSON @value, uint index);
-funcdef void JSONForEachIndexAll(JSON @value, uint index, JSON @all);
+funcdef void JSONForEachIndex(JSON @value, int index);
+funcdef void JSONForEachIndexAll(JSON @value, int index, JSON @all);
 
 // //// FOS Common
 
@@ -219,7 +190,7 @@ JSON @parse(array<JsonTokenizer::Token @> @tokens)
     if (tokens.length() == 0) {
         return @undefined;
     }
-    uint tokenIndex = 0;
+    int tokenIndex = 0;
     return @parseValue(tokens, tokenIndex);
 }
 
@@ -228,7 +199,7 @@ JSON @parse(array<JsonTokenizer::Token @> @tokens)
  *
  * To parse arrays and objects the function uses recursion.
  */
-JSON @parseValue(array<JsonTokenizer::Token @> @tokens, uint& tokenIndex)
+JSON @parseValue(array<JsonTokenizer::Token @> @tokens, int& tokenIndex)
 {
     switch (tokens[tokenIndex].type) {
     case JsonTokenizer::TokenType::NULL:
@@ -597,7 +568,7 @@ class Value : JSON
         return;
     }
 
-    uint length()
+    int length()
     {
         return 0;
     }
@@ -605,7 +576,7 @@ class Value : JSON
     {
         return;
     }
-    JSON @opIndex(const uint index)
+    JSON @opIndex(const int index)
     {
         return @undefined;
     }
@@ -623,7 +594,7 @@ class Value : JSON
         return JsonMisc::Stringify(this, "", "");
     }
 
-    string stringify(uint space)
+    string stringify(int space)
     {
         if (space > 10) {
             space = 10;
@@ -634,26 +605,13 @@ class Value : JSON
     string stringify(const string& space)
     {
         string str = space.substr(0, 10);
-        for (uint i = 0, j = str.length(); i < j; i++) {
+        for (int i = 0, j = str.length(); i < j; i++) {
             if (!_IsWhitespace(_CharGet(str, i))) {
                 Game.Log("Indents can contain only whitespace characters.");
                 return "";
             }
         }
         return JsonMisc::Stringify(this, str, "");
-    }
-
-    bool save(const string& path)
-    {
-        if (this.isUndefined()) {
-            return false;
-        }
-        file f = file();
-        if (f.open(path, "w") == 0) {
-            string text = JsonMisc::Stringify(this, "  ", "");
-            return (uint(f.writeString(text)) == _CharLength(text));
-        }
-        return false;
     }
 }
 
@@ -870,7 +828,7 @@ final class String : Value
         return true;
     }
 
-    uint length()
+    int length()
     {
         return value.length();
     }
@@ -891,7 +849,7 @@ final class String : Value
 final class Object : Value
 {
     private
-    dictionary properties = {};
+    dict<string, JSON> properties = {};
     private
     array<string> keys = {};
 
@@ -923,17 +881,15 @@ final class Object : Value
 
     void forEach(JSONForEachKey @callback)
     {
-        JSON @value;
-        for (uint i = 0, j = this.keys.length(); i < j; i++) {
-            properties.get(this.keys[i], @value);
+        for (int i = 0, j = this.keys.length(); i < j; i++) {
+            JSON @value = properties.get(this.keys[i]);
             callback(value, this.keys[i]);
         }
     }
     void forEach(JSONForEachKeyAll @callback)
     {
-        JSON @value;
-        for (uint i = 0, j = this.keys.length(); i < j; i++) {
-            properties.get(this.keys[i], @value);
+        for (int i = 0, j = this.keys.length(); i < j; i++) {
+            JSON @value = properties.get(this.keys[i]);
             callback(value, this.keys[i], this);
         }
     }
@@ -941,8 +897,7 @@ final class Object : Value
     JSON @opIndex(const string& key)
     {
         if (this.hasProperty(key)) {
-            JSON @value;
-            properties.get(key, @value);
+            JSON @value = properties.get(key);
             return @value;
         }
         else {
@@ -964,7 +919,7 @@ final class Array : Value
 #define _RetrieveArray \
     #(_type, _isType, _init)JSON @opShr(array<_type>& retrieve) \
     { \
-        for (uint i = 0, j = this.elements.length(); i < j; i++) { \
+        for (int i = 0, j = this.elements.length(); i < j; i++) { \
             if (this.elements[i]._isType()) { \
                 _type value = _init; \
                 this.elements[i] >> value; \
@@ -990,7 +945,7 @@ final class Array : Value
 #define _StoreArray \
     #(_type, _JSONType)JSON @opShl(const array<_type>& store) \
     { \
-        for (uint i = 0, j = store.length(); i < j; i++) { \
+        for (int i = 0, j = store.length(); i < j; i++) { \
             this.push(_JSONType(store[i])); \
         } \
         return this; \
@@ -1009,7 +964,7 @@ final class Array : Value
     _StoreArray(float, Number);
     _StoreArray(double, Number);
 
-    uint length()
+    int length()
     {
         return this.elements.length();
     }
@@ -1024,18 +979,18 @@ final class Array : Value
 
     void forEach(JSONForEachIndex @callback)
     {
-        for (uint i = 0, j = elements.length(); i < j; i++) {
+        for (int i = 0, j = elements.length(); i < j; i++) {
             callback(elements[i], i);
         }
     }
     void forEach(JSONForEachIndexAll @callback)
     {
-        for (uint i = 0, j = elements.length(); i < j; i++) {
+        for (int i = 0, j = elements.length(); i < j; i++) {
             callback(elements[i], i, this);
         }
     }
 
-    JSON @opIndex(const uint index)
+    JSON @opIndex(const int index)
     {
         if (index < this.elements.length()) {
             return this.elements[index];
@@ -1105,4 +1060,6 @@ JSON @JSONObject()
 JSON @JSONArray()
 {
     return @Array();
+}
+
 }

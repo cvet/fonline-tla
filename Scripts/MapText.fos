@@ -1,0 +1,318 @@
+namespace MapText
+{
+
+///@ Setting Client int32 TextDelay
+///@ Setting Client string PlayerOffAppendix
+
+///@ Property Critter Client string TextOnHead Mutable
+///@ Property Critter Client nanotime TextOnHeadEndTime Mutable
+
+///@ RemoteCall Client ReceiveMapText(bool flying, ident crId, mpos hex, ucolor color, string text, TextPackName textPack, int32 strNum, string lexems)
+
+void ModuleInit()
+{
+#if CLIENT
+    Game.OnPreRenderIface.Subscribe(OnPreRenderIface);
+    Game.OnMapLoad.Subscribe(OnMapLoad);
+    Game.OnMapUnload.Subscribe(OnMapUnload);
+#endif
+}
+
+#if SERVER
+
+void AddText(Critter cr, ucolor color, string text)
+{
+    if (!text.isEmpty()) {
+        AddText(false, cr, color, text, TextPackName::Text, 0, "");
+    }
+}
+
+void AddText(Critter cr, ucolor color, TextPackName textPack, int strNum, string lexems = "")
+{
+    AddText(false, cr, color, "", textPack, strNum, lexems);
+}
+
+void AddText(Map map, mpos hex, ucolor color, string text)
+{
+    if (!text.isEmpty()) {
+        AddText(false, map, hex, color, text, TextPackName::Text, 0, "");
+    }
+}
+
+void AddText(Map map, mpos hex, ucolor color, TextPackName textPack, int strNum, string lexems = "")
+{
+    AddText(false, map, hex, color, "", textPack, strNum, lexems);
+}
+
+void AddFlyingText(Critter cr, ucolor color, string text)
+{
+    if (!text.isEmpty()) {
+        AddText(true, cr, color, text, TextPackName::Text, 0, "");
+    }
+}
+
+void AddFlyingText(Critter cr, ucolor color, TextPackName textPack, int strNum, string lexems = "")
+{
+    AddText(true, cr, color, "", textPack, strNum, lexems);
+}
+
+void AddFlyingText(Map map, mpos hex, ucolor color, string text)
+{
+    if (!text.isEmpty()) {
+        AddText(true, map, hex, color, text, TextPackName::Text, 0, "");
+    }
+}
+
+void AddFlyingText(Map map, mpos hex, ucolor color, TextPackName textPack, int strNum, string lexems = "")
+{
+    AddText(true, map, hex, color, "", textPack, strNum, lexems);
+}
+
+void AddText(bool flying, Critter cr, ucolor color, string text, TextPackName textPack, int strNum, string lexems)
+{
+    if (cr.MapId == ZERO_IDENT) {
+        return;
+    }
+
+    Critter[] critters = cr.GetCritters(CritterSeeType::WhoSeeMe, CritterFindType::Players);
+
+    for (int i = 0; i < critters.length(); i++) {
+        critters[i].PlayerClientCall.ReceiveMapText(flying, cr.Id, cr.Hex, color, text, textPack, strNum, lexems);
+    }
+}
+
+void AddText(bool flying, Map map, mpos hex, ucolor color, string text, TextPackName textPack, int strNum, string lexems)
+{
+    Critter[] critters = map.GetCrittersWhoSeeHex(hex, CritterFindType::Players);
+
+    for (int i = 0; i < critters.length(); i++) {
+        critters[i].PlayerClientCall.ReceiveMapText(flying, ZERO_IDENT, hex, color, text, textPack, strNum, lexems);
+    }
+}
+
+#endif
+
+#if CLIENT
+
+class MapText
+{
+    bool Flying;
+    mpos Hex;
+    ucolor Color;
+    nanotime StartTime;
+    timespan Duration;
+    ipos StartPos;
+    ipos EndPos;
+    isize Size;
+    string Text;
+};
+
+MapText[] MapTexts = {};
+
+void AddText(Critter cr, ucolor color, string text)
+{
+    if (!text.isEmpty()) {
+        AddText(false, cr, cr.Hex, color, text, TextPackName::Text, 0, "");
+    }
+}
+
+void AddText(Critter cr, ucolor color, TextPackName textPack, int strNum, string lexems = "")
+{
+    AddText(false, cr, cr.Hex, color, "", textPack, strNum, lexems);
+}
+
+void AddText(mpos hex, ucolor color, string text)
+{
+    if (!text.isEmpty()) {
+        AddText(false, null, hex, color, text, TextPackName::Text, 0, "");
+    }
+}
+
+void AddText(mpos hex, ucolor color, TextPackName textPack, int strNum, string lexems = "")
+{
+    AddText(false, null, hex, color, "", textPack, strNum, lexems);
+}
+
+void AddFlyingText(Critter cr, ucolor color, string text)
+{
+    if (!text.isEmpty()) {
+        AddText(true, cr, cr.Hex, color, text, TextPackName::Text, 0, "");
+    }
+}
+
+void AddFlyingText(Critter cr, ucolor color, TextPackName textPack, int strNum, string lexems = "")
+{
+    AddText(true, cr, cr.Hex, color, "", textPack, strNum, lexems);
+}
+
+void AddFlyingText(mpos hex, ucolor color, string text)
+{
+    if (!text.isEmpty()) {
+        AddText(true, null, hex, color, text, TextPackName::Text, 0, "");
+    }
+}
+
+void AddFlyingText(mpos hex, ucolor color, TextPackName textPack, int strNum, string lexems = "")
+{
+    AddText(true, null, hex, color, "", textPack, strNum, lexems);
+}
+
+// [[ClientRemoteCall]]
+void ReceiveMapText(bool flying, ident crId, mpos hex, ucolor color, string text, TextPackName textPack, int strNum, string lexems)
+{
+    Critter cr = Game.GetCritter(crId);
+    AddText(flying, cr, hex, color, text, textPack, strNum, lexems);
+}
+
+void AddText(bool flying, Critter cr, mpos hex, ucolor color, string text, TextPackName textPack, int strNum, string lexems)
+{
+    if (CurMap == null) {
+        return;
+    }
+
+    if (text.isEmpty()) {
+        if (!Game.IsTextPresent(textPack, strNum)) {
+            return;
+        }
+
+        text = Game.GetText(textPack, strNum);
+    }
+
+    if (!flying && cr != null) {
+        cr.TextOnHead = text;
+        cr.TextOnHeadEndTime = Game.FrameTime + Time::Milliseconds(Settings.TextDelay + text.length() * 100);
+        return;
+    }
+
+    isize hexContentSize = CurMap.GetHexContentSize(hex);
+
+    MapText mapText = MapText();
+    mapText.Flying = flying;
+    mapText.Hex = hex;
+    mapText.Color = color;
+    mapText.StartTime = Game.FrameTime;
+    mapText.Duration = Time::Milliseconds(Settings.TextDelay + text.length() * 100);
+    mapText.StartPos = ipos(0, -hexContentSize.height);
+    mapText.EndPos = mapText.StartPos;
+    mapText.Size = isize(Math::Max(hexContentSize.width, 200), 0);
+    mapText.Text = text;
+
+    if (flying) {
+        mapText.EndPos.x += Game.Random(-5, 5);
+        mapText.EndPos.y -= 20;
+    }
+    else {
+        for (int i = 0; i < MapTexts.length();) {
+            if (!MapTexts[i].Flying && MapTexts[i].Hex == hex) {
+                MapTexts.removeAt(i);
+            }
+            else {
+                i++;
+            }
+        }
+    }
+
+    MapTexts.insertLast(mapText);
+}
+
+void OnPreRenderIface()
+{
+    if (CurMap != null) {
+        DrawCritterTexts();
+        DrawMapTexts();
+    }
+}
+
+void OnMapLoad()
+{
+    MapTexts.clear();
+}
+
+void OnMapUnload()
+{
+    MapTexts.clear();
+}
+
+void DrawCritterTexts()
+{
+    Critter[] critters = CurMap.GetCritters(CritterFindType::NonDead);
+    critters = Game.SortCrittersByDeep(critters);
+
+    for (int i = 0; i < critters.length(); i++) {
+        Critter cr = critters[i];
+        DrawCritterText(cr);
+    }
+}
+
+void DrawCritterText(Critter cr)
+{
+    ipos headBox;
+
+    if (!cr.GetTextPos(headBox)) {
+        return;
+    }
+
+    bool drawSpeech = Game.FrameTime < cr.TextOnHeadEndTime;
+    string text = drawSpeech ? cr.TextOnHead : (cr.IsOffline() ? cr.Name + Settings.PlayerOffAppendix : cr.Name);
+
+    int textFont = FONT_DEFAULT;
+    int textFlags = FT_CENTERX | FT_BOTTOM | FT_BORDERED;
+    isize textBox;
+    int textLines = 0;
+    Game.GetTextInfo(text, isize(200, 500), textFont, textFlags, textBox, textLines);
+
+    ucolor textColor = COLOR_TEXT;
+
+    if (!drawSpeech) {
+        textColor = cr.ControlledByPlayer ? COLOR_PLAYER_NAME : COLOR_CRITTER_NAME;
+
+        if (cr.ControlledByPlayer) {
+            int highlight = cr.PlayerKarma / 10;
+            textColor = ucolor(COLOR_CRITTER_NAME.red + highlight, COLOR_CRITTER_NAME.green + highlight, COLOR_CRITTER_NAME.blue + highlight);
+        }
+    }
+
+    int crAlpha = cr.GetAlpha();
+    ucolor spriteColor = COLOR_NEUTRAL;
+    textColor.alpha = crAlpha;
+    spriteColor.alpha = crAlpha;
+
+    Game.DrawText(text, headBox - ipos(textBox.width / 2, textBox.height), textBox, textColor, textFont, textFlags);
+}
+
+void DrawMapTexts()
+{
+    for (int i = 0; i < MapTexts.length();) {
+        MapText mapText = MapTexts[i];
+        int elapsedMs = (Game.FrameTime - mapText.StartTime).milliseconds;
+        int durationMs = mapText.Duration.milliseconds;
+        float t = float(elapsedMs) / float(durationMs);
+
+        if (t >= 1.0) {
+            MapTexts.removeAt(i);
+            continue;
+        }
+
+        ipos hexPos = CurMap.GetHexScreenPos(mapText.Hex);
+        ucolor color = mapText.Color;
+
+        if (elapsedMs < 500) {
+            color.alpha = Math::RoundToInt(255 * (elapsedMs / 500.0));
+        }
+        else if (durationMs - elapsedMs < 500) {
+            color.alpha = Math::RoundToInt(255 * ((durationMs - elapsedMs) / 500.0));
+        }
+        else {
+            color.alpha = 255;
+        }
+
+        ipos hexOffset = Math::Lerp(mapText.StartPos, mapText.EndPos, t) + ipos(-mapText.Size.width / 2, 0);
+        Game.DrawText(mapText.Text, hexPos + hexOffset, mapText.Size, color, FONT_DEFAULT, FT_CENTERX | FT_BOTTOM | FT_BORDERED);
+
+        i++;
+    }
+}
+
+#endif
+
+}

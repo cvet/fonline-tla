@@ -1,39 +1,38 @@
-// FOS Server
+namespace BulletinBoard
+{
+
+#if SERVER
 
 // Author: rifleman17
 // Доска объявлений с возможностью оставлять сообщения
 
-///@ Property Critter PrivateServer int BBMsgPage
-///@ Property Critter PrivateServer int BBSelectedMsg
-///@ Property Critter PrivateServer int KlamAldoBusy
-///@ Property Critter PrivateServer ident KlamAldoListenId
-///@ Property Critter PrivateServer ident KlamAldoReaderId
-///@ Property Critter PrivateServer ident=>uint BBMsgCount
+///@ Property Critter Server int32 BBMsgPage Mutable Persistent
+///@ Property Critter Server int32 BBSelectedMsg Mutable Persistent
+///@ Property Critter Server int32 KlamAldoBusy Mutable Persistent
+///@ Property Critter Server ident KlamAldoListenId Mutable Persistent
+///@ Property Critter Server ident KlamAldoReaderId Mutable Persistent
+///@ Property Critter Server ident=>int32 BBMsgCount Mutable Persistent
 
-///@ Property Map PrivateServer ident KlamAldoId
+///@ Property Map Server ident KlamAldoId Mutable Persistent
 
-///@ Property Game PrivateServer uint8[] BulletinBoard
-
-#define GAME_WEEK #(week)(week * 7 * 24 * 60 * 60)
-#define _Expired \
-    #(msg)(msg.ReaderId == ZERO_IDENT ? msg.WriteTime + GAME_WEEK(20) < Game.GetFullSecond() : msg.WriteTime + GAME_WEEK(80) < Game.GetFullSecond())
+///@ Property Game Server uint8[] BulletinBoard Mutable Persistent
 
 // #define DL#(s) (Game.Log(s))
 #define DL #(s)
 
 class BBMessage
 {
-    uint Idx;
+    int Idx;
     ident MapId;
     ident WriterId;
     ident ReaderId;
-    uint WriteTime;
+    synctime WriteTime;
     string Message;
 }
 
 class BBMessenger
 {
-    uint MsgCount;
+    int MsgCount;
     BBMessage[] Messages = {};
 
     BBMessenger()
@@ -43,8 +42,8 @@ class BBMessenger
 
     void ClearExpiredMessages()
     {
-        for (uint i = 0; i < MsgCount; i++) {
-            if (_Expired(Messages[i])) {
+        for (int i = 0; i < MsgCount; i++) {
+            if (Expired(Messages[i])) {
                 Messages.removeAt(i);
                 MsgCount = Messages.length();
                 i--;
@@ -52,14 +51,14 @@ class BBMessenger
         }
     }
 
-    void AddMessage(ident mapId, ident writer, ident reader, uint when, string message)
+    void AddMessage(ident mapId, ident writer, ident reader, synctime when, string message)
     {
         BBMessage msg;
         msg.Idx = Messages.length();
         msg.MapId = mapId;
         msg.WriterId = writer;
         msg.ReaderId = reader;
-        msg.WriteTime = (when == 0 ? Game.GetFullSecond() : when);
+        msg.WriteTime = (when == ZERO_SYNCTIME ? Game.SynchronizedTime : when);
         msg.Message = message;
         Messages.insertLast(msg);
         MsgCount = Messages.length();
@@ -68,7 +67,7 @@ class BBMessenger
     void ContinueMessage(ident mapId, ident writer, ident reader, string message)
     {
         BBMessage msg;
-        for (uint i = 0; i < MsgCount; i++) {
+        for (int i = 0; i < MsgCount; i++) {
             if (Messages[i].MapId == mapId && Messages[i].WriterId == writer && Messages[i].ReaderId == reader) {
                 Messages[i].Message += message;
                 return;
@@ -79,63 +78,48 @@ class BBMessenger
     void Save()
     {
         ClearExpiredMessages();
-        ident[] maps = {};
-        ident[] writers = {};
-        ident[] readers = {};
-        uint[] writeTimes = {};
-        string[] messages = {};
 
         MsgCount = Messages.length();
-        DL("saving messages num " + MsgCount);
-
-        for (uint i = 0; i < MsgCount; i++) {
-            maps.insertLast(Messages[i].MapId);
-            writers.insertLast(Messages[i].WriterId);
-            readers.insertLast(Messages[i].ReaderId);
-            writeTimes.insertLast(Messages[i].WriteTime);
-            messages.insertLast(Messages[i].Message);
-        }
 
         auto save = Serializator::Serializator();
         save.Set(MsgCount);
-        save.Set(maps);
-        save.Set(writers);
-        save.Set(readers);
-        save.Set(writeTimes);
-        save.Set(messages);
+
+        for (int i = 0; i < MsgCount; i++) {
+            save.Set(Messages[i].MapId);
+            save.Set(Messages[i].WriterId);
+            save.Set(Messages[i].ReaderId);
+            save.Set(Messages[i].WriteTime);
+            save.Set(Messages[i].Message);
+        }
+
         Game.BulletinBoard = save.GetData();
     }
 
     void Load()
     {
+        ident mapId, writer, reader;
+        synctime when;
+        string message;
+
         auto load = Serializator::Serializator();
         if (load.SetData(Game.BulletinBoard) == 0) {
             return;
         }
-
-        ident[] maps = {};
-        ident[] writers = {};
-        ident[] readers = {};
-        uint[] writeTimes = {};
-        string[] messages = {};
+        Messages.clear();
 
         load.Get(MsgCount);
-        load.Get(maps);
-        load.Get(writers);
-        load.Get(readers);
-        load.Get(writeTimes);
-        load.Get(messages);
-        DL("loading messages num " + MsgCount + " maps " + maps.length());
-
-        Messages.clear();
-        for (uint i = 0; i < maps.length(); i++) {
-            AddMessage(maps[i], writers[i], readers[i], writeTimes[i], messages[i]);
+        for (int i = 0; i < MsgCount; i++) {
+            load.Get(mapId);
+            load.Get(writer);
+            load.Get(reader);
+            load.Get(when);
+            load.Get(message);
+            AddMessage(mapId, writer, reader, when, message);
         }
-        MsgCount = Messages.length();
         ClearExpiredMessages();
     }
 
-    BBMessage GetMessage(uint idx)
+    BBMessage GetMessage(int idx)
     {
         if (idx < MsgCount) {
             return Messages[idx];
@@ -146,7 +130,7 @@ class BBMessenger
     BBMessage[] GetPrivateMessages(ident mapId, ident readerId)
     {
         BBMessage[] messages = {};
-        for (uint i = 0; i < MsgCount; i++) {
+        for (int i = 0; i < MsgCount; i++) {
             if (Messages[i].MapId == mapId && Messages[i].ReaderId == readerId) {
                 messages.insertLast(Messages[i]);
             }
@@ -156,7 +140,7 @@ class BBMessenger
 
     BBMessage GetSelfMessage(ident mapId, ident writerId)
     {
-        for (uint i = 0; i < MsgCount; i++) {
+        for (int i = 0; i < MsgCount; i++) {
             if (Messages[i].MapId == mapId && Messages[i].WriterId == writerId) {
                 return Messages[i];
             }
@@ -176,7 +160,7 @@ class BBMessenger
 
     void Reindex()
     {
-        for (uint i = 0; i < MsgCount; i++) {
+        for (int i = 0; i < MsgCount; i++) {
             Messages[i].Idx = i;
         }
     }
@@ -184,7 +168,7 @@ class BBMessenger
     BBMessage GetRandomMessage(ident mapId)
     {
         BBMessage msg;
-        uint counter = 0;
+        int counter = 0;
         while (counter < 20 && Messages.length() > 0) {
             counter++;
             msg = Messages[Game.Random(0, Messages.length() - 1)];
@@ -196,30 +180,46 @@ class BBMessenger
     }
 
     // readFrom - порядковый номер в уже отобранных публичных объявлениях
-    BBMessage[] GetPublicMessages(ident mapId, uint readFrom, uint count)
+    BBMessage[] GetPublicMessages(ident mapId, int readFrom, int count)
     {
-        uint[] msgIds = {};
+        int[] msgIds = {};
         BBMessage[] messages = {};
-        for (uint i = 0; i < MsgCount; i++) {
+        for (int i = 0; i < MsgCount; i++) {
             if (Messages[i].ReaderId == ZERO_IDENT) {
                 msgIds.insertLast(Messages[i].Idx);
             }
         }
-        for (uint i = readFrom; i < readFrom + count && i < msgIds.length(); i++) {
+        for (int i = readFrom; i < readFrom + count && i < msgIds.length(); i++) {
             messages.insertLast(Messages[msgIds[i]]);
         }
         return messages;
     }
 
-    uint CountPublicMessages(ident mapId)
+    int CountPublicMessages(ident mapId)
     {
-        uint count = 0;
-        for (uint i = 0; i < MsgCount; i++) {
+        int count = 0;
+        for (int i = 0; i < MsgCount; i++) {
             if (Messages[i].MapId == mapId && Messages[i].ReaderId == ZERO_IDENT) {
                 count++;
             }
         }
         return count;
+    }
+
+    bool Expired(BBMessage msg)
+    {
+        // Персональные сообщения хранятся дольше.
+        if (msg.ReaderId == ZERO_IDENT) {
+            if (msg.WriteTime + Time::GameDays(20 * 7) < Game.SynchronizedTime) {
+                return true;
+            }
+        }
+        else {
+            if (msg.WriteTime + Time::GameDays(80 * 7) < Game.SynchronizedTime) {
+                return true;
+            }
+        }
+        return false;
     }
 }
 
@@ -268,7 +268,7 @@ bool d_IsPrivateMsg(Critter cr, Critter npc, int numMsg, int msgPerPage)
 {
     Map map = cr.GetMap();
     if (valid(map)) {
-        return Messenger.GetPrivateMessages(map.Id, cr.Id).length() > uint(cr.BBMsgPage * msgPerPage + numMsg);
+        return Messenger.GetPrivateMessages(map.Id, cr.Id).length() > int(cr.BBMsgPage * msgPerPage + numMsg);
     }
     return false;
 }
@@ -280,13 +280,13 @@ void dlg_PrivateMsg5(Critter cr, Critter npc, string& lexems)
         return;
     }
 
-    uint msgPerPage = 5;
+    int msgPerPage = 5;
     lexems = "";
     Map map = cr.GetMap();
     BBMessage[] messages = Messenger.GetPrivateMessages(map.Id, cr.Id);
-    uint msg = 1;
-    for (uint i = msgPerPage * cr.BBMsgPage; i < messages.length(); i++) {
-        lexems += "$msg" + msg + "" + Obsolete::GetPlayerName(messages[i].WriterId);
+    int msg = 1;
+    for (int i = msgPerPage * cr.BBMsgPage; i < messages.length(); i++) {
+        lexems += "$msg" + msg + "" + PlayerRegistration::GetPlayerName(messages[i].WriterId);
         msg++;
     }
 }
@@ -303,7 +303,7 @@ void dlg_GetMsg(Critter cr, Critter npc, string& lexems)
     }
 
     BBMessage m = Messenger.GetMessage(cr.BBSelectedMsg);
-    lexems = "$fromWho" + Obsolete::GetPlayerName(m.WriterId) + "$msg" + m.Message;
+    lexems = "$fromWho" + PlayerRegistration::GetPlayerName(m.WriterId) + "$msg" + m.Message;
 }
 
 bool d_IsPublicMsg(Critter cr, Critter npc)
@@ -318,18 +318,18 @@ bool d_NotPublicMsg(Critter cr, Critter npc)
 
 bool d_IsPublicMsg(Critter cr, Critter npc, int numMsg, int msgPerPage)
 {
-    return (Messenger.GetPublicMessages(cr.GetMap().Id, cr.BBMsgPage * msgPerPage, msgPerPage + numMsg).length() > uint(numMsg));
+    return (Messenger.GetPublicMessages(cr.GetMap().Id, cr.BBMsgPage * msgPerPage, msgPerPage + numMsg).length() > int(numMsg));
 }
 
 void r_SetPublicMsg(Critter cr, Critter npc, int numMsg, int msgPerPage)
 {
     BBMessage[] messages = Messenger.GetPublicMessages(cr.GetMap().Id, cr.BBMsgPage * msgPerPage, msgPerPage + numMsg);
-    if (messages.length() > uint(numMsg)) {
+    if (messages.length() > int(numMsg)) {
         cr.BBSelectedMsg = messages[numMsg].Idx;
     }
 }
 
-uint r_SetRandomMsg(Critter cr, Critter npc)
+int r_SetRandomMsg(Critter cr, Critter npc)
 {
     BBMessage msg = Messenger.GetRandomMessage(cr.GetMap().Id);
     if (valid(msg)) {
@@ -345,37 +345,35 @@ void dlg_PublicMsg5(Critter cr, Critter npc, string& lexems)
         return;
     }
 
-    uint msgPerPage = 5;
+    int msgPerPage = 5;
     lexems = "";
     Map map = cr.GetMap();
     BBMessage[] messages = Messenger.GetPublicMessages(map.Id, cr.BBMsgPage * 5, 5);
-    uint msg = 1;
-    for (uint i = 0; i < messages.length(); i++) {
-        lexems += "$msg" + msg + "" + Obsolete::GetPlayerName(messages[i].WriterId);
+    int msg = 1;
+    for (int i = 0; i < messages.length(); i++) {
+        lexems += "$msg" + msg + "" + PlayerRegistration::GetPlayerName(messages[i].WriterId);
         msg++;
     }
 }
 
 // Альдо и запись текста игрока на доску объявлений
-#define ENTRY_ALDO       (31) // Гекс, к которому подходит Альдо перед началом записи
-#define STR_CANT_REACH   (1)  // Не могу к доске подобраться. Обожди, пока разойдутся все.
-#define STR_IN_PLACE     (2) // Давай, говори, чего писать будем... Буду записывать все, что скажешь, после слова "Начали"
-#define STR_FINISHED     (3) // Все готово, проверяй...
-#define STR_NEXT         (4) // Если чего еще нужно написать, говори. Все после слова "Далее" я занесу сюда. Когда закончишь, скажи "Хватит".
-#define DLG_NOTFOUND     (34) // Номер ветки диалога "нет таких..."
-#define DLG_FOUND        (35) // Хорошо, напишем персональное объявление... Пойдем со мной, продиктуешь.
-#define CTE_CLEAR_VARS   (26) // Событие очистки переменных.
-#define CTE_CONFIRM_SAVE (27)
-#define _RightKeyWord    #(text)(text.length() < KEYWORD.length() ? false : text.substr(0, KEYWORD.length()) == KEYWORD)
-#define _RightKeyWord2   #(text)(text.length() < KEYWORD2.length() ? false : text.substr(0, KEYWORD2.length()) == KEYWORD2)
-#define _RightKeyWord3   #(text)(text.length() < KEYWORD3.length() ? false : text.substr(0, KEYWORD3.length()) == KEYWORD3)
-#define KEYWORD          ("Начали")
-#define KEYWORD2         ("Далее")
-#define KEYWORD3         ("Хватит")
-#define _MsgFromText     #(text)(text.substr(6, text.length() - 1))
-#define _MsgFromText2    #(text)(text.substr(5, text.length() - 1))
+#define ENTRY_ALDO     (31) // Гекс, к которому подходит Альдо перед началом записи
+#define STR_CANT_REACH (1)  // Не могу к доске подобраться. Обожди, пока разойдутся все.
+#define STR_IN_PLACE   (2) // Давай, говори, чего писать будем... Буду записывать все, что скажешь, после слова "Начали"
+#define STR_FINISHED   (3) // Все готово, проверяй...
+#define STR_NEXT       (4) // Если чего еще нужно написать, говори. Все после слова "Далее" я занесу сюда. Когда закончишь, скажи "Хватит".
+#define DLG_NOTFOUND   (34) // Номер ветки диалога "нет таких..."
+#define DLG_FOUND      (35) // Хорошо, напишем персональное объявление... Пойдем со мной, продиктуешь.
+#define _RightKeyWord  #(text)(text.length() < KEYWORD.length() ? false : text.substr(0, KEYWORD.length()) == KEYWORD)
+#define _RightKeyWord2 #(text)(text.length() < KEYWORD2.length() ? false : text.substr(0, KEYWORD2.length()) == KEYWORD2)
+#define _RightKeyWord3 #(text)(text.length() < KEYWORD3.length() ? false : text.substr(0, KEYWORD3.length()) == KEYWORD3)
+#define KEYWORD        ("Начали")
+#define KEYWORD2       ("Далее")
+#define KEYWORD3       ("Хватит")
+#define _MsgFromText   #(text)(text.substr(6, text.length() - 1))
+#define _MsgFromText2  #(text)(text.substr(5, text.length() - 1))
 
-uint dlg_GetReaderId(Critter cr, Critter npc, string& lexems)
+int dlg_GetReaderId(Critter cr, Critter npc, string& lexems)
 {
     if (!IS_DIALOG_SAY_MODE(lexems)) {
         return 0;
@@ -403,7 +401,7 @@ void r_MoveAldo(Critter player, Critter npc)
 
     npc.KlamAldoBusy = 1;
     if (!NpcPlanes::AddWalkPlane(npc, ENTRY_ALDO, 0, false)) {
-        npc.SayMsg(SAY_NORM_ON_HEAD, TextPackName::Dialogs, DLGSTR(npc.DialogId, STR_CANT_REACH));
+        Messaging::SayOnHead(npc, TextPackName::Dialogs, DLGSTR(npc.DialogId, STR_CANT_REACH));
         npc.KlamAldoBusy = 0;
         return;
     }
@@ -412,8 +410,8 @@ void r_MoveAldo(Critter player, Critter npc)
     npc.KlamAldoListenId = player.Id;
     npc.KlamAldoBusy = 1;
     npc.OnNpcPlaneEnd.Subscribe(_AldoPlaneEnd);
-    if (npc.GetTimeEvents(CTE_CLEAR_VARS) == 0) {
-        npc.AddTimeEvent(cte_ClearVars, Time::RealMinute(10), CTE_CLEAR_VARS);
+    if (npc.CountTimeEvent(cte_ClearVars) == 0) {
+        npc.StartTimeEvent(Time::Minutes(10), cte_ClearVars);
     }
 }
 
@@ -423,11 +421,11 @@ bool _AldoPlaneEnd(Critter cr, int planeId, int reason, Critter someCr, Item som
 
     if (cr.KlamAldoBusy == 1 && plane.Type == AI_PLANE_WALK && reason == REASON_SUCCESS) {
         cr.KlamAldoBusy = 2;
-        cr.SayMsg(SAY_NORM_ON_HEAD, TextPackName::Dialogs, DLGSTR(cr.DialogId, STR_IN_PLACE));
-        Game.AddTextListener(SAY_NORM, KEYWORD, cr.GetMap().ProtoId.hash, listen_FirstMessage);
-        NpcPlanes::AddMiscPlane(cr, 0, Game.GetFullSecond() + Time::RealMinute(2), BulletinBoard::plane_AldoFinished);
-        if (cr.GetTimeEvents(CTE_CLEAR_VARS) == 0) {
-            cr.AddTimeEvent(cte_ClearVars, Time::RealMinute(10), CTE_CLEAR_VARS);
+        Messaging::SayOnHead(cr, TextPackName::Dialogs, DLGSTR(cr.DialogId, STR_IN_PLACE));
+        // Todo: Game.AddTextListener(SAY_NORM, KEYWORD, cr.GetMap().ProtoId.hash, listen_FirstMessage);
+        NpcPlanes::AddMiscPlane(cr, 0, Game.SynchronizedTime + Time::Minutes(2), BulletinBoard::plane_AldoFinished);
+        if (cr.CountTimeEvent(cte_ClearVars) == 0) {
+            cr.StartTimeEvent(Time::Minutes(10), cte_ClearVars);
         }
         // cr.SetEvent( CRITTER_EVENT_PLANE_END, "" );
         cr.OnNpcPlaneEnd.Unsubscribe(_AldoPlaneEnd);
@@ -447,11 +445,11 @@ void listen_Next(Critter player, string text)
 
     Critter cr = Game.GetCritter(map.KlamAldoId);
     if (valid(cr) && _RightKeyWord2(text)) {
-        dict<ident, uint> bbMsgCount = player.BBMsgCount.clone();
+        dict<ident, int> bbMsgCount = player.BBMsgCount.clone();
         if (bbMsgCount.get(cr.Id, 0) >= 3) {
             ClearTempVariables(cr);
-            cr.SayMsg(SAY_NORM_ON_HEAD, TextPackName::Dialogs, DLGSTR(cr.DialogId, 6));
-            NpcPlanes::AddWalkPlane(cr, 0, cr.HomeHexX, cr.HomeHexY, cr.HomeDir, false, 0);
+            Messaging::SayOnHead(cr, TextPackName::Dialogs, DLGSTR(cr.DialogId, 6));
+            NpcPlanes::AddWalkPlane(cr, 0, cr.HomeHex, cr.HomeDir, false, 0);
             return;
         }
         else {
@@ -463,7 +461,7 @@ void listen_Next(Critter player, string text)
             Messenger.ContinueMessage(map.Id, cr.KlamAldoListenId, cr.KlamAldoReaderId, "\n" + _MsgFromText2(text));
             // ClearTempVariables(cr);
             // cr.AddTimeEvent(cte_SayMsgSaved, Settings.TimeMultiplier*2, CTE_CONFIRM_SAVE);
-            cr.SayMsg(SAY_NORM_ON_HEAD, TextPackName::Dialogs, DLGSTR(cr.DialogId, 5));
+            Messaging::SayOnHead(cr, TextPackName::Dialogs, DLGSTR(cr.DialogId, 5));
         }
     }
 }
@@ -478,7 +476,7 @@ void listen_End(Critter player, string text)
     Critter cr = Game.GetCritter(map.KlamAldoId);
     if (valid(cr) && _RightKeyWord3(text)) {
         ClearTempVariables(cr);
-        cr.AddTimeEvent(cte_SayMsgSaved, Settings.TimeMultiplier * 2, CTE_CONFIRM_SAVE);
+        cr.StartTimeEvent(Time::Seconds(2), cte_SayMsgSaved);
     }
 }
 
@@ -493,9 +491,9 @@ void listen_FirstMessage(Critter player, string text)
     if (valid(cr) && _RightKeyWord(text)) {
         if (cr.KlamAldoListenId == player.Id) {
             Messenger.RemoveSelfMessages(map.Id, player.Id);
-            Messenger.AddMessage(map.Id, cr.KlamAldoListenId, cr.KlamAldoReaderId, 0, _MsgFromText(text));
+            Messenger.AddMessage(map.Id, cr.KlamAldoListenId, cr.KlamAldoReaderId, ZERO_SYNCTIME, _MsgFromText(text));
             // ClearTempVariables(cr);
-            cr.AddTimeEvent(cte_SayMsgFirstSaved, Settings.TimeMultiplier * 2, CTE_CONFIRM_SAVE);
+            cr.StartTimeEvent(Time::Seconds(2), cte_SayMsgFirstSaved);
         }
     }
 }
@@ -506,30 +504,30 @@ void plane_AldoFinished(Critter cr)
     NpcPlanes::DropPlanes(cr);
 }
 
-uint cte_SayMsgFirstSaved(Critter cr, any identifier, uint& rate)
+void cte_SayMsgFirstSaved(Critter cr)
 {
-    cr.SayMsg(SAY_NORM, TextPackName::Dialogs, DLGSTR(cr.DialogId, STR_NEXT));
+    Messaging::Say(cr, TextPackName::Dialogs, DLGSTR(cr.DialogId, STR_NEXT));
     hstring proto = cr.GetMap().ProtoId;
-    Game.AddTextListener(SAY_NORM, KEYWORD2, proto.hash, listen_Next);
-    Game.AddTextListener(SAY_NORM, KEYWORD3, proto.hash, listen_End);
-    Game.RemoveTextListener(SAY_NORM, KEYWORD, proto.hash);
-    return 0;
+    // Todo: Game.AddTextListener(SAY_NORM, KEYWORD2, proto.hash, listen_Next);
+    // Todo: Game.AddTextListener(SAY_NORM, KEYWORD3, proto.hash, listen_End);
+    // Todo: Game.RemoveTextListener(SAY_NORM, KEYWORD, proto.hash);
+    return;
 }
 
-uint cte_SayMsgSaved(Critter cr, any identifier, uint& rate)
+void cte_SayMsgSaved(Critter cr)
 {
     hstring proto = cr.GetMap().ProtoId;
-    Game.RemoveTextListener(SAY_NORM, KEYWORD2, proto.hash);
-    Game.RemoveTextListener(SAY_NORM, KEYWORD3, proto.hash);
-    cr.SayMsg(SAY_NORM_ON_HEAD, TextPackName::Dialogs, DLGSTR(cr.DialogId, STR_FINISHED));
-    NpcPlanes::AddWalkPlane(cr, 0, cr.HomeHexX, cr.HomeHexY, cr.HomeDir, false, 0);
-    return 0;
+    // Todo: Game.RemoveTextListener(SAY_NORM, KEYWORD2, proto.hash);
+    // Todo: Game.RemoveTextListener(SAY_NORM, KEYWORD3, proto.hash);
+    Messaging::SayOnHead(cr, TextPackName::Dialogs, DLGSTR(cr.DialogId, STR_FINISHED));
+    NpcPlanes::AddWalkPlane(cr, 0, cr.HomeHex, cr.HomeDir, false, 0);
+    return;
 }
 
-uint cte_ClearVars(Critter cr, any identifier, uint& rate)
+void cte_ClearVars(Critter cr)
 {
     ClearTempVariables(cr);
-    return 0;
+    return;
 }
 
 void ClearTempVariables(Critter cr)
@@ -541,12 +539,12 @@ void ClearTempVariables(Critter cr)
     cr.KlamAldoListenId = ZERO_IDENT;
     cr.KlamAldoReaderId = ZERO_IDENT;
 
-    Game.RemoveTextListener(SAY_NORM, KEYWORD, cr.GetMap().ProtoId.hash);
-    Game.RemoveTextListener(SAY_NORM, KEYWORD2, cr.GetMap().ProtoId.hash);
-    Game.RemoveTextListener(SAY_NORM, KEYWORD3, cr.GetMap().ProtoId.hash);
+    // Todo: Game.RemoveTextListener(SAY_NORM, KEYWORD, cr.GetMap().ProtoId.hash);
+    // Todo: Game.RemoveTextListener(SAY_NORM, KEYWORD2, cr.GetMap().ProtoId.hash);
+    // Todo: Game.RemoveTextListener(SAY_NORM, KEYWORD3, cr.GetMap().ProtoId.hash);
 
-    if (cr.GetTimeEvents(CTE_CLEAR_VARS) != 0) {
-        cr.RemoveTimeEvents(CTE_CLEAR_VARS);
+    if (cr.CountTimeEvent(cte_ClearVars) != 0) {
+        cr.StopTimeEvent(cte_ClearVars);
     }
 
     NpcPlanes::DropPlanes(cr);
@@ -560,7 +558,7 @@ void drop_planes(Critter cr, any crId)
         NpcPlanes::DropPlanes(npc);
         return;
     }
-    cr.Say(SAY_NETMSG, "cr invalid");
+    Messaging::Info(cr, "cr invalid");
 }
 
 void add_public_msg(Critter cr, int numMsg, any readerId, any writerId)
@@ -571,7 +569,7 @@ void add_public_msg(Critter cr, int numMsg, any readerId, any writerId)
 
     ident mapId = cr.GetMap().Id;
     for (int i = 0; i < numMsg; i++) {
-        Messenger.AddMessage(mapId, (ident(writerId) == ZERO_IDENT ? cr.Id : ident(writerId)), readerId, 0, "message #" + i);
+        Messenger.AddMessage(mapId, (ident(writerId) == ZERO_IDENT ? cr.Id : ident(writerId)), readerId, ZERO_SYNCTIME, "message #" + i);
     }
 }
 
@@ -587,7 +585,7 @@ void load(Critter cr)
 
 void GetMsg(Critter cr, int id)
 {
-    cr.Say(SAY_NETMSG, "Idx" + Messenger.Messages[id].Idx + " " + Messenger.Messages[id].Message);
+    Messaging::Info(cr, "Idx" + Messenger.Messages[id].Idx + " " + Messenger.Messages[id].Message);
 }
 
 void ResetBBMsgCount(Critter cr, Critter npc)
@@ -595,4 +593,8 @@ void ResetBBMsgCount(Critter cr, Critter npc)
     auto values = cr.BBMsgCount.clone();
     values[npc.Id] = 0;
     cr.BBMsgCount = values;
+}
+
+#endif
+
 }

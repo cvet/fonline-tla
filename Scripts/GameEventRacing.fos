@@ -1,17 +1,20 @@
-// FOS Server Sort 3
+namespace GameEventRacing // Sort 3
+{
 
-///@ Property Critter PrivateServer uint8  RacingCheckPoints Max = 14
-///@ Property Critter PrivateServer ident RacingCheckpointLocId
-///@ Property Critter PrivateServer uint16 GERacingCritterHx
-///@ Property Critter PrivateServer uint16 GERacingCritterHy
-///@ Property Critter PrivateServer uint8  GERacingCritterDir
-///@ Property Critter PrivateServer uint   GERacingNpcRole
-///@ Property Critter PrivateServer uint   GERacingOpeningPhrases
+#if SERVER
 
-///@ Property Location PrivateServer uint8 RacingCheckpointNumber Max = 14
+///@ Property Critter Server uint8 RacingCheckPoints Mutable Persistent Max = 14
+///@ Property Critter Server ident RacingCheckpointLocId Mutable Persistent
+///@ Property Critter Server int16 GERacingCritterHx Mutable Persistent
+///@ Property Critter Server int16 GERacingCritterHy Mutable Persistent
+///@ Property Critter Server uint8 GERacingCritterDir Mutable Persistent
+///@ Property Critter Server int32 GERacingNpcRole Mutable Persistent
+///@ Property Critter Server int32 GERacingOpeningPhrases Mutable Persistent
 
-///@ Property Game PrivateServer uint8 RacingWinnersFound     Max = 2
-///@ Property Game PrivateServer ident RacingWinner
+///@ Property Location Server uint8 RacingCheckpointNumber Mutable Persistent Max = 14
+
+///@ Property Game Server uint8 RacingWinnersFound Mutable Persistent Max = 2
+///@ Property Game Server ident RacingWinner Mutable Persistent
 
 #define DL #(s)(Game.Log("GameEventRacing: " + s))
 // #define DL                                 # ( s )
@@ -49,7 +52,7 @@
 #define STR_1PHASE_COMMENT_FEMALE_FIRST (3804)
 #define STR_1PHASE_COMMENT_FEMALE_LAST  (3808)
 
-#define GAME_MONTH                      #(mon)(GAME_MONTH_TO_TICK(mon))
+#define GAME_MONTH                      #(mon)(Time::GameDays(mon * 30))
 
 #define _Phase1Comment \
     #(cr)(cr.BodyType == BodyTypes::Women ? Game.Random(STR_1PHASE_COMMENT_FEMALE_FIRST, STR_1PHASE_COMMENT_FEMALE_LAST) : \
@@ -125,33 +128,33 @@ void PrepareRacing()
                             CritterProperty::BonusLook,
                             1000};
 
-    uint16 hX = 0, hY = 0;
+    mpos hex;
 
-    if (Entrance::GetNearEntry(map, ENTRY_BILL_PREPARE, hX, hY)) {
-        map.AddNpc(Content::Critter::Bill, hX, hY, 2, Tla::GetCritPropsDict(propsBill));
+    if (Entrance::GetNearEntry(map, ENTRY_BILL_PREPARE, hex)) {
+        map.AddCritter(Content::Critter::Bill, hex, 2, Tla::GetCritPropsDict(propsBill));
     }
     else {
         return;
     }
 
     Entrance::Entry[] entries = Entrance::ParseEntries(map, ENTRY_BODYGUARD_PREPARE);
-    for (uint i = 0; i < entries.length(); i++) {
-        map.AddNpc(Content::Critter::Bodyguard, entries[i].HexX, entries[i].HexY, 2, Tla::GetCritPropsDict(propsBodyGuard));
+    for (int i = 0; i < entries.length(); i++) {
+        map.AddCritter(Content::Critter::Bodyguard, entries[i].Hex, 2, Tla::GetCritPropsDict(propsBodyGuard));
     }
 
-    Game.SavedDeferredCall(MINUTE_TICKS(20), AnnounceRadio);
+    Game.StartTimeEvent(Time::GameMinutes(20), AnnounceRadio); //SavedDeferredCall
 }
 
 void AnnounceRadio()
 {
     DL("Radio announce");
     if (GameEvent::CheckEventStatus(EVENT_RACING_BEGIN, STATUS_RUNNING)) {
-        Game.RadioMessageMsg(0, TextPackName::Text, STR_ANNOUNCE);
-        uint time = GameEvent::GetEventOccurenceTime(EVENT_RACING_BEGIN);
-        if (time > 0 && time > Game.GetFullSecond()) {
-            Game.RadioMessage(0, Time::DateTimeToString(time));
+        Radio::SendChannelRadioMessage(0, TextPackName::Text, STR_ANNOUNCE);
+        auto time = GameEvent::GetEventOccurenceTime(EVENT_RACING_BEGIN);
+        if (time != ZERO_SYNCTIME && time > Game.SynchronizedTime) {
+            Radio::SendChannelRadioMessage(0, GameTime::SynchronizedTimeToString(time));
         }
-        Game.SavedDeferredCall(MINUTE_TICKS(25), AnnounceRadio);
+        Game.StartTimeEvent(Time::GameMinutes(25), AnnounceRadio); //SavedDeferredCall
     }
 }
 
@@ -167,11 +170,11 @@ void dlg_RacingWhen(Critter player, Critter npc, string& lexems)
         return;
     }
     lexems = "$whenНикогда";
-    uint time = GameEvent::GetEventOccurenceTime(EVENT_RACING_BEGIN);
-    if (time == 0) {
+    auto time = GameEvent::GetEventOccurenceTime(EVENT_RACING_BEGIN);
+    if (time == ZERO_SYNCTIME) {
         time = GameEvent::GetEventOccurenceTime(EVENT_RACING_RUN);
     }
-    lexems = "$when" + Time::DateTimeToString(time);
+    lexems = "$when" + GameTime::SynchronizedTimeToString(time);
 }
 
 void BeginRacing()
@@ -181,24 +184,22 @@ void BeginRacing()
         return;
     }
     Critter cr;
-    uint16 hX = 0, hY = 0;
+    mpos hex;
     cr = map.GetCritter(CritterProperty::NpcRole, ROLE_BILL, CritterFindType::Npc);
-    if (valid(cr) && Entrance::GetNearEntry(map, ENTRY_BILL, hX, hY)) {
+    if (valid(cr) && Entrance::GetNearEntry(map, ENTRY_BILL, hex)) {
         cr.HomeMapId = map.Id;
-        cr.HomeHexX = hX;
-        cr.HomeHexY = hY;
+        cr.HomeHex = hex;
         cr.HomeDir = 2;
-        cr.GERacingCritterHx = hX;
-        cr.GERacingCritterHy = hY;
-        cr.AddTimeEvent(cte_RunStartEvent, Time::RealMinute(5), CTE_RUN_START_EVENT);
+        cr.GERacingCritterHx = hex.x;
+        cr.GERacingCritterHy = hex.y;
+        cr.StartTimeEvent(Time::Minutes(5), cte_RunStartEvent);
 
         Entrance::Entry[] entries = Entrance::ParseEntries(map, ENTRY_BODYGUARD);
         Critter[] bodyguards = map.GetCritters(CritterProperty::NpcRole, ROLE_BODYGUARD, CritterFindType::Npc);
-        for (uint i = 0; i < bodyguards.length() && i < entries.length(); i++) {
+        for (int i = 0; i < bodyguards.length() && i < entries.length(); i++) {
             cr = bodyguards[i];
             cr.HomeMapId = map.Id;
-            cr.HomeHexX = entries[i].HexX;
-            cr.HomeHexY = entries[i].HexY;
+            cr.HomeHex = entries[i].Hex;
             cr.HomeDir = 2;
         }
 
@@ -242,40 +243,38 @@ void BeginRacing()
                            50,
                            CritterProperty::BonusLook,
                            1000};
-            for (uint i = 0; i < entries.length(); i++) {
-                Critter npc2 = map.AddNpc(Content::Critter::Guard, entries[i].HexX, entries[i].HexY, 6, Tla::GetCritPropsDict(props));
+            for (int i = 0; i < entries.length(); i++) {
+                Critter npc2 = map.AddCritter(Content::Critter::Guard, entries[i].Hex, 6, Tla::GetCritPropsDict(props));
                 npc2.SetupScript(_DenGuardInit);
             }
         }
 
         entries = Entrance::ParseEntries(map, ENTRY_SPECTATORS);
-        uint16 hXlook = 0, hYlook = 0;
+        mpos hexLook;
         uint8 dir = 2;
         Entrance::Entry entry;
-        Entrance::MapGetEntryCoords(map, ENTRY_LOOK_TO, 0, hXlook, hYlook);
-        Critter[] npc = map.GetCritters(CritterFindType::AliveNpc);
+        Entrance::MapGetEntryCoords(map, ENTRY_LOOK_TO, 0, hexLook);
+        Critter[] npc = map.GetCritters(CritterFindType::NonDeadNpc);
         if (!npc.isEmpty() && entries.length() > 0) {
-            uint countNpc = 0;
-            for (uint i = 0; i < npc.length() && countNpc < 25; i++) {
+            int countNpc = 0;
+            for (int i = 0; i < npc.length() && countNpc < 25; i++) {
                 cr = npc[i];
                 if (valid(cr) && cr.GERacingCritterHx == 0 && cr.GERacingCritterHy == 0 && cr.GERacingCritterDir == 0) {
                     if ((cr.NpcRole == 0 && cr.BodyType != BodyTypes::Brahmin && cr.BodyType != BodyTypes::Dog) ||
                         (cr.BodyType != BodyTypes::Brahmin && cr.NpcRole == ROLE_BRAHMIN)) {
                         entry = entries[Game.Random(0, entries.length() - 1)];
-                        hX = entry.HexX;
-                        hY = entry.HexY;
-                        if (valid(entry) && Caravan::GetFreeHex(map, 4, hX, hY) && map.GetPathLength(cr, hX, hY, 0) > 0) {
-                            cr.GERacingCritterHx = cr.HomeHexX;
-                            cr.GERacingCritterHy = cr.HomeHexY;
+                        hex = entry.Hex;
+                        if (valid(entry) && Entrance::GetFreeHex(map, 4, hex) && map.GetPathLength(cr, hex, 0) > 0) {
+                            cr.GERacingCritterHx = cr.HomeHex.x;
+                            cr.GERacingCritterHy = cr.HomeHex.y;
                             cr.GERacingCritterDir = cr.HomeDir;
                             cr.GERacingNpcRole = cr.NpcRole;
                             cr.NpcRole = ROLE_SPECTATOR;
-                            dir = Game.GetDirection(hX, hY, hXlook, hYlook);
+                            dir = Game.GetDirection(hex, hexLook);
                             cr.HomeMapId = map.Id;
-                            cr.HomeHexX = hX;
-                            cr.HomeHexY = hY;
+                            cr.HomeHex = hex;
                             cr.HomeDir = dir;
-                            cr.AddTimeEvent(cte_Npc2HomePos, GAME_MONTH(3), CTE_RUN_START_EVENT);
+                            cr.StartTimeEvent(GAME_MONTH(3), cte_Npc2HomePos);
                             cr.OnTalk.Subscribe(_SpectatorTalk);
                             countNpc++;
                         }
@@ -289,7 +288,7 @@ void BeginRacing()
     }
 }
 
-bool _SpectatorTalk(Critter cr, Critter player, bool attach, uint talkCount)
+bool _SpectatorTalk(Critter cr, Critter player, bool attach, int talkCount)
 {
     if (!GameEvent::CheckEventStatus(EVENT_RACING_BEGIN, STATUS_RUNNING) && !GameEvent::CheckEventStatus(EVENT_RACING_STOP, STATUS_RUNNING) &&
         !GameEvent::CheckEventStatus(EVENT_RACING_RUN, STATUS_RUNNING)) {
@@ -307,7 +306,7 @@ bool _SpectatorTalk(Critter cr, Critter player, bool attach, uint talkCount)
             return true;
         }
 
-        Game.RunDialog(player, cr, Content::Dialog::den_spectator, false);
+        Dialogs::RunDialog(player, Content::Dialog::den_spectator, cr, false);
         return false;
     }
     else {
@@ -319,18 +318,20 @@ bool _SpectatorTalk(Critter cr, Critter player, bool attach, uint talkCount)
     return true;
 }
 
-uint cte_Npc2HomePos(Critter cr, any identifier, uint& stage)
+void cte_Npc2HomePos(Critter cr)
 {
     if (GameEvent::CheckEventStatus(EVENT_RACING_BEGIN, STATUS_RUNNING) || GameEvent::CheckEventStatus(EVENT_RACING_STOP, STATUS_RUNNING)) {
-        return Time::RealMinute(5);
+        timespan delayTicks = Time::Minutes(5);
+        if (delayTicks != ZERO_TIMESPAN) {
+            Game.RepeatCurrentTimeEvent(delayTicks);
+        }
     }
     if (cr.GERacingCritterHx == 0 || cr.GERacingCritterHy == 0) {
-        return 0;
+        return;
     }
 
     cr.HomeMapId = cr.GetMap().Id;
-    cr.HomeHexX = cr.GERacingCritterHx;
-    cr.HomeHexY = cr.GERacingCritterHy;
+    cr.HomeHex = mpos(cr.GERacingCritterHx, cr.GERacingCritterHy);
     cr.HomeDir = cr.GERacingCritterDir;
     cr.GERacingCritterHx = 0;
     cr.GERacingCritterHy = 0;
@@ -339,7 +340,7 @@ uint cte_Npc2HomePos(Critter cr, any identifier, uint& stage)
     cr.NpcRole = cr.GERacingNpcRole;
     cr.OnTalk.Unsubscribe(_SpectatorTalk);
 
-    return 0;
+    return;
 }
 
 void _DenGuardInit(Critter cr, bool firstTime)
@@ -356,29 +357,32 @@ void _GuardSmthSkill(Critter cr, Critter fromCr, CritterProperty skill, Critter 
     }
 }
 
-uint cte_RunStartEvent(Critter cr, any identifier, uint& stage)
+void cte_RunStartEvent(Critter cr)
 {
-    if (cr.HexX == cr.GERacingCritterHx && cr.HexY == cr.GERacingCritterHy && cr.IsAlive()) {
+    if (cr.Hex.x == cr.GERacingCritterHx && cr.Hex.y == cr.GERacingCritterHy && cr.IsAlive()) {
         GameEvent::RunGameEvent(EVENT_RACING_RUN);
-        cr.AddTimeEvent(cte_Comment, Time::RealSecond(30), CTE_COMMENT);
-        return 0;
+        cr.StartTimeEvent(Time::Seconds(30), cte_Comment);
+        return;
     }
-    return Time::RealMinute(1);
+    timespan delayTicks = Time::Minutes(1);
+    if (delayTicks != ZERO_TIMESPAN) {
+        Game.RepeatCurrentTimeEvent(delayTicks);
+    }
 }
 
-uint cte_Comment(Critter cr, any identifier, uint& stage)
+void cte_Comment(Critter cr)
 {
     if (!GameEvent::CheckEventStatus(EVENT_RACING_RUN, STATUS_RUNNING)) {
-        return 0;
+        return;
     }
 
     Critter[] critters = {};
     Map map = cr.GetMap();
     if (!valid(map)) {
-        return 0;
+        return;
     }
 
-    auto spectators = map.GetCritters(CritterProperty::NpcRole, ROLE_SPECTATOR, CritterFindType::AliveNpc);
+    auto spectators = map.GetCritters(CritterProperty::NpcRole, ROLE_SPECTATOR, CritterFindType::NonDeadNpc);
     if (spectators.length() > 0) {
         Critter cr1;
         Critter cr2;
@@ -401,20 +405,23 @@ uint cte_Comment(Critter cr, any identifier, uint& stage)
         }
 
         if (valid(cr1) && str1 > 0) {
-            cr1.AddTimeEvent(cte_Talk, Time::RealSecond(5), CTE_COMMENT, str1);
+            cr1.StartTimeEvent(Time::Seconds(5), cte_Talk, str1);
         }
         if (valid(cr2) && str2 > 0) {
-            cr2.AddTimeEvent(cte_Talk, Time::RealSecond(Game.Random(2, 20)), CTE_COMMENT, str2);
+            cr2.StartTimeEvent(Time::Seconds(Game.Random(2, 20)), cte_Talk, str2);
         }
     }
 
-    return Time::RealSecond(20);
+    timespan delayTicks = Time::Seconds(20);
+    if (delayTicks != ZERO_TIMESPAN) {
+        Game.RepeatCurrentTimeEvent(delayTicks);
+    }
 }
 
-uint cte_Talk(Critter cr, any identifier, uint& rate)
+void cte_Talk(Critter cr, any rate)
 {
-    cr.SayMsg(SAY_NORM, TextPackName::Text, rate);
-    return 0;
+    Messaging::Say(cr, TextPackName::Text, rate);
+    return;
 }
 
 // ******************* Начало гонок. Билл произносит приветственную речь и открываются энкаунтеры для участников ********************
@@ -433,14 +440,15 @@ void RunRacing()
     }
     Critter cr;
     cr = map.GetCritter(CritterProperty::NpcRole, ROLE_BILL, CritterFindType::Npc);
-    cr.AddTimeEvent(cte_Opening, Time::RealSecond(5), CTE_OPENNING, 0);
+    cr.StartTimeEvent(Time::Seconds(5), cte_Opening, 0);
 }
 
-uint cte_Opening(Critter cr, any identifier, uint& rate)
+void cte_Opening(Critter cr, any data)
 {
+    int rate = data;
     Map map = cr.GetMap();
     if (!valid(map)) {
-        return 0;
+        return;
     }
 
     if (rate == 12) {
@@ -448,16 +456,16 @@ uint cte_Opening(Critter cr, any identifier, uint& rate)
     }
 
     if (rate >= OpeningPhrases.length()) {
-        return 0;
+        return;
     }
 
-    cr.SayMsg(SAY_SHOUT, TextPackName::Text, OpeningPhrases[rate][0][0]);
+    Messaging::SayShout(cr, TextPackName::Text, OpeningPhrases[rate][0][0]);
 
     Critter npc;
     bool talkAlready = true;
     int tries = 0;
-    auto spectators = map.GetCritters(CritterProperty::NpcRole, ROLE_SPECTATOR, CritterFindType::AliveNpc);
-    for (uint i = 0, l = OpeningPhrases[rate][2].length(); i < l && i < spectators.length(); i++) {
+    auto spectators = map.GetCritters(CritterProperty::NpcRole, ROLE_SPECTATOR, CritterFindType::NonDeadNpc);
+    for (int i = 0, l = OpeningPhrases[rate][2].length(); i < l && i < spectators.length(); i++) {
         talkAlready = true;
         tries = 10;
         while (tries > 0 && talkAlready) {
@@ -469,11 +477,11 @@ uint cte_Opening(Critter cr, any identifier, uint& rate)
             }
         }
         if (valid(npc) && npc.GERacingOpeningPhrases > 0 && !talkAlready) {
-            npc.AddTimeEvent(cte_Shout, Time::RealSecond(i) + Time::RealSecond(1) / 2, CTE_COMMENT, npc.GERacingOpeningPhrases);
+            npc.StartTimeEvent(Time::Seconds((i + 1) / 2), cte_Shout, npc.GERacingOpeningPhrases);
         }
     }
 
-    for (uint i = 0, l = OpeningPhrases[rate][3].length(); i < l && i < spectators.length(); i++) {
+    for (int i = 0, l = OpeningPhrases[rate][3].length(); i < l && i < spectators.length(); i++) {
         talkAlready = true;
         tries = 10;
         while (tries > 0 && talkAlready) {
@@ -486,25 +494,29 @@ uint cte_Opening(Critter cr, any identifier, uint& rate)
             }
         }
         if (valid(npc) && npc.GERacingOpeningPhrases > 0 && !talkAlready) {
-            npc.AddTimeEvent(cte_Shout, Time::RealSecond(i) + Time::RealSecond(1) / 2, CTE_COMMENT, npc.GERacingOpeningPhrases);
+            npc.StartTimeEvent(Time::Seconds((i + 1) / 2), cte_Shout, npc.GERacingOpeningPhrases);
         }
     }
 
     if (OpeningPhrases[rate][4][0] > 0) {
-        Critter[] critters = map.GetCritters(CritterProperty::NpcRole, ROLE_BODYGUARD, CritterFindType::AliveNpc);
-        for (uint i = 0; i < 2 && i < critters.length(); i++) {
-            critters[i].AddTimeEvent(cte_Talk, Time::RealSecond(1) + i * 5, CTE_COMMENT, 3854);
+        Critter[] critters = map.GetCritters(CritterProperty::NpcRole, ROLE_BODYGUARD, CritterFindType::NonDeadNpc);
+        for (int i = 0; i < 2 && i < critters.length(); i++) {
+            critters[i].StartTimeEvent(Time::Seconds(1 + i * 5), cte_Talk, 3854);
         }
     }
 
-    rate++;
-    return Time::RealSecond(OpeningPhrases[rate - 1][1][0] / 10);
+    rate = rate + 1;
+    timespan delayTicks = Time::Seconds(OpeningPhrases[rate - 1][1][0] / 10);
+    if (delayTicks != ZERO_TIMESPAN) {
+        Game.SetCurrentTimeEventData(rate);
+        Game.RepeatCurrentTimeEvent(delayTicks);
+    }
 }
 
-uint cte_Shout(Critter cr, any identifier, uint& rate)
+void cte_Shout(Critter cr, any rate)
 {
-    cr.SayMsg(SAY_NORM_ON_HEAD, TextPackName::Text, rate);
-    return 0;
+    Messaging::SayOnHead(cr, TextPackName::Text, rate);
+    return;
 }
 
 void Start()
@@ -519,8 +531,8 @@ void Start()
         Game.RacingEvent = 1;
         Game.RacingWinner = ZERO_IDENT;
         Game.RacingWinnersFound = 0;
-        uint countPlayers = 0;
-        for (uint i = 0; i < players.length(); i++) {
+        int countPlayers = 0;
+        for (int i = 0; i < players.length(); i++) {
             Critter player = players[i];
             if (valid(player)) {
                 if (player.DenBillRacingWin == 1) {
@@ -531,9 +543,9 @@ void Start()
             }
         }
         if (countPlayers > 0) {
-            Game.RadioMessageMsg(0, TextPackName::Text, 3857);
-            Game.RadioMessage(0, "" + countPlayers);
-            Game.RadioMessageMsg(0, TextPackName::Text, 3858);
+            Radio::SendChannelRadioMessage(0, TextPackName::Text, 3857);
+            Radio::SendChannelRadioMessage(0, "" + countPlayers);
+            Radio::SendChannelRadioMessage(0, TextPackName::Text, 3858);
         }
     }
 }
@@ -547,12 +559,13 @@ ident CreateCheckPoint(Critter player)
 
     int number = player.RacingCheckPoints;
     player.RacingCheckPoints += 1;
-    player.SayMsg(SAY_NETMSG, TextPackName::Text, 3856, "$num" + player.RacingCheckPoints);
-    ident locId = Game.CreateLocation(Content::Location::den_racing_checkpoint,
-                                      Coords[number][0] + Game.Random(-1 * int(Settings.GlobalMapZoneLength) / 2, int(Settings.GlobalMapZoneLength) / 2),
-                                      Coords[number][1] + Game.Random(-1 * int(Settings.GlobalMapZoneLength) / 2, int(Settings.GlobalMapZoneLength) / 2),
-                                      null)
-                      .Id;
+    Messaging::Info(player, TextPackName::Text, 3856, "$num" + player.RacingCheckPoints);
+    ident locId =
+        Location::CreateLocation(Content::Location::den_racing_checkpoint,
+                                 ipos(Coords[number][0] + Game.Random(-1 * int(Settings.GlobalMapZoneLength) / 2, int(Settings.GlobalMapZoneLength) / 2),
+                                      Coords[number][1] + Game.Random(-1 * int(Settings.GlobalMapZoneLength) / 2, int(Settings.GlobalMapZoneLength) / 2)),
+                                 null)
+            .Id;
     if (locId != ZERO_IDENT) {
         Location loc = Game.GetLocation(locId);
         if (valid(loc)) {
@@ -560,8 +573,8 @@ ident CreateCheckPoint(Critter player)
         }
         Location::SetKnownLoc(player, locId);
         if (number > 0) {
-            Game.RadioMessageMsg(8, TextPackName::Text, 3860 + number);
-            Game.RadioMessage(8, Obsolete::GetPlayerName(player.Id));
+            Radio::SendChannelRadioMessage(8, TextPackName::Text, 3860 + number);
+            Radio::SendChannelRadioMessage(8, PlayerRegistration::GetPlayerName(player.Id));
         }
         if (player.RacingCheckpointLocId != ZERO_IDENT) {
             Location prev = Game.GetLocation(player.RacingCheckpointLocId);
@@ -603,7 +616,7 @@ void r_NextCheckPoint(Critter player, Critter npc)
 // Наступил на контрольный триггер
 void t_Win(Critter player, StaticItem trigger, bool entered, uint8 dir)
 {
-    if (!player.IsControlledByPlayer || Game.RacingEvent == 0) {
+    if (!player.ControlledByPlayer || Game.RacingEvent == 0) {
         return;
     }
 
@@ -625,7 +638,7 @@ void t_Win(Critter player, StaticItem trigger, bool entered, uint8 dir)
         }
         Critter cr = map.GetCritter(CritterProperty::NpcRole, ROLE_BILL, CritterFindType::Npc);
         if (valid(cr)) {
-            cr.AddTimeEvent(cte_Winner, 0, CTE_OPENNING, 0);
+            cr.StartTimeEvent(ZERO_TIMESPAN, cte_Winner, 0);
         }
 
         return;
@@ -636,34 +649,35 @@ void t_Win(Critter player, StaticItem trigger, bool entered, uint8 dir)
         Game.RacingWinnersFound = 2;
         Game.RacingEvent = 2;
         player.DenBillRacingWin = 4;
-        Game.RadioMessageMsg(0, TextPackName::Text, 3957);
-        Game.RadioMessage(0, Obsolete::GetPlayerName(Game.RacingWinner));
+        Radio::SendChannelRadioMessage(0, TextPackName::Text, 3957);
+        Radio::SendChannelRadioMessage(0, PlayerRegistration::GetPlayerName(Game.RacingWinner));
         StopRacing(); // 3957
         return;
     }
     player.DenBillRacingWin = 3;
 }
 
-uint cte_Winner(Critter cr, any identifier, uint& rate)
+void cte_Winner(Critter cr, any data)
 {
+    int rate = data;
     Map map = cr.GetMap();
     if (!valid(map)) {
-        return 0;
+        return;
     }
     if (rate >= FirstWinnerPhrases.length() || Game.RacingWinner == ZERO_IDENT) {
-        Game.RadioMessageMsg(8, TextPackName::Text, 3953);
-        Game.RadioMessage(8, Obsolete::GetPlayerName(Game.RacingWinner));
-        Game.RadioMessageMsg(0, TextPackName::Text, 3953);
-        Game.RadioMessage(0, Obsolete::GetPlayerName(Game.RacingWinner));
-        Game.RadioMessageMsg(0, TextPackName::Text, 3954);
-        return 0;
+        Radio::SendChannelRadioMessage(8, TextPackName::Text, 3953);
+        Radio::SendChannelRadioMessage(8, PlayerRegistration::GetPlayerName(Game.RacingWinner));
+        Radio::SendChannelRadioMessage(0, TextPackName::Text, 3953);
+        Radio::SendChannelRadioMessage(0, PlayerRegistration::GetPlayerName(Game.RacingWinner));
+        Radio::SendChannelRadioMessage(0, TextPackName::Text, 3954);
+        return;
     }
-    cr.SayMsg(SAY_SHOUT, TextPackName::Text, FirstWinnerPhrases[rate][0][0], "$winner" + Obsolete::GetPlayerName(Game.RacingWinner));
+    Messaging::SayShout(cr, TextPackName::Text, FirstWinnerPhrases[rate][0][0], "$winner" + PlayerRegistration::GetPlayerName(Game.RacingWinner));
     Critter npc;
     bool talkAlready = true;
     int tries = 0;
-    auto spectators = map.GetCritters(CritterProperty::NpcRole, ROLE_SPECTATOR, CritterFindType::AliveNpc);
-    for (uint i = 0, l = FirstWinnerPhrases[rate][2].length(); i < l && i < spectators.length(); i++) {
+    auto spectators = map.GetCritters(CritterProperty::NpcRole, ROLE_SPECTATOR, CritterFindType::NonDeadNpc);
+    for (int i = 0, l = FirstWinnerPhrases[rate][2].length(); i < l && i < spectators.length(); i++) {
         talkAlready = true;
         tries = 10;
         while (tries > 0 && talkAlready) {
@@ -675,10 +689,10 @@ uint cte_Winner(Critter cr, any identifier, uint& rate)
             }
         }
         if (valid(npc) && npc.GERacingOpeningPhrases > 0 && !talkAlready) {
-            npc.AddTimeEvent(cte_Shout, Time::RealSecond(i) + Time::RealSecond(1) / 2, CTE_COMMENT, npc.GERacingOpeningPhrases);
+            npc.StartTimeEvent(Time::Seconds((i + 1) / 2), cte_Shout, npc.GERacingOpeningPhrases);
         }
     }
-    for (uint i = 0, l = OpeningPhrases[rate][3].length(); i < l && i < spectators.length(); i++) {
+    for (int i = 0, l = OpeningPhrases[rate][3].length(); i < l && i < spectators.length(); i++) {
         talkAlready = true;
         tries = 10;
         while (tries > 0 && talkAlready) {
@@ -691,20 +705,24 @@ uint cte_Winner(Critter cr, any identifier, uint& rate)
             }
         }
         if (valid(npc) && npc.GERacingOpeningPhrases > 0 && !talkAlready) {
-            npc.AddTimeEvent(cte_Shout, Time::RealSecond(i) + Time::RealSecond(1) / 2, CTE_COMMENT, npc.GERacingOpeningPhrases);
+            npc.StartTimeEvent(Time::Seconds((i + 1) / 2), cte_Shout, npc.GERacingOpeningPhrases);
         }
     }
     if (OpeningPhrases[rate][4][0] > 0) {
-        Critter[] critters = map.GetCritters(CritterProperty::NpcRole, ROLE_BODYGUARD, CritterFindType::AliveNpc);
-        for (uint i = 0; i < 2 && i < critters.length(); i++) {
-            critters[i].AddTimeEvent(cte_Talk, Time::RealSecond(1) + i * 5, CTE_COMMENT, 3854);
+        Critter[] critters = map.GetCritters(CritterProperty::NpcRole, ROLE_BODYGUARD, CritterFindType::NonDeadNpc);
+        for (int i = 0; i < 2 && i < critters.length(); i++) {
+            critters[i].StartTimeEvent(Time::Seconds(1 + i * 5), cte_Talk, 3854);
         }
     }
-    rate++;
-    return Time::RealSecond(OpeningPhrases[rate - 1][1][0] / 10);
+    rate = rate + 1;
+    timespan delayTicks = Time::Seconds(OpeningPhrases[rate - 1][1][0] / 10);
+    if (delayTicks != ZERO_TIMESPAN) {
+        Game.SetCurrentTimeEventData(rate);
+        Game.RepeatCurrentTimeEvent(delayTicks);
+    }
 }
 
-int16[][] Coords = {
+int[][] Coords = {
     {275, 511},   // 1
     {372, 696},   // 2
     {758, 890},   // 3
@@ -720,121 +738,121 @@ int16[][] Coords = {
     {851, 113}    // 13
 };
 
-int16[][][] OpeningPhrases = {{
-                                  {3809}, // Фраза билли
-                                  {30},   // Время до следующей фразы в 10 долях реальных секунд
-                                  {0},    // Комментарии зрителей
-                                  {0},    // комментарии женщин-зрителей
-                                  {0},    // комментарии телохранителей
-                              },
-                              {
-                                  {3810},
-                                  {60},
-                                  {0},
-                                  {0},
-                                  {0},
-                              },
-                              {
-                                  {3811},
-                                  {50},
-                                  {3822},
-                                  {0},
-                                  {0},
-                              },
-                              {
-                                  {3812},
-                                  {55},
-                                  {3824},
-                                  {0},
-                                  {0},
-                              },
-                              {
-                                  {3813},
-                                  {30},
-                                  {0},
-                                  {0},
-                                  {0},
-                              },
-                              {
-                                  {3814},
-                                  {150},
-                                  {3822, 3823, 3824, 3825, 3826, 3827},
-                                  {0},
-                                  {0},
-                              },
-                              {
-                                  {3815},
-                                  {160},
-                                  {3828, 3829, 3830, 3831, 3832, 3833},
-                                  {0},
-                                  {3854},
-                              },
-                              {
-                                  {3816},
-                                  {180},
-                                  {3834, 3835, 3836, 3837, 3838, 3839},
-                                  {3855},
-                                  {0},
-                              },
-                              {
-                                  {3817},
-                                  {120},
-                                  {3840, 3841, 3842, 3843, 3844, 3845},
-                                  {0},
-                                  {3854},
-                              },
-                              {
-                                  {3818},
-                                  {50},
-                                  {3824},
-                                  {0},
-                                  {0},
-                              },
-                              {
-                                  {3819},
-                                  {45},
-                                  {3840},
-                                  {0},
-                                  {0},
-                              },
-                              {
-                                  {3820},
-                                  {45},
-                                  {0},
-                                  {0},
-                                  {0},
-                              },
-                              {{3821}, {150}, {3846, 3847, 3848, 3849, 3851, 3852}, {3850}, {0}},
-                              {{3874}, {90}, {3876, 3877}, {0}, {0}},
-                              {{3875}, {120}, {3878, 3879, 3880, 3881}, {0}, {0}}};
-int16[][][] FirstWinnerPhrases = {{
-                                      {3883}, // Фраза билли
-                                      {110},  // Время до следующей фразы в 10 долях реальных секунд
-                                      {3887, 3887, 3888, 3889, 3890, 3891, 3892, 3893, 3894}, // Комментарии зрителей
-                                      {0},                                                    // комментарии женщин-зрителей
-                                      {0},                                                    // комментарии телохранителей
-                                  },
-                                  {
-                                      {3884},
-                                      {50},
-                                      {3887},
-                                      {0},
-                                      {0},
-                                  },
-                                  {
-                                      {3885},
-                                      {120},
-                                      {3887, 3887, 3895, 3896, 3887, 3889, 3891, 3897},
-                                      {0},
-                                      {3847},
-                                  },
-                                  {
-                                      {3886},
-                                      {50},
-                                      {3887, 3898, 3950, 3951, 3952, 3889},
-                                      {0},
-                                      {3847},
-                                  }};
+int[][][] OpeningPhrases = {{
+                                {3809}, // Фраза билли
+                                {30},   // Время до следующей фразы в 10 долях реальных секунд
+                                {0},    // Комментарии зрителей
+                                {0},    // комментарии женщин-зрителей
+                                {0},    // комментарии телохранителей
+                            },
+                            {
+                                {3810},
+                                {60},
+                                {0},
+                                {0},
+                                {0},
+                            },
+                            {
+                                {3811},
+                                {50},
+                                {3822},
+                                {0},
+                                {0},
+                            },
+                            {
+                                {3812},
+                                {55},
+                                {3824},
+                                {0},
+                                {0},
+                            },
+                            {
+                                {3813},
+                                {30},
+                                {0},
+                                {0},
+                                {0},
+                            },
+                            {
+                                {3814},
+                                {150},
+                                {3822, 3823, 3824, 3825, 3826, 3827},
+                                {0},
+                                {0},
+                            },
+                            {
+                                {3815},
+                                {160},
+                                {3828, 3829, 3830, 3831, 3832, 3833},
+                                {0},
+                                {3854},
+                            },
+                            {
+                                {3816},
+                                {180},
+                                {3834, 3835, 3836, 3837, 3838, 3839},
+                                {3855},
+                                {0},
+                            },
+                            {
+                                {3817},
+                                {120},
+                                {3840, 3841, 3842, 3843, 3844, 3845},
+                                {0},
+                                {3854},
+                            },
+                            {
+                                {3818},
+                                {50},
+                                {3824},
+                                {0},
+                                {0},
+                            },
+                            {
+                                {3819},
+                                {45},
+                                {3840},
+                                {0},
+                                {0},
+                            },
+                            {
+                                {3820},
+                                {45},
+                                {0},
+                                {0},
+                                {0},
+                            },
+                            {{3821}, {150}, {3846, 3847, 3848, 3849, 3851, 3852}, {3850}, {0}},
+                            {{3874}, {90}, {3876, 3877}, {0}, {0}},
+                            {{3875}, {120}, {3878, 3879, 3880, 3881}, {0}, {0}}};
+int[][][] FirstWinnerPhrases = {{
+                                    {3883}, // Фраза билли
+                                    {110},  // Время до следующей фразы в 10 долях реальных секунд
+                                    {3887, 3887, 3888, 3889, 3890, 3891, 3892, 3893, 3894}, // Комментарии зрителей
+                                    {0},                                                    // комментарии женщин-зрителей
+                                    {0},                                                    // комментарии телохранителей
+                                },
+                                {
+                                    {3884},
+                                    {50},
+                                    {3887},
+                                    {0},
+                                    {0},
+                                },
+                                {
+                                    {3885},
+                                    {120},
+                                    {3887, 3887, 3895, 3896, 3887, 3889, 3891, 3897},
+                                    {0},
+                                    {3847},
+                                },
+                                {
+                                    {3886},
+                                    {50},
+                                    {3887, 3898, 3950, 3951, 3952, 3889},
+                                    {0},
+                                    {3847},
+                                }};
 
 void RunStopPhase()
 {
@@ -847,7 +865,7 @@ void StopRacing()
     GameEvent::StopGameEvent(EVENT_RACING_STOP);
     Location[] checkPoints = {};
     checkPoints = Game.GetLocations(Content::Location::den_racing_checkpoint);
-    for (uint i = 0, l = checkPoints.length(); i < l; i++) {
+    for (int i = 0, l = checkPoints.length(); i < l; i++) {
         Location loc = checkPoints[i];
         if (valid(loc)) {
             loc.AutoGarbage = true;
@@ -855,12 +873,12 @@ void StopRacing()
     }
 
     if (Game.RacingWinnersFound == 2) {
-        Game.RadioMessageMsg(8, TextPackName::Text, 3955);
-        Game.RadioMessageMsg(0, TextPackName::Text, 3955);
+        Radio::SendChannelRadioMessage(8, TextPackName::Text, 3955);
+        Radio::SendChannelRadioMessage(0, TextPackName::Text, 3955);
     }
     else {
-        Game.RadioMessageMsg(8, TextPackName::Text, 3956);
-        Game.RadioMessageMsg(0, TextPackName::Text, 3956);
+        Radio::SendChannelRadioMessage(8, TextPackName::Text, 3956);
+        Radio::SendChannelRadioMessage(0, TextPackName::Text, 3956);
     }
 
     Map map = Game.GetMap(Content::Map::den_carstop);
@@ -869,14 +887,14 @@ void StopRacing()
     }
 
     Critter[] critters = map.GetCritters(CritterFindType::Npc);
-    for (uint i = 0; i < critters.length(); i++) {
+    for (int i = 0; i < critters.length(); i++) {
         Critter cr = critters[i];
         if (valid(cr)) {
             if (cr.NpcRole == ROLE_GUARD || cr.NpcRole == ROLE_BODYGUARD || cr.NpcRole == ROLE_BILL) {
-                cr.AddTimeEvent(cte_DelNpc, Game.Random(Time::RealMinute(2), Time::RealMinute(5)), CTE_COMMENT, 0);
+                cr.StartTimeEvent(Time::Minutes(Game.Random(2, 5)), cte_DelNpc, 0);
             }
             if (cr.NpcRole == ROLE_SPECTATOR) {
-                cr.AddTimeEvent(cte_Npc2HomePos, Time::RealMinute(1), CTE_RUN_START_EVENT);
+                cr.StartTimeEvent(Time::Minutes(1), cte_Npc2HomePos);
             }
         }
     }
@@ -887,12 +905,12 @@ void r_StopEvent(Critter cr, Critter npc)
     StopRacing();
 }
 
-uint cte_DelNpc(Critter cr, any identifier, uint& rate)
+void cte_DelNpc(Critter cr, any rate)
 {
-    if (!cr.IsControlledByPlayer) {
+    if (!cr.ControlledByPlayer) {
         Game.DestroyCritter(cr);
     }
-    return 0;
+    return;
 }
 
 void dlg_Winner(Critter player, Critter npc, string& lexems)
@@ -902,6 +920,10 @@ void dlg_Winner(Critter player, Critter npc, string& lexems)
     }
     lexems = "$winnerИзбранный";
     if (Game.RacingWinner != ZERO_IDENT) {
-        lexems = "$winner" + Obsolete::GetPlayerName(Game.RacingWinner);
+        lexems = "$winner" + PlayerRegistration::GetPlayerName(Game.RacingWinner);
     }
+}
+
+#endif
+
 }

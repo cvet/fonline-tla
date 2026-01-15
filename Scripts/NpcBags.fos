@@ -1,4 +1,7 @@
-// FOS Server Sort 15
+namespace NpcBags // Sort 15
+{
+
+#if SERVER
 
 /*
    BagInfo - описание класса сумки
@@ -28,29 +31,31 @@ void init()
     Json::JSON @bagsInfo = Json::JSONParse(Game.ReadResource("BagsConfig.json"));
     bagsInfo.forEach(@ReadBagInfo);
     Game.OnCritterInit.Subscribe(CritterInit);
-    Game.OnCritterIdle.Subscribe(OnCritterIdle);
 }
 
 void CritterInit(Critter cr, bool firstTime)
 {
-    if (cr.IsAlive() && !cr.IsControlledByPlayer) {
-        cr.LastBagRefreshedTime = 0;
+    if (cr.IsAlive() && !cr.ControlledByPlayer) {
+        cr.LastBagRefreshedTime = ZERO_SYNCTIME;
         // FillCritterBag( cr );
+    }
+    if (!cr.ControlledByPlayer) {
+        cr.StartTimeEvent(Time::Asap(), Time::Milliseconds(1000), OnCritterIdle);
     }
 }
 
-///@ Property Critter Protected        uint   LastBagRefreshedTime
+///@ Property Critter Common synctime LastBagRefreshedTime Mutable OwnerSync Persistent
 
 void OnCritterIdle(Critter cr)
 {
-    if (cr.IsControlledByPlayer || cr.LastBagRefreshedTime > Game.GetFullSecond() || !cr.IsAlive()) { // TODO: переделать,
+    if (cr.ControlledByPlayer || cr.LastBagRefreshedTime > Game.SynchronizedTime || !cr.IsAlive()) { // TODO: переделать,
         return;
     }
-    cr.LastBagRefreshedTime = Game.GetFullSecond() + Time::RealMinute(Settings.BagRefreshTime);
+    cr.LastBagRefreshedTime = Game.SynchronizedTime + Time::Minutes(Settings.BagRefreshTime);
     FillCritterBag(cr);
 }
 
-void ReadBagInfo(Json::JSON @bagInfo, uint index)
+void ReadBagInfo(Json::JSON @bagInfo, int index)
 {
     BagInfo bag = BagInfo();
     AllBags.insertLast(bag);
@@ -67,21 +72,21 @@ BagInfo CurrentBag;
 ItemCollection CurrentCollection;
 BagItem CurrentBagItem;
 
-void ReadChildBagNameInfo(Json::JSON @text, uint index)
+void ReadChildBagNameInfo(Json::JSON @text, int index)
 {
     string name = "";
     text >> name;
     CurrentBag.ChildBagsNames.insertLast(name);
 }
 
-void ReadCollection(Json::JSON @collection, uint index)
+void ReadCollection(Json::JSON @collection, int index)
 {
     CurrentCollection = ItemCollection();
     CurrentBag.BagItemsCollections.insertLast(CurrentCollection);
     collection["BagItems"].forEach(@ReadBagItem);
 }
 
-void ReadBagItem(Json::JSON @itemInfo, uint index)
+void ReadBagItem(Json::JSON @itemInfo, int index)
 {
     CurrentBagItem = BagItem();
     CurrentCollection.Items.insertLast(CurrentBagItem);
@@ -107,7 +112,7 @@ void ReadBagItem(Json::JSON @itemInfo, uint index)
 
 class BagInfo
 {
-    uint BagId;
+    int BagId;
     string Description;
     string Name;
     string[] ChildBagsNames = {};
@@ -116,19 +121,19 @@ class BagInfo
     BagItem[] GetBagItems()
     {
         BagItem[] items = {};
-        uint len = BagItemsCollections.length();
+        int len = BagItemsCollections.length();
         if (len > 0) {
-            uint index = Game.Random(0, len - 1);
+            int index = Game.Random(0, len - 1);
             ItemCollection collection = BagItemsCollections[index];
-            for (uint i = 0, l = collection.Items.length(); i < l; i++) {
+            for (int i = 0, l = collection.Items.length(); i < l; i++) {
                 items.insertLast(collection.Items[i]);
             }
         }
 
-        for (uint i = 0, l = ChildBagsNames.length(); i < l; i++) {
+        for (int i = 0, l = ChildBagsNames.length(); i < l; i++) {
             BagInfo childBag = GetBag(ChildBagsNames[i]);
             BagItem[] childItems = childBag.GetBagItems();
-            for (uint k = 0, m = childItems.length(); k < m; k++) {
+            for (int k = 0, m = childItems.length(); k < m; k++) {
                 items.insertLast(childItems[k]);
             }
         }
@@ -142,15 +147,15 @@ class BagInfo
 
         for (int j = 0, k = BagItemsCollections.length(); j < k; j++) {
             auto collection = BagItemsCollections[j];
-            for (uint i = 0, l = collection.Items.length(); i < l; i++) {
+            for (int i = 0, l = collection.Items.length(); i < l; i++) {
                 items.insertLast(collection.Items[i]);
             }
         }
 
-        for (uint i = 0, l = ChildBagsNames.length(); i < l; i++) {
+        for (int i = 0, l = ChildBagsNames.length(); i < l; i++) {
             BagInfo childBag = GetBag(ChildBagsNames[i]);
             BagItem[] childItems = childBag.GetAllBagItems();
-            for (uint k = 0, m = childItems.length(); k < m; k++) {
+            for (int k = 0, m = childItems.length(); k < m; k++) {
                 items.insertLast(childItems[k]);
             }
         }
@@ -167,14 +172,14 @@ class ItemCollection
 class BagItem
 {
     hstring ProtoId;
-    uint CountMin;
-    uint CountMax;
+    int CountMin;
+    int CountMax;
     bool Fixed;
     CritterItemSlot Slot = CritterItemSlot::Outside;
 
     bool AddCritterItem(Critter cr)
     {
-        uint count = 0;
+        int count = 0;
 
         if (Fixed) {
             count = CountMin;
@@ -206,9 +211,9 @@ class BagItem
 
 BagInfo[] AllBags = {};
 
-BagInfo GetBag(uint bagId)
+BagInfo GetBag(int bagId)
 {
-    for (uint i = 0; i < AllBags.length(); i++) {
+    for (int i = 0; i < AllBags.length(); i++) {
         BagInfo bag = AllBags[i];
         if (bag.BagId == bagId) {
             return bag;
@@ -220,7 +225,7 @@ BagInfo GetBag(uint bagId)
 
 BagInfo GetBag(string bagName)
 {
-    for (uint i = 0; i < AllBags.length(); i++) {
+    for (int i = 0; i < AllBags.length(); i++) {
         BagInfo bag = AllBags[i];
         if (bag.Name == bagName) {
             return bag;
@@ -241,8 +246,12 @@ void FillCritterBag(Critter cr)
         Game.DestroyItems(cr.GetItems());
         auto bagItems = bag.GetBagItems();
         // return;
-        for (uint i = 0, l = bagItems.length(); i < l; i++) {
+        for (int i = 0, l = bagItems.length(); i < l; i++) {
             bagItems[i].AddCritterItem(cr);
         }
     }
+}
+
+#endif
+
 }

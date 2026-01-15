@@ -1,7 +1,10 @@
-// FOS Server Sort 2
+namespace GameEvent // Sort 2
+{
 
-///@ Property Game PrivateServer uint8[] GameEventManagerData
-///@ Property Game PrivateServer uint=>uint8[] GameEventData
+#if SERVER
+
+///@ Property Game Server uint8[] GameEventManagerData Mutable Persistent
+///@ Property Game Server int32=>uint8[] GameEventData Mutable Persistent
 
 #define STATUS_NEVER_OCCURED (0)
 #define STATUS_RUNNING       (1)
@@ -15,36 +18,36 @@ funcdef void CallFunc();
 
 class GameEventOccurCondition
 {
-    uint GameEventIndex;
-    uint Status;
+    int GameEventIndex;
+    int Status;
 };
 
 class GameEvent
 {
-    uint DataIndex;                                 // Индекс события в таблице
-    uint Status;                                    // Текущее состояние события
+    int DataIndex;                                  // Индекс события в таблице
+    int Status;                                     // Текущее состояние события
     GameEventOccurCondition[] OccurConditions = {}; // Условия происхождения события
     string HandlerFunction;                         // Имя фукнции обработчика события
-    uint TimeOccur; // Время, через которое произойдет событие после того, как все условия соблюдены
+    timespan TimeOccur; // Время, через которое произойдет событие после того, как все условия соблюдены
     bool TimeIsAbsolute;         // Признак, что время является абсолютным
     bool FirstEventNoConditions; // Признак, для первого события не требуется выполнение условий
-    ident RunningEventId;        // Код тайм эвента, который уже запущен
-    uint NextEventIndex;         // Код следующего события, если предусмотрен
-    uint ServerTime;             // Время, когда произойдет событие
+    int RunningEventId;          // Код тайм эвента, который уже запущен
+    int NextEventIndex;          // Код следующего события, если предусмотрен
+    synctime ServerTime;         // Время, когда произойдет событие
 
     GameEvent()
     {
     }
 
-    GameEvent(uint idx)
+    GameEvent(int idx)
     {
         DataIndex = idx;
         Load();
     }
 
-    void AddCondition(uint eventIndex, uint status)
+    void AddCondition(int eventIndex, int status)
     {
-        for (uint i = 0; i < OccurConditions.length(); i++) {
+        for (int i = 0; i < OccurConditions.length(); i++) {
             if (OccurConditions[i].GameEventIndex == eventIndex && OccurConditions[i].Status == status) {
                 return;
             }
@@ -61,9 +64,9 @@ class GameEvent
         save.Set(Status);
         save.Set(HandlerFunction);
         save.Set(ServerTime);
-        uint len = OccurConditions.length();
+        int len = OccurConditions.length();
         save.Set(len);
-        for (uint i = 0; i < len; i++) {
+        for (int i = 0; i < len; i++) {
             save.Set(OccurConditions[i].GameEventIndex);
             save.Set(OccurConditions[i].Status);
         }
@@ -72,7 +75,7 @@ class GameEvent
         save.Set(FirstEventNoConditions);
         save.Set(RunningEventId);
         save.Set(NextEventIndex);
-        dict<uint, uint8[]> gameEventData = Game.GameEventData.clone();
+        dict<int, uint8[]> gameEventData = Game.GameEventData.clone();
         gameEventData[DataIndex] = save.GetData();
         Game.GameEventData = gameEventData;
     }
@@ -80,15 +83,15 @@ class GameEvent
     void Load()
     {
         auto load = Serializator::Serializator();
-        uint eId = 0;
-        uint status = 0;
+        int eId = 0;
+        int status = 0;
         if (load.SetData(Game.GameEventData.get(DataIndex, array<uint8>())) > 0) {
             load.Get(Status);
             load.Get(HandlerFunction);
             load.Get(ServerTime);
-            uint len = 0;
+            int len = 0;
             load.Get(len);
-            for (uint i = 0; i < len; i++) {
+            for (int i = 0; i < len; i++) {
                 load.Get(eId);
                 load.Get(status);
                 AddCondition(eId, status);
@@ -110,21 +113,19 @@ class GameEvent
 
     void Run()
     {
-        uint time = TimeIsAbsolute ? TimeOccur : Game.GetFullSecond() + TimeOccur;
-        DL(" Time to start event id " + DataIndex + ": " + time);
-        Run(time);
+        // int time = (TimeIsAbsolute ? TimeOccur : Game.SynchronizedTime +  TimeOccur);
+        Run(TimeOccur);
     }
 
-    void Run(uint time)
+    void Run(timespan time)
     {
-        ServerTime = time;
-        if (TimeOccur > 0 and time < Game.GetFullSecond()) {
+        /* Нужны доработки
+		ServerTime = time;
+        if (TimeOccur != ZERO_TIMESPAN and time < Game.SynchronizedTime) {
             Game.Log("Cannot run event (id=" + DataIndex + "). Time is lost:" + time);
             return;
-        }
-        RunningEventId = Game.SavedDeferredCall(GAME_SECOND_TO_TICK(time - Game.GetFullSecond()), ProcessGameEvent, DataIndex);
-        DL("Event " + DataIndex + " running. TimeEventId = " + RunningEventId);
-        DL("Tostring::::" + ToString());
+        }*/
+        RunningEventId = Game.StartTimeEvent(time, ProcessGameEvent, DataIndex); //SavedDeferredCall
         Status = STATUS_RUNNING;
         Save();
     }
@@ -134,10 +135,10 @@ class GameEvent
         if (Status != STATUS_RUNNING) {
             return;
         }
-        if (RunningEventId != ZERO_IDENT) {
-            Game.CancelDeferredCall(RunningEventId);
+        if (RunningEventId != 0) {
+            Game.StopTimeEvent(ProcessGameEvent);
         }
-        RunningEventId = ZERO_IDENT;
+        RunningEventId = 0;
         Status = STATUS_ENDED;
         Save();
     }
@@ -145,7 +146,7 @@ class GameEvent
 
 class GameEventManager
 {
-    uint[] GameEventsIndexes = {};
+    int[] GameEventsIndexes = {};
 
     void Save()
     {
@@ -163,7 +164,7 @@ class GameEventManager
         }
     }
 
-    GameEvent GetGameEventByIndex(uint index)
+    GameEvent GetGameEventByIndex(int index)
     {
         GameEvent event = GameEvent(index);
         if (valid(event)) {
@@ -176,7 +177,7 @@ class GameEventManager
     // Проверяет, можно ли создать событие, если да, запускает его
     void CheckEventsCanOccure()
     {
-        for (uint i = 0, l = GameEventsIndexes.length(); i < l; i++) {
+        for (int i = 0, l = GameEventsIndexes.length(); i < l; i++) {
             GameEvent event = GetGameEventByIndex(GameEventsIndexes[i]);
             if (valid(event) && CanOccure(event)) {
                 event.Run();
@@ -191,15 +192,13 @@ class GameEventManager
                 return false;
             }
             if (event.FirstEventNoConditions && event.Status == STATUS_NEVER_OCCURED) {
-                DL("Can occured");
                 return true;
             }
             if (event.OccurConditions.length() == 0) {
                 return false;
             }
-            for (uint j = 0, k = event.OccurConditions.length(); j < k; j++) {
+            for (int j = 0, k = event.OccurConditions.length(); j < k; j++) {
                 GameEvent condition = GetGameEventByIndex(event.OccurConditions[j].GameEventIndex);
-                DL("condition!" + "status:" + condition.Status + "Occer condirion:" + event.OccurConditions[j].Status);
                 if (!valid(condition) || condition.Status != event.OccurConditions[j].Status) {
                     // не найден эвент, либо не удовлетворяет условиям
                     return false;
@@ -211,7 +210,7 @@ class GameEventManager
         return false;
     }
 
-    void RunEvent(uint idx, uint time)
+    void RunEvent(int idx, timespan time)
     {
         GameEvent event = GetGameEventByIndex(idx);
         if (valid(event)) {
@@ -219,7 +218,7 @@ class GameEventManager
         }
     }
 
-    void RunEvent(uint idx)
+    void RunEvent(int idx)
     {
         GameEvent event = GetGameEventByIndex(idx);
         if (valid(event)) {
@@ -227,7 +226,7 @@ class GameEventManager
         }
     }
 
-    void StopEvent(uint idx)
+    void StopEvent(int idx)
     {
         GameEvent event = GetGameEventByIndex(idx);
         if (valid(event)) {
@@ -239,12 +238,11 @@ class GameEventManager
 
 void ProcessGameEvent(any value)
 {
-    DL("e_GameEvent");
-    uint key = value;
+    int key = value;
     GameEventManager mng = GameEventManager();
     mng.Load();
     GameEvent event = mng.GetGameEventByIndex(key);
-    DL("valid event? status" + event.Status);
+
     if (valid(event) && event.Status == STATUS_RUNNING) {
         event.Status = STATUS_OCCURED;
         event.Save();
@@ -297,7 +295,7 @@ void ProcessGameEvent(any value)
             @func = GameEventReplicator::StopEvent;
         }
 
-        Game.DeferredCall(0, func);
+        Game.StartTimeEvent(ZERO_TIMESPAN, func);
         if (event.NextEventIndex == event.DataIndex && valid(nextEvent)) {
             event.Status = STATUS_RUNNING;
         }
@@ -329,39 +327,36 @@ void DeclareEvents()
 #define STATUS_OCCURED          (2)
 #define STATUS_ENDED            (3)
 
-#define GAME_MONTH              #(mon)(GAME_MONTH_TO_TICK(mon))
-#define GAME_DAY                #(day)(GAME_DAY_TO_TICK(day))
-#define GAME_WEEK               #(week)(GAME_DAY(7) * week)
-#define GAME_HOUR               #(hour)(GAME_HOUR_TO_TICK(hour))
+#define GAME_MONTH              #(mon)(Time::GameDays(mon * 30))
 
-    // void DeclareEvent(uint idx, string handler, uint timeOccure, bool timeAbsolute, bool defaultStart, uint nextEventIdx)
-    // void DeclareCondition(uint idx, uint eventCondition, uint status)
+    // void DeclareEvent(int idx, string handler, int timeOccure, bool timeAbsolute, bool defaultStart, int nextEventIdx)
+    // void DeclareCondition(int idx, int eventCondition, int status)
 
     DeclareEvent(EVENT_RACING_PREPARE, "GameEventRacing::RunPreparePhase", GAME_MONTH(4), false, true, EVENT_RACING_BEGIN);
     DeclareCondition(EVENT_RACING_PREPARE, EVENT_RACING_STOP, STATUS_OCCURED);
-    DeclareEvent(EVENT_RACING_BEGIN, "GameEventRacing::RunBeginPhase", GAME_WEEK(2), false, false, 0);
+    DeclareEvent(EVENT_RACING_BEGIN, "GameEventRacing::RunBeginPhase", Time::GameDays(2 * 7), false, false, 0);
     DeclareCondition(EVENT_RACING_BEGIN, EVENT_RACING_PREPARE, STATUS_OCCURED);
-    DeclareEvent(EVENT_RACING_RUN, "GameEventRacing::RunRacingPhase", GAME_DAY(1), false, false, EVENT_RACING_STOP);
-    DeclareEvent(EVENT_RACING_STOP, "GameEventRacing::RunStopPhase", GAME_DAY(1), false, false, EVENT_RACING_PREPARE);
+    DeclareEvent(EVENT_RACING_RUN, "GameEventRacing::RunRacingPhase", Time::GameDays(1), false, false, EVENT_RACING_STOP);
+    DeclareEvent(EVENT_RACING_STOP, "GameEventRacing::RunStopPhase", Time::GameDays(1), false, false, EVENT_RACING_PREPARE);
     DeclareCondition(EVENT_RACING_STOP, EVENT_RACING_RUN, STATUS_OCCURED);
     DeclareEvent(EVENT_STOREHOUSE, "GameEventStorehouse::GameEventStorehouse::CreateStoreHouse", GAME_MONTH(1), false, true, EVENT_STOREHOUSE);
     DeclareCondition(EVENT_STOREHOUSE, EVENT_STOREHOUSE, STATUS_OCCURED);
-    DeclareEvent(EVENT_CACHE, "GameEventCaches::StatusOn", GAME_DAY(7), false, true, EVENT_CACHE);
+    DeclareEvent(EVENT_CACHE, "GameEventCaches::StatusOn", Time::GameDays(7), false, true, EVENT_CACHE);
     DeclareCondition(EVENT_CACHE, EVENT_CACHE, STATUS_OCCURED);
     DeclareEvent(EVENT_PURGATORY_PREPARE, "Purgatory::RunPreparationStage", GAME_MONTH(1), false, true, EVENT_PURGATORY_BEGIN);
     DeclareCondition(EVENT_PURGATORY_PREPARE, EVENT_PURGATORY_END, STATUS_OCCURED);
-    DeclareEvent(EVENT_PURGATORY_BEGIN, "Purgatory::RunBeginStage", GAME_DAY(1), false, false, EVENT_PURGATORY_FIGHT);
+    DeclareEvent(EVENT_PURGATORY_BEGIN, "Purgatory::RunBeginStage", Time::GameDays(1), false, false, EVENT_PURGATORY_FIGHT);
     DeclareCondition(EVENT_PURGATORY_BEGIN, EVENT_PURGATORY_PREPARE, STATUS_OCCURED);
-    DeclareEvent(EVENT_PURGATORY_FIGHT, "Purgatory::RunFightStage", Time::RealMinute(5), false, false, EVENT_PURGATORY_END);
+    DeclareEvent(EVENT_PURGATORY_FIGHT, "Purgatory::RunFightStage", Time::Minutes(5), false, false, EVENT_PURGATORY_END);
     DeclareCondition(EVENT_PURGATORY_FIGHT, EVENT_PURGATORY_BEGIN, STATUS_OCCURED);
-    DeclareEvent(EVENT_PURGATORY_END, "Purgatory::RunEndStage", GAME_DAY(2), false, false, EVENT_PURGATORY_PREPARE);
+    DeclareEvent(EVENT_PURGATORY_END, "Purgatory::RunEndStage", Time::GameDays(2), false, false, EVENT_PURGATORY_PREPARE);
     DeclareCondition(EVENT_PURGATORY_END, EVENT_PURGATORY_FIGHT, STATUS_OCCURED);
     DeclareEvent(EVENT_ZOMBIE, "GameEventReplicator::BeginEvent", GAME_MONTH(5), false, true, 0);
     DeclareCondition(EVENT_ZOMBIE, EVENT_ZOMBIE_STOP, STATUS_OCCURED);
     DeclareEvent(EVENT_ZOMBIE_STOP, "GameEventReplicator::StopEvent", GAME_MONTH(1), false, false, EVENT_ZOMBIE);
 }
 
-void DeclareCondition(uint idx, uint eventCondition, uint status)
+void DeclareCondition(int idx, int eventCondition, int status)
 {
     GameEventManager mng;
     mng.Load();
@@ -372,7 +367,7 @@ void DeclareCondition(uint idx, uint eventCondition, uint status)
     }
 }
 
-void DeclareEvent(uint idx, string handler, uint timeOccure, bool timeAbsolute, bool defaultStart, uint nextEventIdx)
+void DeclareEvent(int idx, string handler, timespan timeOccure, bool timeAbsolute, bool defaultStart, int nextEventIdx)
 {
     GameEventManager mng;
     mng.Load();
@@ -384,6 +379,7 @@ void DeclareEvent(uint idx, string handler, uint timeOccure, bool timeAbsolute, 
     event.Status = STATUS_NEVER_OCCURED;
     event.HandlerFunction = handler;
     event.TimeOccur = timeOccure;
+    // не работает, надо отдельно хранить серверное время, если потребуется.
     event.TimeIsAbsolute = timeAbsolute;
     event.FirstEventNoConditions = defaultStart;
     event.NextEventIndex = nextEventIdx;
@@ -392,7 +388,7 @@ void DeclareEvent(uint idx, string handler, uint timeOccure, bool timeAbsolute, 
     mng.Save();
 }
 
-bool CheckEventStatus(uint idx, uint status)
+bool CheckEventStatus(int idx, int status)
 {
     GameEventManager mng;
     mng.Load();
@@ -403,7 +399,7 @@ bool CheckEventStatus(uint idx, uint status)
     return false;
 }
 
-uint GetEventOccurenceTime(uint idx)
+synctime GetEventOccurenceTime(int idx)
 {
     GameEventManager mng;
     mng.Load();
@@ -411,7 +407,7 @@ uint GetEventOccurenceTime(uint idx)
     if (valid(event) && event.Status == STATUS_RUNNING) {
         return event.ServerTime;
     }
-    return 0;
+    return ZERO_SYNCTIME;
 }
 
 void CheckAllGameEvents()
@@ -421,21 +417,21 @@ void CheckAllGameEvents()
     mng.CheckEventsCanOccure();
 }
 
-void RunGameEvent(uint idx, uint time)
+void RunGameEvent(int idx, timespan time)
 {
     GameEventManager mng;
     mng.Load();
     mng.RunEvent(idx, time);
 }
 
-void RunGameEvent(uint idx)
+void RunGameEvent(int idx)
 {
     GameEventManager mng;
     mng.Load();
     mng.RunEvent(idx);
 }
 
-void StopGameEvent(uint idx)
+void StopGameEvent(int idx)
 {
     GameEventManager mng;
     mng.Load();
@@ -444,5 +440,9 @@ void StopGameEvent(uint idx)
 
 bool d_GameEventStatus(Critter player, Critter npc, int idx, int status)
 {
-    return CheckEventStatus(uint(idx), uint(status));
+    return CheckEventStatus(int(idx), int(status));
+}
+
+#endif
+
 }

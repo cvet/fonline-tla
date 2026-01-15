@@ -1,4 +1,8 @@
-// FOS Server
+namespace Repairer
+{
+
+#if SERVER
+
 // Author: rifleman17
 // Скрипт для НПЦ, ремонтирующих оружие и броню.
 // - Ремонтируемый предмет игрок должен держать в основном слоте
@@ -15,16 +19,14 @@
 // VAR_CAN_REPAIR_SPECIAL_ARMOUR - признак, может ремонтировать редкую броню
 // Для настройки возможностей ремонта НПЦ используйте диалог и установку переменных, либо один из заготовленных скриптов (см. конец файла).
 
-///@ Property Critter PrivateServer uint8 CanRepairWeapons        Max = 1
-///@ Property Critter PrivateServer uint8 CanRepairWeaponsSpecial Max = 1
-///@ Property Critter PrivateServer uint8 CanRepairArmor          Max = 1
-///@ Property Critter PrivateServer uint8 CanRepairArmorSpecial   Max = 1
-///@ Property Critter PrivateServer ident=>uint RepairCompleteTime
-///@ Property Critter PrivateServer ident=>hstring RepairItemPid
+///@ Property Critter Server uint8 CanRepairWeapons Mutable Persistent Max = 1
+///@ Property Critter Server uint8 CanRepairWeaponsSpecial Mutable Persistent Max = 1
+///@ Property Critter Server uint8 CanRepairArmor Mutable Persistent Max = 1
+///@ Property Critter Server uint8 CanRepairArmorSpecial Mutable Persistent Max = 1
+///@ Property Critter Server ident=>synctime RepairCompleteTime Mutable Persistent
+///@ Property Critter Server ident=>hstring RepairItemPid Mutable Persistent
 
-#define GAME_DAY         #(day)(day * 24 * 60 * 60) // Игровых дней в секундах
-#define GAME_HOUR        #(hour)(hour * 60 * 60)    // Игровых часов в секундах
-#define BASE_REPAIR_TIME (GAME_HOUR(3))
+#define BASE_REPAIR_TIME (3 * 60 * 60)
 
 #define _RepairCost1 \
     #(itemCost, itemDeterioration, playerBarter, npcBarter)( \
@@ -63,7 +65,7 @@ bool CanRepair(Item item, Critter npc)
     if (!valid(item) || !valid(npc)) {
         return false;
     }
-    uint8 type = item.Type;
+    int type = item.Type;
     hstring pid = item.ProtoId;
     switch (type) {
     case ItemType::Armor:
@@ -90,7 +92,7 @@ void TakeItemToRepair(Critter player, Critter npc, Item item)
 
     auto repairCompleteTime = player.RepairCompleteTime.clone();
     auto repairItemPid = player.RepairItemPid.clone();
-    repairCompleteTime[npc.Id] = Game.GetFullSecond() + _RepairTime(item, npc);
+    repairCompleteTime[npc.Id] = Game.SynchronizedTime + Tla::GameSeconds(_RepairTime(item, npc));
     player.RepairCompleteTime = repairCompleteTime;
     repairItemPid[npc.Id] = item.ProtoId;
     player.RepairItemPid = repairItemPid;
@@ -106,7 +108,7 @@ bool SomeItemWasRepaired(Critter player, Critter npc)
     if (player.RepairItemPid.get(npc.Id, EMPTY_HSTRING) == EMPTY_HSTRING) {
         return false;
     }
-    return Game.GetFullSecond() >= player.RepairCompleteTime.get(npc.Id, 0);
+    return Game.SynchronizedTime >= player.RepairCompleteTime.get(npc.Id, ZERO_SYNCTIME);
 }
 
 bool HasSomeItemToRepair(Critter player, Critter npc)
@@ -134,13 +136,13 @@ void GetItemFromRepair(Critter player, Critter npc)
     player.RepairItemPid = repairItemPid;
 }
 
-uint GetRepairCost(Critter player, Critter npc, Item item)
+int GetRepairCost(Critter player, Critter npc, Item item)
 {
     if (!valid(player) || !valid(npc) || !valid(item)) {
         return 0;
     }
     // DL("Repair price:" + _RepairCost(item, player, npc) + "item cost: "+item.Cost + "; Proto cost = "+item.Cost);
-    return uint(_RepairCost(item, player, npc));
+    return int(_RepairCost(item, player, npc));
 }
 
 // Диалоги. Условия, результаты, генерация лексем
@@ -236,18 +238,12 @@ void dlg_GetRepairTime(Critter player, Critter npc, string& lexems)
     if (!IS_DIALOG_GENERATED(lexems)) {
         return;
     }
-    if (player.RepairCompleteTime.get(npc.Id, 0) == 0) {
+    if (player.RepairCompleteTime.get(npc.Id, ZERO_SYNCTIME) == ZERO_SYNCTIME) {
         return;
     }
 
-    uint16 year = 0;
-    uint16 month = 0;
-    uint16 dayOfWeek = 0;
-    uint16 day = 0;
-    uint16 hour = 0;
-    uint16 minute = 0;
-    uint16 second = 0;
-    Game.EvaluateGameTime(player.RepairCompleteTime[npc.Id], year, month, dayOfWeek, day, hour, minute, second);
+    int year = 0, month = 0, day = 0, hour = 0, minute = 0, second = 0, milisecond = 0;
+    Game.UnpackSynchronizedTime(player.RepairCompleteTime[npc.Id], year, month, day, hour, minute, second, milisecond);
     lexems = "$time" + (month > 9 ? ("" + month) : ("0" + month)) + "." + year + " " + (hour > 9 ? ("" + hour) : ("0" + hour)) + ":" +
              (minute > 9 ? ("" + minute) : ("0" + minute));
 }
@@ -262,7 +258,7 @@ void r_TakeForRepair(Critter player, Critter npc, int free)
         return;
     }
     if (free == 0) {
-        uint money = GetRepairCost(player, npc, item);
+        int money = GetRepairCost(player, npc, item);
         Game.DestroyItem(player.GetItem(Content::Item::bottle_caps), money);
     }
     TakeItemToRepair(player, npc, item);
@@ -272,4 +268,8 @@ void r_TakeForRepair(Critter player, Critter npc, int free)
 void r_TakeItemFromRepair(Critter player, Critter npc)
 {
     GetItemFromRepair(player, npc);
+}
+
+#endif
+
 }

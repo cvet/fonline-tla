@@ -1,4 +1,7 @@
-// FOS Server
+namespace Mob
+{
+
+#if SERVER
 
 // Author: heX, cvet
 
@@ -49,10 +52,10 @@
 #define MSG_GROUP_ATTACK (16001)
 #define MSG_GROUP_FURY   (16002)
 
-///@ Property Critter PrivateServer ident MobAttackedId
-///@ Property Critter PrivateServer int  MobFury
-///@ Property Critter PrivateServer int  MobFear
-///@ Property Critter PrivateServer int  MobMaxFear
+///@ Property Critter Server ident MobAttackedId Mutable Persistent
+///@ Property Critter Server int32 MobFury Mutable Persistent
+///@ Property Critter Server int32 MobFear Mutable Persistent
+///@ Property Critter Server int32 MobMaxFear Mutable Persistent
 
 const hstring[] Pids_BestialMobs = {Content::Critter::SmallSilverGecko,
                                     Content::Critter::ToughSilverGecko,
@@ -107,7 +110,7 @@ void _MobInit(Critter npc, bool firstTime)
     //	npc.OnCritterAppearedDist2.Subscribe(_ShowPlayerFastAttack);
     //	npc.OnCritterDisappearedDist2.Subscribe(_HidePlayerFastAttack);
 
-    npc.OnIdle.Subscribe(_Idle);
+    npc.StartTimeEvent(Time::Asap(), Time::Seconds(1), _Idle);
     npc.OnMessage.Subscribe(_OnMessage);
     npc.OnNpcPlaneBegin.Subscribe(_PlaneBegin);
     npc.OnSomeCritterDead.Subscribe(_Death);
@@ -119,12 +122,12 @@ void _MobInit(Critter npc, bool firstTime)
 void ActivateMobScript(Map map)
 {
     Critter[] critters = {};
-    for (uint i = 0, j = Pids_BestialMobs.length(); i < j; i++) {
+    for (int i = 0, j = Pids_BestialMobs.length(); i < j; i++) {
         // Game.Log("i = " + i + "; proto: " + Pids_BestialMobs[ i ] + Pids_BestialMobs[ i ]);
         critters.insertLast(map.GetCritters(Pids_BestialMobs[i], CritterFindType::Npc));
     }
 
-    for (uint i = 0; i < critters.length(); i++) {
+    for (int i = 0; i < critters.length(); i++) {
         if (critters[i].InitScript == EMPTY_HSTRING && (critters[i].TeamId == 0 || (critters[i].TeamId >= 24 && critters[i].TeamId <= 33))) {
             critters[i].SetupScript(_MobInit);
         }
@@ -148,9 +151,9 @@ void ResetVars(Critter npc)
 void TryGoHome(Critter npc)
 {
     if (npc.MobFury < MAX_FURY && npc.IsAlive()) {
-        if (npc.MapId == npc.HomeMapId && Game.GetDistance(npc.HomeHexX, npc.HomeHexY, npc.HexX, npc.HexY) > DISTANCE_GO_HOME) {
+        if (npc.MapId == npc.HomeMapId && Game.GetDistance(npc.HomeHex, npc.Hex) > DISTANCE_GO_HOME) {
             NpcPlanes::DropPlanes(npc);
-            NpcPlanes::AddWalkPlane(npc, 0, 0, 0, npc.HomeHexX, npc.HomeHexY, npc.HomeDir, false, 0, REASON_GO_HOME);
+            NpcPlanes::AddWalkPlane(npc, 0, 0, 0, npc.HomeHex, npc.HomeDir, false, 0, REASON_GO_HOME);
         }
     }
 }
@@ -165,11 +168,11 @@ void AddPlaneEscape(Critter npc, Critter fromRunning)
 }
 
 // собрать нпц по номеру группы
-uint GetCrittersByTeam(Map map, uint x, uint y, uint radius, int team)
+int GetCrittersByTeam(Map map, int x, int y, int radius, int team)
 {
-    uint count = 0;
-    Critter[] critters = map.GetCritters(x, y, radius, CritterFindType::AliveNpc);
-    for (uint i = 0; i < critters.length(); i++) {
+    int count = 0;
+    Critter[] critters = map.GetCritters(mpos(x, y), radius, CritterFindType::NonDeadNpc);
+    for (int i = 0; i < critters.length(); i++) {
         if (critters[i].TeamId == team) {
             count++;
         }
@@ -177,9 +180,9 @@ uint GetCrittersByTeam(Map map, uint x, uint y, uint radius, int team)
     return count;
 }
 
-uint GetMyTeamCount(Critter npc)
+int GetMyTeamCount(Critter npc)
 {
-    return GetCrittersByTeam(npc.GetMap(), npc.HexX, npc.HexY, DISTANCE_GROUP_RADIUS, npc.TeamId);
+    return GetCrittersByTeam(npc.GetMap(), npc.Hex.x, npc.Hex.y, DISTANCE_GROUP_RADIUS, npc.TeamId);
 }
 
 // CRITTER_EVENT_SMTH_DEAD
@@ -225,7 +228,7 @@ void _Respawn(Critter npc)
 // Появился новый криттер в поле зрения.
 void _ShowPlayer(Critter npc, Critter player)
 {
-    if (not player.IsControlledByPlayer) {
+    if (not player.ControlledByPlayer) {
         return;
     }
     if (npc.MobFear > npc.MobMaxFear) {
@@ -243,7 +246,7 @@ void _ShowPlayer(Critter npc, Critter player)
 // Пропал криттер с поля зрения.
 void _HidePlayer(Critter npc, Critter player)
 {
-    if (not player.IsControlledByPlayer) {
+    if (not player.ControlledByPlayer) {
         return;
     }
     if (npc.MobFury < MAX_FURY) {
@@ -256,7 +259,7 @@ void _HidePlayer(Critter npc, Critter player)
 // Появился новый криттер в поле зрения.
 void _ShowPlayerFastAttack(Critter npc, Critter player)
 {
-    if (not player.IsControlledByPlayer) {
+    if (not player.ControlledByPlayer) {
         return;
     }
     NpcPlanes::AddAttackPlane(npc, AI_PLANE_ATTACK_PRIORITY + 1, player);
@@ -266,7 +269,7 @@ void _ShowPlayerFastAttack(Critter npc, Critter player)
 // Пропал криттер с поля зрения.
 void _HidePlayerFastAttack(Critter npc, Critter player)
 {
-    if (not player.IsControlledByPlayer) {
+    if (not player.ControlledByPlayer) {
         return;
     }
     NpcPlanes::EraseAttackPlane(npc, player);
@@ -276,7 +279,7 @@ void _HidePlayerFastAttack(Critter npc, Critter player)
 // Пришло сообщение отправленное с помощью Critter::SendMessage.
 void _OnMessage(Critter npc, Critter fromCrit, int message, any value)
 {
-    if (npc.IsControlledByPlayer) {
+    if (npc.ControlledByPlayer) {
         return;
     }
     if (not npc.IsAlive()) {
@@ -338,11 +341,11 @@ bool _PlaneBegin(Critter npc, int planeId, int reason, Critter someCr, Item some
         }
 
         if (reason == REASON_FOUND_IN_ENEMY_STACK) {
-            uint distantion = Game.GetDistance(npc, target);
+            int distantion = Game.GetDistance(npc, target);
             if (distantion <= DISTANCE_ATTACK) {
                 // если противник подошел достаточно близко, то разрешаем атаку
                 // анализ на дальность
-                uint pathLength = npc.GetMap().GetPathLength(npc, target.HexX, target.HexY, 1);
+                int pathLength = npc.GetMap().GetPathLength(npc, target.Hex, 1);
                 // если пройти нельзя, то не идем
                 if (pathLength == 0) {
                     return false;
@@ -382,4 +385,8 @@ bool _Attacked(Critter npc, Critter attacker)
         AddPlaneEscape(npc, attacker);
     }
     return true; // Handle attacked processing
+}
+
+#endif
+
 }

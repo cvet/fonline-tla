@@ -1,4 +1,8 @@
-// FOS Server
+namespace Trader
+{
+
+#if SERVER
+
 void ModuleInit()
 {
     Game.OnInit.Subscribe(init);
@@ -12,7 +16,7 @@ void init()
     CurrentSettings = null;
 }
 
-void ReadTradeSettings(Json::JSON @settingsInfo, uint index)
+void ReadTradeSettings(Json::JSON @settingsInfo, int index)
 {
     TradeSettings settings = TradeSettings();
     TradersSettings.insertLast(settings);
@@ -25,7 +29,7 @@ void ReadTradeSettings(Json::JSON @settingsInfo, uint index)
     settingsInfo["Goods"].forEach(@ReadGoods);
 }
 
-void ReadGoods(Json::JSON @goodsInfo, uint index)
+void ReadGoods(Json::JSON @goodsInfo, int index)
 {
     string name;
     int count = 0;
@@ -60,28 +64,34 @@ void _TraderInit(Critter trader, bool firstTime)
         trader.IsNoLoot = true;
         trader.IsNoEnemyStack = true;
 
-        if (trader.GetTimeEvents(Tla::CteTrader) == 0) {
-            uint nextCall = UpdateItems(trader);
+        if (trader.CountTimeEvent(cte_UpdateItems) == 0) {
+            int nextCall = UpdateItems(trader);
             if (nextCall > 0) {
-                trader.AddTimeEvent(cte_UpdateItems, nextCall, Tla::CteTrader);
+                trader.StartTimeEvent(Tla::GameSeconds(nextCall), cte_UpdateItems);
             }
         }
     }
 }
 
-uint cte_UpdateItems(Critter trader, any identifier, uint& stage)
+void cte_UpdateItems(Critter trader)
 {
     if (trader.IsDead()) {
-        return IS_TIMEOUT(trader.TimeoutReplication) ? trader.TimeoutReplication - Game.GetFullSecond() : Time::RealMinute(1);
+        timespan delayTicks = Time::IsTimeoutActive(trader.TimeoutReplication) ? trader.TimeoutReplication - Game.SynchronizedTime : Time::Minutes(1);
+        if (delayTicks != ZERO_TIMESPAN) {
+            Game.RepeatCurrentTimeEvent(delayTicks);
+        }
     }
-    return UpdateItems(trader);
+    timespan delayTicks = Tla::GameSeconds(UpdateItems(trader));
+    if (delayTicks != ZERO_TIMESPAN) {
+        Game.RepeatCurrentTimeEvent(delayTicks);
+    }
 }
 
 int GetTraderIndex(Critter trader)
 {
     hstring dialogId = trader.DialogId;
     if (dialogId != EMPTY_HSTRING) {
-        for (uint i = 0, l = TradersSettings.length(); i < l; i++) {
+        for (int i = 0, l = TradersSettings.length(); i < l; i++) {
             if (TradersSettings[i].TraderDialogId == dialogId) {
                 return i;
             }
@@ -90,7 +100,7 @@ int GetTraderIndex(Critter trader)
     return -1;
 }
 
-uint UpdateItems(Critter trader)
+int UpdateItems(Critter trader)
 {
     int traderIndex = GetTraderIndex(trader);
     if (traderIndex < 0) {
@@ -102,7 +112,7 @@ uint UpdateItems(Critter trader)
     Game.DestroyItems(items);
 
     // Add new
-    for (uint i = 0, j = TradersSettings[traderIndex].Goods.length(); i < j; i++) {
+    for (int i = 0, j = TradersSettings[traderIndex].Goods.length(); i < j; i++) {
         hstring pid = TradersSettings[traderIndex].Goods.getKey(i);
         if (pid != EMPTY_HSTRING) {
             int needCount = TradersSettings[traderIndex].Goods.getValue(i);
@@ -144,6 +154,10 @@ class TradeSettings
 {
     hstring TraderDialogId;
     int UpdateTimeHours;
-    uint BarterSkill;
+    int BarterSkill;
     dict<hstring, int> Goods = {};
+}
+
+#endif
+
 }

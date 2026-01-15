@@ -1,4 +1,7 @@
-// FOS Server Sort 2
+namespace PatternTerm // Sort 2
+{
+
+#if SERVER
 
 /*
         Терминатор
@@ -120,8 +123,8 @@ class TermPattern : PatternCommon::CommonPattern
 
     void _Idle(Critter term)
     {
-        Critter[] players = term.GetCritters(false, CritterFindType::AlivePlayers);
-        for (uint i = 0; i < players.length(); i++) {
+        Critter[] players = term.GetCritters(CritterSeeType::WhoISee, CritterFindType::NonDeadPlayers);
+        for (int i = 0; i < players.length(); i++) {
             DL("added attackplane");
             AttackPlayer(term, players[i]);
             return;
@@ -144,7 +147,7 @@ class TermPattern : PatternCommon::CommonPattern
         // cr.OnAttack.Subscribe(_TermAttack);
         cr.OnAttacked.Subscribe(_TermAttacked);
         cr.OnNpcPlaneEnd.Subscribe(_TermPlaneEnd);
-        cr.OnIdle.Subscribe(_TermIdle);
+        cr.StartTimeEvent(Time::Asap(), Time::Seconds(1), _TermIdle);
         cr.OnNpcPlaneRun.Subscribe(_TermPlaneRun);
         cr.OnMessage.Subscribe(_TermMessage);
         cr.OnNpcPlaneBegin.Subscribe(_TermPlaneBegin);
@@ -156,7 +159,7 @@ class TermPattern : PatternCommon::CommonPattern
     bool _SelectRightWeapon(Critter cr, Critter target)
     {
         // DL("Try select weapon");
-        uint dist = Game.GetDistance(cr, target);
+        int dist = Game.GetDistance(cr, target);
 
         bool takeFlamer = false;
         bool takeMinigun = false;
@@ -215,7 +218,7 @@ class TermPattern : PatternCommon::CommonPattern
 TermPattern pattern; // Для наследников нужно определить _NoBaseInstance
 #endif
 
-void SetTermStats(Critter cr, uint8 lvl)
+void SetTermStats(Critter cr, int lvl)
 {
     if (lvl < 1) {
         return;
@@ -230,7 +233,7 @@ void SetTermStats(Critter cr, uint8 lvl)
     cr.ActionPointsBase = T_AP(lvl);
     cr.CurrentHp = cr.MaxLife;
 
-    for (uint i = 0; i < CritterPropertyGroup::ResistsBase.length(); i++) {
+    for (int i = 0; i < CritterPropertyGroup::ResistsBase.length(); i++) {
         if (CritterPropertyGroup::ResistsBase[i] != CritterProperty::EmpResistanceBase) {
             cr.SetAsInt(CritterPropertyGroup::ResistsBase[i], T_RES(lvl));
         }
@@ -308,13 +311,13 @@ Item GetCritterWeapon(Critter cr, hstring[] weapPids)
 {
     Item handItem = _CritGetItemHand(cr);
     if (valid(handItem)) {
-        for (uint i = 0; i < weapPids.length(); i++) {
+        for (int i = 0; i < weapPids.length(); i++) {
             if (handItem.ProtoId == weapPids[i]) {
                 return handItem;
             }
         }
     }
-    for (uint i = 0; i < weapPids.length(); i++) {
+    for (int i = 0; i < weapPids.length(); i++) {
         if (cr.CountItem(weapPids[i]) > 0) {
             Item weapon = cr.GetItem(weapPids[i]);
             if (!valid(weapon)) {
@@ -338,20 +341,20 @@ void TryCatchSneakers(Critter term)
         return;
     }
 
-    Critter[] players = map.GetCritters(term.HexX, term.HexY, SNEAKERS_SRCH_RADIUS, CritterFindType::AlivePlayers);
+    Critter[] players = map.GetCritters(term.Hex, SNEAKERS_SRCH_RADIUS, CritterFindType::NonDeadPlayers);
 
     // Ближайший игрок
-    for (uint i = 0; i < players.length(); i++) {
+    for (int i = 0; i < players.length(); i++) {
         Critter player = players[i];
         if (player.InSneakMode) {
             continue;
         }
 
         // Анимация
-        term.SetDir(Game.GetDirection(term.HexX, term.HexY, player.HexX, player.HexY));
+        term.SetDir(Game.GetDirection(term.Hex, player.Hex));
         _CritAnimateThrow(term);
-        map.RunFlyEffect(Content::Item::generic_4024, term, player, term.HexX, term.HexY, player.HexX, player.HexY);
-        Game.DeferredCall(3000, UnsneakPlayer, player.Id);
+        Effects::RunFlyEffect(map, Content::Item::generic_4024, term, player);
+        Game.StartTimeEvent(Tla::GameSeconds(3), UnsneakPlayer, player.Id);
         break;
     }
 }
@@ -368,8 +371,8 @@ void UnsneakPlayer(any value)
 
         Map map = player.GetMap();
         if (valid(map)) {
-            if (!valid(map.GetItem(player.HexX, player.HexY, Content::Item::active_flare))) {
-                Item flare = map.AddItem(player.HexX, player.HexY, Content::Item::active_flare, 1);
+            if (!valid(map.GetItem(player.Hex, Content::Item::active_flare))) {
+                Item flare = map.AddItem(player.Hex, Content::Item::active_flare, 1);
                 if (!valid(flare)) {
                     return;
                 }
@@ -377,9 +380,9 @@ void UnsneakPlayer(any value)
                 flare.LightColor = 0x050000;
                 flare.LightDistance = 5;
                 flare.LightIntensity = 100;
-                flare.IsAlwaysView = true;
+                flare.AlwaysView = true;
                 player.TimeoutSneak = SNEAK_TIMEOUT(player);
-                Game.SavedDeferredCall(GAME_MINUTE_TO_TICK(10), DeleteFlare, flare.Id);
+                Game.StartTimeEvent(Time::GameMinutes(10), DeleteFlare, flare.Id); //SavedDeferredCall
             }
         }
     }
@@ -398,7 +401,7 @@ void DeleteFlare(any value)
 void testTerm(Critter cr, int lvl, int team, int bag)
 {
     int[] props = {CritterProperty::BagId, bag, CritterProperty::TeamId, team, CritterProperty::IsNoHome, 1};
-    Critter npc = cr.GetMap().AddNpc(Content::Critter::VaultCityPatrolMale, cr.HexX - 5, cr.HexY - 5, 0, Tla::GetCritPropsDict(props));
+    Critter npc = cr.GetMap().AddCritter(Content::Critter::VaultCityPatrolMale, mpos(cr.Hex.x - 5, cr.Hex.y - 5), 0, Tla::GetCritPropsDict(props));
     npc.SetupScript(_CritterInit);
     npc.AddItem(Content::Item::improved_flamethrower, 1);
     npc.AddItem(Content::Item::vindicator_minigun, 1);
@@ -410,3 +413,7 @@ void testTerm(Critter cr, int lvl, int team, int bag)
 // ~run PatternTerm test 0 0 0
 // ~run test SetStat 1 7 1000
 // ~run test SetStat 1 72 1000
+
+#endif
+
+}

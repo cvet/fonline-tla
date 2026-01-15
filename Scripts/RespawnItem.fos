@@ -1,4 +1,8 @@
-// FOS Server Sort 2
+namespace RespawnItem // Sort 2
+{
+
+#if SERVER
+
 // Самовосстанавлиающийся итем
 // аргументы:
 // RespTime время респауна в игровых минутах (RespawnItemRespTime)
@@ -11,16 +15,16 @@
 // Eсть дополнительная возможность указать номер переменной (поле RespawnItemVarNum), чье значение будет проверяться при попытке поднять итем
 // если значение переменной = 1, предмет будет поднят и после этого переменная будет установлена в 0
 
-///@ Property Item PrivateServer uint8 RespawnItemMode
-///@ Property Item PrivateServer uint  RespawnItemRespTime
-///@ Property Item PrivateServer uint  RespawnItemVarNum
+///@ Property Item Server uint8 RespawnItemMode Mutable Persistent
+///@ Property Item Server int32 RespawnItemRespTime Mutable Persistent
+///@ Property Item Server int32 RespawnItemVarNum Mutable Persistent
 
 #define STR_CANT_PICKUP (3600) // номер сообщения "вы не можете поднять еще один такой предмет"
 #define MODE_XY         (0)    // режим " в тех же координатах "
 #define MODE_NPC        (1)    // режим " в инвентаре нпц "
 #define MODE_CONTAINER  (2)    // режим " в контейнере "
 
-void SetItemRespawn(Item item, uint mode, uint respTime)
+void SetItemRespawn(Item item, int mode, int respTime)
 {
     item.RespawnItemMode = mode;
     item.RespawnItemRespTime = respTime;
@@ -28,7 +32,7 @@ void SetItemRespawn(Item item, uint mode, uint respTime)
     item.SetupScript(_RespItemInit);
 }
 
-void SetItemNoPick(Item item, uint varNum)
+void SetItemNoPick(Item item, int varNum)
 {
     item.RespawnItemVarNum = varNum;
     item.OnCritterUseSkill.Subscribe(e_ItemOnSkill);
@@ -41,7 +45,7 @@ bool CheckItemValidToRespawn(Item item)
         return false;
     }
 
-    uint8 protoType = item.Type;
+    int protoType = item.Type;
     return protoType == ItemType::Armor || protoType == ItemType::Drug || protoType == ItemType::Weapon || protoType == ItemType::Misc ||
            protoType == ItemType::Key;
 }
@@ -59,7 +63,7 @@ bool _NonRespOnSkill(Item item, Critter cr, int skill)
     // проверка, может ли игрок поднять предмет
     if (item.RespawnItemVarNum != 0) {
         if (cr.GetAsInt(CritterProperty(item.RespawnItemVarNum)) == 0) {
-            cr.SayMsg(SAY_NETMSG, TextPackName::Text, STR_CANT_PICKUP);
+            Messaging::Info(cr, TextPackName::Text, STR_CANT_PICKUP);
             return true;
         }
         else {
@@ -75,7 +79,7 @@ bool e_ItemOnSkill(Item item, Critter cr, CritterProperty skill)
         // проверка, может ли игрок поднять предмет
         if (item.RespawnItemVarNum != 0) {
             if (cr.GetAsInt(CritterProperty(item.RespawnItemVarNum)) == 0) {
-                cr.SayMsg(SAY_NETMSG, TextPackName::Text, STR_CANT_PICKUP);
+                Messaging::Info(cr, TextPackName::Text, STR_CANT_PICKUP);
                 return true;
             }
             else {
@@ -88,14 +92,14 @@ bool e_ItemOnSkill(Item item, Critter cr, CritterProperty skill)
                             item.ProtoId.hash,    // код Пида итема
                             item.Count,           // количество
                             item.InitScript.hash, // скрипт
-                            item.HexX,            // координаты
-                            item.HexY,            // координаты
+                            item.Hex.x,           // координаты
+                            item.Hex.y,           // координаты
                             item.RespawnItemVarNum, // номер переменной в которой хранится признак может ли игрок поднять этот итем
                             item.RespawnItemMode,     // режим респауна
                             item.RespawnItemRespTime, // время следующего респауна
                             item.Info};
 
-            Game.SavedDeferredCall(GAME_SECOND_TO_TICK(item.RespawnItemRespTime), ProcessRespawnItem, values);
+            Game.StartTimeEvent(Tla::GameSeconds(item.RespawnItemRespTime), ProcessRespawnItem, values); //SavedDeferredCall
             item.RespawnItemRespTime = 0;
         }
 
@@ -105,8 +109,7 @@ bool e_ItemOnSkill(Item item, Critter cr, CritterProperty skill)
     return false;
 }
 
-void RespawnItem(ident mapId, hstring itemPid, uint itemCount, hstring initScript, uint16 hX, uint16 hY, uint varNum, uint modeResp, uint timeResp,
-                 uint itemInfo)
+void RespawnItem(ident mapId, hstring itemPid, int itemCount, hstring initScript, int hX, int hY, int varNum, int modeResp, int timeResp, int itemInfo)
 {
     any[] values = {mapId, itemPid.uhash, itemCount, initScript.uhash, hX, hY, varNum, modeResp, timeResp, itemInfo};
     ProcessRespawnItem(values);
@@ -117,14 +120,14 @@ void ProcessRespawnItem(any[] values)
     if (values.length() == 10) {
         ident mapId = values[0];
         hstring proto = hstring_fromHash(values[1]);
-        uint count = values[2];
+        int count = values[2];
         hstring script = hstring_fromHash(values[3]);
-        uint16 hx = values[4];
-        uint16 hy = values[5];
-        uint varNum = values[6];
-        uint mode = values[7];
-        uint respTime = values[8];
-        uint info = values[9];
+        int hx = values[4];
+        int hy = values[5];
+        int varNum = values[6];
+        int mode = values[7];
+        int respTime = values[8];
+        int info = values[9];
         Item item;
 
         Map map = Game.GetMap(mapId);
@@ -132,12 +135,12 @@ void ProcessRespawnItem(any[] values)
             return;
         }
 
-        uint tryNum = 0;
+        int tryNum = 0;
 
         while (tryNum < 10) {
             switch (mode) {
             case MODE_XY:
-                item = RespawnItemCoords(map, hx, hy, proto, count);
+                item = RespawnItemCoords(map, mpos(hx, hy), proto, count);
                 break;
             case MODE_NPC:
                 item = RespawnItemAnyCritter(map, proto, count);
@@ -166,26 +169,25 @@ void ProcessRespawnItem(any[] values)
 }
 
 // isUniq - признак, что итем только один может быть на данном гексе (уникальный для данной точки системы координат)
-Item RespawnItemNearEntry(Map map, uint8 entry, hstring protoId, uint count)
+Item RespawnItemNearEntry(Map map, int entry, hstring protoId, int count)
 {
-    uint eCount = Entrance::MapCountEntry(map, entry);
+    int eCount = Entrance::MapCountEntry(map, entry);
     if (eCount == 0) {
         return null;
     }
 
-    uint numTry = 0;
-    uint16 hx = 0;
-    uint16 hy = 0;
+    int numTry = 0;
+    mpos hex;
     bool foundItem = false;
     while (numTry < 10) {
         foundItem = false;
-        if (Entrance::MapGetEntryCoords(map, entry, Game.Random(0, eCount - 1), hx, hy)) {
-            Item[] items = map.GetItems(hx, hy);
+        if (Entrance::MapGetEntryCoords(map, entry, Game.Random(0, eCount - 1), hex)) {
+            Item[] items = map.GetItems(hex);
             if (items.isEmpty()) {
                 // на гексе нет ни одного итема
-                return RespawnItemCoords(map, hx, hy, protoId, count);
+                return RespawnItemCoords(map, hex, protoId, count);
             }
-            for (uint i = 0; i < items.length(); i++) {
+            for (int i = 0; i < items.length(); i++) {
                 if (items[i].ProtoId == protoId) {
                     foundItem = true;
                     break;
@@ -193,7 +195,7 @@ Item RespawnItemNearEntry(Map map, uint8 entry, hstring protoId, uint count)
             }
             if (!foundItem) {
                 // не найден итем с данным кодом - можно добавлять
-                return RespawnItemCoords(map, hx, hy, protoId, count);
+                return RespawnItemCoords(map, hex, protoId, count);
             }
         }
         numTry++;
@@ -202,7 +204,7 @@ Item RespawnItemNearEntry(Map map, uint8 entry, hstring protoId, uint count)
     return null;
 }
 
-Item RespawnItemContainer(Map map, hstring protoId, uint count)
+Item RespawnItemContainer(Map map, hstring protoId, int count)
 {
     Item[] containers = map.GetItems(ItemProperty::Type, ItemType::Container);
     if (containers.isEmpty()) {
@@ -210,10 +212,10 @@ Item RespawnItemContainer(Map map, hstring protoId, uint count)
     }
 
     Item container = containers[Game.Random(0, containers.length() - 1)];
-    return container.AddItem(protoId, count, ContainerItemStack::Root);
+    return container.AddItem(protoId, count, ROOT_CONTAINER_STACK);
 }
 
-Item RespawnItemAnyCritter(Map map, hstring protoId, uint count)
+Item RespawnItemAnyCritter(Map map, hstring protoId, int count)
 {
     Critter[] critters = map.GetCritters(CritterFindType::Npc);
     if (!critters.isEmpty()) {
@@ -223,13 +225,13 @@ Item RespawnItemAnyCritter(Map map, hstring protoId, uint count)
     return null;
 }
 
-Item RespawnItemCoords(Map map, uint16 hexX, uint16 hexY, hstring protoId, uint count)
+Item RespawnItemCoords(Map map, mpos hex, hstring protoId, int count)
 {
-    if (hexX == 0 || hexY == 0) {
+    if (hex.x == 0 || hex.y == 0) {
         return null;
     }
 
-    return map.AddItem(hexX, hexY, protoId, count);
+    return map.AddItem(hex, protoId, count);
 }
 
 void _RespItemInit(Item item, bool firstTime)
@@ -240,4 +242,8 @@ void _RespItemInit(Item item, bool firstTime)
 void _RespawnItemInit(Item item, bool firstTime)
 {
     item.OnCritterUseSkill.Subscribe(e_ItemOnSkill);
+}
+
+#endif
+
 }

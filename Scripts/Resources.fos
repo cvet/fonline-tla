@@ -1,8 +1,12 @@
-// FOS Server Sort 2
+namespace Resources // Sort 2
+{
+
+#if SERVER
+
 // Author: Tab10id
 
-///@ Property Critter Protected uint8 ModFarrelAmmiak Group = Quests Quest = 3316 Max = 2
-///@ Property Map PrivateServer uint=>uint ResourcesData
+///@ Property Critter Common uint8 ModFarrelAmmiak Mutable OwnerSync Persistent Group = Quests Quest = 3316 Max = 2
+///@ Property Map Server int32=>int32 ResourcesData Mutable Persistent
 
 #define DL #(str)
 // #define DL #(str) Game.Log(str)
@@ -10,9 +14,9 @@
 #define MAX_RESOURCES_COUNT_PER_SCENERY (10)
 #define TIME_FOR_RESOURCES_COUNT_RESP   (60 * 60 * 24 * 3)
 #define RESOURCES_COUNT_RESP_COUNT      (2)
-#define DEFAULT_TIMEOUT                 (Time::RealMinute(10))
-#define OUTDOORSMAN_TIMEOUT             #(cr)(Game.GetFullSecond() + (DEFAULT_TIMEOUT / cr.SkillOutdoorsman))
-#define OUTDOORSMAN_SUPERSLEDGE_TIMEOUT #(cr)(Game.GetFullSecond() + (DEFAULT_TIMEOUT / (cr.SkillOutdoorsman * 3 / 2)))
+#define DEFAULT_TIMEOUT                 (Time::Minutes(10))
+#define OUTDOORSMAN_TIMEOUT             #(cr)(Game.SynchronizedTime + Time::Seconds(10 * 60 / cr.SkillOutdoorsman))
+#define OUTDOORSMAN_SUPERSLEDGE_TIMEOUT #(cr)(Game.SynchronizedTime + Time::Seconds(10 * 60 / (cr.SkillOutdoorsman * 3 / 2)))
 
 #define STR_NO_RESOURCE                 (3700)
 #define STR_WEIGHT_TOO_HEAVY            (3701)
@@ -32,7 +36,7 @@
 // clang-format off
 
 // Todo: fix resource pids
-uint[][][] ToolsSettings =
+int[][][] ToolsSettings =
 {
     {
         // Axe
@@ -110,7 +114,7 @@ ToolGiveExpForOre toolGiveExpForOre;
 ToolShowInfoInWeight toolShowInfoInWeight;
 ToolBottle toolBottle;
 
-uint MakeDataKey(uint16 hx, uint16 hy, hstring pid)
+int MakeDataKey(int hx, int hy, hstring pid)
 {
     return (hx << 16) | hy;
 }
@@ -134,8 +138,8 @@ class CStarter
 {
     CStarter()
     {
-        for (uint i = 0; i < ToolsSettings.length(); i++) {
-            uint k = 0;
+        for (int i = 0; i < ToolsSettings.length(); i++) {
+            int k = 0;
             Tools.resize(Tools.length() + 1);
             CTool tool = Tools[Tools.length() - 1];
             tool.ToolPids = IntToHashArray(ToolsSettings[i][k++]);
@@ -158,10 +162,10 @@ class CStarter
     }
 
     private
-    hstring[] IntToHashArray(uint[] hashes)
+    hstring[] IntToHashArray(int[] hashes)
     {
         hstring[] result = {};
-        for (uint i = 0; i < hashes.length(); i++) {
+        for (int i = 0; i < hashes.length(); i++) {
             result.insertLast(hstring_fromHash(hashes[i]));
         }
         return result;
@@ -174,7 +178,7 @@ interface IResourceDemand
 };
 interface IResourceResult
 {
-    uint OnResult(Critter master, Item onItem, StaticItem onScenery, hstring toolPid, uint count, hstring newItemsPid);
+    int OnResult(Critter master, Item onItem, StaticItem onScenery, hstring toolPid, int count, hstring newItemsPid);
 };
 interface IResourceGetTimeouts
 {
@@ -182,24 +186,24 @@ interface IResourceGetTimeouts
 };
 interface IResourceSetTimeouts
 {
-    void OnSetTimeouts(Critter master, hstring toolPid, uint count, hstring newItemsPid);
+    void OnSetTimeouts(Critter master, hstring toolPid, int count, hstring newItemsPid);
 };
 interface IResourceAddExp
 {
-    void OnAddExp(Critter master, hstring toolPid, uint count, hstring newItemsPid);
+    void OnAddExp(Critter master, hstring toolPid, int count, hstring newItemsPid);
 };
 
 class CTool
 {
     hstring[] ToolPids = {};
     hstring[] SourcePids = {};
-    uint[] SourceCount = {};
+    int[] SourceCount = {};
     hstring[] NewItemsPids = {};
-    uint[] NewItemsChances = {};
-    uint[] CrStateAnim = {};
-    uint[] CrActionAnim = {};
-    uint[] MinCount = {};
-    uint[] MaxCount = {};
+    int[] NewItemsChances = {};
+    int[] CrStateAnim = {};
+    int[] CrActionAnim = {};
+    int[] MinCount = {};
+    int[] MaxCount = {};
     IResourceDemand[] CallbackDemand = {};
     IResourceResult[] CallbackResult = {};
     IResourceGetTimeouts CallbackGetTimeouts;
@@ -208,7 +212,7 @@ class CTool
 
     CTool SetCallbackDemand(IResourceDemand callback)
     {
-        for (uint i = 0; i < ToolPids.length(); i++) {
+        for (int i = 0; i < ToolPids.length(); i++) {
             CallbackDemand[i] = callback;
         }
         return this;
@@ -216,7 +220,7 @@ class CTool
 
     CTool SetCallbackResult(IResourceResult callback)
     {
-        for (uint i = 0; i < NewItemsPids.length(); i++) {
+        for (int i = 0; i < NewItemsPids.length(); i++) {
             CallbackResult[i] = callback;
         }
         return this;
@@ -254,7 +258,7 @@ class CTool
 
     CTool SetCallbackSetTimeouts(IResourceSetTimeouts callback)
     {
-        for (uint i = 0; i < ToolPids.length(); i++) {
+        for (int i = 0; i < ToolPids.length(); i++) {
             CallbackSetTimeouts[i] = callback;
         }
         return this;
@@ -274,7 +278,7 @@ class CTool
 
     CTool SetCallbackAddExp(IResourceAddExp callback)
     {
-        for (uint i = 0; i < NewItemsPids.length(); i++) {
+        for (int i = 0; i < NewItemsPids.length(); i++) {
             CallbackAddExp[i] = callback;
         }
         return this;
@@ -299,8 +303,8 @@ class CTool
             demand = CallbackDemand[toolIdx].OnDemand(player, ToolPids[toolIdx]);
         }
         if (demand) {
-            for (uint i = 0; i < NewItemsChances.length(); i++) {
-                if (uint(Game.Random(0, 99)) < NewItemsChances[i]) {
+            for (int i = 0; i < NewItemsChances.length(); i++) {
+                if (int(Game.Random(0, 99)) < NewItemsChances[i]) {
                     return int(i);
                 }
                 else {
@@ -314,7 +318,7 @@ class CTool
     int GetNewItemIdx(hstring pid)
     {
         DL("NewItemsPids count: " + NewItemsPids.length());
-        for (uint i = 0; i < NewItemsPids.length(); i++) {
+        for (int i = 0; i < NewItemsPids.length(); i++) {
             DL("NewItemsPids" + i + ": " + NewItemsPids[i]);
             if (NewItemsPids[i] == pid) {
                 return int(i);
@@ -325,7 +329,7 @@ class CTool
 
     int GetToolIdx(hstring pid)
     {
-        for (uint i = 0; i < ToolPids.length(); i++) {
+        for (int i = 0; i < ToolPids.length(); i++) {
             if (ToolPids[i] == pid) {
                 return i;
             }
@@ -339,11 +343,11 @@ void _ToolInit(Item item, bool firstTime)
     item.OnCritterUseOn.Subscribe(_ToolUse);
 }
 
-bool _ToolUse(Item item, Critter cr, Critter onCritter, Item onItem, StaticItem onScenery, uint param)
+bool _ToolUse(Item item, Critter cr, Critter onCritter, Item onItem, StaticItem onScenery, int param)
 {
     hstring pid = item.ProtoId;
     hstring onObj;
-    uint resourceCount;
+    int resourceCount;
     if (valid(onItem)) {
         onObj = onItem.ProtoId;
     }
@@ -360,7 +364,7 @@ bool _ToolUse(Item item, Critter cr, Critter onCritter, Item onItem, StaticItem 
     tool = GetTool(pid, onObj);
 
     if (valid(tool)) {
-        uint toolIdx = tool.GetToolIdx(pid);
+        int toolIdx = tool.GetToolIdx(pid);
         if (not(tool.CallbackGetTimeouts is null)) {
             bool noTimeouts = tool.CallbackGetTimeouts.OnGetTimeouts(cr, pid);
             if (not noTimeouts) {
@@ -377,7 +381,7 @@ bool _ToolUse(Item item, Critter cr, Critter onCritter, Item onItem, StaticItem 
         if (valid(onScenery)) {
             resourceCount = GetSceneryResourcesCount(mapId, onScenery);
             if (resourceCount == 0) {
-                cr.SayMsg(SAY_NETMSG, TextPackName::Text, STR_NO_RESOURCE);
+                Messaging::Info(cr, TextPackName::Text, STR_NO_RESOURCE);
                 return true;
             }
         }
@@ -385,7 +389,7 @@ bool _ToolUse(Item item, Critter cr, Critter onCritter, Item onItem, StaticItem 
         int newItemIdx = tool.GetNewItemIdx(cr, toolIdx);
         if (newItemIdx != -1) {
             if (tool.NewItemsPids[newItemIdx] != EMPTY_HSTRING) {
-                uint itemCount = Game.Random(tool.MinCount[newItemIdx], tool.MaxCount[newItemIdx]);
+                int itemCount = Game.Random(tool.MinCount[newItemIdx], tool.MaxCount[newItemIdx]);
                 if (itemCount > 0) {
                     if (valid(onScenery)) {
                         if (resourceCount < itemCount) {
@@ -424,40 +428,40 @@ bool _ToolUse(Item item, Critter cr, Critter onCritter, Item onItem, StaticItem 
 bool CritterCanGetMoreItems(Critter player)
 {
     if ((player.CarryWeight - player.ItemsWeight) < 0) {
-        player.SayMsg(SAY_NETMSG, TextPackName::Text, STR_WEIGHT_TOO_HEAVY);
+        Messaging::Info(player, TextPackName::Text, STR_WEIGHT_TOO_HEAVY);
         return false;
     }
     return true;
 }
 
-uint GetSceneryResourcesCount(ident mapId, StaticItem scenery)
+int GetSceneryResourcesCount(ident mapId, StaticItem scenery)
 {
-    uint resourceCount = 0;
+    int resourceCount = 0;
     Map map = Game.GetMap(mapId);
-    uint dataKey = MakeDataKey(scenery.HexX, scenery.HexY, scenery.ProtoId);
+    int dataKey = MakeDataKey(scenery.Hex.x, scenery.Hex.y, scenery.ProtoId);
     auto resourcesData = map.ResourcesData.clone();
     if (resourcesData.exists(dataKey)) {
         resourceCount = resourcesData[dataKey];
     }
     else {
-        uint maxResCount = GetMaxResourceCount(scenery.ProtoId);
+        int maxResCount = GetMaxResourceCount(scenery.ProtoId);
         resourcesData[dataKey] = maxResCount;
         map.ResourcesData = resourcesData;
         any[] forTE = {};
         forTE.insertLast(mapId);
-        forTE.insertLast(scenery.HexX);
-        forTE.insertLast(scenery.HexY);
+        forTE.insertLast(scenery.Hex.x);
+        forTE.insertLast(scenery.Hex.y);
         forTE.insertLast(scenery.ProtoId.uhash);
-        Game.SavedDeferredCall(GAME_SECOND_TO_TICK(TIME_FOR_RESOURCES_COUNT_RESP), AddResourcesCount, forTE);
+        Game.StartTimeEvent(Tla::GameSeconds(TIME_FOR_RESOURCES_COUNT_RESP), AddResourcesCount, forTE); //SavedDeferredCall
         resourceCount = maxResCount;
     }
     return resourceCount;
 }
 
-void SetSceneryResourcesCount(uint resourceCount, ident mapId, StaticItem scenery)
+void SetSceneryResourcesCount(int resourceCount, ident mapId, StaticItem scenery)
 {
     Map map = Game.GetMap(mapId);
-    uint dataKey = MakeDataKey(scenery.HexX, scenery.HexY, scenery.ProtoId);
+    int dataKey = MakeDataKey(scenery.Hex.x, scenery.Hex.y, scenery.ProtoId);
     auto resourcesData = map.ResourcesData.clone();
     resourcesData[dataKey] = resourceCount;
     map.ResourcesData = resourcesData;
@@ -466,10 +470,10 @@ void SetSceneryResourcesCount(uint resourceCount, ident mapId, StaticItem scener
 CTool GetTool(hstring pid, hstring source)
 {
     DL("ToolsGroup count: " + Tools.length());
-    for (uint i = 0; i < Tools.length(); i++) {
-        for (uint k = 0; k < Tools[i].ToolPids.length(); k++) {
+    for (int i = 0; i < Tools.length(); i++) {
+        for (int k = 0; k < Tools[i].ToolPids.length(); k++) {
             if (Tools[i].ToolPids[k] == pid) {
-                for (uint l = 0; l < Tools[i].SourcePids.length(); l++) {
+                for (int l = 0; l < Tools[i].SourcePids.length(); l++) {
                     if (Tools[i].SourcePids[l] == source) {
                         return Tools[i];
                     }
@@ -483,7 +487,7 @@ CTool GetTool(hstring pid, hstring source)
 
 CTool GetTool(hstring sourcePid)
 {
-    for (uint i = 0; i < Tools.length(); i++) {
+    for (int i = 0; i < Tools.length(); i++) {
         for (int k = 0; k < int(Tools[i].SourcePids.length()); k++) {
             if (Tools[i].SourcePids[k] == sourcePid) {
                 return Tools[i];
@@ -496,13 +500,13 @@ CTool GetTool(hstring sourcePid)
 void AddResourcesCount(any[] values)
 {
     Map map = Game.GetMap(ident(values[0]));
-    uint dataKey = MakeDataKey(values[1], values[2], hstring_fromHash(values[3]));
+    int dataKey = MakeDataKey(values[1], values[2], hstring_fromHash(values[3]));
     auto resourcesData = map.ResourcesData.clone();
     if (resourcesData.exists(dataKey)) {
         resourcesData[dataKey] = resourcesData[dataKey] + RESOURCES_COUNT_RESP_COUNT;
         if (resourcesData[dataKey] < GetMaxResourceCount(hstring_fromHash(values[3]))) {
             map.ResourcesData = resourcesData;
-            Game.SavedDeferredCall(GAME_SECOND_TO_TICK(TIME_FOR_RESOURCES_COUNT_RESP), AddResourcesCount, values);
+            Game.StartTimeEvent(Tla::GameSeconds(TIME_FOR_RESOURCES_COUNT_RESP), AddResourcesCount, values); //SavedDeferredCall
             return;
         }
         resourcesData.remove(dataKey);
@@ -513,15 +517,15 @@ void AddResourcesCount(any[] values)
 void AnimateCritter(Critter cr, CritterStateAnim stateAnim, CritterActionAnim actionAnim)
 {
     if (stateAnim != 0 or actionAnim != 0) {
-        cr.Animate(stateAnim, actionAnim, null, true, true);
+        Effects::Animate(cr, stateAnim, actionAnim);
     }
 }
 
-uint GetMaxResourceCount(hstring scProto)
+int GetMaxResourceCount(hstring scProto)
 {
     CTool tool = GetTool(scProto);
     {
-        uint count = tool.SourceCount[0];
+        int count = tool.SourceCount[0];
         if (count != 0) {
             return count;
         }
@@ -531,16 +535,16 @@ uint GetMaxResourceCount(hstring scProto)
 
 class ToolDefault : IResourceDemand, IResourceResult, IResourceGetTimeouts, IResourceSetTimeouts, IResourceAddExp
 {
-    uint OnResult(Critter master, Item onItem, StaticItem onScenery, hstring toolPid, uint count, hstring newItemsPid)
+    int OnResult(Critter master, Item onItem, StaticItem onScenery, hstring toolPid, int count, hstring newItemsPid)
     {
         string lexem = "$itemname" + "@text Item " + STR_PROTO_ITEM_NAME(newItemsPid) + "@";
         if (count > 1) {
             lexem += "$count" + count + "$type" + "@text Text " + STR_TYPE_COUNT + "@";
-            master.SayMsg(SAY_NETMSG, TextPackName::Text, STR_ITEMS_ADDED, lexem);
+            Messaging::Info(master, TextPackName::Text, STR_ITEMS_ADDED, lexem);
         }
         else {
             if (count == 1) {
-                master.SayMsg(SAY_NETMSG, TextPackName::Text, STR_ITEM_ADDED, lexem);
+                Messaging::Info(master, TextPackName::Text, STR_ITEM_ADDED, lexem);
             }
         }
         return 0;
@@ -553,19 +557,19 @@ class ToolDefault : IResourceDemand, IResourceResult, IResourceGetTimeouts, IRes
 
     bool OnGetTimeouts(Critter master, hstring toolPid)
     {
-        if (IS_TIMEOUT(master.TimeoutSkOutdoorsman)) {
-            master.SayMsg(SAY_NETMSG, TextPackName::Game, MsgStr::StrSkillWeariness);
+        if (Time::IsTimeoutActive(master.TimeoutSkOutdoorsman)) {
+            Messaging::Info(master, TextPackName::Game, MsgStr::StrSkillWeariness);
             return false;
         }
         return true;
     }
 
-    void OnSetTimeouts(Critter master, hstring toolPid, uint count, hstring newItemsPid)
+    void OnSetTimeouts(Critter master, hstring toolPid, int count, hstring newItemsPid)
     {
         master.TimeoutSkOutdoorsman = OUTDOORSMAN_TIMEOUT(master);
     }
 
-    void OnAddExp(Critter master, hstring toolPid, uint count, hstring newItemsPid)
+    void OnAddExp(Critter master, hstring toolPid, int count, hstring newItemsPid)
     {
         // do nothing
     }
@@ -580,20 +584,20 @@ class ToolBottle : IResourceDemand, IResourceResult, IResourceSetTimeouts
         return master.ModFarrelAmmiak > 0;
     }
 
-    uint OnResult(Critter master, Item onItem, StaticItem onScenery, hstring toolPid, uint count, hstring newItemsPid)
+    int OnResult(Critter master, Item onItem, StaticItem onScenery, hstring toolPid, int count, hstring newItemsPid)
     {
-        uint itemCount = 1;
-        uint resourceCount = 1;
+        int itemCount = 1;
+        int resourceCount = 1;
         if (valid(onItem)) {
             Map map = Game.GetMap(onItem.MapId);
-            uint dataKey = MakeDataKey(onItem.HexX, onItem.HexY, onItem.ProtoId);
-            dict<uint, uint> resourcesData = map.ResourcesData.clone();
+            int dataKey = MakeDataKey(onItem.Hex.x, onItem.Hex.y, onItem.ProtoId);
+            dict<int, int> resourcesData = map.ResourcesData.clone();
             if (resourcesData.exists(dataKey)) {
                 resourceCount = resourcesData[dataKey];
             }
 
             if (resourceCount == 0) {
-                master.SayMsg(SAY_NETMSG, TextPackName::Text, STR_NO_AMMIAK);
+                Messaging::Info(master, TextPackName::Text, STR_NO_AMMIAK);
                 return 0;
             }
 
@@ -603,25 +607,25 @@ class ToolBottle : IResourceDemand, IResourceResult, IResourceSetTimeouts
 
             any[] forTE = {};
             forTE.insertLast(onItem.MapId);
-            forTE.insertLast(onItem.HexX);
-            forTE.insertLast(onItem.HexY);
+            forTE.insertLast(onItem.Hex.x);
+            forTE.insertLast(onItem.Hex.y);
             forTE.insertLast(onItem.ProtoId.uhash);
-            Game.SavedDeferredCall(GAME_SECOND_TO_TICK(TIME_FOR_RESOURCES_COUNT_RESP * 5), AddResourcesCount, forTE);
+            Game.StartTimeEvent(Tla::GameSeconds(TIME_FOR_RESOURCES_COUNT_RESP * 5), AddResourcesCount, forTE); //SavedDeferredCall
 
             Item tool = master.GetItem(toolPid);
             if ((Game.Random(1, 6) + int(master.Luck / 4)) > 5 && valid(tool)) {
                 master.AddItem(Content::Item::bottle_ammiak, 1);
-                master.SayMsg(SAY_NETMSG, TextPackName::Text, STR_AMMIAK_ADDED);
+                Messaging::Info(master, TextPackName::Text, STR_AMMIAK_ADDED);
                 Game.DestroyItem(tool, 1);
             }
             else {
-                master.SayMsg(SAY_NETMSG, TextPackName::Text, STR_NO_AMMIAK);
+                Messaging::Info(master, TextPackName::Text, STR_NO_AMMIAK);
             }
         }
         return 0;
     }
 
-    void OnSetTimeouts(Critter master, hstring toolPid, uint count, hstring newItemsPid)
+    void OnSetTimeouts(Critter master, hstring toolPid, int count, hstring newItemsPid)
     {
         // ...
     }
@@ -634,18 +638,18 @@ class ToolAxe : IResourceDemand, IResourceResult
         return Game.Random(0, 99) < (50 + (master.AgilityBase * 5));
     }
 
-    uint OnResult(Critter master, Item onItem, StaticItem onScenery, hstring toolPid, uint count, hstring newItemsPid)
+    int OnResult(Critter master, Item onItem, StaticItem onScenery, hstring toolPid, int count, hstring newItemsPid)
     {
-        uint resourceCount = GetMaxResourceCount(onScenery.ProtoId);
-        uint maxCount = master.SkillOutdoorsman / 50;
+        int resourceCount = GetMaxResourceCount(onScenery.ProtoId);
+        int maxCount = master.SkillOutdoorsman / 50;
         if (maxCount == 0) {
             maxCount = 1;
         }
-        uint itemCount = Game.Random(1, maxCount);
+        int itemCount = Game.Random(1, maxCount);
         ident mapId = master.MapId;
         if (valid(onScenery)) {
             Map map = Game.GetMap(mapId);
-            uint dataKey = MakeDataKey(onScenery.HexX, onScenery.HexY, onScenery.ProtoId);
+            int dataKey = MakeDataKey(onScenery.Hex.x, onScenery.Hex.y, onScenery.ProtoId);
             auto resourcesData = map.ResourcesData;
             resourceCount = resourcesData.get(dataKey, resourceCount);
             if (resourceCount < itemCount) {
@@ -653,18 +657,18 @@ class ToolAxe : IResourceDemand, IResourceResult
             }
         }
         if (resourceCount == 0 && count == 0) {
-            master.SayMsg(SAY_NETMSG, TextPackName::Text, STR_NO_RESOURCE);
+            Messaging::Info(master, TextPackName::Text, STR_NO_RESOURCE);
             return 0;
         }
         else {
             resourceCount -= itemCount;
             if ((count + itemCount) > 0) {
-                master.SayMsg(SAY_NETMSG, TextPackName::Text, STR_WOOD_ADDED);
+                Messaging::Info(master, TextPackName::Text, STR_WOOD_ADDED);
             }
         }
         if (valid(onScenery)) {
             Map map = Game.GetMap(mapId);
-            uint dataKey = MakeDataKey(onScenery.HexX, onScenery.HexY, onScenery.ProtoId);
+            int dataKey = MakeDataKey(onScenery.Hex.x, onScenery.Hex.y, onScenery.ProtoId);
             auto resourcesData = map.ResourcesData.clone();
             resourcesData[dataKey] = resourceCount;
             map.ResourcesData = resourcesData;
@@ -676,7 +680,7 @@ class ToolAxe : IResourceDemand, IResourceResult
 
 class ToolSuperSledge : IResourceSetTimeouts
 {
-    void OnSetTimeouts(Critter master, hstring toolPid, uint count, hstring newItemsPid)
+    void OnSetTimeouts(Critter master, hstring toolPid, int count, hstring newItemsPid)
     {
         master.TimeoutSkOutdoorsman = OUTDOORSMAN_SUPERSLEDGE_TIMEOUT(master);
     }
@@ -684,7 +688,7 @@ class ToolSuperSledge : IResourceSetTimeouts
 
 class ToolGiveExpForOre : IResourceAddExp
 {
-    void OnAddExp(Critter master, hstring toolPid, uint count, hstring newItemsPid)
+    void OnAddExp(Critter master, hstring toolPid, int count, hstring newItemsPid)
     {
         master.Experience += EXP_FOR_ORE;
     }
@@ -692,15 +696,19 @@ class ToolGiveExpForOre : IResourceAddExp
 
 class ToolShowInfoInWeight : IResourceResult
 {
-    uint OnResult(Critter master, Item onItem, StaticItem onScenery, hstring toolPid, uint count, hstring newItemsPid)
+    int OnResult(Critter master, Item onItem, StaticItem onScenery, hstring toolPid, int count, hstring newItemsPid)
     {
         string lexem = "$itemname" + "@text Item " + STR_PROTO_ITEM_NAME(newItemsPid) + "@";
         if (count > 0) {
             ProtoItem newProtoItem = Game.GetProtoItem(newItemsPid);
-            uint itemWeight = newProtoItem.Weight * count / 1000;
+            int itemWeight = newProtoItem.Weight * count / 1000;
             lexem += "$count" + itemWeight + "$type" + "@text Text " + STR_TYPE_KG + "@";
-            master.SayMsg(SAY_NETMSG, TextPackName::Text, STR_ITEMS_ADDED, lexem);
+            Messaging::Info(master, TextPackName::Text, STR_ITEMS_ADDED, lexem);
         }
         return 0;
     }
 };
+
+#endif
+
+}

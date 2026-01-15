@@ -1,10 +1,14 @@
-// FOS Server Sort 2
+namespace MainIntro // Sort 2
+{
+
+#if SERVER
+
 // Author: rifleman17
 
-///@ Property Critter Protected uint8 MainQuest Group = Quests Quest = 5001 Max = 21
+///@ Property Critter Common uint8 MainQuest Mutable OwnerSync Persistent Group = Quests Quest = 5001 Max = 21
 
-///@ Property Map PrivateServer bool QIntroInitiated
-///@ Property Map PrivateServer bool IntroDoorsOpen
+///@ Property Map Server bool QIntroInitiated Mutable Persistent
+///@ Property Map Server bool IntroDoorsOpen Mutable Persistent
 
 #define INTRO_WORLD_X           (5)          // координаты расположения стартовой локации на глобале, ось Х
 #define INTRO_WORLD_Y           (5)          // координаты расположения стартовой локации на глобале, ось У
@@ -36,7 +40,7 @@ bool CheckPlayerCompleteIntro(Critter player)
 bool SetPlayerStartLocation(Critter player)
 {
     // Стартовые локации не нужно сохранять. Иначе, если регистрировать тучу персонажей, для каждого придется сохранить свою локацию
-    Location loc = Game.CreateLocation(Content::Location::intro_martin, INTRO_WORLD_X, INTRO_WORLD_Y, null);
+    Location loc = Location::CreateLocation(Content::Location::intro_martin, ipos(INTRO_WORLD_X, INTRO_WORLD_Y), null);
     if (!valid(loc)) {
         return false;
     }
@@ -46,7 +50,7 @@ bool SetPlayerStartLocation(Critter player)
         return false;
     }
 
-    if (!Obsolete::CritterTransitToMapEntry(player, map.Id, (Game.Random(0, 1) == 0 ? ENTRY_ENTRANCE1 : ENTRY_ENTRANCE2))) {
+    if (!Entrance::CritterTransferToMapEntry(player, map.Id, (Game.Random(0, 1) == 0 ? ENTRY_ENTRANCE1 : ENTRY_ENTRANCE2))) {
         return false;
     }
 
@@ -67,7 +71,7 @@ bool SetPlayerStartLocation(Critter player)
 // Возвращает истину если локация нужна, создалась и игрок телепортирован на карту
 bool SetPlayerIntroLocation(Critter player)
 {
-    Location loc = Game.CreateLocation(Content::Location::hubologists_initialization, INTRO_WORLD_X, INTRO_WORLD_Y, null);
+    Location loc = Location::CreateLocation(Content::Location::hubologists_initialization, ipos(INTRO_WORLD_X, INTRO_WORLD_Y), null);
     if (!valid(loc)) {
         return false;
     }
@@ -75,7 +79,7 @@ bool SetPlayerIntroLocation(Critter player)
     if (!valid(map)) {
         return false;
     }
-    Obsolete::CritterTransitToMapEntry(player, map.Id, ENTRY_ENTRANCE1);
+    Entrance::CritterTransferToMapEntry(player, map.Id, ENTRY_ENTRANCE1);
     return true;
 }
 
@@ -99,7 +103,7 @@ bool SetPlayerStoryLineLocation(Critter player)
 }
 
 // Перенос игрока со стартовой локации в результате диалога с ключевым персонажем
-void r_TransitToIntro(Critter player, Critter npc)
+void r_TransferToIntro(Critter player, Critter npc)
 {
     SetPlayerIntroLocation(player);
     player.MainQuest = MAINQ_ST_START_COMPLETE;
@@ -109,11 +113,11 @@ void r_TransitToIntro(Critter player, Critter npc)
 void t_KillPlayerOnIntro(Critter player, StaticItem trigger, bool entered, uint8 dir)
 {
     CritterState::Wait(player, 3000);
-    Effects::FlushScreen(player, COLOR_BLACK, COLOR_BLACK, 5000);
+    Effects::FadeScreen(player, COLOR_BLACK, COLOR_BLACK, Time::Milliseconds(5000));
 
-    Game.SavedDeferredCall(750, KillPlayer, player.Id);
-    Game.SavedDeferredCall(1000, OnPlayerDead, player.Id);
-    Game.SavedDeferredCall(5000, ReplicateCritter, player.Id);
+    Game.StartTimeEvent(Time::Seconds(1), KillPlayer, player.Id);       //SavedDeferredCall
+    Game.StartTimeEvent(Time::Seconds(2), OnPlayerDead, player.Id);     //SavedDeferredCall
+    Game.StartTimeEvent(Time::Seconds(5), ReplicateCritter, player.Id); //SavedDeferredCall
     player.MainQuest = MAINQ_ST_INTRO_COMPLETE;
 }
 
@@ -123,13 +127,13 @@ void t_Initiation(Critter player, StaticItem trigger, bool entered, uint8 dir)
 {
     Map map = player.GetMap();
     if (valid(map)) {
-        if (entered && player.IsControlledByPlayer) {
+        if (entered && player.ControlledByPlayer) {
             if (!map.QIntroInitiated) {
                 map.QIntroInitiated = true;
                 CritterState::Wait(player, 3000);
                 any[] values = {map.Id, player.Id};
-                Game.SavedDeferredCall(SECOND_TICKS(1), SmallEffect, values);
-                Game.SavedDeferredCall(SECOND_TICKS(5), MainEffect, values);
+                Game.StartTimeEvent(Time::Seconds(1), SmallEffect, values); //SavedDeferredCall
+                Game.StartTimeEvent(Time::Seconds(5), MainEffect, values);  //SavedDeferredCall
                 return;
             }
         }
@@ -152,11 +156,11 @@ void SmallEffect(any[] values)
             if (valid(map) && valid(mapCr) && (mapCr.Id == map.Id)) {
                 if (!map.IntroDoorsOpen) {
                     Entrance::Entry[] entries = Entrance::ParseEntries(map, HEX_LIGHTNING);
-                    for (uint i = 0; i < entries.length(); i++) {
-                        map.RunEffect(Content::Item::explode_emp, entries[i].HexX, entries[i].HexY, Game.Random(1, 2));
+                    for (int i = 0; i < entries.length(); i++) {
+                        Effects::RunEffect(map, Content::Item::explode_emp, entries[i].Hex, Game.Random(1, 2));
                         Game.Log("molniya");
                     }
-                    Game.SavedDeferredCall(1000, SmallEffect, values);
+                    Game.StartTimeEvent(Tla::GameSeconds(1), SmallEffect, values); //SavedDeferredCall
                 }
             }
         }
@@ -174,9 +178,9 @@ void MainEffect(any[] values)
             Map mapCr = cr.GetMap();
             if (valid(map) && valid(mapCr) && (mapCr.Id == map.Id)) {
                 if (!map.IntroDoorsOpen) {
-                    map.RunEffect(Content::Item::explode_emp, cr.HexX, cr.HexY, 3);
+                    Effects::RunEffect(map, Content::Item::explode_emp, cr.Hex, 3);
                     map.IntroDoorsOpen = true;
-                    cr.SayMsg(SAY_NETMSG, TextPackName::Text, 20);
+                    Messaging::Info(cr, TextPackName::Text, 20);
                 }
             }
         }
@@ -187,7 +191,7 @@ void KillPlayer(any value)
 {
     Critter player = Game.GetCritter(value);
     if (valid(player)) {
-        player.PlaySound("WA@2XXX1.acm", true); // выстрел
+        Effects::PlaySound(player, "WA@2XXX1.acm"); // выстрел
     }
 }
 
@@ -198,8 +202,8 @@ void OnPlayerDead(any value)
         return;
     }
 
-    player.PlaySound((player.Gender == GenderType::Male ? "HFXXXBF.acm" : "HMXXXBF.acm"), true); // стон
-    CritterState::ToDead(player, CritterActionAnim::None, null);
+    Effects::PlaySound(player, (player.Gender == GenderType::Male ? "HFXXXBF.acm" : "HMXXXBF.acm")); // стон
+    CritterState::ToDead(player, CritterActionAnim::DeadFront, null);
 }
 
 void ReplicateCritter(any value)
@@ -214,7 +218,7 @@ void ReplicateCritter(any value)
     player.ModelNameBase = crType;
 
     Holodisk::AddHolodiskInfo(player, HOLODISK_INFO_INTRO);
-    Game.SavedDeferredCall(3000, ShowMessage, player.Id);
+    Game.StartTimeEvent(Tla::GameSeconds(3), ShowMessage, player.Id); //SavedDeferredCall
     Replication::ReplicateCritter(player);
 }
 
@@ -223,12 +227,16 @@ void ShowMessage(any value)
     Critter player = Game.GetCritter(value);
     player.ReplicationCount = 0;
     player.ReplicationMoney = 0;
-    // player.ShowScreen( CLIENT_SCREEN_DIALOGBOX, 0, "answer_None" );
+    // player.ShowScreen( GuiScreen::DialogBox, 0, "answer_None" );
     // player.SayMsg( Tla::SayDialogboxText, TextPackName::Text, STR_NOTIFY_HOLODISK );
-    player.SayMsg(SAY_NETMSG, TextPackName::Text, STR_NOTIFY_HOLODISK);
+    Messaging::Info(player, TextPackName::Text, STR_NOTIFY_HOLODISK);
 }
 
-void answer_None(Critter player, uint answerI, string answerS)
+void answer_None(Critter player, int answerI, string answerS)
 {
     // ...
+}
+
+#endif
+
 }

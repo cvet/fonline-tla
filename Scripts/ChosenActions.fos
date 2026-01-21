@@ -242,21 +242,39 @@ void ChosenProcess()
         }
 
         uint8 dir = chosen.Dir;
-        if (cw) {
-            dir++;
-            if (dir >= 6) {
-                dir = 0;
-            }
-        }
-        else {
-            dir--;
-            if (dir < 0) {
-                dir = 5;
-            }
-        }
+		if(ChosenActions[2] != 0)
+		{
+			dir = ChosenActions[3];
+		}else{
+			if (cw) {
+				dir++;
+				if (dir >= 6) {
+					dir = 0;
+				}
+			}
+			else {
+				dir--;
+				if (dir < 0) {
+					dir = 5;
+				}
+			}
+		}
 
         chosen.ChangeDir(dir);
     } break;
+	case Tla::ChosenUnloadWeapon:
+	{
+		ident weaponId = ChosenActions[1];
+		auto weapon = chosen.GetItem(weaponId);
+		if(weapon is null || weapon.Type != ItemType::Weapon || weapon.Weapon_MaxAmmoCount == 0 || weapon.AmmoCount == 0)
+		{
+			break;
+		}
+		int apCost = Parameters::GetItemUseApCost(chosen, weapon, USE_RELOAD);
+        CHECK_NEED_AP(apCost);
+		CurPlayer.ServerCall.ReloadWeapon(weapon.Id, ZERO_IDENT);
+        chosen.CurrentAp -= apCost * AP_DIVIDER;
+	} break;
     case Tla::ChosenUseItem: {
         ident itemId = ChosenActions[1];
         int targetType = ChosenActions[3];
@@ -341,7 +359,8 @@ void ChosenProcess()
             }
             if (!chosen.IsUnlimitedAmmo && item.Weapon_MaxAmmoCount > 0 && item.AmmoCount == 0) {
                 int sound = (use == 0 ? item.Weapon_SoundId_0 : (use == 1 ? item.Weapon_SoundId_1 : item.Weapon_SoundId_2));
-                // Game.PlaySound( 'W', 'O', sound, '1' );
+                Effects::PlayWeaponSound( SOUND_WEAPON_EMPTY, sound, '1' );
+				
                 break;
             }
             if (item.Weapon_IsTwoHanded && (chosen.IsDamagedRightArm || chosen.IsDamagedLeftArm)) {
@@ -375,12 +394,7 @@ void ChosenProcess()
                 break; // No have holder
             }
 
-            if (targetId == ZERO_IDENT) { // Unload
-                if (item.AmmoCount == 0) {
-                    break; // Is empty
-                }
-            }
-            else if (targetSelfItem is null) { // Reload
+            if (targetSelfItem is null) { // Reload
                 if (item.AmmoCount >= item.Weapon_MaxAmmoCount) {
                     break; // Is full
                 }
@@ -427,7 +441,7 @@ void ChosenProcess()
             }
 
             CurPlayer.ServerCall.ReloadWeapon(realItem.Id, targetId);
-            // chosen.CurrentAp -= apCost * AP_DIVIDER; TODO: проверить, действительно ли это двойное списание АП за перезарядку
+            chosen.CurrentAp -= apCost * AP_DIVIDER;
         }
         else // Use
         {

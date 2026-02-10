@@ -65,6 +65,8 @@ void InitializeScreens()
     Gui::RegisterScreen(GuiScreen::Cursor, GuiScreens::Cursor::CreateScreen);
     ///@ Enum GuiScreen SayExtended
     Gui::RegisterScreen(GuiScreen::SayExtended, GuiScreens::SayExtended::CreateScreen);
+    ///@ Enum GuiScreen Radio
+    Gui::RegisterScreen(GuiScreen::Radio, GuiScreens::Radio::CreateScreen);
     // Custom hierarchy: GuiScreens::ItemsContainer::CreateHierarchy
     // Custom hierarchy: GuiScreens::Preview::CreateHierarchy
 }
@@ -88,9 +90,7 @@ namespace Login
                     string login = Screen.FindText("InputLogin").Text;
                     string pass = Screen.FindText("InputPassword").Text;
                     if (pass != "" && login != "") {
-                        string cmd = "Login\n" + login + "\n" + pass;
-                        Game.Log(cmd);
-                        Game.CustomCall(cmd, "\n");
+                        Game.Login(login, pass);
                     }
                 }
 
@@ -735,8 +735,8 @@ namespace Registration
     {
         void OnConstruct() override
         {
-            SetPosition(-4, 4);
-            SetSize(100, 30);
+            SetPosition(-12, 4);
+            SetSize(108, 30);
             SetText(MSG_GAME(MsgStr::StrRegSpecialSum));
             SetTextFont(Fonts::Fat);
             SetTextFlags(FT_CENTERX | FT_CENTERY);
@@ -1788,6 +1788,7 @@ namespace Registration
             SetPosition(30, 0);
             SetSize(700, 50);
             SetAnchor(AnchorStyle(AnchorStyle::Left | AnchorStyle::Top));
+            SetDisplayedMessages(array<MessageBoxType> = {MessageBoxType::All});
         }
     };
 
@@ -6273,7 +6274,7 @@ namespace Options
 
         void OnLMouseClick() override
         {
-            Gui::ShowScreen(GuiScreen::Login);
+            Gui::HideScreen();
         }
     };
 
@@ -9339,7 +9340,7 @@ namespace Dialog
         {
             Dialog @dialog = cast<Dialog>(Screen);
             if (dialog.TalkerIsNpc && Game.GetCritter(dialog.TalkerId) !is null && !Game.GetCritter(dialog.TalkerId).IsNoBarter) {
-                Game.CustomCall("DialogAnswer " + dialog.TalkerIsNpc + " " + dialog.TalkerId + " " + 0xF2);
+                CurPlayer.ServerCall.SpeechAnswer(0xF2);
             }
             else {
                 Screen.FindText("SpeechText").SetText(MSG_GAME(MsgStr::StrBarterNoBarterMode));
@@ -9793,6 +9794,13 @@ namespace Barter
             SetBackgroundImage("art/intrface/dummy.png", SpriteLayout::Zoom);
         }
 
+        void OnLMousePressed() override
+        {
+            if (Settings.Cursor == CursorType::Hand) {
+                StartDragging();
+            }
+        }
+
         void OnResizeGrid(Gui::Object cell, int cellIndex) override
         {
             SetPosition(0, 0);
@@ -10000,6 +10008,13 @@ namespace Barter
             SetBackgroundImage("art/intrface/dummy.png", SpriteLayout::Zoom);
         }
 
+        void OnLMousePressed() override
+        {
+            if (Settings.Cursor == CursorType::Hand) {
+                StartDragging();
+            }
+        }
+
         void OnResizeGrid(Gui::Object cell, int cellIndex) override
         {
             SetPosition(0, 0);
@@ -10092,8 +10107,9 @@ namespace Barter
 
         void OnLMouseClick() override
         {
-            Barter @barter = cast<Barter>(Screen);
-            Game.CustomCall("DialogAnswer true " + barter.CritterId + " " + 0xF1);
+            //Barter@ barter = cast< Barter >( Screen );
+            //Game.CustomCall( "DialogAnswer true " + barter.CritterId + " " + 0xF1 );
+            CurPlayer.ServerCall.SpeechAnswer(0xF2);
             Gui::HideScreen();
         }
     };
@@ -11074,7 +11090,7 @@ namespace PipBoy
 
         string get_Text() override
         {
-            return FormatXX(GameTime::GetDay());
+            return FormatXX(Game.Day);
         }
     };
 
@@ -11093,7 +11109,7 @@ namespace PipBoy
 
         string get_Text() override
         {
-            return CodeMonth[GameTime::GetMonth()];
+            return CodeMonth[Game.Month];
         }
     };
 
@@ -11110,7 +11126,7 @@ namespace PipBoy
 
         string get_Text() override
         {
-            return "" + GameTime::GetYear();
+            return "" + Game.Year;
         }
     };
 
@@ -11127,7 +11143,7 @@ namespace PipBoy
 
         string get_Text() override
         {
-            return FormatXX(GameTime::GetHour()) + FormatXX(GameTime::GetMinute());
+            return FormatXX(Game.Hour) + FormatXX(Game.Minute);
         }
     };
 
@@ -15736,7 +15752,7 @@ namespace TownView
 
         void OnLMouseClick() override
         {
-            Game.CustomCall("TryExit");
+            GuiScreensExt::TryExit();
         }
     };
 
@@ -16327,6 +16343,254 @@ namespace SayExtended
     Gui::Screen CreateScreen()
     {
         return CreateSayExtendedHierarchy(null);
+    }
+}
+
+namespace Radio
+{
+    class Radio : Gui::Screen
+    {
+        ident RadioId;
+
+        void OnConstruct() override
+        {
+            SetModal(true);
+            SetCanMove(true, false);
+            SetSize(331, 202);
+            SetBackgroundImage("art/intrface/Radio/radio.png");
+        }
+
+        void OnShow(dict<string, any> params) override
+        {
+            RadioId = params["ItemId"];
+            auto checkbox = cast<Gui::CheckBox>(Find("BroadcastOnOff"));
+            checkbox.SetChecked(Radio::GetRadioActivity(RadioId, true));
+            checkbox = cast<Gui::CheckBox>(Find("ReceiveOnOff"));
+            checkbox.SetChecked(Radio::GetRadioActivity(RadioId, false));
+            Item item = Radio::GetItemRadio(RadioId);
+
+            if (item == null) {
+                Gui::HideScreen();
+                return;
+            }
+
+            auto channelTextBox = cast<ChannelNumber>(Find("ChannelNumber"));
+            channelTextBox.SetChannel(item.Radio.Channel);
+
+            int broadcast = 0;
+            if (item.Radio.Broadcast == RadioBroadcastType::Zone) {
+                broadcast = (item.Radio.BroadcastZones == Settings.RadioBroadcastZones1 ? 1 : 2);
+            }
+            else if (item.Radio.Broadcast == RadioBroadcastType::Location) {
+                broadcast = 3;
+            }
+            else if (item.Radio.Broadcast == RadioBroadcastType::Map) {
+                broadcast = 4;
+            }
+
+            auto switcher = cast<SwitchBroadcast>(Find("SwitchBroadcast"));
+            switcher.BroadCastType = broadcast;
+            switcher.SetBackgroundImage("art/intrface/Radio/radio_dial" + broadcast + ".png");
+        }
+    };
+
+    class ChannelNumber : Gui::TextInput
+    {
+        int RadioChannel;
+        void SetChannel(int channel)
+        {
+            RadioChannel = channel;
+            SetText("" + channel, FONT_DEFAULT, FT_CENTERX | FT_CENTERY);
+            SetTextColor(COLOR_GREEN);
+        }
+
+        void OnConstruct() override
+        {
+            SetPosition(154, 18);
+            SetSize(65, 15);
+            SetInputLength(5);
+        }
+
+        void OnInput(KeyCode key, string text) override
+        {
+            Item item = Radio::GetItemRadio(cast<Radio>(Parent).RadioId);
+            string t = Text;
+
+            if (!item.Radio.FixedChannel) {
+                if (!t.isEmpty() && t[-1] == "\n") {
+                    t[-1] = "";
+                }
+
+                int channel = t.toInt(0);
+                channel = Math::Clamp(channel, 0, 0xFFFF);
+                t = "" + channel;
+
+                RadioChannel = channel;
+
+                if (key == KeyCode::Return || key == KeyCode::Numpadenter) {
+                    Radio::ChangeRadioChannel(item.Id, RadioChannel);
+                }
+            }
+            else {
+                t = "" + RadioChannel;
+                Messaging::Info(TextPackName::Game, MsgStr::Get("RadioCantShiftChannel"));
+            }
+        }
+    };
+
+    class RefreshButton : Gui::Button
+    {
+        void OnConstruct() override
+        {
+            SetPosition(230, 10);
+            SetSize(33, 44);
+            SetPressedImage("art/intrface/Radio/radio_switch.png");
+        }
+
+        void OnLMouseClick() override
+        {
+            auto channelTextBox = cast<ChannelNumber>(Parent.Find("ChannelNumber"));
+            Radio::ChangeRadioChannel(cast<Radio>(Parent).RadioId, channelTextBox.RadioChannel);
+        }
+    };
+
+    class SwitchBroadcast : Gui::Button
+    {
+        int BroadCastType = 0;
+
+        void SwitchBroadCast(bool reverse)
+        {
+            if (reverse) {
+                BroadCastType--;
+                if (BroadCastType < 0) {
+                    BroadCastType = 4;
+                }
+            }
+            else {
+                BroadCastType++;
+
+                if (BroadCastType > 4) {
+                    BroadCastType = 0;
+                }
+            }
+            SetBackgroundImage("art/intrface/Radio/radio_dial" + BroadCastType + ".png");
+            Radio::ChangeRadioBroadcastType(cast<Radio>(Parent).RadioId, BroadCastType);
+        }
+
+        void OnConstruct() override
+        {
+            SetPosition(152, 64);
+        }
+
+        void OnLMouseClick() override
+        {
+            SwitchBroadCast(Input::IsShiftDown());
+        }
+    };
+
+    class DoneButton : Gui::Button
+    {
+        void OnConstruct() override
+        {
+            SetPosition(285, 168);
+            SetSize(15, 16);
+            SetPressedImage("art/intrface/red_button_dn.png");
+        }
+
+        void OnLMouseClick() override
+        {
+            Gui::HideScreen();
+        }
+    };
+
+    class BroadcastOnOff : Gui::CheckBox
+    {
+        void OnConstruct() override
+        {
+            SetPosition(18, 86);
+            SetSize(50, 27);
+            SetPressedImage("art/intrface/Radio/radio_off.png");
+        }
+
+        void OnLMouseClick() override
+        {
+            SetChecked(Radio::ChangeRadioActivity(cast<Radio>(Parent).RadioId, true));
+        }
+    };
+
+    class ReceiveOnOff : Gui::CheckBox
+    {
+        void OnConstruct() override
+        {
+            SetPosition(18, 160);
+            SetSize(50, 27);
+            SetPressedImage("art/intrface/Radio/radio_off.png");
+        }
+
+        void OnLMouseClick() override
+        {
+            SetChecked(Radio::ChangeRadioActivity(cast<Radio>(Parent).RadioId, false));
+        }
+    };
+
+    Radio CreateRadioHierarchy(Gui::Object parent)
+    {
+        Radio obj = Radio();
+        CreateChannelNumberHierarchy(obj);
+        CreateRefreshButtonHierarchy(obj);
+        CreateSwitchBroadcastHierarchy(obj);
+        CreateDoneButtonHierarchy(obj);
+        CreateBroadcastOnOffHierarchy(obj);
+        CreateReceiveOnOffHierarchy(obj);
+        obj.Init(parent);
+        return obj;
+    }
+
+    ChannelNumber CreateChannelNumberHierarchy(Gui::Object parent)
+    {
+        ChannelNumber obj = ChannelNumber();
+        obj.Init(parent);
+        return obj;
+    }
+
+    RefreshButton CreateRefreshButtonHierarchy(Gui::Object parent)
+    {
+        RefreshButton obj = RefreshButton();
+        obj.Init(parent);
+        return obj;
+    }
+
+    SwitchBroadcast CreateSwitchBroadcastHierarchy(Gui::Object parent)
+    {
+        SwitchBroadcast obj = SwitchBroadcast();
+        obj.Init(parent);
+        return obj;
+    }
+
+    DoneButton CreateDoneButtonHierarchy(Gui::Object parent)
+    {
+        DoneButton obj = DoneButton();
+        obj.Init(parent);
+        return obj;
+    }
+
+    BroadcastOnOff CreateBroadcastOnOffHierarchy(Gui::Object parent)
+    {
+        BroadcastOnOff obj = BroadcastOnOff();
+        obj.Init(parent);
+        return obj;
+    }
+
+    ReceiveOnOff CreateReceiveOnOffHierarchy(Gui::Object parent)
+    {
+        ReceiveOnOff obj = ReceiveOnOff();
+        obj.Init(parent);
+        return obj;
+    }
+
+    Gui::Screen CreateScreen()
+    {
+        return CreateRadioHierarchy(null);
     }
 }
 

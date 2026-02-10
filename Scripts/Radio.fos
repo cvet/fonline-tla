@@ -9,8 +9,6 @@ namespace Radio
 ///@ Enum RadioBroadcastType Location
 ///@ Enum RadioBroadcastType Map
 
-///@ Enum GuiScreen Radio
-
 ///@ PropertyComponent Item Radio
 ///@ Property Item Common int32 Radio.Channel Mutable OwnerSync Persistent
 ///@ Property Item Common bool Radio.DisableSend Mutable OwnerSync Persistent
@@ -163,12 +161,13 @@ void SendRadioMessage(Item sendItem, string text)
     RadioBroadcastType sendBroadcast = sendItem.Radio.Broadcast;
 
     for (int i = 0; i < RadioItems.length(); i++) {
+		
         Item recvItem = RadioItems[i];
 
         if (recvItem.Radio.DisableRecv) {
             continue;
         }
-        if (sendItem.Id == recvItem.Id) {
+        if (sendItem.Id == recvItem.Id && sendCr == null) {
             continue;
         }
         if (recvItem.Radio.Channel != sendItem.Radio.Channel) {
@@ -214,7 +213,7 @@ void SendRadioMessage(Item sendItem, string text)
         }
 
         if (recvCr != null) {
-            MapText::AddText(recvCr, COLOR_WHITE, text);
+            Messaging::Info(recvCr, TextPackName::Game, MsgStr::STR_MBRADIO, "$channel" + recvItem.Radio.Channel + "$text" + text);
         }
         else {
             MapText::AddText(recvMap, hex, COLOR_WHITE, text);
@@ -237,7 +236,7 @@ void SendChannelRadioMessage(int channel, string text)
         Critter recvCr = recvItem.GetCritter();
 
         if (recvCr != null) {
-            MapText::AddText(recvCr, COLOR_WHITE, text);
+            Messaging::Info(recvCr, TextPackName::Game, MsgStr::STR_MBRADIO, "$channel" + channel + "$text" + text);
         }
         else {
             mpos hex;
@@ -302,96 +301,67 @@ void SendRadioMessage(string text)
     }
 }
 
-class ScreenMain : Gui::Screen
-{
-    ident RadioId;
-    TextboxChannel Channel;
-    ButtonSendRecv Send;
-    ButtonSendRecv Recv;
-    ButtonBroadcast[] Broadcast;
-    int BroadcastType;
-
-    void OnShow(dict<string, any> params) override
+    Item GetItemRadio(ident radioId)
     {
-        RadioId = params["ItemId"];
-        Item item = GetRadio();
+        Critter chosen = Game.GetChosen();
+
+        if (chosen == null) {
+            return null;
+        }
+
+        Item item = chosen.GetItem(radioId);
 
         if (item == null) {
-            Gui::HideScreen();
-            return;
+            return null;
         }
 
-        Channel.SetChannel(item.Radio.Channel);
-
-        Send.SetState(!item.Radio.DisableSend);
-        Recv.SetState(!item.Radio.DisableRecv);
-
-        for (int i = 0; i < Broadcast.length(); i++) {
-            Broadcast[i].SetState(false);
-        }
-
-        if (item.Radio.Broadcast == RadioBroadcastType::World) {
-            Broadcast[0].SetState(true);
-        }
-        else if (item.Radio.Broadcast == RadioBroadcastType::Zone) {
-            Broadcast[item.Radio.BroadcastZones == Settings.RadioBroadcastZones1 ? 1 : 2].SetState(true);
-        }
-        else if (item.Radio.Broadcast == RadioBroadcastType::Location) {
-            Broadcast[3].SetState(true);
-        }
-        else if (item.Radio.Broadcast == RadioBroadcastType::Map) {
-            Broadcast[4].SetState(true);
-        }
+        return item;
     }
 
-    void OnDraw() override
-    {
-        if (GetRadio() == null) {
-            Gui::HideScreen();
-        }
-    }
 
-    void ChangeChannel()
-    {
-        Item item = GetRadio();
-        Assert(!item.Radio.FixedChannel);
+bool GetRadioActivity(ident radioId, bool isSend)
+{
+	Item item = GetItemRadio(radioId);
+    bool disableFlag = isSend ? item.Radio.DisableSend : item.Radio.DisableRecv;
+	return disableFlag;
+}
 
-        if (item.Radio.Channel == Channel.RadioChannel) {
-            return;
-        }
-
-        CurPlayer.ServerCall.ChangeChannel(RadioId, Channel.RadioChannel);
-        Messaging::Info(TextPackName::Game, MsgStr::Get("RadioChannelChanged"));
-    }
-
-    void ChangeActivity(bool isSend)
-    {
-        Item item = GetRadio();
+bool ChangeRadioActivity(ident radioId, bool isSend)
+{
+	Item item = GetItemRadio(radioId);
         bool disableFlag = isSend ? item.Radio.DisableSend : item.Radio.DisableRecv;
         int beginStr = isSend ? MsgStr::Get("RadioBroadcastSendBegin") : MsgStr::Get("RadioBroadcastRecvBegin");
         int endStr = isSend ? MsgStr::Get("RadioBroadcastSendEnd") : MsgStr::Get("RadioBroadcastRecvEnd");
 
         disableFlag = !disableFlag;
-        CurPlayer.ServerCall.ChangeActivity(RadioId, isSend, disableFlag);
+        CurPlayer.ServerCall.ChangeActivity(radioId, isSend, disableFlag);
 
-        if (disableFlag) {
+        if (!disableFlag) {
             Messaging::Info(TextPackName::Game, beginStr);
         }
         else {
             Messaging::Info(TextPackName::Game, endStr);
         }
 
-        if (isSend) {
-            Send.SetState(!disableFlag);
+       return disableFlag;
+}
+
+    void ChangeRadioChannel(ident radioId, int channel)
+    {
+        Item item = GetItemRadio(radioId);
+        Assert(!item.Radio.FixedChannel);
+
+        if (int(item.Radio.Channel) == channel) {
+            return;
         }
-        else {
-            Recv.SetState(!disableFlag);
-        }
+
+        CurPlayer.ServerCall.ChangeChannel(radioId, channel);
+        Messaging::Info(TextPackName::Game, MsgStr::Get("RadioChannelChanged"));
     }
 
-    void ChangeBroadcast(int type)
+void ChangeRadioBroadcastType(ident radioId, int type)
     {
-        Item item = GetRadio();
+        Item item = GetItemRadio(radioId);
 
         if (item.Radio.FixedBroadcast) {
             Messaging::Info(TextPackName::Game, MsgStr::Get("RadioCantShiftBcSend"));
@@ -427,225 +397,11 @@ class ScreenMain : Gui::Screen
             }
         }
 
-        CurPlayer.ServerCall.ChangeBroadcast(RadioId, newBroadcast, newBroadcastZones);
+        CurPlayer.ServerCall.ChangeBroadcast(radioId, newBroadcast, newBroadcastZones);
         Messaging::Info(TextPackName::Game, MsgStr::Get("RadioBroadcastSendChange"));
-
-        for (int i = 0; i < Broadcast.length(); i++) {
-            Broadcast[i].SetState(false);
-        }
-
-        Broadcast[BroadcastType].SetState(true);
     }
 
-    Item GetRadio()
-    {
-        Critter chosen = Game.GetChosen();
 
-        if (chosen == null) {
-            return null;
-        }
-
-        Item item = chosen.GetItem(RadioId);
-
-        if (item == null) {
-            return null;
-        }
-
-        return item;
-    }
-}
-
-class TextboxChannel : Gui::TextInput
-{
-    ScreenMain Instance;
-    int RadioChannel;
-
-    TextboxChannel(ScreenMain instance)
-    {
-        Instance = instance;
-        Instance.Channel = this;
-    }
-
-    void OnInput(KeyCode key) override
-    {
-        Item item = Instance.GetRadio();
-        string t = Text;
-
-        if (!item.Radio.FixedChannel) {
-            if (!t.isEmpty() && t[-1] == "\n") {
-                t[-1] = "";
-            }
-
-            int channel = t.toInt(0);
-            channel = Math::Clamp(channel, 0, 0xFFFF);
-            t = "" + channel;
-
-            RadioChannel = channel;
-
-            if (key == KeyCode::Return || key == KeyCode::Numpadenter) {
-                Instance.ChangeChannel();
-            }
-        }
-        else {
-            t = "" + RadioChannel;
-            Messaging::Info(TextPackName::Game, MsgStr::Get("RadioCantShiftChannel"));
-        }
-    }
-
-    void SetChannel(int channel)
-    {
-        RadioChannel = channel;
-        SetText("" + channel, FONT_DEFAULT, FT_CENTERX | FT_CENTERY);
-        SetTextColor(COLOR_GREEN);
-    }
-}
-
-class ButtonSendRecv : Gui::Button
-{
-    ScreenMain Instance;
-    bool IsSend;
-
-    ButtonSendRecv(ScreenMain instance, bool isSend)
-    {
-        Instance = instance;
-        IsSend = isSend;
-
-        if (IsSend) {
-            Instance.Send = this;
-        }
-        else {
-            Instance.Recv = this;
-        }
-    }
-
-    void OnMouseClick(MouseButton button) override
-    {
-        if (button == MouseButton::Left) {
-            Instance.ChangeActivity(IsSend);
-        }
-    }
-
-    void SetState(bool state)
-    {
-        SetSwitch(state);
-    }
-}
-
-class ButtonBroadcast : Gui::Button
-{
-    ScreenMain Instance;
-    int Type;
-
-    ButtonBroadcast(ScreenMain instance, int type)
-    {
-        Instance = instance;
-        Type = type;
-        Instance.Broadcast[type] = this;
-    }
-
-    void OnMouseClick(MouseButton button) override
-    {
-        if (button == MouseButton::Left) {
-            Instance.ChangeBroadcast(Type);
-        }
-    }
-
-    void SetState(bool state)
-    {
-        SetSwitch(state);
-    }
-}
-
-void InitRadioScreen()
-{
-    Gui::RegisterScreen(GuiScreen::Radio, CreateRadioScreen);
-}
-
-Gui::Screen CreateRadioScreen()
-{
-    // Main screen
-    ScreenMain screen = ScreenMain();
-    screen.SetBackgroundImage("art/intrface/radio.png");
-    screen.SetCloseOnMiss(true);
-
-    Gui::Text mainText = Gui::Text();
-    mainText.Init(screen);
-    mainText.SetPosition(0, 0);
-    mainText.SetText(Game.GetText(TextPackName::Game, MsgStr::Get("RadioMain")), FONT_DEFAULT, FT_CENTERX | FT_CENTERY | FT_BORDERED);
-    mainText.SetTextColor(COLOR_SAND);
-
-    // Channel textbox
-    TextboxChannel textboxChannel = TextboxChannel(screen);
-    textboxChannel.Init(screen);
-    textboxChannel.SetPosition(29, 29);
-    textboxChannel.SetSize(68, 13);
-    textboxChannel.SetInputLength(5);
-
-    Gui::Text channelText = Gui::Text();
-    channelText.Init(screen);
-    channelText.SetPosition(14, 2);
-    channelText.SetSize(103, 23);
-    channelText.SetText(Game.GetText(TextPackName::Game, MsgStr::Get("RadioChannel")), FONT_DEFAULT, FT_CENTERX | FT_CENTERY | FT_BORDERED);
-    channelText.SetTextColor(COLOR_SAND);
-
-    // Broadcast
-    Gui::Text broadcastSendText = Gui::Text();
-    broadcastSendText.Init(screen);
-    broadcastSendText.SetPosition(5, 50);
-    broadcastSendText.SetSize(70, 20);
-    broadcastSendText.SetText(Game.GetText(TextPackName::Game, MsgStr::Get("RadioBroadcastSend")), FONT_DEFAULT, FT_CENTERY | FT_BORDERED);
-    broadcastSendText.SetTextColor(COLOR_SAND);
-    Gui::Text broadcastRecvText = Gui::Text();
-    broadcastRecvText.Init(screen);
-    broadcastRecvText.SetPosition(75, 50);
-    broadcastRecvText.SetSize(70, 20);
-    broadcastRecvText.SetText(Game.GetText(TextPackName::Game, MsgStr::Get("RadioBroadcastRecv")), FONT_DEFAULT, FT_CENTERR | FT_CENTERY | FT_BORDERED);
-    broadcastRecvText.SetTextColor(COLOR_SAND);
-
-    ButtonSendRecv buttonSend = ButtonSendRecv(screen, true);
-    buttonSend.Init(screen);
-    buttonSend.SetPosition(11, 72);
-    buttonSend.SetPressedImage("art/intrface/PRFSLDON.FRM");
-
-    ButtonSendRecv buttonRecv = ButtonSendRecv(screen, false);
-    buttonRecv.Init(screen);
-    buttonRecv.SetPosition(125, 72);
-    buttonRecv.SetPressedImage("art/intrface/PRFSLDON.FRM");
-
-    screen.Broadcast = array<ButtonBroadcast>(5);
-
-    for (int i = 0; i < 5; i++) {
-        ButtonBroadcast buttonBroadcast = ButtonBroadcast(screen, i);
-        buttonBroadcast.Init(screen);
-        buttonBroadcast.SetPosition(13, 87 + 20 * (i + 1));
-        buttonBroadcast.SetPressedImage("art/intrface/PRFXIN.FRM");
-
-        Gui::Text broadcastText = Gui::Text();
-        broadcastText.Init(screen);
-        broadcastText.SetPosition(35, 87 + 20 * (i + 1));
-        broadcastText.SetText(Game.GetText(TextPackName::Game, MsgStr::Get("RadioBroadcast") + i + 1), FONT_DEFAULT, FT_CENTERX | FT_CENTERY | FT_BORDERED);
-        broadcastText.SetTextColor(COLOR_SAND);
-    }
-
-    screen.Init(null);
-    return screen;
-}
-
-void ShowEditScreen(ident itemId)
-{
-    Critter chosen = Game.GetChosen();
-
-    if (chosen == null) {
-        return;
-    }
-
-    Item item = chosen.GetItem(itemId);
-
-    if (item != null) {
-        dict<string, any> params = {{"ItemId", item.Id}};
-        Gui::ShowScreen(GuiScreen::Radio, params);
-    }
-}
 
 #endif
 

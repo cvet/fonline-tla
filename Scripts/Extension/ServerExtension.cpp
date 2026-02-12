@@ -5,28 +5,28 @@
 
 FO_USING_NAMESPACE();
 
-FO_BEGIN_NAMESPACE();
+FO_BEGIN_NAMESPACE
 ///@ EngineHook
-FO_SCRIPT_API void InitServerEngine(FOServer* server);
+FO_SCRIPT_API void InitServerEngine(ServerEngine* server);
 ///@ ExportMethod
-FO_SCRIPT_API void Server_Game_LoadImage(FOServer* server, int32 imageSlot, string_view imageName);
+FO_SCRIPT_API isize32 Server_Game_LoadImage(ServerEngine* server, uint32 imageSlot, string_view imageName);
 ///@ ExportMethod
-FO_SCRIPT_API ucolor Server_Game_GetImageColor(FOServer* server, int32 imageSlot, int32 x, int32 y);
+FO_SCRIPT_API ucolor Server_Game_GetImageColor(ServerEngine* server, uint32 imageSlot, ipos32 pos);
 ///@ ExportMethod
-FO_SCRIPT_API DialogPack* Server_Game_GetDialogPack(FOServer* server, hstring packId);
+FO_SCRIPT_API DialogPack* Server_Game_GetDialogPack(ServerEngine* server, hstring packId);
 ///@ ExportMethod
-FO_SCRIPT_API string Server_Game_RunSpeechScript(FOServer* server, DialogSpeech* speech, Critter* cr, Critter* talker);
+FO_SCRIPT_API string Server_Game_RunSpeechScript(ServerEngine* server, DialogSpeech* speech, Critter* cr, Critter* talker);
 ///@ ExportMethod
-FO_SCRIPT_API bool Server_Game_DialogScriptDemand(FOServer* server, DialogAnswerReq* demand, Critter* master, Critter* slave);
+FO_SCRIPT_API bool Server_Game_DialogScriptDemand(ServerEngine* server, DialogAnswerReq* demand, Critter* master, Critter* slave);
 ///@ ExportMethod
-FO_SCRIPT_API uint32 Server_Game_DialogScriptResult(FOServer* server, DialogAnswerReq* result, Critter* master, Critter* slave);
+FO_SCRIPT_API uint32 Server_Game_DialogScriptResult(ServerEngine* server, DialogAnswerReq* result, Critter* master, Critter* slave);
 ///@ ExportMethod
 FO_SCRIPT_API bool Server_Critter_IsFree(Critter* server);
 ///@ ExportMethod
 FO_SCRIPT_API bool Server_Critter_IsBusy(Critter* server);
 ///@ ExportMethod
 FO_SCRIPT_API void Server_Critter_Wait(Critter* server, int32 ms);
-FO_END_NAMESPACE();
+FO_END_NAMESPACE
 
 struct ServerImage
 {
@@ -41,16 +41,16 @@ struct ServerExtData
     unique_ptr<DialogManager> DialogMngr {};
 };
 
-static auto GetServerExtData(FOServer* server) -> ServerExtData&
+static auto GetServerExtData(ServerEngine* server) -> ServerExtData&
 {
     return *reinterpret_cast<ServerExtData*>(server->UserData.get());
 }
 
-void FO_NAMESPACE InitServerEngine(FOServer* server)
+void FO_NAMESPACE InitServerEngine(ServerEngine* server)
 {
     FO_STACK_TRACE_ENTRY();
 
-    server->UserData = unique_del_ptr<uint8>(reinterpret_cast<uint8*>(SafeAlloc::MakeRaw<ServerExtData>()), [](const uint8* ptr) {
+    server->UserData = unique_del_ptr<uint8>(reinterpret_cast<uint8*>(SafeAlloc::MakeRaw<ServerExtData>()), [](const uint8* ptr) FO_DEFERRED {
         const auto* ext_data_ptr = reinterpret_cast<const ServerExtData*>(ptr);
         delete ext_data_ptr;
     });
@@ -60,13 +60,13 @@ void FO_NAMESPACE InitServerEngine(FOServer* server)
     ext_data.DialogMngr->LoadFromResources(server->Resources);
 }
 
-void FO_NAMESPACE Server_Game_LoadImage(FOServer* server, int32 imageSlot, string_view imageName)
+isize32 FO_NAMESPACE Server_Game_LoadImage(ServerEngine* server, uint32 imageSlot, string_view imageName)
 {
     FO_STACK_TRACE_ENTRY();
 
     auto& ext_data = GetServerExtData(server);
 
-    if (imageSlot < 0 || imageSlot >= static_cast<int32>(ext_data.ServerImages.size())) {
+    if (imageSlot >= numeric_cast<uint32>(ext_data.ServerImages.size())) {
         ext_data.ServerImages.resize(imageSlot + 1);
     }
     if (ext_data.ServerImages[imageSlot]) {
@@ -74,7 +74,7 @@ void FO_NAMESPACE Server_Game_LoadImage(FOServer* server, int32 imageSlot, strin
     }
 
     if (imageName.empty()) {
-        return;
+        return {};
     }
 
     const auto file = server->Resources.ReadFile(imageName);
@@ -84,6 +84,7 @@ void FO_NAMESPACE Server_Game_LoadImage(FOServer* server, int32 imageSlot, strin
     }
 
     auto reader = file.GetReader();
+
     const auto check_number = reader.GetUInt8();
 
     if (check_number != 42) {
@@ -104,19 +105,19 @@ void FO_NAMESPACE Server_Game_LoadImage(FOServer* server, int32 imageSlot, strin
         throw ScriptException("File must contain only one dir", imageName);
     }
 
-    [[maybe_unused]] const auto ox = reader.GetLEUInt16();
-    [[maybe_unused]] const auto oy = reader.GetLEUInt16();
+    [[maybe_unused]] const auto ox = reader.GetLEInt16();
+    [[maybe_unused]] const auto oy = reader.GetLEInt16();
 
     const auto is_spr_ref = reader.GetUInt8();
     FO_RUNTIME_ASSERT(is_spr_ref == 0);
 
     const auto width = reader.GetLEUInt16();
     const auto height = reader.GetLEUInt16();
-    [[maybe_unused]] const auto nx = reader.GetLEUInt16();
-    [[maybe_unused]] const auto ny = reader.GetLEUInt16();
+    [[maybe_unused]] const auto nx = reader.GetLEInt16();
+    [[maybe_unused]] const auto ny = reader.GetLEInt16();
     const auto* data = reader.GetCurBuf();
 
-    reader.GoForward(static_cast<size_t>(width) * height * 4);
+    reader.GoForward(numeric_cast<size_t>(width) * height * 4);
 
     const auto check_number2 = reader.GetUInt8();
     FO_RUNTIME_ASSERT(check_number2 == 42);
@@ -124,33 +125,35 @@ void FO_NAMESPACE Server_Game_LoadImage(FOServer* server, int32 imageSlot, strin
     auto simg = SafeAlloc::MakeUnique<ServerImage>();
     simg->Width = width;
     simg->Height = height;
-    simg->Data.resize(static_cast<size_t>(width) * height);
-    std::memcpy(simg->Data.data(), data, simg->Data.size() * sizeof(ucolor));
+    simg->Data.resize(numeric_cast<size_t>(width) * height);
+    MemCopy(simg->Data.data(), data, simg->Data.size() * sizeof(ucolor));
 
     ext_data.ServerImages[imageSlot] = std::move(simg);
+
+    return {width, height};
 }
 
-ucolor FO_NAMESPACE Server_Game_GetImageColor(FOServer* server, int32 imageSlot, int32 x, int32 y)
+ucolor FO_NAMESPACE Server_Game_GetImageColor(ServerEngine* server, uint32 imageSlot, ipos32 pos)
 {
     FO_STACK_TRACE_ENTRY();
 
     auto& ext_data = GetServerExtData(server);
 
-    if (imageSlot < 0 || imageSlot >= static_cast<int32>(ext_data.ServerImages.size()) || !ext_data.ServerImages[imageSlot]) {
+    if (imageSlot >= numeric_cast<uint32>(ext_data.ServerImages.size()) || !ext_data.ServerImages[imageSlot]) {
         throw ScriptException("Image not loaded");
     }
 
-    auto&& simg = ext_data.ServerImages[imageSlot];
+    auto& simg = ext_data.ServerImages[imageSlot];
 
-    if (x < 0 || y < 0 || x >= simg->Width || y >= simg->Height) {
+    if (pos.x < 0 || pos.y < 0 || pos.x >= simg->Width || pos.y >= simg->Height) {
         throw ScriptException("Invalid coords arg");
     }
 
-    const auto result = simg->Data[y * simg->Width + x];
+    const auto result = simg->Data[pos.y * simg->Width + pos.x];
     return result;
 }
 
-DialogPack* FO_NAMESPACE Server_Game_GetDialogPack(FOServer* server, hstring packId)
+DialogPack* FO_NAMESPACE Server_Game_GetDialogPack(ServerEngine* server, hstring packId)
 {
     FO_STACK_TRACE_ENTRY();
 
@@ -165,7 +168,7 @@ DialogPack* FO_NAMESPACE Server_Game_GetDialogPack(FOServer* server, hstring pac
     return pack;
 }
 
-string FO_NAMESPACE Server_Game_RunSpeechScript(FOServer* server, DialogSpeech* speech, Critter* cr, Critter* talker)
+string FO_NAMESPACE Server_Game_RunSpeechScript(ServerEngine* server, DialogSpeech* speech, Critter* cr, Critter* talker)
 {
     FO_STACK_TRACE_ENTRY();
 
@@ -174,10 +177,10 @@ string FO_NAMESPACE Server_Game_RunSpeechScript(FOServer* server, DialogSpeech* 
     if (speech->DlgScriptFuncName) {
         bool failed = false;
 
-        if (auto func = server->ScriptSys.FindFunc<void, Critter*, Critter*, string*>(speech->DlgScriptFuncName); func && !func(cr, talker, &lexems)) {
+        if (auto func = server->FindFunc<void, Critter*, Critter*, string&>(speech->DlgScriptFuncName); func && !func.Call(cr, talker, lexems)) {
             failed = true;
         }
-        if (auto func = server->ScriptSys.FindFunc<uint32, Critter*, Critter*, string*>(speech->DlgScriptFuncName); func && !func(cr, talker, &lexems)) {
+        if (auto func = server->FindFunc<int32, Critter*, Critter*, string&>(speech->DlgScriptFuncName); func && !func.Call(cr, talker, lexems)) {
             failed = true;
         }
 
@@ -189,7 +192,7 @@ string FO_NAMESPACE Server_Game_RunSpeechScript(FOServer* server, DialogSpeech* 
     return lexems;
 }
 
-bool FO_NAMESPACE Server_Game_DialogScriptDemand(FOServer* server, DialogAnswerReq* demand, Critter* master, Critter* slave)
+bool FO_NAMESPACE Server_Game_DialogScriptDemand(ServerEngine* server, DialogAnswerReq* demand, Critter* master, Critter* slave)
 {
     FO_STACK_TRACE_ENTRY();
 
@@ -197,55 +200,55 @@ bool FO_NAMESPACE Server_Game_DialogScriptDemand(FOServer* server, DialogAnswerR
 
     switch (demand->ValuesCount) {
     case 0:
-        return server->ScriptSys.CallFunc<bool, Critter*, Critter*>(demand->AnswerScriptFuncName, master, slave, result) && result;
+        return server->CallFunc<bool, Critter*, Critter*>(demand->AnswerScriptFuncName, master, slave, result) && result;
     case 1:
-        return server->ScriptSys.CallFunc<bool, Critter*, Critter*, int32>(demand->AnswerScriptFuncName, master, slave, demand->ValueExt0, result) && result;
+        return server->CallFunc<bool, Critter*, Critter*, int32>(demand->AnswerScriptFuncName, master, slave, demand->ValueExt0, result) && result;
     case 2:
-        return server->ScriptSys.CallFunc<bool, Critter*, Critter*, int32, int32>(demand->AnswerScriptFuncName, master, slave, demand->ValueExt0, demand->ValueExt1, result) && result;
+        return server->CallFunc<bool, Critter*, Critter*, int32, int32>(demand->AnswerScriptFuncName, master, slave, demand->ValueExt0, demand->ValueExt1, result) && result;
     case 3:
-        return server->ScriptSys.CallFunc<bool, Critter*, Critter*, int32, int32, int32>(demand->AnswerScriptFuncName, master, slave, demand->ValueExt0, demand->ValueExt1, demand->ValueExt2, result) && result;
+        return server->CallFunc<bool, Critter*, Critter*, int32, int32, int32>(demand->AnswerScriptFuncName, master, slave, demand->ValueExt0, demand->ValueExt1, demand->ValueExt2, result) && result;
     case 4:
-        return server->ScriptSys.CallFunc<bool, Critter*, Critter*, int32, int32, int32, int32>(demand->AnswerScriptFuncName, master, slave, demand->ValueExt0, demand->ValueExt1, demand->ValueExt2, demand->ValueExt3, result) && result;
+        return server->CallFunc<bool, Critter*, Critter*, int32, int32, int32, int32>(demand->AnswerScriptFuncName, master, slave, demand->ValueExt0, demand->ValueExt1, demand->ValueExt2, demand->ValueExt3, result) && result;
     case 5:
-        return server->ScriptSys.CallFunc<bool, Critter*, Critter*, int32, int32, int32, int32, int32>(demand->AnswerScriptFuncName, master, slave, demand->ValueExt0, demand->ValueExt1, demand->ValueExt2, demand->ValueExt3, demand->ValueExt4, result) && result;
+        return server->CallFunc<bool, Critter*, Critter*, int32, int32, int32, int32, int32>(demand->AnswerScriptFuncName, master, slave, demand->ValueExt0, demand->ValueExt1, demand->ValueExt2, demand->ValueExt3, demand->ValueExt4, result) && result;
     default:
         FO_UNREACHABLE_PLACE();
     }
 }
 
-uint32 FO_NAMESPACE Server_Game_DialogScriptResult(FOServer* server, DialogAnswerReq* result, Critter* master, Critter* slave)
+uint32 FO_NAMESPACE Server_Game_DialogScriptResult(ServerEngine* server, DialogAnswerReq* result, Critter* master, Critter* slave)
 {
     FO_STACK_TRACE_ENTRY();
 
     switch (result->ValuesCount) {
     case 0:
-        if (auto func = server->ScriptSys.FindFunc<uint32, Critter*, Critter*>(result->AnswerScriptFuncName)) {
-            return func(master, slave) ? func.GetResult() : 0;
+        if (auto func = server->FindFunc<int32, Critter*, Critter*>(result->AnswerScriptFuncName)) {
+            return func.Call(master, slave) ? func.GetResult() : 0;
         }
         break;
     case 1:
-        if (auto func = server->ScriptSys.FindFunc<uint32, Critter*, Critter*, int32>(result->AnswerScriptFuncName)) {
-            return func(master, slave, result->ValueExt0) ? func.GetResult() : 0;
+        if (auto func = server->FindFunc<int32, Critter*, Critter*, int32>(result->AnswerScriptFuncName)) {
+            return func.Call(master, slave, result->ValueExt0) ? func.GetResult() : 0;
         }
         break;
     case 2:
-        if (auto func = server->ScriptSys.FindFunc<uint32, Critter*, Critter*, int32, int32>(result->AnswerScriptFuncName)) {
-            return func(master, slave, result->ValueExt0, result->ValueExt1) ? func.GetResult() : 0;
+        if (auto func = server->FindFunc<int32, Critter*, Critter*, int32, int32>(result->AnswerScriptFuncName)) {
+            return func.Call(master, slave, result->ValueExt0, result->ValueExt1) ? func.GetResult() : 0;
         }
         break;
     case 3:
-        if (auto func = server->ScriptSys.FindFunc<uint32, Critter*, Critter*, int32, int32, int32>(result->AnswerScriptFuncName)) {
-            return func(master, slave, result->ValueExt0, result->ValueExt1, result->ValueExt2) ? func.GetResult() : 0;
+        if (auto func = server->FindFunc<int32, Critter*, Critter*, int32, int32, int32>(result->AnswerScriptFuncName)) {
+            return func.Call(master, slave, result->ValueExt0, result->ValueExt1, result->ValueExt2) ? func.GetResult() : 0;
         }
         break;
     case 4:
-        if (auto func = server->ScriptSys.FindFunc<uint32, Critter*, Critter*, int32, int32, int32, int32>(result->AnswerScriptFuncName)) {
-            return func(master, slave, result->ValueExt0, result->ValueExt1, result->ValueExt2, result->ValueExt3) ? func.GetResult() : 0;
+        if (auto func = server->FindFunc<int32, Critter*, Critter*, int32, int32, int32, int32>(result->AnswerScriptFuncName)) {
+            return func.Call(master, slave, result->ValueExt0, result->ValueExt1, result->ValueExt2, result->ValueExt3) ? func.GetResult() : 0;
         }
         break;
     case 5:
-        if (auto func = server->ScriptSys.FindFunc<uint32, Critter*, Critter*, int32, int32, int32, int32, int32>(result->AnswerScriptFuncName)) {
-            return func(master, slave, result->ValueExt0, result->ValueExt1, result->ValueExt2, result->ValueExt3, result->ValueExt4) ? func.GetResult() : 0;
+        if (auto func = server->FindFunc<int32, Critter*, Critter*, int32, int32, int32, int32, int32>(result->AnswerScriptFuncName)) {
+            return func.Call(master, slave, result->ValueExt0, result->ValueExt1, result->ValueExt2, result->ValueExt3, result->ValueExt4) ? func.GetResult() : 0;
         }
         break;
     default:
@@ -254,32 +257,32 @@ uint32 FO_NAMESPACE Server_Game_DialogScriptResult(FOServer* server, DialogAnswe
 
     switch (result->ValuesCount) {
     case 0:
-        if (!server->ScriptSys.CallFunc<void, Critter*, Critter*>(result->AnswerScriptFuncName, master, slave)) {
+        if (!server->CallFunc<void, Critter*, Critter*>(result->AnswerScriptFuncName, master, slave)) {
             return 0;
         }
         break;
     case 1:
-        if (!server->ScriptSys.CallFunc<void, Critter*, Critter*, int32>(result->AnswerScriptFuncName, master, slave, result->ValueExt0)) {
+        if (!server->CallFunc<void, Critter*, Critter*, int32>(result->AnswerScriptFuncName, master, slave, result->ValueExt0)) {
             return 0;
         }
         break;
     case 2:
-        if (!server->ScriptSys.CallFunc<void, Critter*, Critter*, int32, int32>(result->AnswerScriptFuncName, master, slave, result->ValueExt0, result->ValueExt1)) {
+        if (!server->CallFunc<void, Critter*, Critter*, int32, int32>(result->AnswerScriptFuncName, master, slave, result->ValueExt0, result->ValueExt1)) {
             return 0;
         }
         break;
     case 3:
-        if (!server->ScriptSys.CallFunc<void, Critter*, Critter*, int32, int32, int32>(result->AnswerScriptFuncName, master, slave, result->ValueExt0, result->ValueExt1, result->ValueExt2)) {
+        if (!server->CallFunc<void, Critter*, Critter*, int32, int32, int32>(result->AnswerScriptFuncName, master, slave, result->ValueExt0, result->ValueExt1, result->ValueExt2)) {
             return 0;
         }
         break;
     case 4:
-        if (!server->ScriptSys.CallFunc<void, Critter*, Critter*, int32, int32, int32, int32>(result->AnswerScriptFuncName, master, slave, result->ValueExt0, result->ValueExt1, result->ValueExt2, result->ValueExt3)) {
+        if (!server->CallFunc<void, Critter*, Critter*, int32, int32, int32, int32>(result->AnswerScriptFuncName, master, slave, result->ValueExt0, result->ValueExt1, result->ValueExt2, result->ValueExt3)) {
             return 0;
         }
         break;
     case 5:
-        if (!server->ScriptSys.CallFunc<void, Critter*, Critter*, int32, int32, int32, int32, int32>(result->AnswerScriptFuncName, master, slave, result->ValueExt0, result->ValueExt1, result->ValueExt2, result->ValueExt3, result->ValueExt4)) {
+        if (!server->CallFunc<void, Critter*, Critter*, int32, int32, int32, int32, int32>(result->AnswerScriptFuncName, master, slave, result->ValueExt0, result->ValueExt1, result->ValueExt2, result->ValueExt3, result->ValueExt4)) {
             return 0;
         }
         break;

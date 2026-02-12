@@ -7,12 +7,12 @@
 
 FO_USING_NAMESPACE();
 
-FO_BEGIN_NAMESPACE();
+FO_BEGIN_NAMESPACE
 ///@ ExportMethod
 FO_SCRIPT_API string Common_Game_Sha1(BaseEngine* engine, string_view text);
 ///@ ExportMethod
 FO_SCRIPT_API string Common_Game_Sha2(BaseEngine* engine, string_view text);
-FO_END_NAMESPACE();
+FO_END_NAMESPACE
 
 string FO_NAMESPACE Common_Game_Sha1(BaseEngine* engine, string_view text)
 {
@@ -46,5 +46,6 @@ string FO_NAMESPACE Common_Game_Sha2(BaseEngine* engine, string_view text)
     for (size_t i = 0; i < sizeof(hex_digest); i++) {
         hex_digest[i] = nums[(i % 2) != 0 ? digest[i / 2] & 0xF : digest[i / 2] >> 4];
     }
+
     return {hex_digest, sizeof(hex_digest)};
 }

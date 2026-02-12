@@ -4,36 +4,36 @@
 
 FO_USING_NAMESPACE();
 
-FO_BEGIN_NAMESPACE();
+FO_BEGIN_NAMESPACE
 ///@ ExportMethod
-FO_SCRIPT_API string Client_Game_FormatTags(FOClient* client, string_view text, string_view lexems);
+FO_SCRIPT_API string Client_Game_FormatTags(ClientEngine* client, string_view text, string_view lexems);
 ///@ ExportMethod
-FO_SCRIPT_API string Client_Game_FormatTags(FOClient* client, string_view text, string_view lexems, CritterView* talker);
+FO_SCRIPT_API string Client_Game_FormatTags(ClientEngine* client, string_view text, string_view lexems, CritterView* talker);
 ///@ ExportMethod
 FO_SCRIPT_API bool Client_Critter_IsFree(CritterView* self);
 ///@ ExportMethod
 FO_SCRIPT_API bool Client_Critter_IsBusy(CritterView* self);
 ///@ ExportMethod
 FO_SCRIPT_API void Client_Critter_Wait(CritterView* self, int32 ms);
-FO_END_NAMESPACE();
+FO_END_NAMESPACE
 
-static auto FormatTags(FOClient* client, string_view text, string_view lexems, CritterView* talker) -> string;
+static auto FormatTags(ClientEngine* client, string_view text, string_view lexems, CritterView* talker) -> string;
 
-string FO_NAMESPACE Client_Game_FormatTags(FOClient* client, string_view text, string_view lexems)
+string FO_NAMESPACE Client_Game_FormatTags(ClientEngine* client, string_view text, string_view lexems)
 {
     FO_STACK_TRACE_ENTRY();
 
     return FormatTags(client, text, lexems, nullptr);
 }
 
-string FO_NAMESPACE Client_Game_FormatTags(FOClient* client, string_view text, string_view lexems, CritterView* talker)
+string FO_NAMESPACE Client_Game_FormatTags(ClientEngine* client, string_view text, string_view lexems, CritterView* talker)
 {
     FO_STACK_TRACE_ENTRY();
 
     return FormatTags(client, text, lexems, talker);
 }
 
-string FormatTags(FOClient* client, string_view text, string_view lexems, CritterView* talker)
+string FormatTags(ClientEngine* client, string_view text, string_view lexems, CritterView* talker)
 {
     FO_STACK_TRACE_ENTRY();
 
@@ -151,7 +151,7 @@ string FormatTags(FOClient* client, string_view text, string_view lexems, Critte
             else if (tag.length() > 7 && tag[0] == 's' && tag[1] == 'c' && tag[2] == 'r' && tag[3] == 'i' && tag[4] == 'p' && tag[5] == 't' && tag[6] == ' ') {
                 string func_name = strex(tag.substr(7)).substring_until('$');
 
-                if (!client->ScriptSys.CallFunc<string, string>(client->Hashes.ToHashedString(func_name), string(lexems), tag)) {
+                if (!client->CallFunc<string, string>(client->Hashes.ToHashedString(func_name), string(lexems), tag)) {
                     tag = "<script function not found>";
                 }
             }

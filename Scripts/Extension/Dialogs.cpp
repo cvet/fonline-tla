@@ -1,52 +1,19 @@
-//      __________        ___               ______            _
-//     / ____/ __ \____  / (_)___  ___     / ____/___  ____ _(_)___  ___
-//    / /_  / / / / __ \/ / / __ \/ _ \   / __/ / __ \/ __ `/ / __ \/ _ `
-//   / __/ / /_/ / / / / / / / / /  __/  / /___/ / / / /_/ / / / / /  __/
-//  /_/    \____/_/ /_/_/_/_/ /_/\___/  /_____/_/ /_/\__, /_/_/ /_/\___/
-//                                                  /____/
-// FOnline Engine
-// https://fonline.ru
-// https://github.com/cvet/fonline
-//
-// MIT License
-//
-// Copyright (c) 2006 - 2025, Anton Tsvetinskiy aka cvet <cvet@tut.by>
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
-//
-
 #include "Dialogs.h"
 #include "Application.h"
 #include "ConfigFile.h"
 #include "FileSystem.h"
 
-FO_BEGIN_NAMESPACE();
+FO_BEGIN_NAMESPACE
 
-static auto GetPropEnumIndex(const EngineData* engine, string_view str, bool is_demand, uint8& type, bool& is_hash) -> int32
+static auto GetPropEnumIndex(const EngineMetadata* meta, string_view str, bool is_demand, uint8& type, bool& is_hash) -> int32
 {
     FO_STACK_TRACE_ENTRY();
 
-    const auto* prop_global = engine->GetPropertyRegistrator(GameProperties::ENTITY_TYPE_NAME)->FindProperty(str);
-    const auto* prop_critter = engine->GetPropertyRegistrator(CritterProperties::ENTITY_TYPE_NAME)->FindProperty(str);
-    const auto* prop_item = engine->GetPropertyRegistrator(ItemProperties::ENTITY_TYPE_NAME)->FindProperty(str);
-    const auto* prop_location = engine->GetPropertyRegistrator(LocationProperties::ENTITY_TYPE_NAME)->FindProperty(str);
-    const auto* prop_map = engine->GetPropertyRegistrator(MapProperties::ENTITY_TYPE_NAME)->FindProperty(str);
+    const auto* prop_global = meta->GetPropertyRegistrator(GameProperties::ENTITY_TYPE_NAME)->FindProperty(str);
+    const auto* prop_critter = meta->GetPropertyRegistrator(CritterProperties::ENTITY_TYPE_NAME)->FindProperty(str);
+    const auto* prop_item = meta->GetPropertyRegistrator(ItemProperties::ENTITY_TYPE_NAME)->FindProperty(str);
+    const auto* prop_location = meta->GetPropertyRegistrator(LocationProperties::ENTITY_TYPE_NAME)->FindProperty(str);
+    const auto* prop_map = meta->GetPropertyRegistrator(MapProperties::ENTITY_TYPE_NAME)->FindProperty(str);
 
     auto count = 0;
     count += prop_global != nullptr ? 1 : 0;
@@ -92,7 +59,7 @@ static auto GetPropEnumIndex(const EngineData* engine, string_view str, bool is_
         throw DialogParseException("DR property is disabled", str);
     }
     if (!is_demand && !prop->IsMutable()) {
-        throw DialogParseException("DR property is read only", str);
+        throw DialogParseException("DR property is not mutable", str);
     }
 
     is_hash = prop->IsBaseTypeHash();
@@ -107,7 +74,7 @@ auto DialogAnswer::GetDemand(int32 index) -> DialogAnswerReq*
         throw DialogException("Dialog demand index out of range", index);
     }
 
-    return Demands->at(index).get();
+    return Demands.at(index).get();
 }
 
 auto DialogAnswer::GetResult(int32 index) -> DialogAnswerReq*
@@ -118,7 +85,7 @@ auto DialogAnswer::GetResult(int32 index) -> DialogAnswerReq*
         throw DialogException("Dialog result index out of range", index);
     }
 
-    return Results->at(index).get();
+    return Results.at(index).get();
 }
 
 auto DialogSpeech::GetAnswer(int32 index) -> DialogAnswer*
@@ -129,7 +96,7 @@ auto DialogSpeech::GetAnswer(int32 index) -> DialogAnswer*
         throw DialogException("Dialog answer index out of range", index);
     }
 
-    return Answers->at(index).get();
+    return Answers.at(index).get();
 }
 
 auto DialogPack::GetSpeech(int32 index) -> DialogSpeech*
@@ -140,11 +107,11 @@ auto DialogPack::GetSpeech(int32 index) -> DialogSpeech*
         throw DialogException("Dialog speech index out of range", index);
     }
 
-    return Speeches->at(index).get();
+    return Speeches.at(index).get();
 }
 
-DialogManager::DialogManager(EngineData& engine) :
-    _engine {&engine}
+DialogManager::DialogManager(EngineMetadata& meta) :
+    _meta {&meta}
 {
     FO_STACK_TRACE_ENTRY();
 }
@@ -198,7 +165,7 @@ auto DialogManager::GetDialogs() -> vector<DialogPack*>
 
     vector<DialogPack*> result;
 
-    for (auto&& [pack_id, pack] : _dialogPacks) {
+    for (auto& pack : _dialogPacks | std::views::values) {
         result.emplace_back(pack.get());
     }
 
@@ -210,10 +177,10 @@ auto DialogManager::ParseDialog(string_view pack_name, string_view data) const -
     FO_STACK_TRACE_ENTRY();
 
     auto pack = SafeAlloc::MakeRefCounted<DialogPack>();
-    auto fodlg = ConfigFile(strex("{}.fodlg", pack_name), string(data), &_engine->Hashes, ConfigFileOption::CollectContent);
+    auto fodlg = ConfigFile(strex("{}.fodlg", pack_name), string(data), &_meta->Hashes, ConfigFileOption::CollectContent);
 
-    pack->PackId = _engine->Hashes.ToHashedString(pack_name);
-    *pack->Comment = fodlg.GetSectionContent("comment");
+    pack->PackId = _meta->Hashes.ToHashedString(pack_name);
+    pack->Comment = fodlg.GetSectionContent("comment");
 
     const auto lang_key = fodlg.GetAsStr("data", "lang");
 
@@ -225,7 +192,7 @@ auto DialogManager::ParseDialog(string_view pack_name, string_view data) const -
         throw DialogParseException("Invalid hash for dialog name", pack_name);
     }
 
-    const auto lang_apps = strex(lang_key).split(' ');
+    const auto lang_apps = strvex(lang_key).split(' ');
 
     if (lang_apps.empty()) {
         throw DialogParseException("Lang app is empty", pack_name);
@@ -246,11 +213,11 @@ auto DialogManager::ParseDialog(string_view pack_name, string_view data) const -
 
         TextPack temp_msg;
 
-        if (!temp_msg.LoadFromString(lang_buf, _engine->Hashes)) {
+        if (!temp_msg.LoadFromString(lang_buf, _meta->Hashes)) {
             throw DialogParseException("Load MSG fail", pack_name);
         }
 
-        pack->Texts->emplace_back(lang_app, TextPack {});
+        pack->Texts.emplace_back(lang_app, TextPack {});
 
         uint32 str_num = 0;
 
@@ -260,7 +227,7 @@ auto DialogManager::ParseDialog(string_view pack_name, string_view data) const -
 
             for (size_t n = 0; n < count; n++) {
                 string str = strex(temp_msg.GetStr(str_num, n)).replace("\n\\[", "\n[");
-                pack->Texts->at(i).second.AddStr(new_str_num, std::move(str));
+                pack->Texts.at(i).second.AddStr(new_str_num, std::move(str));
             }
         }
     }
@@ -308,7 +275,7 @@ auto DialogManager::ParseDialog(string_view pack_name, string_view data) const -
             script = "";
         }
 
-        speech->DlgScriptFuncName = _engine->Hashes.ToHashedString(script);
+        speech->DlgScriptFuncName = _meta->Hashes.ToHashedString(script);
 
         uint32 flags = 0;
         input >> flags;
@@ -326,7 +293,7 @@ auto DialogManager::ParseDialog(string_view pack_name, string_view data) const -
 
         if (tok == "@" || tok == "&") {
             pack->SpeechesCount++;
-            pack->Speeches->emplace_back(speech);
+            pack->Speeches.emplace_back(speech);
 
             if (tok == "@") {
                 continue;
@@ -365,11 +332,11 @@ auto DialogManager::ParseDialog(string_view pack_name, string_view data) const -
 
                 if (tok == "D") {
                     answer->DemandsCount++;
-                    answer->Demands->emplace_back(LoadDemandResult(input, true));
+                    answer->Demands.emplace_back(LoadDemandResult(input, true));
                 }
                 else if (tok == "R") {
                     answer->ResultsCount++;
-                    answer->Results->emplace_back(LoadDemandResult(input, false));
+                    answer->Results.emplace_back(LoadDemandResult(input, false));
                 }
                 else if (tok == "*" || tok == "d" || tok == "r") {
                     throw DialogParseException("Found old token, update dialog file to actual format (resave in version 2.22)", pack_name);
@@ -380,7 +347,7 @@ auto DialogManager::ParseDialog(string_view pack_name, string_view data) const -
             }
 
             speech->AnswersCount++;
-            speech->Answers->emplace_back(answer);
+            speech->Answers.emplace_back(answer);
 
             if (tok == "@" || tok == "&") {
                 break;
@@ -391,7 +358,7 @@ auto DialogManager::ParseDialog(string_view pack_name, string_view data) const -
         }
 
         pack->SpeechesCount++;
-        pack->Speeches->emplace_back(speech);
+        pack->Speeches.emplace_back(speech);
 
         if (tok == "&") {
             break;
@@ -450,7 +417,7 @@ auto DialogManager::LoadDemandResult(istringstream& input, bool is_demand) const
         // Name
         input >> name;
         auto is_hash = false;
-        id_index = GetPropEnumIndex(_engine.get(), name, is_demand, type, is_hash);
+        id_index = GetPropEnumIndex(_meta.get(), name, is_demand, type, is_hash);
 
         // Operator
         input >> oper;
@@ -463,10 +430,10 @@ auto DialogManager::LoadDemandResult(istringstream& input, bool is_demand) const
         input >> svalue;
 
         if (is_hash) {
-            ivalue = _engine->Hashes.ToHashedString(svalue).as_int32();
+            ivalue = _meta->Hashes.ToHashedString(svalue).as_int32();
         }
         else {
-            ivalue = _engine->ResolveGenericValue(svalue);
+            ivalue = _meta->ResolveGenericValue(svalue);
         }
     } break;
     case DR_ITEM: {
@@ -480,7 +447,7 @@ auto DialogManager::LoadDemandResult(istringstream& input, bool is_demand) const
 
         // Name
         input >> name;
-        id_hash = _engine->Hashes.ToHashedString(name);
+        id_hash = _meta->Hashes.ToHashedString(name);
 
         // Operator
         input >> oper;
@@ -491,7 +458,7 @@ auto DialogManager::LoadDemandResult(istringstream& input, bool is_demand) const
 
         // Value
         input >> svalue;
-        ivalue = _engine->ResolveGenericValue(svalue);
+        ivalue = _meta->ResolveGenericValue(svalue);
     } break;
     case DR_SCRIPT: {
         // Script name
@@ -505,23 +472,23 @@ auto DialogManager::LoadDemandResult(istringstream& input, bool is_demand) const
 
         if (values_count > 0) {
             input >> value_str;
-            script_val[0] = _engine->ResolveGenericValue(value_str);
+            script_val[0] = _meta->ResolveGenericValue(value_str);
         }
         if (values_count > 1) {
             input >> value_str;
-            script_val[1] = _engine->ResolveGenericValue(value_str);
+            script_val[1] = _meta->ResolveGenericValue(value_str);
         }
         if (values_count > 2) {
             input >> value_str;
-            script_val[2] = _engine->ResolveGenericValue(value_str);
+            script_val[2] = _meta->ResolveGenericValue(value_str);
         }
         if (values_count > 3) {
             input >> value_str;
-            script_val[3] = _engine->ResolveGenericValue(value_str);
+            script_val[3] = _meta->ResolveGenericValue(value_str);
         }
         if (values_count > 4) {
             input >> value_str;
-            script_val[4] = _engine->ResolveGenericValue(value_str);
+            script_val[4] = _meta->ResolveGenericValue(value_str);
         }
         if (values_count < 0 || values_count > 5) {
             throw DialogParseException("Invalid values count", values_count);
@@ -544,7 +511,7 @@ auto DialogManager::LoadDemandResult(istringstream& input, bool is_demand) const
     result->Who = who;
     result->ParamIndex = id_index;
     result->ParamHash = id_hash;
-    result->AnswerScriptFuncName = _engine->Hashes.ToHashedString(script_name);
+    result->AnswerScriptFuncName = _meta->Hashes.ToHashedString(script_name);
     result->Op = oper;
     result->ValuesCount = static_cast<uint8>(values_count);
     result->NoRecheck = no_recheck;
@@ -599,4 +566,4 @@ auto DialogManager::CheckOper(uint8 oper) const -> bool
     return oper == '>' || oper == '<' || oper == '=' || oper == '+' || oper == '-' || oper == '*' || oper == '/' || oper == '!' || oper == '}' || oper == '{';
 }
 
-FO_END_NAMESPACE();
+FO_END_NAMESPACE

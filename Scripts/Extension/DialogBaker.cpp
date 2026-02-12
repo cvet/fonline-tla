@@ -1,54 +1,16 @@
-//      __________        ___               ______            _
-//     / ____/ __ \____  / (_)___  ___     / ____/___  ____ _(_)___  ___
-//    / /_  / / / / __ \/ / / __ \/ _ \   / __/ / __ \/ __ `/ / __ \/ _ `
-//   / __/ / /_/ / / / / / / / / /  __/  / /___/ / / / /_/ / / / / /  __/
-//  /_/    \____/_/ /_/_/_/_/ /_/\___/  /_____/_/ /_/\__, /_/_/ /_/\___/
-//                                                  /____/
-// FOnline Engine
-// https://fonline.ru
-// https://github.com/cvet/fonline
-//
-// MIT License
-//
-// Copyright (c) 2006 - 2025, Anton Tsvetinskiy aka cvet <cvet@tut.by>
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
-//
-
 #include "DialogBaker.h"
 #include "Dialogs.h"
 #include "ScriptSystem.h"
 #include "TextPack.h"
 
-FO_BEGIN_NAMESPACE();
+FO_BEGIN_NAMESPACE
 
-class Critter;
-
-DialogBaker::DialogBaker(BakerData& data) :
-    BaseBaker(data)
+class CritterTag
 {
-    FO_STACK_TRACE_ENTRY();
+};
 
-    _skipBaking = !std::ranges::find_if(_settings->GetResourcePacks(), [&](auto&& pack) { return pack.Name == _resPackName; })->ServerOnly;
-}
-
-DialogBaker::~DialogBaker()
+DialogBaker::DialogBaker(shared_ptr<BakingContext> ctx) :
+    BaseBaker(std::move(ctx))
 {
     FO_STACK_TRACE_ENTRY();
 }
@@ -56,10 +18,6 @@ DialogBaker::~DialogBaker()
 void DialogBaker::BakeFiles(const FileCollection& files, string_view target_path) const
 {
     FO_STACK_TRACE_ENTRY();
-
-    if (_skipBaking) {
-        return;
-    }
 
     // Collect dialog files
     vector<File> filtered_files;
@@ -69,7 +27,7 @@ void DialogBaker::BakeFiles(const FileCollection& files, string_view target_path
             if (strex(file_header.GetPath()).get_file_extension() != "fodlg") {
                 continue;
             }
-            if (_bakeChecker && !_bakeChecker(file_header.GetPath(), file_header.GetWriteTime())) {
+            if (_context->BakeChecker && !_context->BakeChecker(file_header.GetPath(), file_header.GetWriteTime())) {
                 continue;
             }
 
@@ -86,7 +44,7 @@ void DialogBaker::BakeFiles(const FileCollection& files, string_view target_path
         if (!file) {
             return;
         }
-        if (_bakeChecker && !_bakeChecker(target_path, file.GetWriteTime())) {
+        if (_context->BakeChecker && !_context->BakeChecker(target_path, file.GetWriteTime())) {
             return;
         }
 
@@ -98,9 +56,10 @@ void DialogBaker::BakeFiles(const FileCollection& files, string_view target_path
     }
 
     // Load dialogs
-    auto server_engine = BakerEngine(PropertiesRelationType::ServerRelative);
+    auto server_engine = BakerServerEngine(*_context->BakedFiles);
+    server_engine.MapEngineType<CritterTag>(server_engine.GetBaseType("Critter"));
+    server_engine.InitSubsystems(&server_engine, *_context->BakedFiles);
     const auto dialog_mngr = DialogManager(server_engine);
-    const auto script_sys = BakerScriptSystem(server_engine, *_bakedFiles);
 
     size_t errors = 0;
     vector<refcount_ptr<DialogPack>> dialog_packs;
@@ -118,49 +77,49 @@ void DialogBaker::BakeFiles(const FileCollection& files, string_view target_path
 
     // Verify
     for (const auto& dlg_pack : dialog_packs) {
-        for (const auto& speech : *dlg_pack->Speeches) {
+        for (const auto& speech : dlg_pack->Speeches) {
             if (speech->DlgScriptFuncName) {
-                if (!script_sys.CheckFunc<void, Critter*, Critter*, string*>(speech->DlgScriptFuncName) && //
-                    !script_sys.CheckFunc<int32, Critter*, Critter*, string*>(speech->DlgScriptFuncName)) {
-                    //WriteLog("Dialog {} invalid start function {}", dlg_pack->PackId, speech->DlgScriptFuncName);
-                    //errors++;
+                if (!server_engine.CheckFunc<void, CritterTag*, CritterTag*, string&>(speech->DlgScriptFuncName) && //
+                    !server_engine.CheckFunc<int32, CritterTag*, CritterTag*, string&>(speech->DlgScriptFuncName)) {
+                    WriteLog("Dialog {} invalid start function {}", dlg_pack->PackId, speech->DlgScriptFuncName);
+                    errors++;
                 }
             }
 
-            for (const auto& answer : *speech->Answers) {
-                for (const auto& demand : *answer->Demands) {
+            for (const auto& answer : speech->Answers) {
+                for (const auto& demand : answer->Demands) {
                     if (demand->Type == DR_SCRIPT) {
-                        if ((demand->ValuesCount == 0 && !script_sys.CheckFunc<bool, Critter*, Critter*>(demand->AnswerScriptFuncName)) || //
-                            (demand->ValuesCount == 1 && !script_sys.CheckFunc<bool, Critter*, Critter*, int32>(demand->AnswerScriptFuncName)) || //
-                            (demand->ValuesCount == 2 && !script_sys.CheckFunc<bool, Critter*, Critter*, int32, int32>(demand->AnswerScriptFuncName)) || //
-                            (demand->ValuesCount == 3 && !script_sys.CheckFunc<bool, Critter*, Critter*, int32, int32, int32>(demand->AnswerScriptFuncName)) || //
-                            (demand->ValuesCount == 4 && !script_sys.CheckFunc<bool, Critter*, Critter*, int32, int32, int32, int32>(demand->AnswerScriptFuncName)) || //
-                            (demand->ValuesCount == 5 && !script_sys.CheckFunc<bool, Critter*, Critter*, int32, int32, int32, int32, int32>(demand->AnswerScriptFuncName))) {
+                        if ((demand->ValuesCount == 0 && !server_engine.CheckFunc<bool, CritterTag*, CritterTag*>(demand->AnswerScriptFuncName)) || //
+                            (demand->ValuesCount == 1 && !server_engine.CheckFunc<bool, CritterTag*, CritterTag*, int32>(demand->AnswerScriptFuncName)) || //
+                            (demand->ValuesCount == 2 && !server_engine.CheckFunc<bool, CritterTag*, CritterTag*, int32, int32>(demand->AnswerScriptFuncName)) || //
+                            (demand->ValuesCount == 3 && !server_engine.CheckFunc<bool, CritterTag*, CritterTag*, int32, int32, int32>(demand->AnswerScriptFuncName)) || //
+                            (demand->ValuesCount == 4 && !server_engine.CheckFunc<bool, CritterTag*, CritterTag*, int32, int32, int32, int32>(demand->AnswerScriptFuncName)) || //
+                            (demand->ValuesCount == 5 && !server_engine.CheckFunc<bool, CritterTag*, CritterTag*, int32, int32, int32, int32, int32>(demand->AnswerScriptFuncName))) {
                             WriteLog("Dialog {} answer demand invalid function {}", dlg_pack->PackId, demand->AnswerScriptFuncName);
                             errors++;
                         }
                     }
                 }
 
-                for (const auto& result : *answer->Results) {
+                for (const auto& result : answer->Results) {
                     if (result->Type == DR_SCRIPT) {
                         int32 not_found_count = 0;
 
-                        if ((result->ValuesCount == 0 && !script_sys.CheckFunc<void, Critter*, Critter*>(result->AnswerScriptFuncName)) || //
-                            (result->ValuesCount == 1 && !script_sys.CheckFunc<void, Critter*, Critter*, int32>(result->AnswerScriptFuncName)) || //
-                            (result->ValuesCount == 2 && !script_sys.CheckFunc<void, Critter*, Critter*, int32, int32>(result->AnswerScriptFuncName)) || //
-                            (result->ValuesCount == 3 && !script_sys.CheckFunc<void, Critter*, Critter*, int32, int32, int32>(result->AnswerScriptFuncName)) || //
-                            (result->ValuesCount == 4 && !script_sys.CheckFunc<void, Critter*, Critter*, int32, int32, int32, int32>(result->AnswerScriptFuncName)) || //
-                            (result->ValuesCount == 5 && !script_sys.CheckFunc<void, Critter*, Critter*, int32, int32, int32, int32, int32>(result->AnswerScriptFuncName))) {
+                        if ((result->ValuesCount == 0 && !server_engine.CheckFunc<void, CritterTag*, CritterTag*>(result->AnswerScriptFuncName)) || //
+                            (result->ValuesCount == 1 && !server_engine.CheckFunc<void, CritterTag*, CritterTag*, int32>(result->AnswerScriptFuncName)) || //
+                            (result->ValuesCount == 2 && !server_engine.CheckFunc<void, CritterTag*, CritterTag*, int32, int32>(result->AnswerScriptFuncName)) || //
+                            (result->ValuesCount == 3 && !server_engine.CheckFunc<void, CritterTag*, CritterTag*, int32, int32, int32>(result->AnswerScriptFuncName)) || //
+                            (result->ValuesCount == 4 && !server_engine.CheckFunc<void, CritterTag*, CritterTag*, int32, int32, int32, int32>(result->AnswerScriptFuncName)) || //
+                            (result->ValuesCount == 5 && !server_engine.CheckFunc<void, CritterTag*, CritterTag*, int32, int32, int32, int32, int32>(result->AnswerScriptFuncName))) {
                             not_found_count++;
                         }
 
-                        if ((result->ValuesCount == 0 && !script_sys.CheckFunc<int32, Critter*, Critter*>(result->AnswerScriptFuncName)) || //
-                            (result->ValuesCount == 1 && !script_sys.CheckFunc<int32, Critter*, Critter*, int32>(result->AnswerScriptFuncName)) || //
-                            (result->ValuesCount == 2 && !script_sys.CheckFunc<int32, Critter*, Critter*, int32, int32>(result->AnswerScriptFuncName)) || //
-                            (result->ValuesCount == 3 && !script_sys.CheckFunc<int32, Critter*, Critter*, int32, int32, int32>(result->AnswerScriptFuncName)) || //
-                            (result->ValuesCount == 4 && !script_sys.CheckFunc<int32, Critter*, Critter*, int32, int32, int32, int32>(result->AnswerScriptFuncName)) || //
-                            (result->ValuesCount == 5 && !script_sys.CheckFunc<int32, Critter*, Critter*, int32, int32, int32, int32, int32>(result->AnswerScriptFuncName))) {
+                        if ((result->ValuesCount == 0 && !server_engine.CheckFunc<int32, CritterTag*, CritterTag*>(result->AnswerScriptFuncName)) || //
+                            (result->ValuesCount == 1 && !server_engine.CheckFunc<int32, CritterTag*, CritterTag*, int32>(result->AnswerScriptFuncName)) || //
+                            (result->ValuesCount == 2 && !server_engine.CheckFunc<int32, CritterTag*, CritterTag*, int32, int32>(result->AnswerScriptFuncName)) || //
+                            (result->ValuesCount == 3 && !server_engine.CheckFunc<int32, CritterTag*, CritterTag*, int32, int32, int32>(result->AnswerScriptFuncName)) || //
+                            (result->ValuesCount == 4 && !server_engine.CheckFunc<int32, CritterTag*, CritterTag*, int32, int32, int32, int32>(result->AnswerScriptFuncName)) || //
+                            (result->ValuesCount == 5 && !server_engine.CheckFunc<int32, CritterTag*, CritterTag*, int32, int32, int32, int32, int32>(result->AnswerScriptFuncName))) {
                             not_found_count++;
                         }
 
@@ -180,19 +139,12 @@ void DialogBaker::BakeFiles(const FileCollection& files, string_view target_path
 
     // Write data
     for (const auto& file : filtered_files) {
-        _writeData(file.GetPath(), file.GetData());
+        _context->WriteData(file.GetPath(), file.GetData());
     }
 }
 
-DialogTextBaker::DialogTextBaker(BakerData& data) :
-    BaseBaker(data)
-{
-    FO_STACK_TRACE_ENTRY();
-
-    _skipBaking = std::ranges::find_if(_settings->GetResourcePacks(), [&](auto&& pack) { return pack.Name == _resPackName; })->ServerOnly;
-}
-
-DialogTextBaker::~DialogTextBaker()
+DialogTextBaker::DialogTextBaker(shared_ptr<BakingContext> ctx) :
+    BaseBaker(std::move(ctx))
 {
     FO_STACK_TRACE_ENTRY();
 }
@@ -201,9 +153,6 @@ void DialogTextBaker::BakeFiles(const FileCollection& files, string_view target_
 {
     FO_STACK_TRACE_ENTRY();
 
-    if (_skipBaking) {
-        return;
-    }
     if (!target_path.empty() && !strex(target_path).get_file_extension().starts_with("fotxt")) {
         return;
     }
@@ -224,8 +173,8 @@ void DialogTextBaker::BakeFiles(const FileCollection& files, string_view target_
     bool something_changed = false;
 
     if (!filtered_files.empty()) {
-        for (const auto& lang_name : _settings->BakeLanguages) {
-            if (!_bakeChecker || _bakeChecker(strex("{}.Dialogs.{}.fotxt-bin", _resPackName, lang_name), max_write_time)) {
+        for (const auto& lang_name : _context->Settings->BakeLanguages) {
+            if (!_context->BakeChecker || _context->BakeChecker(strex("{}.Dialogs.{}.fotxt-bin", _context->PackName, lang_name), max_write_time)) {
                 something_changed = true;
             }
         }
@@ -236,7 +185,7 @@ void DialogTextBaker::BakeFiles(const FileCollection& files, string_view target_
     }
 
     // Load dialogs
-    auto server_engine = BakerEngine(PropertiesRelationType::ServerRelative);
+    auto server_engine = BakerServerEngine(*_context->BakedFiles);
     const auto dialog_mngr = DialogManager(server_engine);
 
     size_t errors = 0;
@@ -257,10 +206,10 @@ void DialogTextBaker::BakeFiles(const FileCollection& files, string_view target_
     vector<pair<string, map<string, TextPack>>> lang_packs;
 
     for (const auto& dlg_pack : dialog_packs) {
-        for (const auto& dlg_pack_text : *dlg_pack->Texts) {
+        for (const auto& dlg_pack_text : dlg_pack->Texts) {
             const string lang_pack = dlg_pack_text.first;
 
-            if (std::find_if(_settings->BakeLanguages.begin(), _settings->BakeLanguages.end(), [&](auto&& l) { return l == lang_pack; }) == _settings->BakeLanguages.end()) {
+            if (std::ranges::find_if(_context->Settings->BakeLanguages, [&](auto&& l) { return l == lang_pack; }) == _context->Settings->BakeLanguages.end()) {
                 WriteLog(LogType::Warning, "Dialog {} contains unsupported language {}", dlg_pack->PackId, lang_pack);
                 continue;
             }
@@ -286,7 +235,7 @@ void DialogTextBaker::BakeFiles(const FileCollection& files, string_view target_
         }
     }
 
-    TextPack::FixPacks(_settings->BakeLanguages, lang_packs);
+    TextPack::FixPacks(_context->Settings->BakeLanguages, lang_packs);
 
     if (errors != 0) {
         throw DialogBakerException("Errors during dialogs text baking");
@@ -295,8 +244,8 @@ void DialogTextBaker::BakeFiles(const FileCollection& files, string_view target_
     // Write data
     for (auto&& [lang_name, text_packs] : lang_packs) {
         auto text_pack_data = text_packs.at("Dialogs").GetBinaryData();
-        _writeData(strex("{}.Dialogs.{}.fotxt-bin", _resPackName, lang_name), text_pack_data);
+        _context->WriteData(strex("{}.Dialogs.{}.fotxt-bin", _context->PackName, lang_name), text_pack_data);
     }
 }
 
-FO_END_NAMESPACE();
+FO_END_NAMESPACE

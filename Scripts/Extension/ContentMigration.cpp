@@ -1,15 +1,13 @@
 #include "Common.h"
 
-#include "StringUtils.h"
-
 FO_USING_NAMESPACE();
 
-FO_BEGIN_NAMESPACE();
+FO_BEGIN_NAMESPACE
 ///@ EngineHook
 FO_SCRIPT_API void ConfigSectionParseHook(const string& fname, string& section, map<string, string>& init_section_kv);
 ///@ EngineHook
 FO_SCRIPT_API void ConfigEntryParseHook(const string& fname, const string& section, string& key, string& value);
-FO_END_NAMESPACE();
+FO_END_NAMESPACE
 
 void FO_NAMESPACE ConfigSectionParseHook(const string& fname, string& section, map<string, string>& init_section_kv)
 {

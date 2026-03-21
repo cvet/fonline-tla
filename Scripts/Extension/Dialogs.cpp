@@ -5,6 +5,62 @@
 
 FO_BEGIN_NAMESPACE
 
+static auto ExtractTextPackEntries(string_view str, HashResolver& hash_resolver, vector<pair<TextPackKey, string>>& entries) -> bool
+{
+    FO_STACK_TRACE_ENTRY();
+
+    auto failed = false;
+    auto source = string(str);
+    istringstream sstr(source);
+    string line;
+
+    while (std::getline(sstr, line, '\n')) {
+        TextPackKey num = 0;
+        size_t offset = 0;
+
+        for (auto i = 0; i < 3; i++) {
+            const auto first = line.find('{', offset);
+            auto last = line.find('}', first);
+
+            if (first == string::npos || last == string::npos) {
+                if (i == 2 && first != string::npos) {
+                    string additional_line;
+                    while (last == string::npos && std::getline(sstr, additional_line, '\n')) {
+                        line += "\n" + additional_line;
+                        last = line.find('}', first);
+                    }
+                }
+
+                if (first == string::npos || last == string::npos) {
+                    if (i > 0 || first != string::npos) {
+                        failed = true;
+                    }
+
+                    break;
+                }
+            }
+
+            auto substr = line.substr(first + 1, last - first - 1);
+            offset = last + 1;
+
+            if (i == 0 && num == 0) {
+                num = strvex(substr).is_number() ? strvex(substr).to_uint32() : hash_resolver.ToHashedString(substr).as_uint32();
+            }
+            else if (i == 1 && num != 0) {
+                num += !substr.empty() ? (strvex(substr).is_number() ? strvex(substr).to_uint32() : hash_resolver.ToHashedString(substr).as_uint32()) : 0;
+            }
+            else if (i == 2 && num != 0) {
+                entries.emplace_back(num, std::move(substr));
+            }
+            else {
+                failed = true;
+            }
+        }
+    }
+
+    return !failed;
+}
+
 static auto GetPropEnumIndex(const EngineMetadata* meta, string_view str, bool is_demand, uint8& type, bool& is_hash) -> int32
 {
     FO_STACK_TRACE_ENTRY();
@@ -211,24 +267,18 @@ auto DialogManager::ParseDialog(string_view pack_name, string_view data) const -
             throw DialogParseException("One of the lang section not found", pack_name);
         }
 
-        TextPack temp_msg;
+        vector<pair<TextPackKey, string>> temp_entries;
 
-        if (!temp_msg.LoadFromString(lang_buf, _meta->Hashes)) {
+        if (!ExtractTextPackEntries(lang_buf, _meta->Hashes, temp_entries)) {
             throw DialogParseException("Load MSG fail", pack_name);
         }
 
-        pack->Texts.emplace_back(lang_app, TextPack {});
+        pack->Texts.emplace_back(string(lang_app), TextPack {});
 
-        uint32 str_num = 0;
-
-        while ((str_num = temp_msg.GetStrNumUpper(str_num)) != 0) {
-            const size_t count = temp_msg.GetStrCount(str_num);
+        for (auto& [str_num, raw_str] : temp_entries) {
             const uint32 new_str_num = pack->PackId.as_uint32() + (str_num < 100000000 ? str_num / 10 : str_num - 100000000 + 12000);
-
-            for (size_t n = 0; n < count; n++) {
-                string str = strex(temp_msg.GetStr(str_num, n)).replace("\n\\[", "\n[");
-                pack->Texts.at(i).second.AddStr(new_str_num, std::move(str));
-            }
+            string str = strex(raw_str).replace("\n\\[", "\n[");
+            pack->Texts.at(i).second.AddStr(new_str_num, std::move(str));
         }
     }
 
@@ -238,7 +288,8 @@ auto DialogManager::ParseDialog(string_view pack_name, string_view data) const -
         throw DialogParseException("Dialog section not found", pack_name);
     }
 
-    istringstream input(dlg_buf);
+    auto dlg_buf_str = string(dlg_buf);
+    istringstream input(dlg_buf_str);
 
     string tok;
     input >> tok;

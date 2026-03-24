@@ -11,7 +11,7 @@ namespace Dialogs
 ///@ Property Critter Common int8 TalkDistance Mutable PublicSync Persistent
 ///@ Property Critter Server int8 MaxTalkers Mutable Persistent
 
-///@ PropertyComponent Critter DialogContext
+///@ Property Critter Common bool DialogContext Component
 ///@ Property Critter Common bool DialogContext.Talking Mutable PublicSync
 ///@ Property Critter Server hstring DialogContext.DialogId Mutable
 ///@ Property Critter Server ident DialogContext.TalkerId Mutable
@@ -90,7 +90,7 @@ void RunDialog(Critter cr, hstring dialogId, Critter talker, bool ignoreDistance
 
     DialogSpeech initSpeech = dialogPack.GetSpeech(initSpeechIndex);
     DialogAnswer initAnswer = initSpeech.GetAnswer(answerIndices.first());
-    uint firstSpeechId = UseAnswerResults(cr, talker, initAnswer);
+    int firstSpeechId = UseAnswerResults(cr, talker, initAnswer);
     int firstSpeechIndex = FindSpeech(dialogPack, firstSpeechId);
 
     if (firstSpeechIndex == -1) {
@@ -177,7 +177,7 @@ void SpeechAnswer(Player player, int answerIndex)
     }
 
     hstring dialogId = cr.DialogContext.DialogId;
-    auto answerIndices = cr.DialogContext.SpeechAnswers;
+    int[] answerIndices = cr.DialogContext.SpeechAnswers;
 
     if (answerIndex < 0 || answerIndex >= answerIndices.length()) {
         CloseDialog(cr);
@@ -195,28 +195,39 @@ void SpeechAnswer(Player player, int answerIndex)
     DialogSpeech dialogSpeech = dialogPack.GetSpeech(cr.DialogContext.CurSpeech);
     DialogAnswer dialogAnswer = dialogSpeech.GetAnswer(answerIndices[answerIndex]);
 
-    uint nextSpeechId = UseAnswerResults(cr, talker, dialogAnswer);
+    int nextSpeechId = UseAnswerResults(cr, talker, dialogAnswer);
 
     // Специальные обработчики
     switch (nextSpeechId) {
-    case 0:
-    case uint(-1): { // Закрываем
+    case 0: { // Закрываем
         CloseDialog(cr);
         return;
     }
+    case 0xFFE1:
+    case -1: { // К предыдущей речи
+        if (cr.DialogContext.PrevSpeech < 0) {
+            CloseDialog(cr);
+            return;
+        }
+
+        DialogSpeech prevSpeech = dialogPack.GetSpeech(cr.DialogContext.PrevSpeech);
+        nextSpeechId = prevSpeech.Id;
+        break;
+    }
     case 0xFFE2:
-    case uint(-3): { // Бартер
+    case -2: { // Бартер
         if (talker != null) {
             CloseDialog(cr);
             Barter::StartNpcBarter(cr, talker);
         }
         return;
     }
-    case 0xFFE1:
-    case uint(-2): { // К предыдущей речи
-        DialogSpeech prevSpeech = dialogPack.GetSpeech(cr.DialogContext.PrevSpeech);
-        nextSpeechId = prevSpeech.Id;
-        break;
+    case 0xFFE3:
+    case -3: { // Атака
+        if (talker != null) {
+            // Todo:
+        }
+        return;
     }
     default: {
         break;
@@ -301,6 +312,9 @@ void ProcessDialog(Critter cr)
 bool IsDialogMustBeClosed(Critter cr)
 {
     if (cr.DialogContext == null || !cr.DialogContext.Talking) {
+        return true;
+    }
+    if (cr.IsMoving()) {
         return true;
     }
 
@@ -399,7 +413,7 @@ void SendDialogContext(Critter cr)
         cr.PlayerClientCall.ReceiveDialogContext(dialogId, talkerId, textId, answerTextIds, lexems, duration);
     }
     else {
-        cr.PlayerClientCall.ReceiveDialogContext(EMPTY_HSTRING, ZERO_IDENT, 0, array<uint> = {}, "", timespan());
+        cr.PlayerClientCall.ReceiveDialogContext(EMPTY_HSTRING, ZERO_IDENT, 0, {}, "", timespan());
     }
 }
 
@@ -615,9 +629,9 @@ bool CheckAnswerDemands(Critter cr, Critter talker, DialogAnswer answer, bool re
     return true;
 }
 
-uint UseAnswerResults(Critter cr, Critter talker, DialogAnswer answer)
+int UseAnswerResults(Critter cr, Critter talker, DialogAnswer answer)
 {
-    uint linkId = answer.Link;
+    int linkId = answer.Link;
 
     Critter master;
     Critter slave;
@@ -760,7 +774,7 @@ uint UseAnswerResults(Critter cr, Critter talker, DialogAnswer answer)
             continue;
         }
         case DR_SCRIPT: {
-            uint newLinkId = Game.DialogScriptResult(result, master, slave);
+            int newLinkId = Game.DialogScriptResult(result, master, slave);
 
             if (newLinkId != 0) {
                 linkId = newLinkId;
@@ -776,12 +790,18 @@ uint UseAnswerResults(Critter cr, Critter talker, DialogAnswer answer)
     return linkId;
 }
 
-int FindSpeech(DialogPack dialogPack, uint speechId)
+int FindSpeech(DialogPack dialogPack, int speechId)
 {
+    if (speechId < 0) {
+        return -1;
+    }
+
+    uint targetSpeechId = uint(speechId);
+
     for (int i = 0; i < dialogPack.SpeechesCount; i++) {
         DialogSpeech speech = dialogPack.GetSpeech(i);
 
-        if (speech.Id == speechId) {
+        if (speech.Id == targetSpeechId) {
             return i;
         }
     }

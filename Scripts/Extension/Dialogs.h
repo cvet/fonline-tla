@@ -109,7 +109,6 @@ public:
 
 private:
     [[nodiscard]] auto GetDrType(string_view str) const -> uint8;
-    [[nodiscard]] auto GetWho(uint8 who) const -> uint8;
     [[nodiscard]] auto CheckOper(uint8 oper) const -> bool;
 
     auto LoadDemandResult(istringstream& input, bool is_demand) const -> refcount_ptr<DialogAnswerReq>;

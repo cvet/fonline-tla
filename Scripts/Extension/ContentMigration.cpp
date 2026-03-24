@@ -4,38 +4,48 @@ FO_USING_NAMESPACE();
 
 FO_BEGIN_NAMESPACE
 ///@ EngineHook
-FO_SCRIPT_API void ConfigSectionParseHook(const string& fname, string& section, map<string, string>& init_section_kv);
+FO_SCRIPT_API auto ConfigSectionParseHook(string_view fname, string_view section, string& out_section, map<string, string>& init_section_kv) -> bool;
 ///@ EngineHook
-FO_SCRIPT_API void ConfigEntryParseHook(const string& fname, const string& section, string& key, string& value);
+FO_SCRIPT_API auto ConfigEntryParseHook(string_view fname, string_view section, string_view key, string_view value, string& out_key, string& out_value) -> bool;
 FO_END_NAMESPACE
 
-void FO_NAMESPACE ConfigSectionParseHook(const string& fname, string& section, map<string, string>& init_section_kv)
+auto FO_NAMESPACE ConfigSectionParseHook(string_view fname, string_view section, string& out_section, map<string, string>& init_section_kv) -> bool
 {
     FO_STACK_TRACE_ENTRY();
 
     ignore_unused(fname, init_section_kv);
 
     if (section == "Tile") {
-        section = "Item";
+        out_section = "Item";
+        return true;
     }
+
+    return false;
 }
 
-void FO_NAMESPACE ConfigEntryParseHook(const string& fname, const string& section, string& key, string& value)
+auto FO_NAMESPACE ConfigEntryParseHook(string_view fname, string_view section, string_view key, string_view value, string& out_key, string& out_value) -> bool
 {
     FO_STACK_TRACE_ENTRY();
 
     ignore_unused(fname);
 
+    out_key = string(key);
+    out_value = string(value);
+    auto changed = false;
+
     if (section == "Tile") {
         if (key == "PicMap") {
-            key = "$Proto";
-            value = "tile_" + strex(value).extract_file_name().erase_file_extension().str();
+            out_key = "$Proto";
+            out_value = "tile_" + strex(value).extract_file_name().erase_file_extension().str();
+            changed = true;
         }
         else if (key == "IsRoof") {
-            key = "IsRoofTile";
+            out_key = "IsRoofTile";
+            changed = true;
         }
         else if (key == "Layer") {
-            key = "TileLayer";
+            out_key = "TileLayer";
+            changed = true;
         }
     }
 
@@ -44,50 +54,60 @@ void FO_NAMESPACE ConfigEntryParseHook(const string& fname, const string& sectio
         static thread_local string prev_value;
 
         if (key == "HexX") {
-            prev_key = key;
-            prev_value = value;
-            key = "Hex";
-            value = strex("{} 0", value);
+            prev_key = string(key);
+            prev_value = string(value);
+            out_key = "Hex";
+            out_value = strex("{} 0", value);
+            changed = true;
         }
         else if (key == "HexY") {
-            value = strex("{} {}", prev_key == "HexX" ? prev_value : "0", value);
-            key = "Hex";
+            out_value = strex("{} {}", prev_key == "HexX" ? prev_value : "0", value);
+            out_key = "Hex";
             prev_key = "";
+            changed = true;
         }
         else if (key == "OffsetX") {
-            prev_key = key;
-            prev_value = value;
-            key = "Offset";
-            value = strex("{} 0", value);
+            prev_key = string(key);
+            prev_value = string(value);
+            out_key = "Offset";
+            out_value = strex("{} 0", value);
+            changed = true;
         }
         else if (key == "OffsetY") {
-            key = "Offset";
-            value = strex("{} {}", prev_key == "OffsetX" ? prev_value : "0", value);
+            out_key = "Offset";
+            out_value = strex("{} {}", prev_key == "OffsetX" ? prev_value : "0", value);
             prev_key = "";
+            changed = true;
         }
         else if (key == "Height") {
-            prev_key = key;
-            prev_value = value;
-            key = "";
+            prev_key = string(key);
+            prev_value = string(value);
+            out_key.clear();
+            changed = true;
         }
         else if (key == "Width") {
-            key = "Size";
-            value = strex("{} {}", value, prev_value);
+            out_key = "Size";
+            out_value = strex("{} {}", value, prev_value);
             prev_key = "";
+            changed = true;
         }
         else if (key == "WorkHexX") {
-            prev_key = key;
-            prev_value = value;
-            key = "WorkHex";
-            value = strex("{} 0", value);
+            prev_key = string(key);
+            prev_value = string(value);
+            out_key = "WorkHex";
+            out_value = strex("{} 0", value);
+            changed = true;
         }
         else if (key == "WorkHexY") {
-            value = strex("{} {}", prev_key == "WorkHexX" ? prev_value : "0", value);
-            key = "WorkHex";
+            out_value = strex("{} {}", prev_key == "WorkHexX" ? prev_value : "0", value);
+            out_key = "WorkHex";
             prev_key = "";
+            changed = true;
         }
         else {
             prev_key = "";
         }
     }
+
+    return changed;
 }

@@ -19,7 +19,7 @@ FO_SCRIPT_API string Server_Game_RunSpeechScript(ServerEngine* server, DialogSpe
 ///@ ExportMethod
 FO_SCRIPT_API bool Server_Game_DialogScriptDemand(ServerEngine* server, DialogAnswerReq* demand, Critter* master, Critter* slave);
 ///@ ExportMethod
-FO_SCRIPT_API uint32 Server_Game_DialogScriptResult(ServerEngine* server, DialogAnswerReq* result, Critter* master, Critter* slave);
+FO_SCRIPT_API int32 Server_Game_DialogScriptResult(ServerEngine* server, DialogAnswerReq* result, Critter* master, Critter* slave);
 ///@ ExportMethod
 FO_SCRIPT_API bool Server_Critter_IsFree(Critter* server);
 ///@ ExportMethod
@@ -216,7 +216,7 @@ bool FO_NAMESPACE Server_Game_DialogScriptDemand(ServerEngine* server, DialogAns
     }
 }
 
-uint32 FO_NAMESPACE Server_Game_DialogScriptResult(ServerEngine* server, DialogAnswerReq* result, Critter* master, Critter* slave)
+int32 FO_NAMESPACE Server_Game_DialogScriptResult(ServerEngine* server, DialogAnswerReq* result, Critter* master, Critter* slave)
 {
     FO_STACK_TRACE_ENTRY();
 

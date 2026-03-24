@@ -235,6 +235,14 @@ void DialogTextBaker::BakeFiles(const FileCollection& files, string_view target_
         }
     }
 
+    std::ranges::stable_sort(lang_packs, [&](const auto& l, const auto& r) {
+        const auto li = std::ranges::find(_context->Settings->BakeLanguages, l.first);
+        const auto ri = std::ranges::find(_context->Settings->BakeLanguages, r.first);
+        const auto lrank = li != _context->Settings->BakeLanguages.end() ? static_cast<size_t>(std::distance(_context->Settings->BakeLanguages.begin(), li)) : std::numeric_limits<size_t>::max();
+        const auto rrank = ri != _context->Settings->BakeLanguages.end() ? static_cast<size_t>(std::distance(_context->Settings->BakeLanguages.begin(), ri)) : std::numeric_limits<size_t>::max();
+        return lrank < rrank;
+    });
+
     TextPack::FixPacks(_context->Settings->BakeLanguages, lang_packs);
 
     if (errors != 0) {
@@ -243,6 +251,10 @@ void DialogTextBaker::BakeFiles(const FileCollection& files, string_view target_
 
     // Write data
     for (auto&& [lang_name, text_packs] : lang_packs) {
+        if (text_packs.count("Dialogs") == 0) {
+            throw DialogBakerException(strex("Dialogs text pack missing for language '{}' after normalization", lang_name));
+        }
+
         auto text_pack_data = text_packs.at("Dialogs").GetBinaryData();
         _context->WriteData(strex("{}.Dialogs.{}.fotxt-bin", _context->PackName, lang_name), text_pack_data);
     }

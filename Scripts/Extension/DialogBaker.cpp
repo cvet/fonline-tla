@@ -1,4 +1,5 @@
 #include "DialogBaker.h"
+#include "AngelScriptScripting.h"
 #include "Dialogs.h"
 #include "ScriptSystem.h"
 #include "TextPack.h"
@@ -58,7 +59,10 @@ void DialogBaker::BakeFiles(const FileCollection& files, string_view target_path
     // Load dialogs
     auto server_engine = BakerServerEngine(*_context->BakedFiles);
     server_engine.MapEngineType<CritterTag>(server_engine.GetBaseType("Critter"));
-    server_engine.InitSubsystems(&server_engine, *_context->BakedFiles);
+    server_engine.MapScriptTypes(&server_engine);
+#if FO_ANGELSCRIPT_SCRIPTING
+    InitAngelScriptScripting(&server_engine, *_context->BakedFiles);
+#endif
     const auto dialog_mngr = DialogManager(server_engine);
 
     size_t errors = 0;

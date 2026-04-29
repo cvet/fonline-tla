@@ -40,12 +40,12 @@ public:
     bool NoRecheck {};
     uint8 Op {};
     uint8 ValuesCount {};
-    int32 Value {};
-    int32 ValueExt0 {};
-    int32 ValueExt1 {};
-    int32 ValueExt2 {};
-    int32 ValueExt3 {};
-    int32 ValueExt4 {};
+    any_t Value {};
+    any_t ValueExt0 {};
+    any_t ValueExt1 {};
+    any_t ValueExt2 {};
+    any_t ValueExt3 {};
+    any_t ValueExt4 {};
 };
 
 ///@ ExportRefType Server RefCounted Export = Link, TextId, DemandsCount, ResultsCount, GetDemand, GetResult
@@ -55,8 +55,8 @@ public:
     auto GetDemand(int32 index) -> DialogAnswerReq*;
     auto GetResult(int32 index) -> DialogAnswerReq*;
 
-    uint32 Link {};
-    uint32 TextId {};
+    int32 Link {};
+    hstring TextId {};
     int32 DemandsCount {};
     int32 ResultsCount {};
     vector<refcount_ptr<DialogAnswerReq>> Demands {};
@@ -69,8 +69,8 @@ class DialogSpeech : public RefCounted<DialogSpeech>
 public:
     auto GetAnswer(int32 index) -> DialogAnswer*;
 
-    uint32 Id {};
-    uint32 TextId {};
+    int32 Id {};
+    hstring TextId {};
     hstring DlgScriptFuncName {};
     int32 AnswersCount {};
     vector<refcount_ptr<DialogAnswer>> Answers {};

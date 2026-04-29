@@ -12,7 +12,17 @@ FO_BEGIN_NAMESPACE
 FO_SCRIPT_API string Common_Game_Sha1(BaseEngine* engine, string_view text);
 ///@ ExportMethod
 FO_SCRIPT_API string Common_Game_Sha2(BaseEngine* engine, string_view text);
+///@ ExportMethod
+FO_SCRIPT_API hstring Common_Game_HstringFromHash(BaseEngine* engine, int64 hashValue);
 FO_END_NAMESPACE
+
+hstring FO_NAMESPACE Common_Game_HstringFromHash(BaseEngine* engine, int64 hashValue)
+{
+    if (hashValue == 0) {
+        return hstring();
+    }
+    return engine->Hashes.ResolveHash(static_cast<hstring::hash_t>(hashValue));
+}
 
 string FO_NAMESPACE Common_Game_Sha1(BaseEngine* engine, string_view text)
 {

@@ -132,21 +132,17 @@ string FormatTags(ClientEngine* client, string_view text, string_view lexems, Cr
 
                 istringstream itag(tag);
                 string pack_name_str;
-                uint32 str_num = 0;
+                string key_name;
 
-                if (itag >> pack_name_str >> str_num) {
-                    bool failed = false;
-                    const auto pack_name = client->GetCurLang().ResolveTextPackName(pack_name_str, &failed);
-                    const auto& text_pack = client->GetCurLang().GetTextPack(pack_name);
+                if (itag >> pack_name_str >> key_name) {
+                    const auto text_key = TextPackKey::FromPack(client->Hashes, pack_name_str, key_name);
+                    const auto& text_pack = client->GetCurLang();
 
-                    if (failed) {
-                        tag = "<text tag, invalid pack name>";
-                    }
-                    else if (text_pack.GetStrCount(str_num) == 0) {
-                        tag = strex("<text tag, string {} not found>", str_num);
+                    if (text_pack.GetStrCount(text_key) == 0) {
+                        tag = strex("<text tag, key {} not found>", key_name);
                     }
                     else {
-                        tag = text_pack.GetStr(str_num);
+                        tag = text_pack.GetStr(text_key);
                     }
                 }
                 else {

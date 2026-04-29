@@ -196,21 +196,24 @@ bool FO_NAMESPACE Server_Game_DialogScriptDemand(ServerEngine* server, DialogAns
 {
     FO_STACK_TRACE_ENTRY();
 
-    bool result = false;
+    const auto call_demand = [server, demand, master, slave]<typename... TArgs>(const TArgs&... args) -> bool {
+        bool result = false;
+        return server->CallFunc<bool, Critter*, Critter*, TArgs...>(demand->AnswerScriptFuncName, master, slave, args..., result) && result;
+    };
 
     switch (demand->ValuesCount) {
     case 0:
-        return server->CallFunc<bool, Critter*, Critter*>(demand->AnswerScriptFuncName, master, slave, result) && result;
+        return call_demand();
     case 1:
-        return server->CallFunc<bool, Critter*, Critter*, int32>(demand->AnswerScriptFuncName, master, slave, demand->ValueExt0, result) && result;
+        return call_demand(demand->ValueExt0);
     case 2:
-        return server->CallFunc<bool, Critter*, Critter*, int32, int32>(demand->AnswerScriptFuncName, master, slave, demand->ValueExt0, demand->ValueExt1, result) && result;
+        return call_demand(demand->ValueExt0, demand->ValueExt1);
     case 3:
-        return server->CallFunc<bool, Critter*, Critter*, int32, int32, int32>(demand->AnswerScriptFuncName, master, slave, demand->ValueExt0, demand->ValueExt1, demand->ValueExt2, result) && result;
+        return call_demand(demand->ValueExt0, demand->ValueExt1, demand->ValueExt2);
     case 4:
-        return server->CallFunc<bool, Critter*, Critter*, int32, int32, int32, int32>(demand->AnswerScriptFuncName, master, slave, demand->ValueExt0, demand->ValueExt1, demand->ValueExt2, demand->ValueExt3, result) && result;
+        return call_demand(demand->ValueExt0, demand->ValueExt1, demand->ValueExt2, demand->ValueExt3);
     case 5:
-        return server->CallFunc<bool, Critter*, Critter*, int32, int32, int32, int32, int32>(demand->AnswerScriptFuncName, master, slave, demand->ValueExt0, demand->ValueExt1, demand->ValueExt2, demand->ValueExt3, demand->ValueExt4, result) && result;
+        return call_demand(demand->ValueExt0, demand->ValueExt1, demand->ValueExt2, demand->ValueExt3, demand->ValueExt4);
     default:
         FO_UNREACHABLE_PLACE();
     }
@@ -220,71 +223,43 @@ int32 FO_NAMESPACE Server_Game_DialogScriptResult(ServerEngine* server, DialogAn
 {
     FO_STACK_TRACE_ENTRY();
 
-    switch (result->ValuesCount) {
-    case 0:
-        if (auto func = server->FindFunc<int32, Critter*, Critter*>(result->AnswerScriptFuncName)) {
-            return func.Call(master, slave) ? func.GetResult() : 0;
+    const auto call_result_int = [server, result, master, slave]<typename... TArgs>(const TArgs&... args) -> std::optional<int32> {
+        auto func = server->FindFunc<int32, Critter*, Critter*, TArgs...>(result->AnswerScriptFuncName);
+        if (func && func.Call(master, slave, args...)) {
+            return func.GetResult();
         }
-        break;
-    case 1:
-        if (auto func = server->FindFunc<int32, Critter*, Critter*, int32>(result->AnswerScriptFuncName)) {
-            return func.Call(master, slave, result->ValueExt0) ? func.GetResult() : 0;
-        }
-        break;
-    case 2:
-        if (auto func = server->FindFunc<int32, Critter*, Critter*, int32, int32>(result->AnswerScriptFuncName)) {
-            return func.Call(master, slave, result->ValueExt0, result->ValueExt1) ? func.GetResult() : 0;
-        }
-        break;
-    case 3:
-        if (auto func = server->FindFunc<int32, Critter*, Critter*, int32, int32, int32>(result->AnswerScriptFuncName)) {
-            return func.Call(master, slave, result->ValueExt0, result->ValueExt1, result->ValueExt2) ? func.GetResult() : 0;
-        }
-        break;
-    case 4:
-        if (auto func = server->FindFunc<int32, Critter*, Critter*, int32, int32, int32, int32>(result->AnswerScriptFuncName)) {
-            return func.Call(master, slave, result->ValueExt0, result->ValueExt1, result->ValueExt2, result->ValueExt3) ? func.GetResult() : 0;
-        }
-        break;
-    case 5:
-        if (auto func = server->FindFunc<int32, Critter*, Critter*, int32, int32, int32, int32, int32>(result->AnswerScriptFuncName)) {
-            return func.Call(master, slave, result->ValueExt0, result->ValueExt1, result->ValueExt2, result->ValueExt3, result->ValueExt4) ? func.GetResult() : 0;
-        }
-        break;
-    default:
-        FO_UNREACHABLE_PLACE();
-    }
+        return std::nullopt;
+    };
+
+    const auto call_result_void = [server, result, master, slave]<typename... TArgs>(const TArgs&... args) -> bool {
+        auto func = server->FindFunc<void, Critter*, Critter*, TArgs...>(result->AnswerScriptFuncName);
+        return func && func.Call(master, slave, args...);
+    };
 
     switch (result->ValuesCount) {
     case 0:
-        if (!server->CallFunc<void, Critter*, Critter*>(result->AnswerScriptFuncName, master, slave)) {
-            return 0;
-        }
+        if (const auto res = call_result_int()) return *res;
+        if (call_result_void()) return 0;
         break;
     case 1:
-        if (!server->CallFunc<void, Critter*, Critter*, int32>(result->AnswerScriptFuncName, master, slave, result->ValueExt0)) {
-            return 0;
-        }
+        if (const auto res = call_result_int(result->ValueExt0)) return *res;
+        if (call_result_void(result->ValueExt0)) return 0;
         break;
     case 2:
-        if (!server->CallFunc<void, Critter*, Critter*, int32, int32>(result->AnswerScriptFuncName, master, slave, result->ValueExt0, result->ValueExt1)) {
-            return 0;
-        }
+        if (const auto res = call_result_int(result->ValueExt0, result->ValueExt1)) return *res;
+        if (call_result_void(result->ValueExt0, result->ValueExt1)) return 0;
         break;
     case 3:
-        if (!server->CallFunc<void, Critter*, Critter*, int32, int32, int32>(result->AnswerScriptFuncName, master, slave, result->ValueExt0, result->ValueExt1, result->ValueExt2)) {
-            return 0;
-        }
+        if (const auto res = call_result_int(result->ValueExt0, result->ValueExt1, result->ValueExt2)) return *res;
+        if (call_result_void(result->ValueExt0, result->ValueExt1, result->ValueExt2)) return 0;
         break;
     case 4:
-        if (!server->CallFunc<void, Critter*, Critter*, int32, int32, int32, int32>(result->AnswerScriptFuncName, master, slave, result->ValueExt0, result->ValueExt1, result->ValueExt2, result->ValueExt3)) {
-            return 0;
-        }
+        if (const auto res = call_result_int(result->ValueExt0, result->ValueExt1, result->ValueExt2, result->ValueExt3)) return *res;
+        if (call_result_void(result->ValueExt0, result->ValueExt1, result->ValueExt2, result->ValueExt3)) return 0;
         break;
     case 5:
-        if (!server->CallFunc<void, Critter*, Critter*, int32, int32, int32, int32, int32>(result->AnswerScriptFuncName, master, slave, result->ValueExt0, result->ValueExt1, result->ValueExt2, result->ValueExt3, result->ValueExt4)) {
-            return 0;
-        }
+        if (const auto res = call_result_int(result->ValueExt0, result->ValueExt1, result->ValueExt2, result->ValueExt3, result->ValueExt4)) return *res;
+        if (call_result_void(result->ValueExt0, result->ValueExt1, result->ValueExt2, result->ValueExt3, result->ValueExt4)) return 0;
         break;
     default:
         FO_UNREACHABLE_PLACE();

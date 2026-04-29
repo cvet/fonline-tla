@@ -91,7 +91,13 @@ string FormatTags(ClientEngine* client, string_view text, string_view lexems, Cr
             }
             // Sex
             else if (strex(tag).compare_ignore_case("sex")) {
-                sex = chosen != nullptr && chosen->GetSexTagFemale() ? 2 : 1;
+                if (chosen != nullptr) {
+                    const auto* sex_tag_female = chosen->GetProperties().GetRegistrator()->FindProperty("SexTagFemale");
+                    sex = (sex_tag_female != nullptr && chosen->GetProperties().GetValue<bool>(sex_tag_female)) ? 2 : 1;
+                }
+                else {
+                    sex = 1;
+                }
                 sex_tags = true;
                 continue;
             }

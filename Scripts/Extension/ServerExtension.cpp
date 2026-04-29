@@ -238,28 +238,52 @@ int32_t FO_NAMESPACE Server_Game_DialogScriptResult(ServerEngine* server, Dialog
 
     switch (result->ValuesCount) {
     case 0:
-        if (const auto res = call_result_int()) return *res;
-        if (call_result_void()) return 0;
+        if (const auto res = call_result_int()) {
+            return *res;
+        }
+        if (call_result_void()) {
+            return 0;
+        }
         break;
     case 1:
-        if (const auto res = call_result_int(result->ValueExt0)) return *res;
-        if (call_result_void(result->ValueExt0)) return 0;
+        if (const auto res = call_result_int(result->ValueExt0)) {
+            return *res;
+        }
+        if (call_result_void(result->ValueExt0)) {
+            return 0;
+        }
         break;
     case 2:
-        if (const auto res = call_result_int(result->ValueExt0, result->ValueExt1)) return *res;
-        if (call_result_void(result->ValueExt0, result->ValueExt1)) return 0;
+        if (const auto res = call_result_int(result->ValueExt0, result->ValueExt1)) {
+            return *res;
+        }
+        if (call_result_void(result->ValueExt0, result->ValueExt1)) {
+            return 0;
+        }
         break;
     case 3:
-        if (const auto res = call_result_int(result->ValueExt0, result->ValueExt1, result->ValueExt2)) return *res;
-        if (call_result_void(result->ValueExt0, result->ValueExt1, result->ValueExt2)) return 0;
+        if (const auto res = call_result_int(result->ValueExt0, result->ValueExt1, result->ValueExt2)) {
+            return *res;
+        }
+        if (call_result_void(result->ValueExt0, result->ValueExt1, result->ValueExt2)) {
+            return 0;
+        }
         break;
     case 4:
-        if (const auto res = call_result_int(result->ValueExt0, result->ValueExt1, result->ValueExt2, result->ValueExt3)) return *res;
-        if (call_result_void(result->ValueExt0, result->ValueExt1, result->ValueExt2, result->ValueExt3)) return 0;
+        if (const auto res = call_result_int(result->ValueExt0, result->ValueExt1, result->ValueExt2, result->ValueExt3)) {
+            return *res;
+        }
+        if (call_result_void(result->ValueExt0, result->ValueExt1, result->ValueExt2, result->ValueExt3)) {
+            return 0;
+        }
         break;
     case 5:
-        if (const auto res = call_result_int(result->ValueExt0, result->ValueExt1, result->ValueExt2, result->ValueExt3, result->ValueExt4)) return *res;
-        if (call_result_void(result->ValueExt0, result->ValueExt1, result->ValueExt2, result->ValueExt3, result->ValueExt4)) return 0;
+        if (const auto res = call_result_int(result->ValueExt0, result->ValueExt1, result->ValueExt2, result->ValueExt3, result->ValueExt4)) {
+            return *res;
+        }
+        if (call_result_void(result->ValueExt0, result->ValueExt1, result->ValueExt2, result->ValueExt3, result->ValueExt4)) {
+            return 0;
+        }
         break;
     default:
         FO_UNREACHABLE_PLACE();

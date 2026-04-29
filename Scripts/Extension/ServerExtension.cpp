@@ -9,9 +9,9 @@ FO_BEGIN_NAMESPACE
 ///@ EngineHook
 FO_SCRIPT_API void InitServerEngine(ServerEngine* server);
 ///@ ExportMethod
-FO_SCRIPT_API isize32 Server_Game_LoadImage(ServerEngine* server, uint32 imageSlot, string_view imageName);
+FO_SCRIPT_API isize32 Server_Game_LoadImage(ServerEngine* server, uint32_t imageSlot, string_view imageName);
 ///@ ExportMethod
-FO_SCRIPT_API ucolor Server_Game_GetImageColor(ServerEngine* server, uint32 imageSlot, ipos32 pos);
+FO_SCRIPT_API ucolor Server_Game_GetImageColor(ServerEngine* server, uint32_t imageSlot, ipos32 pos);
 ///@ ExportMethod
 FO_SCRIPT_API DialogPack* Server_Game_GetDialogPack(ServerEngine* server, hstring packId);
 ///@ ExportMethod
@@ -19,20 +19,20 @@ FO_SCRIPT_API string Server_Game_RunSpeechScript(ServerEngine* server, DialogSpe
 ///@ ExportMethod
 FO_SCRIPT_API bool Server_Game_DialogScriptDemand(ServerEngine* server, DialogAnswerReq* demand, Critter* master, Critter* slave);
 ///@ ExportMethod
-FO_SCRIPT_API int32 Server_Game_DialogScriptResult(ServerEngine* server, DialogAnswerReq* result, Critter* master, Critter* slave);
+FO_SCRIPT_API int32_t Server_Game_DialogScriptResult(ServerEngine* server, DialogAnswerReq* result, Critter* master, Critter* slave);
 ///@ ExportMethod
 FO_SCRIPT_API bool Server_Critter_IsFree(Critter* server);
 ///@ ExportMethod
 FO_SCRIPT_API bool Server_Critter_IsBusy(Critter* server);
 ///@ ExportMethod
-FO_SCRIPT_API void Server_Critter_Wait(Critter* server, int32 ms);
+FO_SCRIPT_API void Server_Critter_Wait(Critter* server, int32_t ms);
 FO_END_NAMESPACE
 
 struct ServerImage
 {
     vector<ucolor> Data {};
-    int32 Width {};
-    int32 Height {};
+    int32_t Width {};
+    int32_t Height {};
 };
 
 struct ServerExtData
@@ -50,7 +50,7 @@ void FO_NAMESPACE InitServerEngine(ServerEngine* server)
 {
     FO_STACK_TRACE_ENTRY();
 
-    server->UserData = unique_del_ptr<uint8>(reinterpret_cast<uint8*>(SafeAlloc::MakeRaw<ServerExtData>()), [](const uint8* ptr) FO_DEFERRED {
+    server->UserData = unique_del_ptr<uint8_t>(reinterpret_cast<uint8_t*>(SafeAlloc::MakeRaw<ServerExtData>()), [](const uint8_t* ptr) FO_DEFERRED {
         const auto* ext_data_ptr = reinterpret_cast<const ServerExtData*>(ptr);
         delete ext_data_ptr;
     });
@@ -60,13 +60,13 @@ void FO_NAMESPACE InitServerEngine(ServerEngine* server)
     ext_data.DialogMngr->LoadFromResources(server->Resources);
 }
 
-isize32 FO_NAMESPACE Server_Game_LoadImage(ServerEngine* server, uint32 imageSlot, string_view imageName)
+isize32 FO_NAMESPACE Server_Game_LoadImage(ServerEngine* server, uint32_t imageSlot, string_view imageName)
 {
     FO_STACK_TRACE_ENTRY();
 
     auto& ext_data = GetServerExtData(server);
 
-    if (imageSlot >= numeric_cast<uint32>(ext_data.ServerImages.size())) {
+    if (imageSlot >= numeric_cast<uint32_t>(ext_data.ServerImages.size())) {
         ext_data.ServerImages.resize(imageSlot + 1);
     }
     if (ext_data.ServerImages[imageSlot]) {
@@ -133,13 +133,13 @@ isize32 FO_NAMESPACE Server_Game_LoadImage(ServerEngine* server, uint32 imageSlo
     return {width, height};
 }
 
-ucolor FO_NAMESPACE Server_Game_GetImageColor(ServerEngine* server, uint32 imageSlot, ipos32 pos)
+ucolor FO_NAMESPACE Server_Game_GetImageColor(ServerEngine* server, uint32_t imageSlot, ipos32 pos)
 {
     FO_STACK_TRACE_ENTRY();
 
     auto& ext_data = GetServerExtData(server);
 
-    if (imageSlot >= numeric_cast<uint32>(ext_data.ServerImages.size()) || !ext_data.ServerImages[imageSlot]) {
+    if (imageSlot >= numeric_cast<uint32_t>(ext_data.ServerImages.size()) || !ext_data.ServerImages[imageSlot]) {
         throw ScriptException("Image not loaded");
     }
 
@@ -180,7 +180,7 @@ string FO_NAMESPACE Server_Game_RunSpeechScript(ServerEngine* server, DialogSpee
         if (auto func = server->FindFunc<void, Critter*, Critter*, string&>(speech->DlgScriptFuncName); func && !func.Call(cr, talker, lexems)) {
             failed = true;
         }
-        if (auto func = server->FindFunc<int32, Critter*, Critter*, string&>(speech->DlgScriptFuncName); func && !func.Call(cr, talker, lexems)) {
+        if (auto func = server->FindFunc<int32_t, Critter*, Critter*, string&>(speech->DlgScriptFuncName); func && !func.Call(cr, talker, lexems)) {
             failed = true;
         }
 
@@ -219,12 +219,12 @@ bool FO_NAMESPACE Server_Game_DialogScriptDemand(ServerEngine* server, DialogAns
     }
 }
 
-int32 FO_NAMESPACE Server_Game_DialogScriptResult(ServerEngine* server, DialogAnswerReq* result, Critter* master, Critter* slave)
+int32_t FO_NAMESPACE Server_Game_DialogScriptResult(ServerEngine* server, DialogAnswerReq* result, Critter* master, Critter* slave)
 {
     FO_STACK_TRACE_ENTRY();
 
-    const auto call_result_int = [server, result, master, slave]<typename... TArgs>(const TArgs&... args) -> std::optional<int32> {
-        auto func = server->FindFunc<int32, Critter*, Critter*, TArgs...>(result->AnswerScriptFuncName);
+    const auto call_result_int = [server, result, master, slave]<typename... TArgs>(const TArgs&... args) -> std::optional<int32_t> {
+        auto func = server->FindFunc<int32_t, Critter*, Critter*, TArgs...>(result->AnswerScriptFuncName);
         if (func && func.Call(master, slave, args...)) {
             return func.GetResult();
         }
@@ -284,7 +284,7 @@ bool FO_NAMESPACE Server_Critter_IsBusy(Critter* server)
     return false;
 }
 
-void FO_NAMESPACE Server_Critter_Wait(Critter* server, int32 ms)
+void FO_NAMESPACE Server_Critter_Wait(Critter* server, int32_t ms)
 {
     FO_STACK_TRACE_ENTRY();
 

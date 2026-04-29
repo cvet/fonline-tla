@@ -14,7 +14,7 @@ FO_SCRIPT_API bool Client_Critter_IsFree(CritterView* self);
 ///@ ExportMethod
 FO_SCRIPT_API bool Client_Critter_IsBusy(CritterView* self);
 ///@ ExportMethod
-FO_SCRIPT_API void Client_Critter_Wait(CritterView* self, int32 ms);
+FO_SCRIPT_API void Client_Critter_Wait(CritterView* self, int32_t ms);
 FO_END_NAMESPACE
 
 static auto FormatTags(ClientEngine* client, string_view text, string_view lexems, CritterView* talker) -> string;
@@ -109,7 +109,7 @@ string FormatTags(ClientEngine* client, string_view text, string_view lexems, Cr
                 new_text.erase(first, last - first + 1);
 
                 if (!rnd.empty()) {
-                    new_text.insert(first, rnd[client->Random(0, numeric_cast<int32>(rnd.size()) - 1)]);
+                    new_text.insert(first, rnd[client->Random(0, numeric_cast<int32_t>(rnd.size()) - 1)]);
                 }
             }
             // Lexems
@@ -173,7 +173,7 @@ string FormatTags(ClientEngine* client, string_view text, string_view lexems, Cr
     }
 
     dialogs.push_back(new_text);
-    new_text = dialogs[client->Random(0, numeric_cast<int32>(dialogs.size()) - 1)];
+    new_text = dialogs[client->Random(0, numeric_cast<int32_t>(dialogs.size()) - 1)];
 
     return new_text;
 }
@@ -194,7 +194,7 @@ bool FO_NAMESPACE Client_Critter_IsBusy(CritterView* self)
     return false;
 }
 
-void FO_NAMESPACE Client_Critter_Wait(CritterView* self, int32 ms)
+void FO_NAMESPACE Client_Critter_Wait(CritterView* self, int32_t ms)
 {
     FO_STACK_TRACE_ENTRY();
 

@@ -25,7 +25,7 @@ static auto GetServerExtData(ServerEngine* server) -> ServerExtData&
 
 FO_BEGIN_NAMESPACE
 ///@ EngineHook
-FO_SCRIPT_API void InitServerEngine(ServerEngine* server);
+FO_SCRIPT_API void ServerInitHook(ServerEngine* server);
 ///@ ExportMethod
 FO_SCRIPT_API isize32 Server_Game_LoadImage(ServerEngine* server, uint32_t imageSlot, string_view imageName);
 ///@ ExportMethod
@@ -46,7 +46,7 @@ FO_SCRIPT_API bool Server_Critter_IsBusy(Critter* server);
 FO_SCRIPT_API void Server_Critter_Wait(Critter* server, int32_t ms);
 FO_END_NAMESPACE
 
-void FO_NAMESPACE InitServerEngine(ServerEngine* server)
+void FO_NAMESPACE ServerInitHook(ServerEngine* server)
 {
     FO_STACK_TRACE_ENTRY();
 

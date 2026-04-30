@@ -557,7 +557,7 @@ def generate_script(project_root: Path, gui_path: Path, scheme_path: Path) -> st
         root = parse_gui_file(gui_file_path)
         default_prefix = Path(gui_file_name).stem
         if screen_name != 'CUSTOM':
-            namespace_name = screen_prefixes.get(screen_name, default_prefix)
+            namespace_name = default_prefix
         else:
             namespace_name = custom_prefixes[custom_index] if custom_index < len(custom_prefixes) else default_prefix
             custom_index += 1

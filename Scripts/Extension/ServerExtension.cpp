@@ -5,6 +5,24 @@
 
 FO_USING_NAMESPACE();
 
+struct ServerImage
+{
+    vector<ucolor> Data {};
+    int32_t Width {};
+    int32_t Height {};
+};
+
+struct ServerExtData
+{
+    vector<unique_ptr<ServerImage>> ServerImages {};
+    unique_ptr<DialogManager> DialogMngr {};
+};
+
+static auto GetServerExtData(ServerEngine* server) -> ServerExtData&
+{
+    return *reinterpret_cast<ServerExtData*>(server->UserData.get());
+}
+
 FO_BEGIN_NAMESPACE
 ///@ EngineHook
 FO_SCRIPT_API void InitServerEngine(ServerEngine* server);
@@ -28,24 +46,6 @@ FO_SCRIPT_API bool Server_Critter_IsBusy(Critter* server);
 FO_SCRIPT_API void Server_Critter_Wait(Critter* server, int32_t ms);
 FO_END_NAMESPACE
 
-struct ServerImage
-{
-    vector<ucolor> Data {};
-    int32_t Width {};
-    int32_t Height {};
-};
-
-struct ServerExtData
-{
-    vector<unique_ptr<ServerImage>> ServerImages {};
-    unique_ptr<DialogManager> DialogMngr {};
-};
-
-static auto GetServerExtData(ServerEngine* server) -> ServerExtData&
-{
-    return *reinterpret_cast<ServerExtData*>(server->UserData.get());
-}
-
 void FO_NAMESPACE InitServerEngine(ServerEngine* server)
 {
     FO_STACK_TRACE_ENTRY();
@@ -55,6 +55,10 @@ void FO_NAMESPACE InitServerEngine(ServerEngine* server)
         delete ext_data_ptr;
     });
 
+    if (IsTestingInProgress) {
+        return;
+    }
+
     auto& ext_data = GetServerExtData(server);
     ext_data.DialogMngr = SafeAlloc::MakeUnique<DialogManager>(*server);
     ext_data.DialogMngr->LoadFromResources(server->Resources);
@@ -63,6 +67,11 @@ void FO_NAMESPACE InitServerEngine(ServerEngine* server)
 isize32 FO_NAMESPACE Server_Game_LoadImage(ServerEngine* server, uint32_t imageSlot, string_view imageName)
 {
     FO_STACK_TRACE_ENTRY();
+
+    if (IsTestingInProgress) {
+        ignore_unused(server, imageSlot, imageName);
+        return {};
+    }
 
     auto& ext_data = GetServerExtData(server);
 
@@ -180,7 +189,7 @@ string FO_NAMESPACE Server_Game_RunSpeechScript(ServerEngine* server, DialogSpee
         if (auto func = server->FindFunc<void, Critter*, Critter*, string&>(speech->DlgScriptFuncName); func && !func.Call(cr, talker, lexems)) {
             failed = true;
         }
-        if (auto func = server->FindFunc<int32_t, Critter*, Critter*, string&>(speech->DlgScriptFuncName); func && !func.Call(cr, talker, lexems)) {
+        if (auto func = server->FindFunc<uint32_t, Critter*, Critter*, string&>(speech->DlgScriptFuncName); func && !func.Call(cr, talker, lexems)) {
             failed = true;
         }
 
@@ -197,8 +206,8 @@ bool FO_NAMESPACE Server_Game_DialogScriptDemand(ServerEngine* server, DialogAns
     FO_STACK_TRACE_ENTRY();
 
     const auto call_demand = [server, demand, master, slave]<typename... TArgs>(const TArgs&... args) -> bool {
-        bool result = false;
-        return server->CallFunc<bool, Critter*, Critter*, TArgs...>(demand->AnswerScriptFuncName, master, slave, args..., result) && result;
+        auto func = server->FindFunc<bool, Critter*, Critter*, TArgs...>(demand->AnswerScriptFuncName);
+        return func && func.HasAttribute("DialogDemand") && func.Call(master, slave, args...) && func.GetResult();
     };
 
     switch (demand->ValuesCount) {
@@ -223,17 +232,19 @@ int32_t FO_NAMESPACE Server_Game_DialogScriptResult(ServerEngine* server, Dialog
 {
     FO_STACK_TRACE_ENTRY();
 
-    const auto call_result_int = [server, result, master, slave]<typename... TArgs>(const TArgs&... args) -> std::optional<int32_t> {
+    const auto call_result_int = [server, result, master, slave]<typename... TArgs>(const TArgs&... args) -> optional<int32_t> {
         auto func = server->FindFunc<int32_t, Critter*, Critter*, TArgs...>(result->AnswerScriptFuncName);
-        if (func && func.Call(master, slave, args...)) {
+
+        if (func && func.HasAttribute("DialogResult") && func.Call(master, slave, args...)) {
             return func.GetResult();
         }
+
         return std::nullopt;
     };
 
     const auto call_result_void = [server, result, master, slave]<typename... TArgs>(const TArgs&... args) -> bool {
         auto func = server->FindFunc<void, Critter*, Critter*, TArgs...>(result->AnswerScriptFuncName);
-        return func && func.Call(master, slave, args...);
+        return func && func.HasAttribute("DialogResult") && func.Call(master, slave, args...);
     };
 
     switch (result->ValuesCount) {
@@ -241,47 +252,64 @@ int32_t FO_NAMESPACE Server_Game_DialogScriptResult(ServerEngine* server, Dialog
         if (const auto res = call_result_int()) {
             return *res;
         }
-        if (call_result_void()) {
-            return 0;
-        }
         break;
     case 1:
         if (const auto res = call_result_int(result->ValueExt0)) {
             return *res;
-        }
-        if (call_result_void(result->ValueExt0)) {
-            return 0;
         }
         break;
     case 2:
         if (const auto res = call_result_int(result->ValueExt0, result->ValueExt1)) {
             return *res;
         }
-        if (call_result_void(result->ValueExt0, result->ValueExt1)) {
-            return 0;
-        }
         break;
     case 3:
         if (const auto res = call_result_int(result->ValueExt0, result->ValueExt1, result->ValueExt2)) {
             return *res;
-        }
-        if (call_result_void(result->ValueExt0, result->ValueExt1, result->ValueExt2)) {
-            return 0;
         }
         break;
     case 4:
         if (const auto res = call_result_int(result->ValueExt0, result->ValueExt1, result->ValueExt2, result->ValueExt3)) {
             return *res;
         }
-        if (call_result_void(result->ValueExt0, result->ValueExt1, result->ValueExt2, result->ValueExt3)) {
-            return 0;
-        }
         break;
     case 5:
         if (const auto res = call_result_int(result->ValueExt0, result->ValueExt1, result->ValueExt2, result->ValueExt3, result->ValueExt4)) {
             return *res;
         }
-        if (call_result_void(result->ValueExt0, result->ValueExt1, result->ValueExt2, result->ValueExt3, result->ValueExt4)) {
+        break;
+    default:
+        FO_UNREACHABLE_PLACE();
+    }
+
+    switch (result->ValuesCount) {
+    case 0:
+        if (!call_result_void()) {
+            return 0;
+        }
+        break;
+    case 1:
+        if (!call_result_void(result->ValueExt0)) {
+            return 0;
+        }
+        break;
+    case 2:
+        if (!call_result_void(result->ValueExt0, result->ValueExt1)) {
+            return 0;
+        }
+        break;
+    case 3:
+        if (!call_result_void(result->ValueExt0, result->ValueExt1, result->ValueExt2)) {
+            return 0;
+        }
+        break;
+    case 4:
+        if (!call_result_void(result->ValueExt0, result->ValueExt1, result->ValueExt2, result->ValueExt3)) {
+            return 0;
+        }
+        break;
+    case 5:
+        if (!call_result_void(result->ValueExt0, result->ValueExt1, result->ValueExt2, result->ValueExt3, result->ValueExt4)) {
             return 0;
         }
         break;

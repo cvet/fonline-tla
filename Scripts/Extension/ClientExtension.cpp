@@ -17,31 +17,23 @@ FO_SCRIPT_API bool Client_Critter_IsBusy(CritterView* self);
 FO_SCRIPT_API void Client_Critter_Wait(CritterView* self, int32_t ms);
 FO_END_NAMESPACE
 
-static auto FormatTags(ClientEngine* client, string_view text, string_view lexems, CritterView* talker) -> string;
-
-string FO_NAMESPACE Client_Game_FormatTags(ClientEngine* client, string_view text, string_view lexems)
+static auto HasFemaleSexTag(const CritterView* cr) -> bool
 {
-    FO_STACK_TRACE_ENTRY();
+    if (cr == nullptr) {
+        return false;
+    }
 
-    return FormatTags(client, text, lexems, nullptr);
+    const auto* sex_tag_female = cr->GetProperties().GetRegistrator()->FindProperty("SexTagFemale");
+    return sex_tag_female != nullptr && cr->GetProperties().GetValue<bool>(sex_tag_female);
 }
 
-string FO_NAMESPACE Client_Game_FormatTags(ClientEngine* client, string_view text, string_view lexems, CritterView* talker)
-{
-    FO_STACK_TRACE_ENTRY();
-
-    return FormatTags(client, text, lexems, talker);
-}
-
-string FormatTags(ClientEngine* client, string_view text, string_view lexems, CritterView* talker)
+static auto FormatTags(ClientEngine* client, string_view text, string_view lexems, CritterView* talker) -> string
 {
     FO_STACK_TRACE_ENTRY();
 
     auto new_text = string(text);
 
     vector<string> dialogs;
-    auto sex = 0;
-    auto sex_tags = false;
     string tag;
 
     CritterView* chosen = client->GetChosen();
@@ -51,23 +43,23 @@ string FormatTags(ClientEngine* client, string_view text, string_view lexems, Cr
         case '#': {
             new_text[i] = '\n';
         } break;
-        case '|': {
-            if (sex_tags) {
-                tag = strex(new_text.substr(i + 1)).substring_until('|');
-                new_text.erase(i, tag.length() + 2);
+        case '$': {
+            const auto tag_begin = i;
+            auto tag_end = i + 1;
 
-                if (sex != 0) {
-                    if (sex == 1) {
-                        new_text.insert(i, tag);
-                    }
-
-                    sex--;
-                }
-                continue;
+            while (tag_end < new_text.length() && (std::isalnum(static_cast<unsigned char>(new_text[tag_end])) != 0 || new_text[tag_end] == '_')) {
+                tag_end++;
             }
-        } break;
+
+            if (tag_end == i + 1) {
+                break;
+            }
+
+            new_text.replace(tag_begin, tag_end - tag_begin, "@lex " + new_text.substr(tag_begin + 1, tag_end - tag_begin - 1) + "@");
+            continue;
+        }
         case '@': {
-            if (new_text[i + 1] == '@') {
+            if (i + 1 < new_text.length() && new_text[i + 1] == '@') {
                 dialogs.push_back(new_text.substr(0, i));
                 new_text.erase(0, i + 2);
                 i = 0;
@@ -91,14 +83,27 @@ string FormatTags(ClientEngine* client, string_view text, string_view lexems, Cr
             }
             // Sex
             else if (strex(tag).compare_ignore_case("sex")) {
-                if (chosen != nullptr) {
-                    const auto* sex_tag_female = chosen->GetProperties().GetRegistrator()->FindProperty("SexTagFemale");
-                    sex = (sex_tag_female != nullptr && chosen->GetProperties().GetValue<bool>(sex_tag_female)) ? 2 : 1;
+                if (i < new_text.length() && new_text[i] == '|') {
+                    const auto male_begin = i + 1;
+                    const auto male_end = new_text.find('|', male_begin);
+
+                    if (male_end != string::npos) {
+                        auto female_begin = male_end + 1;
+                        if (female_begin < new_text.length() && new_text[female_begin] == '|') {
+                            female_begin++;
+                        }
+
+                        const auto female_end = new_text.find('|', female_begin);
+                        if (female_end != string::npos) {
+                            const auto male_text = string(new_text.substr(male_begin, male_end - male_begin));
+                            const auto female_text = string(new_text.substr(female_begin, female_end - female_begin));
+                            new_text.replace(i, female_end - i + 1, HasFemaleSexTag(chosen) ? female_text : male_text);
+                            continue;
+                        }
+                    }
                 }
-                else {
-                    sex = 1;
-                }
-                sex_tags = true;
+
+                new_text.insert(i, "");
                 continue;
             }
             // Random
@@ -122,7 +127,7 @@ string FormatTags(ClientEngine* client, string_view text, string_view lexems, Cr
                     tag = strex(lexems.substr(pos)).substring_until('$').trim();
                 }
                 else {
-                    tag = "<lexem not found>";
+                    tag = "";
                 }
             }
             // Text pack
@@ -139,14 +144,14 @@ string FormatTags(ClientEngine* client, string_view text, string_view lexems, Cr
                     const auto& text_pack = client->GetCurLang();
 
                     if (text_pack.GetStrCount(text_key) == 0) {
-                        tag = strex("<text tag, key {} not found>", key_name);
+                        tag = key_name;
                     }
                     else {
                         tag = text_pack.GetStr(text_key);
                     }
                 }
                 else {
-                    tag = "<text tag parse fail>";
+                    tag = "";
                 }
             }
             // Script
@@ -154,17 +159,16 @@ string FormatTags(ClientEngine* client, string_view text, string_view lexems, Cr
                 string func_name = strex(tag.substr(7)).substring_until('$');
 
                 if (!client->CallFunc<string, string>(client->Hashes.ToHashedString(func_name), string(lexems), tag)) {
-                    tag = "<script function not found>";
+                    tag = "";
                 }
             }
-            // Error
             else {
-                tag = "<error>";
+                tag = "";
             }
 
             new_text.insert(i, tag);
-        }
             continue;
+        }
         default:
             break;
         }
@@ -176,6 +180,20 @@ string FormatTags(ClientEngine* client, string_view text, string_view lexems, Cr
     new_text = dialogs[client->Random(0, numeric_cast<int32_t>(dialogs.size()) - 1)];
 
     return new_text;
+}
+
+string FO_NAMESPACE Client_Game_FormatTags(ClientEngine* client, string_view text, string_view lexems)
+{
+    FO_STACK_TRACE_ENTRY();
+
+    return FormatTags(client, text, lexems, nullptr);
+}
+
+string FO_NAMESPACE Client_Game_FormatTags(ClientEngine* client, string_view text, string_view lexems, CritterView* talker)
+{
+    FO_STACK_TRACE_ENTRY();
+
+    return FormatTags(client, text, lexems, talker);
 }
 
 bool FO_NAMESPACE Client_Critter_IsFree(CritterView* self)

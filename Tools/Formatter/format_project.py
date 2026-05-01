@@ -14,8 +14,8 @@ from typing import Sequence
 PROJECT_FORMAT_PATTERNS = [
     'Scripts/*.fos',
     'Scripts/Json/*.fos',
-    'Scripts/Extension/*.cpp',
-    'Scripts/Extension/*.h',
+    'SourceExt/*.cpp',
+    'SourceExt/*.h',
     'Gui/*.fogui',
 ]
 UTF8_BOM = b'\xef\xbb\xbf'

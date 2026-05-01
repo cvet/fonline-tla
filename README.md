@@ -105,8 +105,8 @@ Tagged builds publish `TLA-Dev`, `TLA-Server`, and `TLA-Client` archives as rele
 | Path | Role |
 | ---- | ---- |
 | [`Engine/`](Engine) | Pinned [FOnline engine](https://github.com/cvet/fonline) submodule. Treated as upstream — do not edit in place. |
-| [`Scripts/`](Scripts) | AngelScript gameplay code (`*.fos`): combat, dialogs, quests, AI, UI behavior, world events. Flat layout with `Json/` and `Extension/` as the only nested folders. |
-| [`Scripts/Extension/`](Scripts/Extension) | Native C++ extensions hooked into the engine via `///@ EngineHook` and `///@ ExportMethod` annotations, wired through `AddEngineSource(...)` in [`CMakeLists.txt`](CMakeLists.txt). |
+| [`Scripts/`](Scripts) | AngelScript gameplay code (`*.fos`): combat, dialogs, quests, AI, UI behavior, world events. Flat layout with `Json/` as the only nested folder. |
+| [`SourceExt/`](SourceExt) | Native C++ extensions hooked into the engine via `///@ EngineHook` and `///@ ExportMethod` annotations, wired through `AddEngineSources(...)` in [`CMakeLists.txt`](CMakeLists.txt). |
 | [`Gui/`](Gui) | Interface definitions (`*.fogui`) and the default GUI scheme. |
 | [`Maps/`](Maps) | Maps (`*.fomap`) and location metadata (`*.foloc`). |
 | [`Critters/`](Critters) | Critter protos (`*.focr`). |
@@ -128,8 +128,8 @@ Gameplay logic is written in AngelScript with FOnline preprocessor extensions:
 - `*.fos` files in [`Scripts/`](Scripts) hold the bulk of the game.
 - [`Scripts/GuiScreens.fos`](Scripts/GuiScreens.fos) is **generated** from `Gui/*.fogui` by the Python tool [`Tools/InterfaceEditor/generate_gui_screens.py`](Tools/InterfaceEditor/generate_gui_screens.py). Regenerate it through the `Generate GuiScreens.fos` VSCode task after changing screen identity. Do not hand-edit the generated file. The hand-written companion is [`Scripts/GuiScreensExt.fos`](Scripts/GuiScreensExt.fos).
 - The `InterfaceEditor.exe` binary in the same folder also has a `-SilentGenerate` mode, but its output layout is incompatible — always use the Python generator.
-- Native extensions in [`Scripts/Extension/`](Scripts/Extension) expose additional methods to AngelScript (`///@ ExportMethod`) and hook engine lifecycle events (`///@ EngineHook`).
-- Run [`FormatSource.bat`](FormatSource.bat) (or the `Format Scripts` VSCode task) before submitting changes; it formats `Scripts/*.fos`, `Scripts/Json/*.fos`, `Scripts/Extension/*.cpp`, and `Gui/*.fogui` with the bundled clang-format-20.
+- Native extensions in [`SourceExt/`](SourceExt) expose additional methods to AngelScript (`///@ ExportMethod`) and hook engine lifecycle events (`///@ EngineHook`).
+- Run [`FormatSource.bat`](FormatSource.bat) (or the `Format Scripts` VSCode task) before submitting changes; it formats `Scripts/*.fos`, `Scripts/Json/*.fos`, `SourceExt/*.cpp`, `SourceExt/*.h`, and `Gui/*.fogui` with the bundled clang-format-20.
 
 ## Documentation
 

@@ -1,70 +1,126 @@
 cmake_minimum_required(VERSION 3.22)
 project(TLA)
 
+# ---------------------------------------------------------------------------
+# Pre-Stage bootstrap.
+# ---------------------------------------------------------------------------
+
 include(Engine/BuildTools/Init.cmake)
 
-SetOption(FO_MAIN_CONFIG "TLA.fomain")
-SetOption(FO_DEV_NAME "TLA")
-SetOption(FO_NICE_NAME "FOnlineTLA")
-SetOption(FO_ENABLE_3D OFF)
-SetOption(FO_ANGELSCRIPT_SCRIPTING ON)
-SetOption(FO_NATIVE_SCRIPTING OFF)
-SetOption(FO_MONO_SCRIPTING OFF)
-SetOption(FO_GEOMETRY HEXAGONAL)
-SetOption(FO_MAP_HEX_WIDTH 32)
-SetOption(FO_MAP_HEX_HEIGHT 16)
-SetOption(FO_MAP_CAMERA_ANGLE 25.6589)
-SetOption(FO_APP_ICON Resources/TLA.ico)
+# ---------------------------------------------------------------------------
+# Engine-level options. Defaults overridable via cache; SetOptionValues only
+# sets when the variable is undefined, so a -D flag on the cmake command line
+# wins.
+# ---------------------------------------------------------------------------
 
-SetOption(FO_BUILD_CLIENT ON)
-SetOption(FO_BUILD_SERVER ON)
-SetOption(FO_BUILD_MAPPER ON)
-SetOption(FO_BUILD_EDITOR ON)
-SetOption(FO_BUILD_ASCOMPILER ON)
-SetOption(FO_BUILD_BAKER ON)
-SetOption(FO_UNIT_TESTS ON)
-SetOption(FO_OUTPUT_PATH ${CMAKE_CURRENT_SOURCE_DIR})
+SetOptionValues(
+    FO_MAIN_CONFIG TLA.fomain
+    FO_DEV_NAME TLA
+    FO_NICE_NAME FOnlineTLA
+    FO_ENABLE_3D OFF
+    FO_ANGELSCRIPT_SCRIPTING ON
+    FO_NATIVE_SCRIPTING OFF
+    FO_MONO_SCRIPTING OFF
+    FO_GEOMETRY HEXAGONAL
+    FO_MAP_HEX_WIDTH 32
+    FO_MAP_HEX_HEIGHT 16
+    FO_MAP_CAMERA_ANGLE 25.6589
+    FO_APP_ICON Resources/TLA.ico
+    FO_BUILD_CLIENT ON
+    FO_BUILD_SERVER ON
+    FO_BUILD_MAPPER ON
+    FO_BUILD_EDITOR ON
+    FO_BUILD_ASCOMPILER ON
+    FO_BUILD_BAKER ON
+    FO_UNIT_TESTS ON
+    FO_OUTPUT_PATH ${CMAKE_CURRENT_SOURCE_DIR})
 
-include(Engine/BuildTools/StartGeneration.cmake)
+# ---------------------------------------------------------------------------
+# Stage 1: Init — options, platform detection, compiler/link flags.
+# ---------------------------------------------------------------------------
 
-# SHA
-include_directories("Scripts/Extension/SHA")
-add_library(SHA STATIC EXCLUDE_FROM_ALL
-    "Scripts/Extension/SHA/sha1.h"
-    "Scripts/Extension/SHA/sha1.c"
-    "Scripts/Extension/SHA/sha2.h"
-    "Scripts/Extension/SHA/sha2.c")
+StartProjectGeneration()
+
+# ---------------------------------------------------------------------------
+# Stage 2: ProjectOptions — engine-side option validation.
+# ---------------------------------------------------------------------------
+
+RegisterProjectOptions()
+
+# Engine 89a83316b regression workaround: ThirdParty stage gates LibreSSL on
+# FO_BUILD_OPENSSL_LIB, but the option is never declared or auto-derived
+# (pre-refactor it was FO_BUILD_SERVER_LIB). Mirror the previous behaviour so
+# Asio/websocketpp's TLS headers can find OpenSSL. Drop once upstream fixes it.
+SetValue(FO_BUILD_OPENSSL_LIB ${FO_BUILD_SERVER_LIB})
+
+# ---------------------------------------------------------------------------
+# Stage 3: ThirdParty — bundled engine libs plus project-local extras.
+# ---------------------------------------------------------------------------
+
+AddThirdPartyLibraries()
+
+# SHA — small in-tree hash lib used by CommonExtension.cpp.
+StatusMessage("Add SHA library")
+AddIncludeDirectories("SourceExt/SHA")
+SetValue(FO_SHA_SOURCE
+    "SourceExt/SHA/sha1.h"
+    "SourceExt/SHA/sha1.c"
+    "SourceExt/SHA/sha2.h"
+    "SourceExt/SHA/sha2.c")
+AddStaticThirdPartyLibrary(SHA
+    SOURCE_LIST FO_SHA_SOURCE
+    APPEND_TO FO_COMMON_LIBS)
 DisableLibWarnings(SHA)
-list(APPEND FO_COMMON_LIBS SHA)
 
-# Native code
-AddEngineSource(COMMON Scripts/Extension/CommonExtension.cpp)
-AddEngineSource(COMMON Scripts/Extension/ContentMigration.cpp)
-AddEngineSource(SERVER Scripts/Extension/ServerExtension.cpp)
-AddEngineSource(CLIENT Scripts/Extension/ClientExtension.cpp)
-AddEngineSource(COMMON Scripts/Extension/Dialogs.h)
-AddEngineSource(COMMON Scripts/Extension/Dialogs.cpp)
-AddEngineSource(BAKER Scripts/Extension/BakerExtension.cpp)
-AddEngineSource(BAKER Scripts/Extension/DialogBaker.h)
-AddEngineSource(BAKER Scripts/Extension/DialogBaker.cpp)
+# ---------------------------------------------------------------------------
+# Stage 4: EngineSources — register native extensions before the engine
+# aggregates the source lists.
+# ---------------------------------------------------------------------------
 
-# Test builds
-CreatePackage(Dev LocalTest)
-AddToPackage(Dev Server Windows win64 NoRes+Root+SingleZip)
-AddToPackage(Dev Client Windows win64 NoRes+Root+SingleZip)
-AddToPackage(Dev Mapper Windows win64 NoRes+Root+SingleZip)
-AddToPackage(Dev Editor Windows win64 NoRes+Root+SingleZip)
-AddToPackage(Dev Baker Windows win64 Lib+NoRes+Root+SingleZip)
+AddEngineSources(
+    COMMON SourceExt/CommonExtension.cpp
+    COMMON SourceExt/ContentMigration.cpp
+    COMMON SourceExt/Dialogs.h
+    COMMON SourceExt/Dialogs.cpp
+    SERVER SourceExt/ServerExtension.cpp
+    CLIENT SourceExt/ClientExtension.cpp
+    BAKER SourceExt/BakerExtension.cpp
+    BAKER SourceExt/DialogBaker.h
+    BAKER SourceExt/DialogBaker.cpp)
 
-CreatePackage(Test LocalTest)
-AddToPackage(Test Client Windows win64 TotalProfiling+OGL+Raw)
-AddToPackage(Test Server Windows win64 TotalProfiling+Raw)
+RegisterEngineSources()
 
-CreatePackage(LinuxTest LocalTest)
-AddToPackage(LinuxTest Client Linux x64 Raw)
-AddToPackage(LinuxTest Server Linux x64 Raw)
-AddToPackage(LinuxTest Editor Linux x64 Raw)
-AddToPackage(LinuxTest Mapper Linux x64 Raw)
+# ---------------------------------------------------------------------------
+# Packaging definitions go in before the Packages stage processes them.
+# ---------------------------------------------------------------------------
 
-#
-include(Engine/BuildTools/FinalizeGeneration.cmake)
+DefinePackage(Dev
+    CONFIG LocalTest
+    BINARY Server Windows win64 NoRes+Root+SingleZip
+    BINARY Client Windows win64 NoRes+Root+SingleZip
+    BINARY Mapper Windows win64 NoRes+Root+SingleZip
+    BINARY Editor Windows win64 NoRes+Root+SingleZip
+    BINARY Baker Windows win64 Lib+NoRes+Root+SingleZip)
+
+DefinePackage(Test
+    CONFIG LocalTest
+    BINARY Client Windows win64 TotalProfiling+OGL+Raw
+    BINARY Server Windows win64 TotalProfiling+Raw)
+
+DefinePackage(LinuxTest
+    CONFIG LocalTest
+    BINARY Client Linux x64 Raw
+    BINARY Server Linux x64 Raw
+    BINARY Editor Linux x64 Raw
+    BINARY Mapper Linux x64 Raw)
+
+# ---------------------------------------------------------------------------
+# Stages 5..10 — engine-driven, called explicitly in canonical order.
+# ---------------------------------------------------------------------------
+
+SetupCodeGeneration()
+BuildCoreLibraries()
+BuildApplications()
+SetupScriptsAndBaking()
+BuildPackages()
+FinalizeProjectGeneration()

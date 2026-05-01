@@ -47,12 +47,6 @@ StartProjectGeneration()
 
 RegisterProjectOptions()
 
-# Engine 89a83316b regression workaround: ThirdParty stage gates LibreSSL on
-# FO_BUILD_OPENSSL_LIB, but the option is never declared or auto-derived
-# (pre-refactor it was FO_BUILD_SERVER_LIB). Mirror the previous behaviour so
-# Asio/websocketpp's TLS headers can find OpenSSL. Drop once upstream fixes it.
-SetValue(FO_BUILD_OPENSSL_LIB ${FO_BUILD_SERVER_LIB})
-
 # ---------------------------------------------------------------------------
 # Stage 3: ThirdParty — bundled engine libs plus project-local extras.
 # ---------------------------------------------------------------------------
@@ -113,6 +107,26 @@ DefinePackage(LinuxTest
     BINARY Server Linux x64 Raw
     BINARY Editor Linux x64 Raw
     BINARY Mapper Linux x64 Raw)
+
+# ---------------------------------------------------------------------------
+# Per-target post-build steps (BakerLib runtime sync) need the targets to
+# already exist, so they go into a Finalize-Pre hook. Without TLA_BakerLib.dll
+# next to each app exe, the engine's PrebakeResources step on startup can
+# only fall back to using the existing baked output (warning popup) — adding
+# the dll here makes the engine auto-bake on launch when sources changed.
+# ---------------------------------------------------------------------------
+
+function(_tla_post_target_setup)
+    CopyTargetRuntimeToTarget(${FO_DEV_NAME}_Client ${FO_DEV_NAME}_BakerLib)
+    CopyTargetRuntimeToTarget(${FO_DEV_NAME}_Server ${FO_DEV_NAME}_BakerLib)
+    CopyTargetRuntimeToTarget(${FO_DEV_NAME}_ServerHeadless ${FO_DEV_NAME}_BakerLib)
+    CopyTargetRuntimeToTarget(${FO_DEV_NAME}_ServerService ${FO_DEV_NAME}_BakerLib)
+    CopyTargetRuntimeToTarget(${FO_DEV_NAME}_Mapper ${FO_DEV_NAME}_BakerLib)
+    CopyTargetRuntimeToTarget(${FO_DEV_NAME}_Editor ${FO_DEV_NAME}_BakerLib)
+    CopyTargetRuntimeToTarget(${FO_DEV_NAME}_ASCompiler ${FO_DEV_NAME}_BakerLib)
+endfunction()
+
+AddStageHook(Finalize Pre _tla_post_target_setup)
 
 # ---------------------------------------------------------------------------
 # Stages 5..10 — engine-driven, called explicitly in canonical order.

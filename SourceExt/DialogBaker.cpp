@@ -68,7 +68,7 @@ void DialogBaker::BakeFiles(const FileCollection& files, string_view target_path
     server_engine.MapEngineType<CritterTag>(server_engine.GetBaseType("Critter"));
     server_engine.MapScriptTypes(&server_engine);
 #if FO_ANGELSCRIPT_SCRIPTING
-    InitAngelScriptScripting(&server_engine, *_context->BakedFiles);
+    InitAngelScriptScripting(&server_engine, *_context->Settings, *_context->BakedFiles);
 #endif
     const auto dialog_mngr = DialogManager(server_engine);
 

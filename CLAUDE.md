@@ -71,6 +71,17 @@ Typical breakage points after a bump:
 
 The same folder also contains a legacy binary, `InterfaceEditor.exe -SilentGenerate`, with its own (incompatible) generation logic. Invoking it produces a `GuiScreens.fos` that does not compile against TLA's scripts (mismatched namespaces, screen types, etc.). **Do not call it for regeneration.**
 
+### Editing screen code — always update both files
+
+The AngelScript code embedded in screens (`OnGlobalMouseDown`, `OnLMouseClick`, `GlobalScope`, `ClassFields`, `OnDraw`, callbacks listed in `CALLBACK_METHODS` of [Tools/InterfaceEditor/generate_gui_screens.py](Tools/InterfaceEditor/generate_gui_screens.py), plus the `CODE_KEYS` set: `GlobalScope`, `ClassFields`, `DynamicText`, `Text`, `GridSize`) lives in the `.fogui` JSON. The Python generator extracts those bodies verbatim into [Scripts/GuiScreens.fos](Scripts/GuiScreens.fos).
+
+**If you fix a bug or change behavior inside that generated code, the same edit MUST be applied to the source `.fogui` file** — otherwise the next `Generate GuiScreens.fos` run will silently revert your fix. Workflow:
+
+1. Find the matching `.fogui` (e.g. [Gui/Game.fogui](Gui/Game.fogui) for the `Game` screen).
+2. Apply the identical edit there.
+3. Edit `Scripts/GuiScreens.fos` too — the file is what gets baked, so the change is needed in both places to take effect now AND survive regeneration.
+4. After hand-editing both, you do NOT need to regenerate — that is only required when you change the set/identity of screens or non-code fogui properties.
+
 ## Conventions
 
 - **Formatting.** Before committing, or whenever files look untidy, run the `Format Scripts` task. It covers `.fos`, the extension `.cpp` files, and `.fogui`.

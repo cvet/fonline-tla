@@ -14,18 +14,35 @@ struct ServerImage
 
 struct ServerExtData
 {
+    int32_t LookMinimum {};
+    raw_ptr<const Property> InSneakMode {};
+    raw_ptr<const Property> SneakCoefficient {};
+    raw_ptr<const Property> IsAlwaysView {};
+    raw_ptr<const Property> IsTrap {};
+    raw_ptr<const Property> TrapValue {};
     vector<unique_ptr<ServerImage>> ServerImages {};
     unique_ptr<DialogManager> DialogMngr {};
 };
+
+static constexpr int32_t TLA_SNEAK_DIVIDER = 6;
 
 static auto GetServerExtData(ServerEngine* server) -> ServerExtData&
 {
     return *reinterpret_cast<ServerExtData*>(server->UserData.get());
 }
 
+static auto GetServerExtData(const ServerEngine* server) -> const ServerExtData&
+{
+    return *reinterpret_cast<const ServerExtData*>(server->UserData.get());
+}
+
 FO_BEGIN_NAMESPACE
 ///@ EngineHook
 FO_SCRIPT_API void ServerInitHook(ServerEngine* server);
+///@ EngineHook
+FO_SCRIPT_API CritterVisibilityMode CheckCritterVisibilityHook(const ServerEngine* server, const Map* map, const Critter* cr, const Critter* target);
+///@ EngineHook
+FO_SCRIPT_API bool CheckItemVisibilityHook(const ServerEngine* server, const Map* map, const Critter* cr, const Item* item);
 ///@ ExportMethod
 FO_SCRIPT_API isize32 Server_Game_LoadImage(ServerEngine* server, uint32_t imageSlot, string_view imageName);
 ///@ ExportMethod
@@ -60,8 +77,88 @@ void FO_NAMESPACE ServerInitHook(ServerEngine* server)
     }
 
     auto& ext_data = GetServerExtData(server);
+
+    ext_data.LookMinimum = strvex(server->Settings.GetCustomSetting("Look.LookMinimum")).to_int32();
+    FO_RUNTIME_ASSERT(ext_data.LookMinimum != 0);
+
+    const auto* cr_props = server->GetPropertyRegistrator(Critter::ENTITY_TYPE_NAME);
+    ext_data.InSneakMode = cr_props->FindProperty("InSneakMode");
+    FO_RUNTIME_ASSERT(ext_data.InSneakMode);
+    ext_data.SneakCoefficient = cr_props->FindProperty("SneakCoefficient");
+    FO_RUNTIME_ASSERT(ext_data.SneakCoefficient);
+
+    const auto* item_props = server->GetPropertyRegistrator(Item::ENTITY_TYPE_NAME);
+    ext_data.IsAlwaysView = item_props->FindProperty("IsAlwaysView");
+    FO_RUNTIME_ASSERT(ext_data.IsAlwaysView);
+    ext_data.IsTrap = item_props->FindProperty("IsTrap");
+    FO_RUNTIME_ASSERT(ext_data.IsTrap);
+    ext_data.TrapValue = item_props->FindProperty("TrapValue");
+    FO_RUNTIME_ASSERT(ext_data.TrapValue);
+
     ext_data.DialogMngr = SafeAlloc::MakeUnique<DialogManager>(*server);
     ext_data.DialogMngr->LoadFromResources(server->Resources);
+}
+
+CritterVisibilityMode FO_NAMESPACE CheckCritterVisibilityHook(const ServerEngine* server, const Map* map, const Critter* cr, const Critter* target)
+{
+    FO_STACK_TRACE_ENTRY();
+
+    if (IsTestingInProgress) {
+        return GeometryHelper::GetDistance(cr->GetHex(), target->GetHex()) <= cr->GetLookDistance() ? CritterVisibilityMode::Full : CritterVisibilityMode::None;
+    }
+
+    const int32_t dist = GeometryHelper::GetDistance(cr->GetHex(), target->GetHex());
+    int32_t look_dist = cr->GetLookDistance();
+
+    if (dist > look_dist) {
+        return CritterVisibilityMode::None;
+    }
+
+    const auto trace_output = server->MapMngr.TracePath(map, cr->GetHex(), target->GetHex());
+
+    if (!trace_output.IsFullTrace) {
+        return CritterVisibilityMode::None;
+    }
+
+    const auto& ext_data = GetServerExtData(server);
+    const auto& target_props = target->GetProperties();
+
+    if (target_props.GetValue<bool>(ext_data.InSneakMode.get())) {
+        const int32_t sneak_penalty = target_props.GetValue<int32_t>(ext_data.SneakCoefficient.get()) / TLA_SNEAK_DIVIDER;
+        look_dist = look_dist > sneak_penalty ? look_dist - sneak_penalty : 0;
+    }
+
+    look_dist = std::max(look_dist, ext_data.LookMinimum);
+    return look_dist >= dist ? CritterVisibilityMode::Full : CritterVisibilityMode::None;
+}
+
+bool FO_NAMESPACE CheckItemVisibilityHook(const ServerEngine* server, const Map* map, const Critter* cr, const Item* item)
+{
+    FO_STACK_TRACE_ENTRY();
+
+    ignore_unused(map);
+
+    if (IsTestingInProgress) {
+        return GeometryHelper::GetDistance(cr->GetHex(), item->GetHex()) <= cr->GetLookDistance();
+    }
+
+    const auto& ext_data = GetServerExtData(server);
+    const auto& props = item->GetProperties();
+
+    if (props.GetValue<bool>(ext_data.IsAlwaysView.get())) {
+        return true;
+    }
+
+    const int32_t dist = GeometryHelper::GetDistance(cr->GetHex(), item->GetHex());
+    int32_t look_dist = cr->GetLookDistance();
+
+    if (props.GetValue<bool>(ext_data.IsTrap.get())) {
+        const int32_t trap_penalty = props.GetValue<int32_t>(ext_data.TrapValue.get());
+        look_dist = look_dist > trap_penalty ? look_dist - trap_penalty : 0;
+    }
+
+    look_dist = std::max(look_dist, ext_data.LookMinimum);
+    return look_dist >= dist;
 }
 
 isize32 FO_NAMESPACE Server_Game_LoadImage(ServerEngine* server, uint32_t imageSlot, string_view imageName)

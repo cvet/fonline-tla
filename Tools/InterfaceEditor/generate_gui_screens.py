@@ -356,24 +356,24 @@ def emit_on_construct(lines: list[str], obj: dict, is_root: bool) -> None:
 
         text_flags: list[str] = []
         if obj.get('HorisontalAlignment') == 'Center':
-            text_flags.append('FT_CENTERX')
+            text_flags.append('int(FontFlag::CenterX)')
         if obj.get('VerticalAlignment') == 'Center':
-            text_flags.append('FT_CENTERY')
+            text_flags.append('int(FontFlag::CenterY)')
         if obj.get('HorisontalAlignment') == 'Far':
-            text_flags.append('FT_CENTERR')
+            text_flags.append('int(FontFlag::AlignRight)')
         if obj.get('VerticalAlignment') == 'Far':
-            text_flags.append('FT_BOTTOM')
+            text_flags.append('int(FontFlag::AlignBottom)')
         if obj.get('DrawFromBottom'):
-            text_flags.append('FT_UPPER')
+            text_flags.append('int(FontFlag::KeepTail)')
         if obj.get('NoColorize'):
-            text_flags.append('FT_NO_COLORIZE')
+            text_flags.append('int(FontFlag::NoColorize)')
         if obj.get('Align'):
-            text_flags.append('FT_ALIGN')
+            text_flags.append('int(FontFlag::Justify)')
         if obj.get('Bordered'):
-            text_flags.append('FT_BORDERED')
+            text_flags.append('int(FontFlag::Bordered)')
         if text_flags:
             joined_flags = ' | '.join(text_flags)
-            lines.append(f'{indent}SetTextFlags({joined_flags});')
+            lines.append(f'{indent}SetTextFlags(FontFlag({joined_flags}));')
 
         if is_non_empty(obj.get('NormalColor')):
             lines.append(f'{indent}SetTextColor({obj["NormalColor"]});')

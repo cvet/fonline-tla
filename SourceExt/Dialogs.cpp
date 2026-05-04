@@ -3,12 +3,11 @@
 #include "ConfigFile.h"
 #include "FileSystem.h"
 
-FO_BEGIN_NAMESPACE
+FO_USING_NAMESPACE();
 
-static constexpr uint32 DIALOG_LINK_EXIT = 0;
-static constexpr uint32 DIALOG_LINK_BACK = 0xFFFFFFFFu;
-static constexpr uint32 DIALOG_LINK_BARTER = 0xFFFFFFFEu;
-static constexpr uint32 DIALOG_LINK_ATTACK = 0xFFFFFFFDu;
+static constexpr int32_t DIALOG_LINK_EXIT = 0;
+static constexpr int32_t DIALOG_LINK_BACK = -1;
+static constexpr string_view DIALOG_ANSWER_LINK_ENUM = "DialogAnswerLink";
 
 static auto IsDialogCommentOrEmpty(string_view line) -> bool
 {
@@ -27,79 +26,130 @@ static auto IsDialogCommentOrEmpty(string_view line) -> bool
     return line[start] == '#' || (line[start] == '/' && start + 1 < line.size() && line[start + 1] == '/');
 }
 
-static auto NormalizeSpecialDialogLink(uint32 link) -> uint32
+static auto TryNormalizeDialogLinkValue(const EngineMetadata* meta, int64_t link, int32_t& normalized_link) -> bool
 {
     FO_STACK_TRACE_ENTRY();
 
     if (link == DIALOG_LINK_EXIT) {
-        return DIALOG_LINK_EXIT;
+        normalized_link = DIALOG_LINK_EXIT;
+        return true;
     }
-    if (link == 0xFFE1u || link == DIALOG_LINK_BACK) {
-        return DIALOG_LINK_BACK;
-    }
-    if (link == 0xFFE2u || link == DIALOG_LINK_BARTER) {
-        return DIALOG_LINK_BARTER;
-    }
-    if (link == 0xFFE3u || link == DIALOG_LINK_ATTACK) {
-        return DIALOG_LINK_ATTACK;
+    if (link == DIALOG_LINK_BACK) {
+        normalized_link = DIALOG_LINK_BACK;
+        return true;
     }
 
-    return link;
+    if (link < -2147483648ll || link > 2147483647ll) {
+        return false;
+    }
+
+    normalized_link = numeric_cast<int32_t>(link);
+
+    if (normalized_link >= 0) {
+        return true;
+    }
+
+    bool failed = false;
+    const auto& value_name = meta->ResolveEnumValueName(DIALOG_ANSWER_LINK_ENUM, normalized_link, &failed);
+    ignore_unused(value_name);
+
+    if (failed) {
+        return false;
+    }
+
+    return true;
 }
 
-static auto TryParseDialogLinkToken(string_view token, uint32& value) -> bool
+static auto TryResolveDialogAnswerLinkCanonical(const EngineMetadata* meta, int32_t link, string& canonical) -> bool
+{
+    FO_STACK_TRACE_ENTRY();
+
+    int32_t normalized_link = 0;
+    if (!TryNormalizeDialogLinkValue(meta, link, normalized_link)) {
+        return false;
+    }
+
+    link = normalized_link;
+
+    switch (link) {
+    case DIALOG_LINK_EXIT:
+        canonical = "Exit";
+        return true;
+    case DIALOG_LINK_BACK:
+        canonical = "Back";
+        return true;
+    default:
+        break;
+    }
+
+    if (link >= 0) {
+        canonical = std::to_string(link);
+        return true;
+    }
+
+    bool failed = false;
+    const auto& value_name = meta->ResolveEnumValueName(DIALOG_ANSWER_LINK_ENUM, link, &failed);
+    if (failed) {
+        return false;
+    }
+
+    canonical = string(value_name);
+    return true;
+}
+
+static auto TryParseDialogLinkToken(const EngineMetadata* meta, string_view token, int32_t& value, string& canonical) -> bool
 {
     FO_STACK_TRACE_ENTRY();
 
     if (strvex(token).compare_ignore_case("Exit")) {
         value = DIALOG_LINK_EXIT;
+        canonical = "Exit";
         return true;
     }
     if (strvex(token).compare_ignore_case("Back")) {
         value = DIALOG_LINK_BACK;
-        return true;
-    }
-    if (strvex(token).compare_ignore_case("Barter")) {
-        value = DIALOG_LINK_BARTER;
-        return true;
-    }
-    if (strvex(token).compare_ignore_case("Attack")) {
-        value = DIALOG_LINK_ATTACK;
+        canonical = "Back";
         return true;
     }
 
     if (strvex(token).is_number()) {
-        value = strvex(token).to_uint32();
-        value = NormalizeSpecialDialogLink(value);
-        return true;
+        if (!TryNormalizeDialogLinkValue(meta, strvex(token).to_int64(), value)) {
+            return false;
+        }
+
+        return TryResolveDialogAnswerLinkCanonical(meta, value, canonical);
+    }
+
+    string entry_name;
+
+    const auto separator_pos = token.find("::");
+    if (separator_pos != std::string_view::npos) {
+        if (token.substr(0, separator_pos) != DIALOG_ANSWER_LINK_ENUM || separator_pos + 2 >= token.size()) {
+            return false;
+        }
+
+        entry_name = string(token.substr(separator_pos + 2));
+    }
+    else {
+        entry_name = string(token);
+    }
+
+    bool failed = false;
+    value = meta->ResolveEnumValue(DIALOG_ANSWER_LINK_ENUM, entry_name, &failed);
+    if (!failed) {
+        int32_t normalized_link = 0;
+        if (!TryNormalizeDialogLinkValue(meta, value, normalized_link)) {
+            return false;
+        }
+
+        value = normalized_link;
+        return TryResolveDialogAnswerLinkCanonical(meta, value, canonical);
     }
 
     return false;
 }
 
-static auto GetDialogLinkTokenCanonical(uint32 link) -> string
-{
-    FO_STACK_TRACE_ENTRY();
-
-    link = NormalizeSpecialDialogLink(link);
-
-    if (link == DIALOG_LINK_EXIT) {
-        return "Exit";
-    }
-    if (link == DIALOG_LINK_BACK) {
-        return "Back";
-    }
-    if (link == DIALOG_LINK_BARTER) {
-        return "Barter";
-    }
-    if (link == DIALOG_LINK_ATTACK) {
-        return "Attack";
-    }
-
-    return string(std::to_string(link).c_str());
-}
-
-static auto TryParseDialogAnswerToken(string_view token, uint32& link, string& token_for_hash) -> bool
+static auto TryParseDialogAnswerToken(const EngineMetadata* meta, string_view token, int32_t& link, string& token_for_hash) -> bool
 {
     FO_STACK_TRACE_ENTRY();
 
@@ -111,13 +161,14 @@ static auto TryParseDialogAnswerToken(string_view token, uint32& link, string& t
         base_token.pop_back();
     }
 
-    if (base_token.empty() || !TryParseDialogLinkToken(base_token, link)) {
+    if (base_token.empty() || !TryParseDialogLinkToken(meta, base_token, link, token_for_hash)) {
         return false;
     }
 
-    link = NormalizeSpecialDialogLink(link);
+    if (!TryNormalizeDialogLinkValue(meta, link, link)) {
+        return false;
+    }
 
-    token_for_hash = GetDialogLinkTokenCanonical(link);
     token_for_hash.append(marker_count, '*');
     return true;
 }
@@ -209,89 +260,6 @@ static auto CollectDialogLangSections(ConfigFile& fodlg, string_view pack_name) 
     return lang_sections;
 }
 
-static auto TryGetDialogLegacyTextId(const EngineMetadata& meta, string_view pack_name, string_view key1, uint32& text_id) -> bool
-{
-    FO_STACK_TRACE_ENTRY();
-
-    const uint32 pack_id = meta.Hashes.ToHashedString(pack_name).as_uint32();
-
-    if (strvex(key1).compare_ignore_case("Name")) {
-        text_id = pack_id + 10;
-        return true;
-    }
-    if (strvex(key1).compare_ignore_case("Avatar")) {
-        text_id = pack_id + 11;
-        return true;
-    }
-    if (strvex(key1).compare_ignore_case("DescAliveShort")) {
-        text_id = pack_id + 20;
-        return true;
-    }
-    if (strvex(key1).compare_ignore_case("DescAliveFull")) {
-        text_id = pack_id + 21;
-        return true;
-    }
-    if (strvex(key1).compare_ignore_case("DescKnockoutShort")) {
-        text_id = pack_id + 22;
-        return true;
-    }
-    if (strvex(key1).compare_ignore_case("DescKnockoutFull")) {
-        text_id = pack_id + 23;
-        return true;
-    }
-    if (strvex(key1).compare_ignore_case("DescDeadShort")) {
-        text_id = pack_id + 24;
-        return true;
-    }
-    if (strvex(key1).compare_ignore_case("DescDeadFull")) {
-        text_id = pack_id + 25;
-        return true;
-    }
-    if (strvex(key1).compare_ignore_case("DescCriticalDeadShort")) {
-        text_id = pack_id + 26;
-        return true;
-    }
-    if (strvex(key1).compare_ignore_case("DescCriticalDeadFull")) {
-        text_id = pack_id + 27;
-        return true;
-    }
-
-    if (StartsWithIgnoreCase(key1, "Speech ")) {
-        const string_view speech_suffix = strvex(key1.substr(7)).trim();
-
-        if (strvex(speech_suffix).is_number()) {
-            text_id = pack_id + 12000 + strvex(speech_suffix).to_uint32();
-            return true;
-        }
-    }
-
-    return false;
-}
-
-static auto MakeDialogTextEntryId(const EngineMetadata& meta, string_view pack_name, const string& key1, const string& key2) -> uint32
-{
-    FO_STACK_TRACE_ENTRY();
-
-    uint32 text_id = 0;
-
-    if (key2.empty() && TryGetDialogLegacyTextId(meta, pack_name, key1, text_id)) {
-        return text_id;
-    }
-
-    if (TryGetDialogLegacyTextId(meta, pack_name, strex("{} {}", key1, key2), text_id)) {
-        return text_id;
-    }
-
-    string text_key = key1;
-
-    if (!key2.empty()) {
-        text_key += ' ';
-        text_key += key2;
-    }
-
-    return meta.Hashes.ToHashedString(strex("{} {}", pack_name, text_key)).as_uint32();
-}
-
 static void LoadDialogTextSection(const EngineMetadata& meta, DialogPack* pack, string_view pack_name, const string& lang_section_name, const string& lang_buf)
 {
     FO_STACK_TRACE_ENTRY();
@@ -303,13 +271,13 @@ static void LoadDialogTextSection(const EngineMetadata& meta, DialogPack* pack, 
         throw DialogParseException("One of the lang section not found", pack_name);
     }
 
-    TextPack temp_msg;
+    TextPack temp_msg {meta.Hashes};
 
-    if (!temp_msg.LoadFromString(lang_buf, meta.Hashes)) {
+    if (!temp_msg.LoadFromString(lang_buf, "Dialogs")) {
         throw DialogParseException("Load MSG fail", pack_name);
     }
 
-    pack->Texts.emplace_back(lang_section_name, TextPack {});
+    pack->Texts.emplace_back(lang_section_name, TextPack {meta.Hashes});
     const size_t text_pack_index = pack->Texts.size() - 1;
 
     istringstream lang_lines {string(lang_buf)};
@@ -324,14 +292,8 @@ static void LoadDialogTextSection(const EngineMetadata& meta, DialogPack* pack, 
             return;
         }
 
-        const uint32 new_str_num = MakeDialogTextEntryId(meta, pack_name, key1, key2);
-
-        if (new_str_num == 0) {
-            return;
-        }
-
         text = strex(text).replace("\\n", "\n");
-        pack->Texts.at(text_pack_index).second.AddStr(new_str_num, std::move(text));
+        pack->Texts.at(text_pack_index).second.AddStr(TextPackKey::FromParts(meta.Hashes, "Dialogs", string(pack_name), key1, key2), std::move(text));
     };
 
     while (std::getline(lang_lines, lang_line)) {
@@ -380,7 +342,7 @@ static void LoadDialogTextSection(const EngineMetadata& meta, DialogPack* pack, 
     }
 }
 
-static auto GetPropEnumIndex(const EngineMetadata* meta, string_view str, bool is_demand, uint8& type, bool& is_hash) -> int32
+static auto GetPropEnumIndex(const EngineMetadata* meta, string_view str, bool is_demand, uint8_t& type) -> int32_t
 {
     FO_STACK_TRACE_ENTRY();
 
@@ -390,7 +352,7 @@ static auto GetPropEnumIndex(const EngineMetadata* meta, string_view str, bool i
     const auto* prop_location = meta->GetPropertyRegistrator(LocationProperties::ENTITY_TYPE_NAME)->FindProperty(str);
     const auto* prop_map = meta->GetPropertyRegistrator(MapProperties::ENTITY_TYPE_NAME)->FindProperty(str);
 
-    auto count = 0;
+    int32_t count = 0;
     count += prop_global != nullptr ? 1 : 0;
     count += prop_critter != nullptr ? 1 : 0;
     count += prop_item != nullptr ? 1 : 0;
@@ -437,11 +399,10 @@ static auto GetPropEnumIndex(const EngineMetadata* meta, string_view str, bool i
         throw DialogParseException("DR property is not mutable", str);
     }
 
-    is_hash = prop->IsBaseTypeHash();
     return prop->GetRegIndex();
 }
 
-auto DialogAnswer::GetDemand(int32 index) -> DialogAnswerReq*
+auto DialogAnswer::GetDemand(int32_t index) -> DialogAnswerReq*
 {
     FO_STACK_TRACE_ENTRY();
 
@@ -452,7 +413,7 @@ auto DialogAnswer::GetDemand(int32 index) -> DialogAnswerReq*
     return Demands.at(index).get();
 }
 
-auto DialogAnswer::GetResult(int32 index) -> DialogAnswerReq*
+auto DialogAnswer::GetResult(int32_t index) -> DialogAnswerReq*
 {
     FO_STACK_TRACE_ENTRY();
 
@@ -463,7 +424,7 @@ auto DialogAnswer::GetResult(int32 index) -> DialogAnswerReq*
     return Results.at(index).get();
 }
 
-auto DialogSpeech::GetAnswer(int32 index) -> DialogAnswer*
+auto DialogSpeech::GetAnswer(int32_t index) -> DialogAnswer*
 {
     FO_STACK_TRACE_ENTRY();
 
@@ -474,7 +435,7 @@ auto DialogSpeech::GetAnswer(int32 index) -> DialogAnswer*
     return Answers.at(index).get();
 }
 
-auto DialogPack::GetSpeech(int32 index) -> DialogSpeech*
+auto DialogPack::GetSpeech(int32_t index) -> DialogSpeech*
 {
     FO_STACK_TRACE_ENTRY();
 
@@ -496,16 +457,11 @@ void DialogManager::LoadFromResources(const FileSystem& resources)
     FO_STACK_TRACE_ENTRY();
 
     size_t errors = 0;
-    auto files = resources.FilterFiles("fodlg");
+    const auto files = resources.FilterFiles("fodlg");
 
     for (const auto& file_header : files) {
         try {
             auto file = File::Load(file_header);
-
-            if (strvex(file.GetStr()).trim().empty()) {
-                continue;
-            }
-
             auto pack = ParseDialog(file.GetNameNoExt(), file.GetStr());
             AddDialog(std::move(pack));
         }
@@ -557,7 +513,7 @@ auto DialogManager::ParseDialog(string_view pack_name, string_view data) const -
     FO_STACK_TRACE_ENTRY();
 
     auto pack = SafeAlloc::MakeRefCounted<DialogPack>();
-    auto fodlg = ConfigFile(strex("{}.fodlg", pack_name), string(data), &_meta->Hashes, ConfigFileOption::CollectContent);
+    auto fodlg = ConfigFile(strex("{}.fodlg", pack_name), string(data), ConfigFileOption::CollectContent);
 
     pack->PackId = _meta->Hashes.ToHashedString(pack_name);
 
@@ -570,10 +526,6 @@ auto DialogManager::ParseDialog(string_view pack_name, string_view data) const -
     const string_view comment = fodlg.GetSectionContent("Comment");
     pack->Comment = comment.empty() ? fodlg.GetSectionContent("comment") : comment;
     pack->Comment = strvex(pack->Comment).trim();
-
-    if (pack->PackId.as_uint32() <= 0xFFFF) {
-        throw DialogParseException("Invalid hash for dialog name", pack_name);
-    }
 
     const vector<string> lang_sections = CollectDialogLangSections(fodlg, pack_name);
 
@@ -637,7 +589,7 @@ auto DialogManager::ParseDialog(string_view pack_name, string_view data) const -
         if (strvex(command).compare_ignore_case("Speech")) {
             flush_speech();
 
-            uint32 speech_id = 0;
+            int32_t speech_id = 0;
             vector<string> args;
             string arg;
 
@@ -652,7 +604,7 @@ auto DialogManager::ParseDialog(string_view pack_name, string_view data) const -
                 throw DialogParseException("Dialog syntax: invalid Speech id", pack_name);
             }
 
-            speech_id = strvex(args[0]).to_uint32();
+            speech_id = numeric_cast<int32_t>(strvex(args[0]).to_int64());
 
             if (args.size() != 1) {
                 throw DialogParseException("Dialog syntax: Speech must contain only id", pack_name);
@@ -660,7 +612,7 @@ auto DialogManager::ParseDialog(string_view pack_name, string_view data) const -
 
             auto speech = SafeAlloc::MakeRefCounted<DialogSpeech>();
             speech->Id = speech_id;
-            speech->TextId = MakeDialogTextEntryId(*_meta, pack_name, strex("Speech {}", speech->Id).str(), string {});
+            speech->TextId = _meta->Hashes.ToHashedString(strex("Speech {}", speech->Id));
             speech->DlgScriptFuncName = hstring {};
 
             current_speech = speech;
@@ -698,7 +650,7 @@ auto DialogManager::ParseDialog(string_view pack_name, string_view data) const -
 
             flush_answer();
 
-            uint32 link = 0;
+            int32_t link = 0;
             vector<string> args;
             string arg;
             string answer_token_for_hash;
@@ -707,13 +659,13 @@ auto DialogManager::ParseDialog(string_view pack_name, string_view data) const -
                 args.emplace_back(arg);
             }
 
-            if (args.size() != 1 || !TryParseDialogAnswerToken(args[0], link, answer_token_for_hash)) {
-                throw DialogParseException("Dialog syntax: invalid Answer command", pack_name);
+            if (args.size() != 1 || !TryParseDialogAnswerToken(_meta.get(), args[0], link, answer_token_for_hash)) {
+                throw DialogParseException("Dialog syntax: invalid Answer command", pack_name, args[0], link, answer_token_for_hash);
             }
 
             auto answer = SafeAlloc::MakeRefCounted<DialogAnswer>();
-            answer->Link = NormalizeSpecialDialogLink(link);
-            answer->TextId = MakeDialogTextEntryId(*_meta, pack_name, strex("Speech {}", current_speech->Id).str(), strex("Answer {}", answer_token_for_hash).str());
+            answer->Link = link;
+            answer->TextId = _meta->Hashes.ToHashedString(strex("Speech {} Answer {}", current_speech->Id, answer_token_for_hash));
 
             current_answer = answer;
             continue;
@@ -760,20 +712,20 @@ auto DialogManager::LoadDemandResult(istringstream& input, bool is_demand) const
 {
     FO_STACK_TRACE_ENTRY();
 
-    uint8 who = DR_WHO_PLAYER;
-    uint8 oper = '=';
-    int32 values_count = 0;
+    uint8_t who = DR_WHO_PLAYER;
+    uint8_t oper = '=';
+    int32_t values_count = 0;
     string svalue;
-    int32 ivalue = 0;
-    int32 id_index = 0;
+    any_t value;
+    int32_t id_index = 0;
     hstring id_hash;
     string type_str;
     string name;
     string script_name;
     bool no_recheck = false;
-    int32 script_val[5] = {0, 0, 0, 0, 0};
+    any_t script_val[5];
 
-    auto parse_who = [&](string_view who_token) -> uint8 {
+    auto parse_who = [&](string_view who_token) -> uint8_t {
         if (strvex(who_token).compare_ignore_case("Player")) {
             return DR_WHO_PLAYER;
         }
@@ -784,7 +736,7 @@ auto DialogManager::LoadDemandResult(istringstream& input, bool is_demand) const
         throw DialogParseException("Invalid DR who token, expected Player or Npc", who_token);
     };
 
-    auto parse_oper = [&](string_view oper_token) -> uint8 {
+    auto parse_oper = [&](string_view oper_token) -> uint8_t {
         if (oper_token == ">") {
             return '>';
         }
@@ -831,7 +783,7 @@ auto DialogManager::LoadDemandResult(istringstream& input, bool is_demand) const
         throw DialogParseException("Parse DR type fail");
     }
 
-    auto type = GetDrType(type_str);
+    uint8_t type = GetDrType(type_str);
 
     if (type == DR_NO_RECHECK) {
         no_recheck = true;
@@ -857,8 +809,7 @@ auto DialogManager::LoadDemandResult(istringstream& input, bool is_demand) const
 
         // Name
         input >> name;
-        bool is_hash = false;
-        id_index = GetPropEnumIndex(_meta.get(), name, is_demand, type, is_hash);
+        id_index = GetPropEnumIndex(_meta.get(), name, is_demand, type);
 
         // Operator
         string oper_token;
@@ -871,13 +822,7 @@ auto DialogManager::LoadDemandResult(istringstream& input, bool is_demand) const
 
         // Value
         input >> svalue;
-
-        if (is_hash) {
-            ivalue = _meta->Hashes.ToHashedString(svalue).as_int32();
-        }
-        else {
-            ivalue = _meta->ResolveGenericValue(svalue);
-        }
+        value = any_t {std::move(svalue)};
     } break;
     case DR_ITEM: {
         // Who
@@ -904,7 +849,7 @@ auto DialogManager::LoadDemandResult(istringstream& input, bool is_demand) const
 
         // Value
         input >> svalue;
-        ivalue = _meta->ResolveGenericValue(svalue);
+        value = any_t {std::move(svalue)};
     } break;
     case DR_SCRIPT: {
         // Script name
@@ -915,7 +860,6 @@ auto DialogManager::LoadDemandResult(istringstream& input, bool is_demand) const
         }
 
         string value_str;
-
         values_count = 0;
 
         while (input >> value_str) {
@@ -923,7 +867,7 @@ auto DialogManager::LoadDemandResult(istringstream& input, bool is_demand) const
                 throw DialogParseException("Invalid values count", values_count + 1);
             }
 
-            script_val[values_count] = _meta->ResolveGenericValue(value_str);
+            script_val[values_count] = any_t {std::move(value_str)};
             values_count++;
         }
 
@@ -956,18 +900,18 @@ auto DialogManager::LoadDemandResult(istringstream& input, bool is_demand) const
     result->ParamHash = id_hash;
     result->AnswerScriptFuncName = _meta->Hashes.ToHashedString(script_name);
     result->Op = oper;
-    result->ValuesCount = static_cast<uint8>(values_count);
+    result->ValuesCount = static_cast<uint8_t>(values_count);
     result->NoRecheck = no_recheck;
-    result->Value = ivalue;
-    result->ValueExt0 = script_val[0];
-    result->ValueExt1 = script_val[1];
-    result->ValueExt2 = script_val[2];
-    result->ValueExt3 = script_val[3];
-    result->ValueExt4 = script_val[4];
+    result->Value = std::move(value);
+    result->ValueExt0 = std::move(script_val[0]);
+    result->ValueExt1 = std::move(script_val[1]);
+    result->ValueExt2 = std::move(script_val[2]);
+    result->ValueExt3 = std::move(script_val[3]);
+    result->ValueExt4 = std::move(script_val[4]);
     return result;
 }
 
-auto DialogManager::GetDrType(string_view str) const -> uint8
+auto DialogManager::GetDrType(string_view str) const -> uint8_t
 {
     FO_STACK_TRACE_ENTRY();
 
@@ -990,11 +934,9 @@ auto DialogManager::GetDrType(string_view str) const -> uint8
     return DR_NONE;
 }
 
-auto DialogManager::CheckOper(uint8 oper) const -> bool
+auto DialogManager::CheckOper(uint8_t oper) const -> bool
 {
     FO_STACK_TRACE_ENTRY();
 
     return oper == '>' || oper == '<' || oper == '=' || oper == '+' || oper == '-' || oper == '*' || oper == '/' || oper == '!' || oper == '}' || oper == '{';
 }
-
-FO_END_NAMESPACE

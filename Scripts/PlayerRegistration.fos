@@ -8,7 +8,38 @@ namespace PlayerRegistration
 
 #if SERVER
 
-void ModuleInit()
+const hstring PlayerNamesCollectionName = "PlayerNames".hstr();
+
+Player GetPlayerByName(string playerName)
+{
+    ident playerId = ResolvePlayerIdByName(playerName);
+    return playerId != ZERO_IDENT ? Game.GetPlayer(playerId) : null;
+}
+
+ident ResolvePlayerIdByName(string playerName)
+{
+    if (!Game.DbHasRecord(PlayerNamesCollectionName, playerName)) {
+        return ZERO_IDENT;
+    }
+    dict<string, string> linkEntry = Game.DbGetRecord(PlayerNamesCollectionName, playerName);
+    if (!linkEntry.exists("PlayerId")) {
+        return ZERO_IDENT;
+    }
+    ident playerId = ZERO_IDENT;
+    playerId.value = linkEntry["PlayerId"].toInt64();
+    return playerId;
+}
+
+void UpsertPlayerName(string playerName, ident playerId)
+{
+    if (!Game.DbHasRecord(PlayerNamesCollectionName, playerName)) {
+        Game.DbInsertRecord(PlayerNamesCollectionName, playerName, {{"_Name", playerName}});
+    }
+    Game.DbUpdateRecordInt64(PlayerNamesCollectionName, playerName, "PlayerId", playerId.value);
+}
+
+[[ModuleInit]]
+void InitPlayerRegistration()
 {
     AddRegistrationProperty(CritterProperty::StrengthBase);
     AddRegistrationProperty(CritterProperty::PerceptionBase);
@@ -34,29 +65,32 @@ void AddRegistrationProperty(CritterProperty prop)
     Game.RegProperties = properies;
 }
 
+[[ServerRemoteCall]]
 void LoginExistingPlayer(Player player, string name)
 {
-    if (Game.GetPlayer(name) == null) {
-        Messaging::Info(player, TextPackName::Game, STR_NET_WRONG_LOGIN);
+    ident playerId = ResolvePlayerIdByName(name);
+    if (playerId == ZERO_IDENT) {
+        Messaging::Info(player, TextPackKey(TextPackName::Game, "" + (STR_NET_WRONG_LOGIN)));
         player.Disconnect();
         return;
     }
 
-    Game.LoginPlayer(player, name);
+    player.SetName(name);
+    Game.LoginPlayerToExistentRecord(player, playerId);
 }
 
 bool ValidateRegistrationProps(Player player, string name, dict<CritterProperty, int> props)
 {
     int nameError = Parameters::CheckPlayerName(name);
     if (nameError != 0) {
-        Messaging::Info(player, TextPackName::Game, nameError);
+        Messaging::Info(player, TextPackKey(TextPackName::Game, "" + (nameError)));
         Game.Log("Player registration rejected due to invalid name");
         return false;
     }
 
     for (int i = 0; i < Game.RegProperties.length(); i++) {
         if (!props.exists(Game.RegProperties[i])) {
-            Messaging::Info(player, TextPackName::Game, MsgStr::StrNetWrongSpecial);
+            Messaging::Info(player, TextPackKey(TextPackName::Game, "" + (MsgStr::StrNetWrongSpecial)));
             Game.Log("Player registration rejected due to missing registration prop");
             return false;
         }
@@ -64,7 +98,7 @@ bool ValidateRegistrationProps(Player player, string name, dict<CritterProperty,
 
     for (int i = 0; i < props.length(); i++) {
         if (Game.RegProperties.find(props.getKey(i)) == -1) {
-            Messaging::Info(player, TextPackName::Game, MsgStr::StrNetWrongSpecial);
+            Messaging::Info(player, TextPackKey(TextPackName::Game, "" + (MsgStr::StrNetWrongSpecial)));
             Game.Log("Player registration rejected due to unexpected registration prop");
             return false;
         }
@@ -76,7 +110,7 @@ bool ValidateRegistrationProps(Player player, string name, dict<CritterProperty,
         int value = props.get(prop, 0);
 
         if (value < 1 || value > 10) {
-            Messaging::Info(player, TextPackName::Game, MsgStr::StrNetWrongSpecial);
+            Messaging::Info(player, TextPackKey(TextPackName::Game, "" + (MsgStr::StrNetWrongSpecial)));
             Game.Log("Player registration rejected due to invalid SPECIAL values");
             return false;
         }
@@ -84,8 +118,8 @@ bool ValidateRegistrationProps(Player player, string name, dict<CritterProperty,
         special += value;
     }
 
-    if (special != Settings.StartSpecialPoints) {
-        Messaging::Info(player, TextPackName::Game, MsgStr::StrNetWrongSpecial);
+    if (special != Settings.Player.StartSpecialPoints) {
+        Messaging::Info(player, TextPackKey(TextPackName::Game, "" + (MsgStr::StrNetWrongSpecial)));
         Game.Log("Player registration rejected due to invalid SPECIAL sum");
         return false;
     }
@@ -96,7 +130,7 @@ bool ValidateRegistrationProps(Player player, string name, dict<CritterProperty,
          CritterPropertyGroup::Skills.find(CritterProperty(props.get(CritterProperty::TagSkill2, CritterProperty::None))) == -1) ||
         (props.get(CritterProperty::TagSkill3, CritterProperty::None) != CritterProperty::None &&
          CritterPropertyGroup::Skills.find(CritterProperty(props.get(CritterProperty::TagSkill3, CritterProperty::None))) == -1)) {
-        Messaging::Info(player, TextPackName::Game, MsgStr::StrNetWrongTagskill);
+        Messaging::Info(player, TextPackKey(TextPackName::Game, "" + (MsgStr::StrNetWrongTagskill)));
         Game.Log("Player registration rejected due to invalid tag skills");
         return false;
     }
@@ -104,6 +138,7 @@ bool ValidateRegistrationProps(Player player, string name, dict<CritterProperty,
     return true;
 }
 
+[[ServerRemoteCall]]
 void RegisterNewPlayer(Player player, string name, dict<CritterProperty, int> props)
 {
     if (!ValidateRegistrationProps(player, name, props)) {
@@ -111,8 +146,8 @@ void RegisterNewPlayer(Player player, string name, dict<CritterProperty, int> pr
         return;
     }
 
-    if (Game.GetPlayer(name) != null) {
-        Messaging::Info(player, TextPackName::Game, STR_NET_ACCOUNT_ALREADY);
+    if (ResolvePlayerIdByName(name) != ZERO_IDENT) {
+        Messaging::Info(player, TextPackKey(TextPackName::Game, "" + (STR_NET_ACCOUNT_ALREADY)));
         player.Disconnect();
         return;
     }
@@ -122,15 +157,21 @@ void RegisterNewPlayer(Player player, string name, dict<CritterProperty, int> pr
         critterProps[props.getKey(i)] = any(props.getValue(i));
     }
 
+    player.SetName(name);
     Critter cr = Game.CreateCritter(Content::Critter::Player, true, critterProps);
-    Player loginedPlayer = Game.LoginPlayer(player, name);
+    // MainCritterId must be set before LoginPlayerToNewRecord — the engine rejects an empty
+    // player document on insert and only Persistent properties get serialized. As a side effect
+    // the engine auto-attaches the critter during login, so no SwitchCritter call is needed.
+    player.MainCritterId = cr.Id;
+    Player loginedPlayer = Game.LoginPlayerToNewRecord(player);
 
-    loginedPlayer.MainCritterId = cr.Id;
-    loginedPlayer.SwitchCritter(cr);
-    loginedPlayer.DisplayName = loginedPlayer.Name;
-    cr.DisplayName = loginedPlayer.DisplayName;
-    cr.IsGenerated = true;
-    Game.Log("Player registered and entered the game");
+    if (loginedPlayer != null) {
+        UpsertPlayerName(name, loginedPlayer.Id);
+        loginedPlayer.DisplayName = loginedPlayer.Name;
+        cr.DisplayName = loginedPlayer.DisplayName;
+        cr.IsGenerated = true;
+        Game.Log("Player registered and entered the game");
+    }
 }
 
 string GetPlayerName(ident crId)
@@ -147,7 +188,8 @@ string GetPlayerName(ident crId)
 
 #if CLIENT
 
-void ModuleInit()
+[[ModuleInit]]
+void InitPlayerRegistration()
 {
     Game.OnConnected.Subscribe(OnConnected);
     Game.OnLoginSuccess.Subscribe(OnLoginSuccess);
@@ -175,6 +217,7 @@ void CallRegisterPlayer(string name, string pass, dict<CritterProperty, int> pro
     }
 }
 
+[[Event]]
 void OnConnected()
 {
     string name = Game.GetCacheText("RegName__");
@@ -191,16 +234,19 @@ void OnConnected()
     }
 }
 
+[[Event]]
 void OnLoginSuccess()
 {
     ResetRegistrationRequest();
 }
 
+[[Event]]
 void OnConnectingFailed()
 {
     ResetRegistrationRequest();
 }
 
+[[Event]]
 void OnDisconnected()
 {
     ResetRegistrationRequest();

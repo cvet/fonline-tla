@@ -1,13 +1,21 @@
 #include "DialogBaker.h"
+#include "AngelScriptScripting.h"
 #include "Dialogs.h"
 #include "ScriptSystem.h"
 #include "TextPack.h"
 
-FO_BEGIN_NAMESPACE
+FO_USING_NAMESPACE();
 
 class CritterTag
 {
 };
+
+template<typename TRet, typename... Args>
+static auto HasDialogScriptAttribute(ScriptSystem& engine, hstring func_name, string_view attribute) -> bool
+{
+    auto func = engine.FindFunc<TRet, Args...>(func_name);
+    return func && func.HasAttribute(attribute);
+}
 
 DialogBaker::DialogBaker(shared_ptr<BakingContext> ctx) :
     BaseBaker(std::move(ctx))
@@ -58,7 +66,10 @@ void DialogBaker::BakeFiles(const FileCollection& files, string_view target_path
     // Load dialogs
     auto server_engine = BakerServerEngine(*_context->BakedFiles);
     server_engine.MapEngineType<CritterTag>(server_engine.GetBaseType("Critter"));
-    server_engine.InitSubsystems(&server_engine, *_context->BakedFiles);
+    server_engine.MapScriptTypes(&server_engine);
+#if FO_ANGELSCRIPT_SCRIPTING
+    InitAngelScriptScripting(&server_engine, *_context->Settings, *_context->BakedFiles);
+#endif
     const auto dialog_mngr = DialogManager(server_engine);
 
     size_t errors = 0;
@@ -80,7 +91,7 @@ void DialogBaker::BakeFiles(const FileCollection& files, string_view target_path
         for (const auto& speech : dlg_pack->Speeches) {
             if (speech->DlgScriptFuncName) {
                 if (!server_engine.CheckFunc<void, CritterTag*, CritterTag*, string&>(speech->DlgScriptFuncName) && //
-                    !server_engine.CheckFunc<int32, CritterTag*, CritterTag*, string&>(speech->DlgScriptFuncName)) {
+                    !server_engine.CheckFunc<int32_t, CritterTag*, CritterTag*, string&>(speech->DlgScriptFuncName)) {
                     WriteLog("Dialog {} invalid start function {}", dlg_pack->PackId, speech->DlgScriptFuncName);
                     errors++;
                 }
@@ -89,13 +100,15 @@ void DialogBaker::BakeFiles(const FileCollection& files, string_view target_path
             for (const auto& answer : speech->Answers) {
                 for (const auto& demand : answer->Demands) {
                     if (demand->Type == DR_SCRIPT) {
-                        if ((demand->ValuesCount == 0 && !server_engine.CheckFunc<bool, CritterTag*, CritterTag*>(demand->AnswerScriptFuncName)) || //
-                            (demand->ValuesCount == 1 && !server_engine.CheckFunc<bool, CritterTag*, CritterTag*, int32>(demand->AnswerScriptFuncName)) || //
-                            (demand->ValuesCount == 2 && !server_engine.CheckFunc<bool, CritterTag*, CritterTag*, int32, int32>(demand->AnswerScriptFuncName)) || //
-                            (demand->ValuesCount == 3 && !server_engine.CheckFunc<bool, CritterTag*, CritterTag*, int32, int32, int32>(demand->AnswerScriptFuncName)) || //
-                            (demand->ValuesCount == 4 && !server_engine.CheckFunc<bool, CritterTag*, CritterTag*, int32, int32, int32, int32>(demand->AnswerScriptFuncName)) || //
-                            (demand->ValuesCount == 5 && !server_engine.CheckFunc<bool, CritterTag*, CritterTag*, int32, int32, int32, int32, int32>(demand->AnswerScriptFuncName))) {
-                            WriteLog("Dialog {} answer demand invalid function {}", dlg_pack->PackId, demand->AnswerScriptFuncName);
+                        const bool has_valid_demand = (demand->ValuesCount == 0 && HasDialogScriptAttribute<bool, CritterTag*, CritterTag*>(server_engine, demand->AnswerScriptFuncName, "DialogDemand")) || //
+                            (demand->ValuesCount == 1 && HasDialogScriptAttribute<bool, CritterTag*, CritterTag*, any_t>(server_engine, demand->AnswerScriptFuncName, "DialogDemand")) || //
+                            (demand->ValuesCount == 2 && HasDialogScriptAttribute<bool, CritterTag*, CritterTag*, any_t, any_t>(server_engine, demand->AnswerScriptFuncName, "DialogDemand")) || //
+                            (demand->ValuesCount == 3 && HasDialogScriptAttribute<bool, CritterTag*, CritterTag*, any_t, any_t, any_t>(server_engine, demand->AnswerScriptFuncName, "DialogDemand")) || //
+                            (demand->ValuesCount == 4 && HasDialogScriptAttribute<bool, CritterTag*, CritterTag*, any_t, any_t, any_t, any_t>(server_engine, demand->AnswerScriptFuncName, "DialogDemand")) || //
+                            (demand->ValuesCount == 5 && HasDialogScriptAttribute<bool, CritterTag*, CritterTag*, any_t, any_t, any_t, any_t, any_t>(server_engine, demand->AnswerScriptFuncName, "DialogDemand"));
+
+                        if (!has_valid_demand) {
+                            WriteLog("Dialog {} answer demand invalid function {} (expected [[DialogDemand]])", dlg_pack->PackId, demand->AnswerScriptFuncName);
                             errors++;
                         }
                     }
@@ -103,28 +116,39 @@ void DialogBaker::BakeFiles(const FileCollection& files, string_view target_path
 
                 for (const auto& result : answer->Results) {
                     if (result->Type == DR_SCRIPT) {
-                        int32 not_found_count = 0;
+                        const bool found_void_result = (result->ValuesCount == 0 && server_engine.CheckFunc<void, CritterTag*, CritterTag*>(result->AnswerScriptFuncName)) || //
+                            (result->ValuesCount == 1 && server_engine.CheckFunc<void, CritterTag*, CritterTag*, any_t>(result->AnswerScriptFuncName)) || //
+                            (result->ValuesCount == 2 && server_engine.CheckFunc<void, CritterTag*, CritterTag*, any_t, any_t>(result->AnswerScriptFuncName)) || //
+                            (result->ValuesCount == 3 && server_engine.CheckFunc<void, CritterTag*, CritterTag*, any_t, any_t, any_t>(result->AnswerScriptFuncName)) || //
+                            (result->ValuesCount == 4 && server_engine.CheckFunc<void, CritterTag*, CritterTag*, any_t, any_t, any_t, any_t>(result->AnswerScriptFuncName)) || //
+                            (result->ValuesCount == 5 && server_engine.CheckFunc<void, CritterTag*, CritterTag*, any_t, any_t, any_t, any_t, any_t>(result->AnswerScriptFuncName));
 
-                        if ((result->ValuesCount == 0 && !server_engine.CheckFunc<void, CritterTag*, CritterTag*>(result->AnswerScriptFuncName)) || //
-                            (result->ValuesCount == 1 && !server_engine.CheckFunc<void, CritterTag*, CritterTag*, int32>(result->AnswerScriptFuncName)) || //
-                            (result->ValuesCount == 2 && !server_engine.CheckFunc<void, CritterTag*, CritterTag*, int32, int32>(result->AnswerScriptFuncName)) || //
-                            (result->ValuesCount == 3 && !server_engine.CheckFunc<void, CritterTag*, CritterTag*, int32, int32, int32>(result->AnswerScriptFuncName)) || //
-                            (result->ValuesCount == 4 && !server_engine.CheckFunc<void, CritterTag*, CritterTag*, int32, int32, int32, int32>(result->AnswerScriptFuncName)) || //
-                            (result->ValuesCount == 5 && !server_engine.CheckFunc<void, CritterTag*, CritterTag*, int32, int32, int32, int32, int32>(result->AnswerScriptFuncName))) {
-                            not_found_count++;
-                        }
+                        const bool found_int_result = (result->ValuesCount == 0 && server_engine.CheckFunc<int32_t, CritterTag*, CritterTag*>(result->AnswerScriptFuncName)) || //
+                            (result->ValuesCount == 1 && server_engine.CheckFunc<int32_t, CritterTag*, CritterTag*, any_t>(result->AnswerScriptFuncName)) || //
+                            (result->ValuesCount == 2 && server_engine.CheckFunc<int32_t, CritterTag*, CritterTag*, any_t, any_t>(result->AnswerScriptFuncName)) || //
+                            (result->ValuesCount == 3 && server_engine.CheckFunc<int32_t, CritterTag*, CritterTag*, any_t, any_t, any_t>(result->AnswerScriptFuncName)) || //
+                            (result->ValuesCount == 4 && server_engine.CheckFunc<int32_t, CritterTag*, CritterTag*, any_t, any_t, any_t, any_t>(result->AnswerScriptFuncName)) || //
+                            (result->ValuesCount == 5 && server_engine.CheckFunc<int32_t, CritterTag*, CritterTag*, any_t, any_t, any_t, any_t, any_t>(result->AnswerScriptFuncName));
 
-                        if ((result->ValuesCount == 0 && !server_engine.CheckFunc<int32, CritterTag*, CritterTag*>(result->AnswerScriptFuncName)) || //
-                            (result->ValuesCount == 1 && !server_engine.CheckFunc<int32, CritterTag*, CritterTag*, int32>(result->AnswerScriptFuncName)) || //
-                            (result->ValuesCount == 2 && !server_engine.CheckFunc<int32, CritterTag*, CritterTag*, int32, int32>(result->AnswerScriptFuncName)) || //
-                            (result->ValuesCount == 3 && !server_engine.CheckFunc<int32, CritterTag*, CritterTag*, int32, int32, int32>(result->AnswerScriptFuncName)) || //
-                            (result->ValuesCount == 4 && !server_engine.CheckFunc<int32, CritterTag*, CritterTag*, int32, int32, int32, int32>(result->AnswerScriptFuncName)) || //
-                            (result->ValuesCount == 5 && !server_engine.CheckFunc<int32, CritterTag*, CritterTag*, int32, int32, int32, int32, int32>(result->AnswerScriptFuncName))) {
-                            not_found_count++;
-                        }
+                        const bool valid_void_result = (result->ValuesCount == 0 && HasDialogScriptAttribute<void, CritterTag*, CritterTag*>(server_engine, result->AnswerScriptFuncName, "DialogResult")) || //
+                            (result->ValuesCount == 1 && HasDialogScriptAttribute<void, CritterTag*, CritterTag*, any_t>(server_engine, result->AnswerScriptFuncName, "DialogResult")) || //
+                            (result->ValuesCount == 2 && HasDialogScriptAttribute<void, CritterTag*, CritterTag*, any_t, any_t>(server_engine, result->AnswerScriptFuncName, "DialogResult")) || //
+                            (result->ValuesCount == 3 && HasDialogScriptAttribute<void, CritterTag*, CritterTag*, any_t, any_t, any_t>(server_engine, result->AnswerScriptFuncName, "DialogResult")) || //
+                            (result->ValuesCount == 4 && HasDialogScriptAttribute<void, CritterTag*, CritterTag*, any_t, any_t, any_t, any_t>(server_engine, result->AnswerScriptFuncName, "DialogResult")) || //
+                            (result->ValuesCount == 5 && HasDialogScriptAttribute<void, CritterTag*, CritterTag*, any_t, any_t, any_t, any_t, any_t>(server_engine, result->AnswerScriptFuncName, "DialogResult"));
 
-                        if (not_found_count != 1) {
-                            WriteLog("Dialog {} answer result invalid function {}", dlg_pack->PackId, result->AnswerScriptFuncName);
+                        const bool valid_int_result = (result->ValuesCount == 0 && HasDialogScriptAttribute<int32_t, CritterTag*, CritterTag*>(server_engine, result->AnswerScriptFuncName, "DialogResult")) || //
+                            (result->ValuesCount == 1 && HasDialogScriptAttribute<int32_t, CritterTag*, CritterTag*, any_t>(server_engine, result->AnswerScriptFuncName, "DialogResult")) || //
+                            (result->ValuesCount == 2 && HasDialogScriptAttribute<int32_t, CritterTag*, CritterTag*, any_t, any_t>(server_engine, result->AnswerScriptFuncName, "DialogResult")) || //
+                            (result->ValuesCount == 3 && HasDialogScriptAttribute<int32_t, CritterTag*, CritterTag*, any_t, any_t, any_t>(server_engine, result->AnswerScriptFuncName, "DialogResult")) || //
+                            (result->ValuesCount == 4 && HasDialogScriptAttribute<int32_t, CritterTag*, CritterTag*, any_t, any_t, any_t, any_t>(server_engine, result->AnswerScriptFuncName, "DialogResult")) || //
+                            (result->ValuesCount == 5 && HasDialogScriptAttribute<int32_t, CritterTag*, CritterTag*, any_t, any_t, any_t, any_t, any_t>(server_engine, result->AnswerScriptFuncName, "DialogResult"));
+
+                        const int32_t found_count = (found_void_result ? 1 : 0) + (found_int_result ? 1 : 0);
+                        const int32_t valid_count = (valid_void_result ? 1 : 0) + (valid_int_result ? 1 : 0);
+
+                        if (found_count != 1 || valid_count != 1) {
+                            WriteLog("Dialog {} answer result invalid function {} (expected exactly one [[DialogResult]] overload)", dlg_pack->PackId, result->AnswerScriptFuncName);
                             errors++;
                         }
                     }
@@ -159,7 +183,7 @@ void DialogTextBaker::BakeFiles(const FileCollection& files, string_view target_
 
     // Collect dialog files
     vector<File> filtered_files;
-    uint64 max_write_time = 0;
+    uint64_t max_write_time = 0;
 
     for (const auto& file_header : files) {
         if (strex(file_header.GetPath()).get_file_extension() != "fodlg") {
@@ -259,5 +283,3 @@ void DialogTextBaker::BakeFiles(const FileCollection& files, string_view target_
         _context->WriteData(strex("{}.Dialogs.{}.fotxt-bin", _context->PackName, lang_name), text_pack_data);
     }
 }
-
-FO_END_NAMESPACE

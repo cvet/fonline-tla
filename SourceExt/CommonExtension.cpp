@@ -20,8 +20,8 @@ string FO_NAMESPACE Common_Game_Sha1(BaseEngine* engine, string_view text)
 
     SHA1_CTX ctx;
     _SHA1_Init(&ctx);
-    _SHA1_Update(&ctx, reinterpret_cast<const uint8*>(text.data()), text.length());
-    uint8 digest[SHA1_DIGEST_SIZE];
+    _SHA1_Update(&ctx, reinterpret_cast<const uint8_t*>(text.data()), text.length());
+    uint8_t digest[SHA1_DIGEST_SIZE];
     _SHA1_Final(&ctx, digest);
 
     const auto* nums = "0123456789abcdef";
@@ -37,9 +37,9 @@ string FO_NAMESPACE Common_Game_Sha2(BaseEngine* engine, string_view text)
 {
     ignore_unused(engine);
 
-    constexpr uint32 digest_size = 32;
-    uint8 digest[digest_size];
-    sha256(reinterpret_cast<const uint8*>(text.data()), numeric_cast<uint32>(text.length()), digest);
+    constexpr uint32_t digest_size = 32;
+    uint8_t digest[digest_size];
+    sha256(reinterpret_cast<const uint8_t*>(text.data()), numeric_cast<uint32_t>(text.length()), digest);
 
     const auto* nums = "0123456789abcdef";
     char hex_digest[digest_size * 2];

@@ -22,7 +22,8 @@ namespace ChosenActions
 
 any[] ChosenActions = {};
 
-void ModuleInit()
+[[ModuleInit]]
+void InitChosenActions()
 {
     Game.OnLoop.Subscribe(ChosenProcess);
 }
@@ -41,15 +42,6 @@ void SetChosenActions(any[] actions)
     if (actions != null) {
         Assert(actions.length() % 7 == 0);
         ChosenActions = actions.clone();
-
-        Critter chosen = Game.GetChosen();
-        if (chosen == null) {
-            return;
-        }
-        int actionType = actions[0];
-        if (actionType == Tla::ChosenMove) {
-            chosen.StopMove();
-        }
     }
 }
 
@@ -75,7 +67,7 @@ void SetAction(any[] action, bool append, bool toBeginning)
 #define CHECK_NEED_AP \
     #(needAp) if (chosen.ActionPoints < int(needAp)) \
     { \
-        Messaging::Info(Game.ReplaceText(Game.GetText(TextPackName::Combat, MsgStr::StrCombatNeedAp), "%d", needAp)); \
+        Messaging::Info(Game.ReplaceText(Game.GetText(TextPackKey(TextPackName::Combat, "" + (MsgStr::StrCombatNeedAp))), "%d", needAp)); \
         break; \
     } \
     if (chosen.CurrentAp / AP_DIVIDER < int(needAp)) \
@@ -84,15 +76,16 @@ void SetAction(any[] action, bool append, bool toBeginning)
 #define CHECK_NEED_AP2 \
     #(needAp) if (chosen.ActionPoints < int(needAp)) \
     { \
-        Messaging::Info(Game.ReplaceText(Game.GetText(TextPackName::Combat, MsgStr::StrCombatNeedAp), "%d", needAp)); \
+        Messaging::Info(Game.ReplaceText(Game.GetText(TextPackKey(TextPackName::Combat, "" + (MsgStr::StrCombatNeedAp))), "%d", needAp)); \
         return true; \
     } \
     if (chosen.CurrentAp / AP_DIVIDER < int(needAp)) \
         return false;
 
+[[Event]]
 void ChosenProcess()
 {
-    Critter chosen = Game.GetChosen();
+    Critter chosen = Chosen;
     if (chosen == null) {
         return;
     }
@@ -104,10 +97,10 @@ void ChosenProcess()
         // Hidden mode
         chosen.SetAlpha(chosen.InSneakMode ? 130 : 255);
 
-        // Shoot borders
-        bool shootBorders = Settings.Cursor == CursorType::UseWeapon;
-        int attackDist = Parameters::GetActiveItemAttackDistance(chosen);
-        CurMap.SetShootBorders(shootBorders, attackDist);
+        // Shoot borders (SetShootBorders removed in engine update)
+        // bool shootBorders = Gui::Cursor == CursorType::UseWeapon;
+        // int attackDist = Parameters::GetActiveItemAttackDistance(chosen);
+        // CurMap.SetShootBorders(shootBorders, attackDist);
 
         if (chosen.IsMoving()) {
             return;
@@ -132,7 +125,7 @@ void ChosenProcess()
 
             int apRegeneration = chosen.ApRegenerationTime;
             if (apRegeneration == 0) {
-                apRegeneration = Settings.ApRegeneration;
+                apRegeneration = Settings.Combat.ApRegeneration;
             }
 
             int maxAp = chosen.ActionPoints * AP_DIVIDER;
@@ -169,7 +162,6 @@ void ChosenProcess()
         mpos hex;
         bool isRun = (ChosenActions[3] != 0);
         int cut = ChosenActions[4];
-        int startTick = ChosenActions[6];
 
         if (CurMap == null) {
             break;
@@ -193,16 +185,16 @@ void ChosenProcess()
 
         // Can't move
         if (chosen.IsNoMove) {
-            Messaging::Info(TextPackName::Game, MsgStr::StrCritterCantMove);
+            Messaging::Info(TextPackKey(TextPackName::Game, "" + (MsgStr::StrCritterCantMove)));
             break;
         }
 
         // Check running
         if (isRun) {
-            if (!Settings.RunOnCombat && Time::IsTimeoutActive(chosen.TimeoutBattle)) {
+            if (!Settings.Movement.RunOnCombat && Time::IsTimeoutActive(chosen.TimeoutBattle)) {
                 isRun = false;
             }
-            else if (!Settings.RunOnTransfer && Time::IsTimeoutActive(chosen.TimeoutTransfer)) {
+            else if (!Settings.Movement.RunOnTransfer && Time::IsTimeoutActive(chosen.TimeoutTransfer)) {
                 isRun = false;
             }
             else if (chosen.IsDamagedRightLeg || chosen.IsDamagedLeftLeg || chosen.IsOverweight) {
@@ -241,23 +233,25 @@ void ChosenProcess()
             break;
         }
 
-        uint8 dir = chosen.Dir;
+        mdir dir = chosen.Dir;
         if (ChosenActions[2] != 0) {
-            dir = ChosenActions[3];
+            dir = mdir(hdir(ChosenActions[3]));
         }
         else {
+            int dirVal = dir.hex.value;
             if (cw) {
-                dir++;
-                if (dir >= 6) {
-                    dir = 0;
+                dirVal++;
+                if (dirVal >= 6) {
+                    dirVal = 0;
                 }
             }
             else {
-                dir--;
-                if (dir < 0) {
-                    dir = 5;
+                dirVal--;
+                if (dirVal < 0) {
+                    dirVal = 5;
                 }
             }
+            dir = mdir(hdir(dirVal));
         }
 
         chosen.ChangeDir(dir);
@@ -362,15 +356,15 @@ void ChosenProcess()
                 break;
             }
             if (item.Weapon_IsTwoHanded && (chosen.IsDamagedRightArm || chosen.IsDamagedLeftArm)) {
-                Messaging::Info(TextPackName::Combat, MsgStr::StrCombatNeedDmgArm);
+                Messaging::Info(TextPackKey(TextPackName::Combat, "" + (MsgStr::StrCombatNeedDmgArm)));
                 break;
             }
             if (chosen.IsDamagedRightArm && chosen.IsDamagedLeftArm && realItem != null) {
-                Messaging::Info(TextPackName::Combat, MsgStr::StrCombatNeedDmgTwoArms);
+                Messaging::Info(TextPackKey(TextPackName::Combat, "" + (MsgStr::StrCombatNeedDmgTwoArms)));
                 break;
             }
             if (item.Deteriorable && item.IsBroken) {
-                Messaging::Info(TextPackName::Game, MsgStr::StrDeteriorationWeaponBroken);
+                Messaging::Info(TextPackKey(TextPackName::Game, "" + (MsgStr::StrDeteriorationWeaponBroken)));
                 break;
             }
         }
@@ -385,7 +379,7 @@ void ChosenProcess()
 
             Gui::Screen screen = Gui::GetActiveScreen();
             if (screen == null || screen.Num == GuiScreen::None || screen.Num == GuiScreen::Game) {
-                Settings.Cursor = CursorType::UseWeapon;
+                Gui::Cursor = CursorType::UseWeapon;
             }
 
             if (item.Weapon_MaxAmmoCount == 0) {
@@ -484,7 +478,7 @@ void ChosenProcess()
             // TODO: r17 trace
             if (needMove) {
                 if (dist > maxDist) {
-                    bool isRun = false; // 814 ( Settings.AlwaysRun && dist >= Settings.AlwaysRunUseDist );
+                    bool isRun = false; // 814 ( Settings.Movement.AlwaysRun && dist >= Settings.Movement.AlwaysRunUseDist );
                     if (targetCr != null) {
                         SetAction({Tla::ChosenMoveToCrit, targetCr.Id, 0, isRun ? 1 : 0, maxDist, 0, 0}, false, false);
                     }
@@ -499,13 +493,13 @@ void ChosenProcess()
                     return;
                 }
 
-                Messaging::Info(TextPackName::Game, MsgStr::StrFindpathAimblock);
+                Messaging::Info(TextPackKey(TextPackName::Game, "" + (MsgStr::StrFindpathAimblock)));
                 break;
             }
 
             // Refresh orientation
             CHECK_NEED_AP(apCost);
-            uint8 dir = Game.GetDirection(chosen.Hex, mpos(hx, hy));
+            mdir dir = Game.GetDirection(chosen.Hex, mpos(hx, hy));
             if (Game.GetDistance(chosen.Hex, mpos(hx, hy)) >= 1 && chosen.Dir != dir) {
                 chosen.ChangeDir(dir);
             }
@@ -537,13 +531,13 @@ void ChosenProcess()
             }
         }
         if (use >= USE_PRIMARY && use <= USE_THIRD) {
-            Game.OnCritterActionEx.Fire(true, chosen, CritterAction::UseWeapon, rate, item);
+            (Game.OnCritterActionEx.Fire(true, chosen, CritterAction::UseWeapon, rate, item) == EventResult::ContinueChain);
         }
         else if (use == USE_RELOAD) {
-            Game.OnCritterActionEx.Fire(true, chosen, CritterAction::ReloadWeapon, 0, item);
+            (Game.OnCritterActionEx.Fire(true, chosen, CritterAction::ReloadWeapon, 0, item) == EventResult::ContinueChain);
         }
         else {
-            Game.OnCritterActionEx.Fire(true, chosen, CritterAction::UseItem, 0, item);
+            (Game.OnCritterActionEx.Fire(true, chosen, CritterAction::UseItem, 0, item) == EventResult::ContinueChain);
         }
         chosen.CurrentAp -= apCost * AP_DIVIDER;
         if (isAttack && targetCr != null) {
@@ -574,7 +568,7 @@ void ChosenProcess()
         }
 
         if (toSlot == CritterItemSlot::Outside) {
-            if (!Game.OnItemCheckMove.Fire(item, itemCount, chosen, CurMap)) {
+            if ((Game.OnItemCheckMove.Fire(item, itemCount, chosen, CurMap) == EventResult::StopChain)) {
                 break;
             }
         }
@@ -584,11 +578,12 @@ void ChosenProcess()
             itemSwap = chosen.GetItem(ItemProperty::CritterSlot, toSlot);
         }
 
-        if (!Game.OnCritterCheckMoveItem.Fire(chosen, item, toSlot)) {
+        if ((Game.OnCritterCheckMoveItem.Fire(chosen, item, toSlot) == EventResult::StopChain)) {
             // Gameplay swap workaround
             if (itemSwap != null && !isSecondTry) {
                 // Add actions
-                if (Game.OnCritterCheckMoveItem.Fire(chosen, itemSwap, CritterItemSlot::Inventory) && Game.OnCritterCheckMoveItem.Fire(chosen, item, toSlot)) {
+                if ((Game.OnCritterCheckMoveItem.Fire(chosen, itemSwap, CritterItemSlot::Inventory) == EventResult::ContinueChain) &&
+                    (Game.OnCritterCheckMoveItem.Fire(chosen, item, toSlot) == EventResult::ContinueChain)) {
                     ChosenActions.reverse();
                     ChosenActions.resize(ChosenActions.length() - 7);
                     ChosenActions.reverse();
@@ -602,13 +597,13 @@ void ChosenProcess()
         }
 
         // Action points
-        int apCost = Settings.RtApCostMoveItemInventory;
+        int apCost = Settings.Movement.RtApCostMoveItemInventory;
         if ((fromSlot == CritterItemSlot::Main && toSlot == CritterItemSlot::Secondary) ||
             (fromSlot == CritterItemSlot::Secondary && toSlot == CritterItemSlot::Main)) {
             apCost = 0;
         }
         if (toSlot == CritterItemSlot::Outside) {
-            apCost = Settings.RtApCostDropItem;
+            apCost = Settings.Movement.RtApCostDropItem;
         }
         CHECK_NEED_AP(apCost);
 
@@ -634,7 +629,7 @@ void ChosenProcess()
         Assert(itemCont == ITEMS_PICKUP || itemCont == ITEMS_PICKUP_FROM);
         Assert(count > 0);
 
-        Item @[] cont = ClientItems::RefreshItemsCollection(itemCont);
+        Item[] cont = ClientItems::RefreshItemsCollection(itemCont);
         Item item;
         for (int i = 0; i < cont.length() && item == null; i++) {
             if (cont[i].Id == itemId) {
@@ -667,17 +662,17 @@ void ChosenProcess()
         bool take = (colType == ClientItems::Collection::Loot);
         Entity from = (itemCont == ITEMS_PICKUP ? cast<Entity>(chosen) : contEntity);
         Entity to = (itemCont == ITEMS_PICKUP ? contEntity : cast<Entity>(chosen));
-        if (!Game.OnItemCheckMove.Fire(item, count, from, to)) {
+        if ((Game.OnItemCheckMove.Fire(item, count, from, to) == EventResult::StopChain)) {
             break;
         }
 
-        int apCost = Settings.RtApCostMoveItemContainer;
+        int apCost = Settings.Movement.RtApCostMoveItemContainer;
         CHECK_NEED_AP(apCost);
 
         if (take || cast<Critter>(to) != null) {
             Critter toCr = take ? chosen : cast<Critter>(to);
             if (int(toCr.ItemsWeight) + item.Weight * count > toCr.CarryWeight) {
-                Messaging::Info(TextPackName::Game, (take ? MsgStr::StrOverweight : MsgStr::StrOvervolume));
+                Messaging::Info(TextPackKey(TextPackName::Game, "" + ((take ? MsgStr::StrOverweight : MsgStr::StrOvervolume))));
                 break;
             }
         }
@@ -685,7 +680,7 @@ void ChosenProcess()
         // Game.CustomCall( "MoveItemCont " + apCost + " " + count + " " + itemId + " " + itemCont );
         ClientItems::RemoveItem(colType, item, count);
 
-        Game.OnCritterActionEx.Fire(true, chosen, CritterAction::OperateContainer, transferType, item);
+        (Game.OnCritterActionEx.Fire(true, chosen, CritterAction::OperateContainer, transferType, item) == EventResult::ContinueChain);
 
         CurPlayer.ServerCall.OperateContainer(take, false, item.Id, count);
     } break;
@@ -727,7 +722,7 @@ void ChosenProcess()
        }
        break;*/
     case Tla::ChosenSneak: {
-        int apCost = Settings.RtApCostUseSkill;
+        int apCost = Settings.Movement.RtApCostUseSkill;
         CHECK_NEED_AP(apCost);
 
         // Game.CustomCall( "UseCritterSkill " + CritterProperty::UseSneak + " " + apCost + " " + chosen.Id );
@@ -764,7 +759,7 @@ void ChosenProcess()
                 int dist = Game.GetDistance(chosen.Hex, mpos(hx, hy));
                 int useDist = 1 + chosen.Multihex;
                 if (dist > useDist) {
-                    bool isRun = false; // 814 ( Settings.AlwaysRun && dist >= Settings.AlwaysRunUseDist );
+                    bool isRun = false; // 814 ( Settings.Movement.AlwaysRun && dist >= Settings.Movement.AlwaysRunUseDist );
                     SetAction({Tla::ChosenMove, hx, hy, isRun ? 1 : 0, useDist, 0, 1}, false, false);
                     if (CurMap.GetPathLength(chosen, mpos(hx, hy), useDist) > 0) {
                         SetAction({Tla::ChosenUseSklOnItem, int(skill), itemId, ChosenActions[3], 0, 0, 0}, true, false);
@@ -773,14 +768,14 @@ void ChosenProcess()
                     return;
                 }
             }
-            int apCost = Settings.RtApCostUseSkill;
+            int apCost = Settings.Movement.RtApCostUseSkill;
             CHECK_NEED_AP(apCost);
             CurPlayer.ServerCall.UseSkill(skill, ZERO_IDENT, itemAction.Id, EMPTY_HSTRING, ZERO_MPOS);
         }
     } break;
     case Tla::ChosenUseSklOnScen: {
         CritterProperty skill = CritterProperty(int(ChosenActions[1]));
-        hstring sceneryProto = hstring_fromHash(ChosenActions[2]);
+        hstring sceneryProto = ChosenActions[2];
         int hx = ChosenActions[3];
         int hy = ChosenActions[4];
         if (!UseSkillOnScenerySuccess(skill, chosen, sceneryProto, hx, hy)) {
@@ -802,7 +797,7 @@ void ChosenProcess()
             int dist = Game.GetDistance(chosen.Hex, cr.Hex);
             int useDist = 1 + chosen.Multihex;
             if (dist > useDist) {
-                bool isRun = false; // 814 ( Settings.AlwaysRun && dist >= Settings.AlwaysRunUseDist );
+                bool isRun = false; // 814 ( Settings.Movement.AlwaysRun && dist >= Settings.Movement.AlwaysRunUseDist );
                 SetAction({Tla::ChosenMoveToCrit, cr.Id, 0, isRun ? 1 : 0, useDist, 0, 0}, false, false);
                 // Возможна ситуация, когда до цели нельзя дойти.
                 if (CurMap.GetPathLength(chosen, cr.Hex, useDist) > 0) {
@@ -813,18 +808,18 @@ void ChosenProcess()
             }
         }
 
-        int apCost = Settings.RtApCostUseSkill;
+        int apCost = Settings.Movement.RtApCostUseSkill;
         CHECK_NEED_AP(apCost);
 
         // Refresh orientation
-        uint8 dir = Game.GetDirection(chosen.Hex, cr.Hex);
+        mdir dir = Game.GetDirection(chosen.Hex, cr.Hex);
         if (Game.GetDistance(chosen.Hex, cr.Hex) >= 1 && chosen.Dir != dir) {
             chosen.ChangeDir(dir);
         }
 
         chosen.CurrentAp = chosen.CurrentAp - apCost * AP_DIVIDER;
 
-        Game.OnCritterActionEx.Fire(true, chosen, CritterAction::UseSkill, 0, null);
+        (Game.OnCritterActionEx.Fire(true, chosen, CritterAction::UseSkill, 0, null) == EventResult::ContinueChain);
         CurPlayer.ServerCall.UseSkill(skill, cr.Id, ZERO_IDENT, EMPTY_HSTRING, ZERO_MPOS);
     } break;
     case Tla::ChosenTalkNpc: {
@@ -839,10 +834,10 @@ void ChosenProcess()
         }
 
         int dist = Game.GetDistance(chosen, cr);
-        int talkDistance = (cr.TalkDistance != 0 ? cr.TalkDistance : Settings.TalkDistance) + chosen.Multihex;
+        int talkDistance = (cr.TalkDistance != 0 ? cr.TalkDistance : Settings.Dialog.TalkDistance) + chosen.Multihex;
 
         if (dist > talkDistance) {
-            bool isRun = false; // 814 ( Settings.AlwaysRun && dist >= Settings.AlwaysRunUseDist );
+            bool isRun = false; // 814 ( Settings.Movement.AlwaysRun && dist >= Settings.Movement.AlwaysRunUseDist );
             SetAction({Tla::ChosenMoveToCrit, cr.Id, 0, isRun ? 1 : 0, talkDistance, 0, 0}, false, false);
             if (CurMap.GetPathLength(chosen, cr.Hex, talkDistance) > 0) {
                 SetAction({Tla::ChosenTalkNpc, cr.Id, 0, 0, 0, 0, 0}, true, false);
@@ -859,7 +854,7 @@ void ChosenProcess()
         // }
 
         // Refresh orientation
-        uint8 dir = Game.GetDirection(chosen.Hex, cr.Hex);
+        mdir dir = Game.GetDirection(chosen.Hex, cr.Hex);
         if (Game.GetDistance(chosen.Hex, cr.Hex) >= 1 && chosen.Dir != dir) {
             chosen.ChangeDir(dir);
         }
@@ -867,7 +862,7 @@ void ChosenProcess()
         CurPlayer.ServerCall.StartDialog(cr.Id);
     } break;
     case Tla::ChosenPickItem: {
-        hstring pid = hstring_fromHash(ChosenActions[1]);
+        hstring pid = ChosenActions[1];
         int hx = ChosenActions[2];
         int hy = ChosenActions[3];
         ident itemId = ChosenActions[4];
@@ -879,19 +874,19 @@ void ChosenProcess()
         int dist = Game.GetDistance(chosen.Hex, mpos(hx, hy));
         int useDist = 1 + chosen.Multihex;
         if (dist > useDist) {
-            bool isRun = false; // 814 ( Settings.AlwaysRun && dist >= Settings.AlwaysRunUseDist );
+            bool isRun = false; // 814 ( Settings.Movement.AlwaysRun && dist >= Settings.Movement.AlwaysRunUseDist );
             SetAction({Tla::ChosenMove, hx, hy, isRun ? 1 : 0, useDist, 0, 1}, false, false);
 
             if (CurMap.GetPathLength(chosen, mpos(hx, hy), useDist) > 0) {
-                SetAction({Tla::ChosenPickItem, pid.hash, hx, hy, 0, 0, 0}, true, false);
+                SetAction({Tla::ChosenPickItem, pid, hx, hy, 0, 0, 0}, true, false);
             }
             return;
         }
-        int apCost = Settings.RtApCostPickItem;
+        int apCost = Settings.Movement.RtApCostPickItem;
         CHECK_NEED_AP(apCost);
 
         // Refresh orientation
-        uint8 dir = Game.GetDirection(chosen.Hex, mpos(hx, hy));
+        mdir dir = Game.GetDirection(chosen.Hex, mpos(hx, hy));
         if (Game.GetDistance(chosen.Hex, mpos(hx, hy)) >= 1 && chosen.Dir != dir) {
             chosen.ChangeDir(dir);
         }
@@ -903,7 +898,7 @@ void ChosenProcess()
         if (itemId != ZERO_IDENT) {
             Item item = Game.GetItem(itemId);
             if (item != null) {
-                Game.OnCritterActionEx.Fire(true, chosen, CritterAction::PickItem, 0, item);
+                (Game.OnCritterActionEx.Fire(true, chosen, CritterAction::PickItem, 0, item) == EventResult::ContinueChain);
             }
         }
     } break;
@@ -930,7 +925,7 @@ void ChosenProcess()
         int dist = Game.GetDistance(chosen.Hex, cr.Hex);
         int pickDist = 1 + chosen.Multihex + cr.Multihex;
         if (dist > pickDist) {
-            bool isRun = false; // 814 ( Settings.AlwaysRun && dist >= Settings.AlwaysRunUseDist );
+            bool isRun = false; // 814 ( Settings.Movement.AlwaysRun && dist >= Settings.Movement.AlwaysRunUseDist );
             SetAction({Tla::ChosenMoveToCrit, cr.Id, 0, isRun ? 1 : 0, pickDist, 0, 0}, false, false);
             if (CurMap.GetPathLength(chosen, cr.Hex, pickDist) > 0) {
                 SetAction(curAction, true, false);
@@ -938,11 +933,11 @@ void ChosenProcess()
             return;
         }
 
-        int apCost = Settings.RtApCostPickCritter;
+        int apCost = Settings.Movement.RtApCostPickCritter;
         CHECK_NEED_AP(apCost);
 
         // Refresh orientation
-        uint8 dir = Game.GetDirection(chosen.Hex, cr.Hex);
+        mdir dir = Game.GetDirection(chosen.Hex, cr.Hex);
         if (Game.GetDistance(chosen.Hex, cr.Hex) >= 1 && chosen.Dir != dir) {
             chosen.ChangeDir(dir);
         }
@@ -966,18 +961,18 @@ bool UseSkillOnScenerySuccess(CritterProperty skill, Critter chosen, hstring sce
         int dist = Game.GetDistance(chosen.Hex, mpos(hx, hy));
         int useDist = 1 + chosen.Multihex;
         if (dist > useDist) {
-            bool isRun = Settings.AlwaysRun && dist >= Settings.AlwaysRunUseDist;
+            bool isRun = Settings.Movement.AlwaysRun && dist >= Settings.Movement.AlwaysRunUseDist;
             SetAction({Tla::ChosenMove, hx, hy, isRun ? 1 : 0, useDist, 0, 1}, false, false);
 
             if (CurMap.GetPathLength(chosen, mpos(hx, hy), useDist) > 0) {
-                SetAction({Tla::ChosenUseSklOnScen, int(skill), sceneryProto.uhash, hx, hy, 0, 0}, true, false);
+                SetAction({Tla::ChosenUseSklOnScen, int(skill), sceneryProto, hx, hy, 0, 0}, true, false);
             }
             return false;
         }
-        int apCost = Settings.RtApCostUseSkill;
+        int apCost = Settings.Movement.RtApCostUseSkill;
         CHECK_NEED_AP2(apCost);
 
-        Game.OnCritterActionEx.Fire(true, chosen, CritterAction::UseSkill, 0, null);
+        (Game.OnCritterActionEx.Fire(true, chosen, CritterAction::UseSkill, 0, null) == EventResult::ContinueChain);
         CurPlayer.ServerCall.UseSkill(skill, ZERO_IDENT, ZERO_IDENT, sceneryProto, mpos(hx, hy));
     }
     return true;
@@ -997,7 +992,7 @@ bool UseSkillOnScenerySuccess(CritterProperty skill, Critter chosen, hstring sce
     if( enable )
         cr.TimeoutSneak = SNEAK_TIMEOUT( client );
     cr.InSneakMode = !cr.InSneakMode;
-    CritterState::Wait(cr,  Settings.Breaktime );
+    CritterState::Wait(cr,  Settings.Movement.Breaktime );
    }*/
 
 bool IsBusy(Critter cr)
@@ -1014,46 +1009,55 @@ bool IsFree(Critter cr)
 
 #if SERVER
 
+[[ServerRemoteCall]]
 void PickCritter(Player player, ident crId)
 {
     CritterActions::PickCritter(player.GetControlledCritter(), Game.GetCritter(crId));
 }
 
+[[ServerRemoteCall]]
 void PickItem(Player player, mpos hex, hstring pid)
 {
     CritterActions::PickItem(player.GetControlledCritter(), hex, pid);
 }
 
+[[ServerRemoteCall]]
 void DropInvItem(Player player, ident itemId, int count)
 {
     CritterActions::DropInvItem(player.GetControlledCritter(), itemId, count);
 }
 
+[[ServerRemoteCall]]
 void UseSkill(Player player, CritterProperty skill, ident targetCrId, ident targetItemId, hstring sceneryPid, mpos hex)
 {
     CritterActions::UseSkill(player.GetControlledCritter(), skill, targetCrId, targetItemId, sceneryPid, hex.x, hex.y);
 }
 
+[[ServerRemoteCall]]
 void MoveInvItem(Player player, ident itemId, CritterItemSlot slot)
 {
     CritterActions::MoveInvItem(player.GetControlledCritter(), itemId, slot);
 }
 
+[[ServerRemoteCall]]
 void OperateContainer(Player player, bool take, bool all, ident itemId, int itemCount)
 {
     CritterActions::OperateContainer(player.GetControlledCritter(), take, all, itemId, itemCount);
 }
 
+[[ServerRemoteCall]]
 void ReloadWeapon(Player player, ident weaponId, ident ammoId)
 {
     CritterActions::ReloadWeapon(player.GetControlledCritter(), weaponId, ammoId);
 }
 
+[[ServerRemoteCall]]
 void Attack(Player player, ident targetId, int mode)
 {
     CritterActions::Attack(player.GetControlledCritter(), targetId, mode);
 }
 
+[[ServerRemoteCall]]
 void UseItemOn(Player player, ident usedItemId, ident targetCrId, ident targetItemId, hstring sceneryPid, mpos hex, int timer)
 {
     CritterActions::UseItemOn(player.GetControlledCritter(), usedItemId, targetCrId, targetItemId, sceneryPid, hex.x, hex.y, timer);

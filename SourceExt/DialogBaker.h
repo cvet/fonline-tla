@@ -5,7 +5,7 @@
 #include "Baker.h"
 #include "FileSystem.h"
 
-FO_BEGIN_NAMESPACE
+FO_USING_NAMESPACE();
 
 FO_DECLARE_EXCEPTION(DialogBakerException);
 
@@ -22,7 +22,7 @@ public:
     ~DialogBaker() override = default;
 
     [[nodiscard]] auto GetName() const -> string_view override { return NAME; }
-    [[nodiscard]] auto GetOrder() const -> int32 override { return 5; }
+    [[nodiscard]] auto GetOrder() const -> int32_t override { return 5; }
 
     void BakeFiles(const FileCollection& files, string_view target_path) const override;
 };
@@ -40,9 +40,7 @@ public:
     ~DialogTextBaker() override = default;
 
     [[nodiscard]] auto GetName() const -> string_view override { return NAME; }
-    [[nodiscard]] auto GetOrder() const -> int32 override { return 5; }
+    [[nodiscard]] auto GetOrder() const -> int32_t override { return 5; }
 
     void BakeFiles(const FileCollection& files, string_view target_path) const override;
 };
-
-FO_END_NAMESPACE

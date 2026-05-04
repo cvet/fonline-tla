@@ -136,7 +136,7 @@ void BehemothCommand(ident behemothId, string cmd)
         if (_IsCmdRoute(firstKeyWord)) {
             globalX = GetIntValue(valuesStr, 2, -1);
             globalY = GetIntValue(valuesStr, 3, -1);
-            Location[] locations = Location::GetLocationsInRadius(ipos(globalX, globalY), Settings.GlobalMapZoneLength);
+            Location[] locations = Location::GetLocationsInRadius(ipos(globalX, globalY), Settings.GlobalMap.GlobalMapZoneLength);
             // Переданы координаты, куда нужно двигаться.
             if (globalX > 0 && globalY > 0 && locations.length() > 0) {
                 for (int i = 0, l = locations.length(); i < l; i++) {
@@ -146,8 +146,7 @@ void BehemothCommand(ident behemothId, string cmd)
                         if (map != null && Entrance::MapCountEntry(map, ENTER_ENTRY) > 0) {
                             SetOrder(behemothId, TYPE_ORDER_ROUTE, loc.Id, 0);
                             Radio::SendChannelRadioMessage(_GetRadioChannel(behemothId),
-                                                           TextPackName::Text,
-                                                           600,
+                                                           TextPackKey(TextPackName::Text, "" + (600)),
                                                            "$where@text Locations " + STR_LOC_NAME(loc.ProtoId) + "@");
                             RunOrder(behemothId, TYPE_ORDER_ROUTE);
                             return;
@@ -155,7 +154,7 @@ void BehemothCommand(ident behemothId, string cmd)
                     }
                 }
             }
-            Radio::SendChannelRadioMessage(_GetRadioChannel(behemothId), TextPackName::Text, 601);
+            Radio::SendChannelRadioMessage(_GetRadioChannel(behemothId), TextPackKey(TextPackName::Text, "" + (601)));
         }
         else if (_IsCmdCamera(firstKeyWord)) {
             RunOrder(behemothId, TYPE_ORDER_CAMERA);
@@ -186,7 +185,7 @@ void BehemothCommand(ident behemothId, string cmd)
         else if (_IsCmdChannel(firstKeyWord)) {
             int channel = GetIntValue(valuesStr, 2, _GetRadioChannel(behemothId));
             ChangeChannel(Game.GetCritter(behemothId), channel);
-            Radio::SendChannelRadioMessage(_GetRadioChannel(behemothId), TextPackName::Text, 612);
+            Radio::SendChannelRadioMessage(_GetRadioChannel(behemothId), TextPackKey(TextPackName::Text, "" + (612)));
         }
         else if (_IsCmdAttack(firstKeyWord)) {
             RunOrder(behemothId, TYPE_ORDER_ATTACK);
@@ -214,7 +213,7 @@ void CancelOrder(ident crId, bool noMessage)
     cr.BehemothParam_2 = 0;
 
     if (!noMessage) {
-        Radio::SendChannelRadioMessage(cr.BehemothRadio, TextPackName::Text, 602);
+        Radio::SendChannelRadioMessage(cr.BehemothRadio, TextPackKey(TextPackName::Text, "" + (602)));
     }
 }
 
@@ -273,10 +272,11 @@ void _BehemothInit(Critter cr, bool firstTime)
     cr.OnSomeUseSkillOnMe.Subscribe(_BehemothUseSkillOnMe);
 }
 
-bool _BehemothOnGlobal(Critter cr, int type, Item car, float x, float y, float toX, float toY, float speed, int encounterDescriptor, bool waitForAnswer)
+[[Event]]
+EventResult _BehemothOnGlobal(Critter cr, int type, Item car, float x, float y, float toX, float toY, float speed, int encounterDescriptor, bool waitForAnswer)
 {
     if (encounterDescriptor != 0) {
-        return false; // Энкаунтер
+        return EventResult::StopChain; // Энкаунтер
     }
     if (cr.BehemothOrderType == TYPE_ORDER_ROUTE) {
         Location locTo = GetLocationTo(cr);
@@ -286,37 +286,37 @@ bool _BehemothOnGlobal(Critter cr, int type, Item car, float x, float y, float t
                 if (Entrance::CritterTransferToMapEntry(cr, mapId, ENTER_ENTRY)) {
                     cr.HomeMapId = mapId;
                     cr.HomeHex = cr.Hex;
-                    cr.HomeDir = cr.Dir;
+                    cr.HomeDir = cr.Dir.hex.value;
                     Radio::SendChannelRadioMessage(cr.BehemothRadio,
-                                                   TextPackName::Text,
-                                                   603,
+                                                   TextPackKey(TextPackName::Text, "" + (603)),
                                                    "$where@text Locations " + STR_LOC_NAME(locTo.ProtoId) + "@$x" + cr.Hex.x + "$y" + cr.Hex.y);
                 }
                 CancelOrder(cr.Id, true);
-                return true;
+                return EventResult::StopChain;
             }
             speed = GLOBAL_MAP_BASE_SPEED;
             if (int(toX) != locTo.WorldPos.x || int(toY) != locTo.WorldPos.y) {
                 toX = locTo.WorldPos.x;
                 toY = locTo.WorldPos.y;
-                return true;
+                return EventResult::StopChain;
             }
         }
         else {
             CancelOrder(cr.Id, false);
-            return true;
+            return EventResult::StopChain;
         }
     }
     else {
         if (toX != x || toY != y) {
             toX = x;
             toY = y;
-            return true;
+            return EventResult::StopChain;
         }
     }
-    return false;
+    return EventResult::StopChain;
 }
 
+[[TimeEvent]]
 void _BehemothIdle(Critter cr)
 {
     int orderCurrent = cr.BehemothOrderType;
@@ -331,7 +331,7 @@ void _BehemothIdle(Critter cr)
         }
         locTo = GetLocationTo(cr);
         if (locTo != null && loc != null && locTo.Id != loc.Id) {
-            Radio::SendChannelRadioMessage(cr.BehemothRadio, TextPackName::Text, 604);
+            Radio::SendChannelRadioMessage(cr.BehemothRadio, TextPackKey(TextPackName::Text, "" + (604)));
             RunOrderRoute(cr);
         }
         else {
@@ -343,37 +343,43 @@ void _BehemothIdle(Critter cr)
     }
 }
 
-bool _BehemothPlaneEnd(Critter cr, int planeId, int reason, Critter someCr, Item someItem)
+[[Event]]
+EventResult _BehemothPlaneEnd(Critter cr, int planeId, int reason, Critter someCr, Item someItem)
 {
     NpcPlanes::NpcPlane plane = NpcPlanes::GetCritterPlane(cr, planeId);
 
     if (plane.Identifier == PLANE_MOVE && cr.GetMap() != null && cr.IsAlive()) {
         cr.HomeHex = cr.Hex;
-        cr.HomeDir = cr.Dir;
+        cr.HomeDir = cr.Dir.hex.value;
         CancelOrder(cr.Id, false);
-        Radio::SendChannelRadioMessage(cr.BehemothRadio, TextPackName::Text, STR_PLANES_EXECUTED);
+        Radio::SendChannelRadioMessage(cr.BehemothRadio, TextPackKey(TextPackName::Text, "" + (STR_PLANES_EXECUTED)));
     }
-    return true;
+    return EventResult::StopChain;
 }
 
+[[Event]]
 void _BehemothShowCritter1(Critter cr, Critter showCrit)
 {
     if (cr.BehemothOrderType == TYPE_ORDER_PATROL) {
         if (showCrit.ControlledByPlayer && showCrit.IsAlive()) {
-            Messaging::Say(cr, TextPackName::Text, 608, "$pname" + PlayerRegistration::GetPlayerName(showCrit.Id));
-            Radio::SendChannelRadioMessage(cr.BehemothRadio, TextPackName::Text, 608, "$pname" + PlayerRegistration::GetPlayerName(showCrit.Id));
+            Messaging::Say(cr, TextPackKey(TextPackName::Text, "" + (608)), "$pname" + PlayerRegistration::GetPlayerName(showCrit.Id));
+            Radio::SendChannelRadioMessage(cr.BehemothRadio,
+                                           TextPackKey(TextPackName::Text, "" + (608)),
+                                           "$pname" + PlayerRegistration::GetPlayerName(showCrit.Id));
         }
     }
 }
 
+[[Event]]
 void _BehemothKill(Critter cr, Critter victim)
 {
     if (victim.ControlledByPlayer) {
-        Radio::SendChannelRadioMessage(cr.BehemothRadio, TextPackName::Text, 609, "$pname" + PlayerRegistration::GetPlayerName(victim.Id));
+        Radio::SendChannelRadioMessage(cr.BehemothRadio, TextPackKey(TextPackName::Text, "" + (609)), "$pname" + PlayerRegistration::GetPlayerName(victim.Id));
     }
 }
 
-bool _BehemothAttacked(Critter cr, Critter attacker)
+[[Event]]
+EventResult _BehemothAttacked(Critter cr, Critter attacker)
 {
     string attackerName = "некто";
     if (cr.BehemothLastReport < Game.SynchronizedTime - Time::Minutes(1)) {
@@ -388,16 +394,17 @@ bool _BehemothAttacked(Critter cr, Critter attacker)
                 attackerName = "@text Dialogs " + STR_NPC_NAME_DLG(attacker.DialogId) + "@";
             }
         }
-        Radio::SendChannelRadioMessage(cr.BehemothRadio, TextPackName::Text, 610, "$pname" + attackerName);
+        Radio::SendChannelRadioMessage(cr.BehemothRadio, TextPackKey(TextPackName::Text, "" + (610)), "$pname" + attackerName);
     }
-    return false;
+    return EventResult::StopChain;
 }
 
-bool _BehemothUseItemOnMe(Critter cr, Critter whoUse, Item item, int param)
+[[Event]]
+EventResult _BehemothUseItemOnMe(Critter cr, Critter whoUse, Item item, int param)
 {
     if (item.ProtoId == Content::Item::super_tool_kit) {
         if (cr.CurrentHp >= cr.MaxLife) {
-            Messaging::Info(whoUse, TextPackName::Text, 613);
+            Messaging::Info(whoUse, TextPackKey(TextPackName::Text, "" + (613)));
         }
         else {
             int hp = int(500 * whoUse.SkillRepair / 300) + Game.Random(300, 500);
@@ -405,19 +412,20 @@ bool _BehemothUseItemOnMe(Critter cr, Critter whoUse, Item item, int param)
             whoUse.Experience += hp * (CLAMP(whoUse.Level, 0, 10) / 10);
             cr.CurrentHp += hp;
             Game.DestroyItem(item, 1);
-            Messaging::Info(whoUse, TextPackName::Text, 614);
+            Messaging::Info(whoUse, TextPackKey(TextPackName::Text, "" + (614)));
         }
     }
     else {
-        Messaging::Info(whoUse, TextPackName::Game, MsgStr::StrUseNothing);
+        Messaging::Info(whoUse, TextPackKey(TextPackName::Game, "" + (MsgStr::StrUseNothing)));
     }
-    return true;
+    return EventResult::StopChain;
 }
 
-bool _BehemothUseSkillOnMe(Critter cr, Critter whoUse, CritterProperty skill)
+[[Event]]
+EventResult _BehemothUseSkillOnMe(Critter cr, Critter whoUse, CritterProperty skill)
 {
-    Messaging::Info(cr, TextPackName::Game, MsgStr::StrUseNothing);
-    return true;
+    Messaging::Info(cr, TextPackKey(TextPackName::Game, "" + (MsgStr::StrUseNothing)));
+    return EventResult::StopChain;
 }
 
 // Маршрут/Route
@@ -443,16 +451,17 @@ void RunOrderCamera(Critter cr)
 {
     Map map = cr.GetMap();
     if (map == null) {
-        Radio::SendChannelRadioMessage(cr.BehemothRadio, TextPackName::Text, STR_CANNOT_EXECUTE);
+        Radio::SendChannelRadioMessage(cr.BehemothRadio, TextPackKey(TextPackName::Text, "" + (STR_CANNOT_EXECUTE)));
         return;
     }
     else {
         any[] values = {cr.BehemothOwner, map.Id, cr.Hex.x, cr.Hex.y, cr.Dir};
-        Radio::SendChannelRadioMessage(cr.BehemothRadio, TextPackName::Text, STR_EXECUTE);
+        Radio::SendChannelRadioMessage(cr.BehemothRadio, TextPackKey(TextPackName::Text, "" + (STR_EXECUTE)));
         Game.StartTimeEvent(Time::Seconds(2), ShowCamera, values);
     }
 }
 
+[[TimeEvent]]
 void ShowCamera(any[] values)
 {
     Critter player = Game.GetCritter(values[0]);
@@ -475,14 +484,15 @@ void RunOrderMove(Critter cr)
 {
     Map map = cr.GetMap();
     if (map == null) {
-        Radio::SendChannelRadioMessage(cr.BehemothRadio, TextPackName::Text, STR_CANNOT_EXECUTE);
+        Radio::SendChannelRadioMessage(cr.BehemothRadio, TextPackKey(TextPackName::Text, "" + (STR_CANNOT_EXECUTE)));
         return;
     }
     mpos hex = cr.Hex;
-    uint8 dir = cr.BehemothParam_2;
-    if (dir > 5) {
-        dir = cr.Dir;
+    uint8 dirVal = cr.BehemothParam_2;
+    if (dirVal > 5) {
+        dirVal = cr.Dir.hex.value;
     }
+    mdir dir = mdir(hdir(dirVal));
     int steps = CLAMP(cr.BehemothParam_1, 0, 30);
     map.MoveHexByDir(hex, dir, steps);
     cr.SetDir(dir);
@@ -502,10 +512,10 @@ void RunOrderAttack(Critter cr)
         for (int i = 0; i < critters.length(); i++) {
             NpcPlanes::AddAttackPlane(cr, 0, critters[i]);
         }
-        Radio::SendChannelRadioMessage(cr.BehemothRadio, TextPackName::Text, 616, "$targets" + critters.length());
+        Radio::SendChannelRadioMessage(cr.BehemothRadio, TextPackKey(TextPackName::Text, "" + (616)), "$targets" + critters.length());
     }
     else {
-        Radio::SendChannelRadioMessage(cr.BehemothRadio, TextPackName::Text, 615);
+        Radio::SendChannelRadioMessage(cr.BehemothRadio, TextPackKey(TextPackName::Text, "" + (615)));
     }
 }
 
@@ -514,7 +524,7 @@ void RunOrderPatrol(Critter cr)
 {
     DL("patrol, radius =" + cr.ShowCritterDist1);
     cr.ShowCritterDist1 = cr.BehemothParam_1;
-    Radio::SendChannelRadioMessage(cr.BehemothRadio, TextPackName::Text, 611);
+    Radio::SendChannelRadioMessage(cr.BehemothRadio, TextPackKey(TextPackName::Text, "" + (611)));
 }
 
 // Utils
@@ -530,12 +540,11 @@ int GetIntValue(string[] values, int idx, int defaultValue)
 
 void RadioMessageMsgTmp(int channel, TextPackName textMsg, int strNum, string& lexems)
 {
-    switch (textMsg) {
-    case TextPackName::Text:
+    if (textMsg == TextPackName::Text) {
         Radio::SendChannelRadioMessage(channel, "@text Text " + strNum + "@" + lexems);
-        break;
-    default:
-        Radio::SendChannelRadioMessage(channel, textMsg, strNum);
+    }
+    else {
+        Radio::SendChannelRadioMessage(channel, TextPackKey(textMsg, "" + strNum));
     }
 }
 

@@ -283,7 +283,7 @@ class CBarier
             newHex = baseHex;
             for (int i = 0; i < blockers[k].length(); i++) {
                 map.MoveHexByDir(newHex, blockers[k][i], 1);
-                Critter crit = map.GetCritter(newHex);
+                Critter crit = map.GetCritterOnHex(newHex);
                 if (map.IsHexMovable(newHex) or crit != null) {
                     temp = map.GetItemOnHex(newHex, Content::Item::eb_blocker);
                     if (temp == null or temp.Val1 != Barier.Val1) {
@@ -300,7 +300,7 @@ class CBarier
             DL("Триггеры для барьера №" + Blockers[0].Val1 + ": " + triggers.length());
             for (int k = 0; k < triggers.length(); k++) {
                 map.MoveHexByDir(newHex, triggers[k], 1);
-                Critter crit = map.GetCritter(newHex);
+                Critter crit = map.GetCritterOnHex(newHex);
                 if (map.IsHexMovable(newHex) or crit != null) {
                     temp = map.GetItemOnHex(newHex, Content::Item::eb_trigger);
                     if (temp == null or temp.Val1 != Barier.Val1) {
@@ -565,6 +565,7 @@ bool BarierOpen(Critter master)
     }
 }
 
+[[TimeEvent]]
 void InitBarier(any value)
 {
     Item barier = Game.GetItem(value);
@@ -587,7 +588,8 @@ void InitTriggers(CBarier barier)
     }
 }
 
-void _WalkOnTrigg(Item item, Critter cr, bool entered, uint8 dir) // TODO
+[[Event]]
+void _WalkOnTrigg(Item item, Critter cr, bool entered, mdir dir) // TODO
 {
     int netNum = 0;
 
@@ -615,7 +617,7 @@ void _WalkOnTrigg(Item item, Critter cr, bool entered, uint8 dir) // TODO
         return;
     }
 
-    Critter[] npcs = map.GetCritters(cr.Hex, RADIUS, CritterFindType::NonDeadNpc);
+    Critter[] npcs = map.GetCrittersInRadius(cr.Hex, RADIUS, CritterFindType::NonDeadNpc);
     for (int i = 0; i < npcs.length(); i++) {
         if (npcs[i].NpcRole != item.Val1) {
             npcs.removeAt(i);
@@ -668,7 +670,8 @@ int GetNetState(ident locId, int netNum)
     return 0;
 }
 
-void _DamageCritter(Item item, Critter cr, bool entered, uint8 dir)
+[[Event]]
+void _DamageCritter(Item item, Critter cr, bool entered, mdir dir)
 {
     if (entered) {
         CritterState::Wait(cr, 0);
@@ -676,11 +679,12 @@ void _DamageCritter(Item item, Critter cr, bool entered, uint8 dir)
     }
 }
 
-bool _DamageCritterUse(Item item, Critter cr, CritterProperty skill)
+[[Event]]
+EventResult _DamageCritterUse(Item item, Critter cr, CritterProperty skill)
 {
     CBarier barier = GetBarier(item.Id);
     if (barier == null) {
-        return true;
+        return EventResult::StopChain;
     }
     else {
         if (skill != CritterProperty::SkillScience or !SKILL_SUCCESS(cr, CritterProperty::SkillScience, 0)) {
@@ -692,10 +696,10 @@ bool _DamageCritterUse(Item item, Critter cr, CritterProperty skill)
                                       ZERO_IDENT,
                                       HF_BYPASS_ARMOR);
                 if (skill == CritterProperty::SkillScience) {
-                    Messaging::Info(cr, TextPackName::Text, MSG_FIELD_SCIENCE_USE_FAIL);
+                    Messaging::Info(cr, TextPackKey(TextPackName::Text, "" + (MSG_FIELD_SCIENCE_USE_FAIL)));
                 }
                 else {
-                    Messaging::Info(cr, TextPackName::Text, MSG_SHOCK_PAIN_FIELD_USE);
+                    Messaging::Info(cr, TextPackKey(TextPackName::Text, "" + (MSG_SHOCK_PAIN_FIELD_USE)));
                 }
             }
             else {
@@ -706,37 +710,38 @@ bool _DamageCritterUse(Item item, Critter cr, CritterProperty skill)
                                       ZERO_IDENT,
                                       HF_BYPASS_ARMOR);
                 if (skill == CritterProperty::SkillScience) {
-                    Messaging::Info(cr, TextPackName::Text, MSG_FIELD_SCIENCE_USE_FAIL);
+                    Messaging::Info(cr, TextPackKey(TextPackName::Text, "" + (MSG_FIELD_SCIENCE_USE_FAIL)));
                 }
                 else {
-                    Messaging::Info(cr, TextPackName::Text, MSG_SHOCK_FULL_FIELD_USE);
+                    Messaging::Info(cr, TextPackKey(TextPackName::Text, "" + (MSG_SHOCK_FULL_FIELD_USE)));
                 }
             }
         }
         else {
-            Messaging::Info(cr, TextPackName::Text, MSG_FIELD_SCIENCE_USE_WIN);
+            Messaging::Info(cr, TextPackKey(TextPackName::Text, "" + (MSG_FIELD_SCIENCE_USE_WIN)));
         }
     }
-    return true;
+    return EventResult::StopChain;
 }
 
-bool _UseEmitter(Item item, Critter cr, CritterProperty skill)
+[[Event]]
+EventResult _UseEmitter(Item item, Critter cr, CritterProperty skill)
 {
     CBarier field;
     bool autoOn;
     int fieldMode = GetFieldMode(item);
     if (skill == CritterProperty::SkillRepair) {
         if (Time::IsTimeoutActive(cr.TimeoutSkRepair)) {
-            Messaging::Info(cr, TextPackName::Game, MsgStr::StrSkillWeariness);
-            return true;
+            Messaging::Info(cr, TextPackKey(TextPackName::Game, "" + (MsgStr::StrSkillWeariness)));
+            return EventResult::StopChain;
         }
         if (SKILL_SUCCESS(cr, CritterProperty::SkillRepair, SCIENCE_PENALTY + int(item.Val0))) {
             field = GetBarier(item.Hex.x, item.Hex.y, item.ProtoId);
             if (field == null) {
-                return false;
+                return EventResult::StopChain;
             }
             if ((fieldMode == BM_ON) or (fieldMode == BM_HALF_ON)) {
-                Messaging::Info(cr, TextPackName::Text, MSG_REPAIR_WIN_OFF);
+                Messaging::Info(cr, TextPackKey(TextPackName::Text, "" + (MSG_REPAIR_WIN_OFF)));
                 autoOn = (field.Blockers[0].Val4 == 0) ? true : false;
                 if (autoOn) {
                     DL("Автовключение");
@@ -747,7 +752,7 @@ bool _UseEmitter(Item item, Critter cr, CritterProperty skill)
                 field.ChangeMode(BM_OFF);
             }
             else {
-                Messaging::Info(cr, TextPackName::Text, MSG_REPAIR_WIN_ON);
+                Messaging::Info(cr, TextPackKey(TextPackName::Text, "" + (MSG_REPAIR_WIN_ON)));
                 field.ChangeMode(BM_ON);
             }
             if (!GaveExp(cr, item.Id)) {
@@ -757,31 +762,32 @@ bool _UseEmitter(Item item, Critter cr, CritterProperty skill)
         else {
             field = GetBarier(item.Hex.x, item.Hex.y, item.ProtoId);
             if ((field.GetFieldMode() == BM_ON) or (field.GetFieldMode() == BM_HALF_ON)) {
-                Messaging::Info(cr, TextPackName::Text, MSG_REPAIR_FAIL_OFF);
+                Messaging::Info(cr, TextPackKey(TextPackName::Text, "" + (MSG_REPAIR_FAIL_OFF)));
             }
             else {
-                Messaging::Info(cr, TextPackName::Text, MSG_REPAIR_FAIL_ON);
+                Messaging::Info(cr, TextPackKey(TextPackName::Text, "" + (MSG_REPAIR_FAIL_ON)));
             }
         }
         cr.TimeoutSkRepair = REPAIR_TIMEOUT(cr);
     }
     else {
-        return false;
+        return EventResult::StopChain;
     }
-    return true;
+    return EventResult::StopChain;
 }
 
-bool _UseOnEmitter(Item item, Critter cr, Item usedItem, int param)
+[[Event]]
+EventResult _UseOnEmitter(Item item, Critter cr, Item usedItem, int param)
 {
     if (usedItem == null) {
-        return true;
+        return EventResult::StopChain;
     }
 
     if ((usedItem.ProtoId == Content::Item::multi_tool) or (usedItem.ProtoId == Content::Item::super_tool_kit)) {
-        return ObjectUse(cr, item, usedItem.ProtoId);
+        return (ObjectUse(cr, item, usedItem.ProtoId)) ? EventResult::StopChain : EventResult::StopChain;
     }
     else {
-        return false;
+        return EventResult::StopChain;
     }
 }
 
@@ -804,7 +810,7 @@ bool ObjectUse(Critter cr, Item item, hstring proto)
     }
 
     if (Time::IsTimeoutActive(cr.TimeoutSkScience)) {
-        Messaging::Info(cr, TextPackName::Game, MsgStr::StrSkillWeariness);
+        Messaging::Info(cr, TextPackKey(TextPackName::Game, "" + (MsgStr::StrSkillWeariness)));
         return true;
     }
 
@@ -815,7 +821,7 @@ bool ObjectUse(Critter cr, Item item, hstring proto)
         }
 
         if ((fieldMode == BM_ON) or (fieldMode == BM_HALF_ON)) {
-            Messaging::Info(cr, TextPackName::Text, MSG_REPAIR_WIN_OFF);
+            Messaging::Info(cr, TextPackKey(TextPackName::Text, "" + (MSG_REPAIR_WIN_OFF)));
             autoOn = (field.Blockers[0].Val4 == 0) ? true : false;
             if (autoOn) {
                 DL("Автовключение");
@@ -826,7 +832,7 @@ bool ObjectUse(Critter cr, Item item, hstring proto)
             field.ChangeMode(BM_OFF);
         }
         else {
-            Messaging::Info(cr, TextPackName::Text, MSG_REPAIR_WIN_ON);
+            Messaging::Info(cr, TextPackKey(TextPackName::Text, "" + (MSG_REPAIR_WIN_ON)));
             field.ChangeMode(BM_ON);
         }
 
@@ -839,10 +845,10 @@ bool ObjectUse(Critter cr, Item item, hstring proto)
     else {
         field = GetBarier(item.Hex.x, item.Hex.y, item.ProtoId);
         if (field.GetFieldMode() == BM_ON or field.GetFieldMode() == BM_HALF_ON) {
-            Messaging::Info(cr, TextPackName::Text, MSG_REPAIR_FAIL_OFF);
+            Messaging::Info(cr, TextPackKey(TextPackName::Text, "" + (MSG_REPAIR_FAIL_OFF)));
         }
         else {
-            Messaging::Info(cr, TextPackName::Text, MSG_REPAIR_FAIL_ON);
+            Messaging::Info(cr, TextPackKey(TextPackName::Text, "" + (MSG_REPAIR_FAIL_ON)));
         }
 
         cr.TimeoutSkScience = SCIENCE_TIMEOUT(cr);
@@ -886,7 +892,7 @@ void _EmitterInit(Item emitter, bool firstTime)
     InitEmitter(emitter);
 }
 
-bool s_Terminal(Critter player, StaticItem terminal, Item item, any skill)
+bool s_Terminal_Impl(Critter player, StaticItem terminal, Item item, any skill)
 {
     Map map = player.GetMap();
     if (map == null) {
@@ -946,6 +952,13 @@ bool s_Terminal(Critter player, StaticItem terminal, Item item, any skill)
     return true;
 }
 
+[[ItemStatic]]
+bool s_Terminal(Critter player, StaticItem terminal, Item item, any skill)
+{
+    return s_Terminal_Impl(player, terminal, item, skill);
+}
+
+[[DialogResult]]
 void r_GetAccessCard(Critter master, Critter slave)
 {
     Item item = master.AddItem(Content::Item::energy_barier_access_card, 1);
@@ -953,6 +966,7 @@ void r_GetAccessCard(Critter master, Critter slave)
     item.Val5 = master.Id;
 }
 
+[[DialogResult]]
 int r_Start(Critter master, Critter slave)
 {
     Map map = master.GetMap();
@@ -1018,6 +1032,7 @@ int r_Start(Critter master, Critter slave)
     return 0;
 }
 
+[[DialogResult]]
 int r_doHack(Critter master, Critter slave)
 {
     return doHack(master, master.EnergyBarierTerminalHex.x, master.EnergyBarierTerminalHex.y);
@@ -1039,7 +1054,7 @@ int doHack(Critter master, int hexX, int hexY)
     }
 
     CBariersNet net = GetBariersNet(master.EnergyBarierNetNum, loc.Id);
-    Critter[] npcs = map.GetCritters(master.Hex, RADIUS, CritterFindType::NonDeadNpc);
+    Critter[] npcs = map.GetCrittersInRadius(master.Hex, RADIUS, CritterFindType::NonDeadNpc);
     for (int i = 0; i < npcs.length(); i++) {
         for (int k = 0; k < net.Bariers.length(); k++) {
             if (npcs[i].NpcRole == int(net.Bariers[k].GetGuardNum())) {
@@ -1084,6 +1099,7 @@ int doHack(Critter master, int hexX, int hexY)
     return FD_HACK_SUCC;
 }
 
+[[DialogResult]]
 int r_TurnOfBarier(Critter master, Critter slave)
 {
     Map map = master.GetMap();
@@ -1105,11 +1121,13 @@ int r_TurnOfBarier(Critter master, Critter slave)
     return FD_TURN_OFF_FIELD;
 }
 
+[[DialogResult]]
 void r_CheckHit(Critter master, Critter slave)
 {
     // TODO
 }
 
+[[DialogResult]]
 int r_CheckAccessCard(Critter master, Critter slave)
 {
     if (CheckInven(master)) {
@@ -1133,6 +1151,7 @@ int r_CheckAccessCard(Critter master, Critter slave)
     return FD_TURN_OFF_FIELD;
 }
 
+[[TimeEvent]]
 void TurnOnBariers(any[] values)
 {
     CBariersNet net = GetBariersNet(values[1], values[0]);
@@ -1141,6 +1160,7 @@ void TurnOnBariers(any[] values)
     }
 }
 
+[[TimeEvent]]
 void TurnOnBarier(any[] values)
 {
     for (int i = 0; i < BariersNets.length(); i++) {
@@ -1153,6 +1173,7 @@ void TurnOnBarier(any[] values)
     }
 }
 
+[[DialogResult]]
 void r_StartGuard(Critter master, Critter npc)
 {
     // TODO
@@ -1178,6 +1199,7 @@ void r_HalfOn(Critter master, Critter npc)
     }
 }
 
+[[TimeEvent]]
 void DisableForceField(any[] values)
 {
     CBariersNet net = GetBariersNet(values[0], values[1]);
@@ -1194,6 +1216,7 @@ void DisableForceFieldWithGuards(any[] values)
     }
 }
 
+[[TimeEvent]]
 void EnableForceField(any[] values)
 {
     CBariersNet net = GetBariersNet(values[0], values[1]);

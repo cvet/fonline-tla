@@ -54,8 +54,8 @@ namespace ReddWanamingo // Sort 2
 #define MAX_CRIT (32)
 
 // позиция
-#define REDD_POS_X (13 * Settings.GlobalMapZoneLength - Settings.GlobalMapZoneLength / 2)
-#define REDD_POS_Y (10 * Settings.GlobalMapZoneLength - Settings.GlobalMapZoneLength / 2)
+#define REDD_POS_X (13 * Settings.GlobalMap.GlobalMapZoneLength - Settings.GlobalMap.GlobalMapZoneLength / 2)
+#define REDD_POS_Y (10 * Settings.GlobalMap.GlobalMapZoneLength - Settings.GlobalMap.GlobalMapZoneLength / 2)
 
 // <--- r17
 #define NPC_ROLE_COW  (13) // брамины
@@ -144,7 +144,7 @@ void DeleteWanMap()
 // собрать нпц по номеру роли
 int GetCrittersByRole(Map map, mpos hex, int radius, int role, Critter[] critters) // lib
 {
-    Critter[] cTmp = map.GetCritters(hex, radius, CritterFindType::NonDeadNpc);
+    Critter[] cTmp = map.GetCrittersInRadius(hex, radius, CritterFindType::NonDeadNpc);
     for (int i = 0; i < cTmp.length(); i++) {
         if (cTmp[i].NpcRole == role) {
             critters.insertLast(cTmp[i]);
@@ -158,11 +158,12 @@ Location _GetNewWanLoc(Critter[] grp)
     int x, y;
     x = -1;
     y = 1;
-    Location loc = Location::CreateLocation(
-        Content::Location::wanamingo_cavern,
-        ipos(REDD_POS_X + x * Settings.GlobalMapZoneLength + Game.Random(-(Settings.GlobalMapZoneLength / 2), (Settings.GlobalMapZoneLength / 2)),
-             REDD_POS_Y + y * Settings.GlobalMapZoneLength + Game.Random(-(Settings.GlobalMapZoneLength / 2), (Settings.GlobalMapZoneLength / 2))),
-        grp);
+    Location loc = Location::CreateLocation(Content::Location::wanamingo_cavern,
+                                            ipos(REDD_POS_X + x * Settings.GlobalMap.GlobalMapZoneLength +
+                                                     Game.Random(-(Settings.GlobalMap.GlobalMapZoneLength / 2), (Settings.GlobalMap.GlobalMapZoneLength / 2)),
+                                                 REDD_POS_Y + y * Settings.GlobalMap.GlobalMapZoneLength +
+                                                     Game.Random(-(Settings.GlobalMap.GlobalMapZoneLength / 2), (Settings.GlobalMap.GlobalMapZoneLength / 2))),
+                                            grp);
 
     if (loc == null) {
         return null;
@@ -175,7 +176,8 @@ Location _GetNewWanLoc(Critter[] grp)
     return loc;
 }
 
-void r_GotoHunter(Critter player, Critter npc, int val)
+[[DialogResult]]
+void r_GotoHunter(Critter player, Critter npc, any val)
 {
     if (!_TimeOutIsFree()) {
         // по идее сюда игрок никогда не должен попасть
@@ -281,6 +283,7 @@ void _WanMapInit(Map map, bool firstTime)
 }
 
 // на зачистку шахты даются только одни сутки
+[[TimeEvent]]
 void TimeExpired()
 {
     DeleteWanMap();
@@ -307,7 +310,7 @@ Critter SpawnWan(Map map, int EntSpawn, int level)
                    -1,
                    CritterProperty::Level,
                    level};
-    Critter cr = map.AddCritter(Content::Critter::ToughAlien, hex, Game.Random(0, 5), Tla::GetCritPropsDict(props));
+    Critter cr = map.AddCritter(Content::Critter::ToughAlien, hex, HDIR_Random, Tla::GetCritPropsDict(props));
     cr.SetupScript(Mob::_MobInit);
     if (cr != null) {
         // прерывания
@@ -354,9 +357,9 @@ bool SpawnWan2()
         }
         cr.HomeMapId = map.Id;
         cr.HomeHex = hex;
-        cr.HomeDir = Game.Random(0, 5);
+        cr.HomeDir = HDIR_Random.value;
 
-        NpcPlanes::AddWalkPlane(cr, AI_PLANE_ATTACK_PRIORITY + 20, hex, Game.Random(0, 5), false, 0);
+        NpcPlanes::AddWalkPlane(cr, AI_PLANE_ATTACK_PRIORITY + 20, hex, HDIR_Random, false, 0);
         NpcPlanes::AddAttackPlane(cr, AI_PLANE_ATTACK_PRIORITY + 10, globalCr);
         GlobalWanSpawn--;
         // BREAK!!!
@@ -369,6 +372,7 @@ bool SpawnWan2()
 }
 
 // Time event
+[[TimeEvent]]
 void Spawn()
 {
     if (not SpawnWan2()) {
@@ -383,6 +387,7 @@ void Spawn()
 }
 
 // Алерт
+[[TimeEvent]]
 void Alert()
 {
     for (int i = 0; i < GlobalGroupsIds.length(); i++) {
@@ -394,6 +399,7 @@ void Alert()
 }
 
 // Алерт
+[[TimeEvent]]
 void Alert2()
 {
     for (int i = 0; i < GlobalGroupsIds.length(); i++) {
@@ -488,6 +494,7 @@ void map_leave(Map map, Critter player)
     DL("Map leave end"); // r17
 }
 // r17
+[[Event]]
 void map_leave_r17(Map map, Critter player)
 {
     if (player.ControlledByPlayer) {
@@ -527,6 +534,7 @@ void map_leave_r17(Map map, Critter player)
         DeleteWanMap();
     }
 }
+[[Event]]
 void map_incoming_r17(Map map, Critter player)
 {
     Location loc = map.GetLocation();
@@ -547,6 +555,7 @@ void map_incoming_r17(Map map, Critter player)
 }
 
 // игрок умер во время квеста
+[[Event]]
 void player_dead_r_17(Critter player, Critter killer)
 {
     SetQuestState(player, 4);                          // умер
@@ -617,6 +626,7 @@ void remove_events(Critter player)
 }
 
 // игрок умер во время квеста
+[[Event]]
 void player_dead(Critter player, Critter killer)
 {
     remove_events(player);
@@ -646,7 +656,8 @@ void map_deleting(Map map, bool deleted)
     Game.ReddMarionWanLocation = ZERO_IDENT;
 }
 
-bool player_doctor(Critter crit, CritterProperty skill, Critter onCritter, Item onItem, StaticItem onScenery)
+[[Event]]
+EventResult player_doctor(Critter crit, CritterProperty skill, Critter onCritter, Item onItem, StaticItem onScenery)
 {
     // цепочка if
     if (skill == CritterProperty::SkillFirstAid && onCritter != null && onCritter.ControlledByPlayer && crit.Id != onCritter.Id &&
@@ -654,10 +665,11 @@ bool player_doctor(Critter crit, CritterProperty skill, Critter onCritter, Item 
         crit.ReddQWinamingoHealing += 1;
     }
     // и всетаки он вылечил его (ну или пытался, что тоже важно)
-    return false; // вызываем глобальный обработчик
+    return EventResult::StopChain; // вызываем глобальный обработчик
 }
 
 // смерть трех ванаминго которые стоят в начале
+[[Event]]
 void wan_dead_low(Critter crit, Critter killer)
 {
     GlobalWanCountLow--;
@@ -667,6 +679,7 @@ void wan_dead_low(Critter crit, Critter killer)
     }
 }
 
+[[Event]]
 void wan_dead(Critter crit, Critter killer)
 {
     if (killer.ControlledByPlayer) {

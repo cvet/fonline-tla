@@ -434,6 +434,7 @@ void answer_BattleInvite(Critter player, int answerI)
 }
 
 // Если по каким то причинам последняя заявка не получила ответа, или игрок слишком долго думает
+[[TimeEvent]]
 void CheckInvite(any[] values)
 {
     BattleTeam bt = bInfo.Teams[values[0]];
@@ -451,6 +452,7 @@ bool d_IsStage(Critter player, Critter npc, int stage)
 }
 
 // Может ли персонаж подать заявку
+[[DialogDemand]]
 bool d_CanRequestBattle(Critter player, Critter npc)
 {
     return d_IsStage(player, npc, STAGE_PREPARE);
@@ -463,11 +465,13 @@ bool d_PlayerRequested(Critter player, Critter npc)
 }
 
 // Игрок не в составе
+[[DialogDemand]]
 bool d_PlayerNotRequested(Critter player, Critter npc)
 {
     return !bInfo.HasRequest(player.Id);
 }
 
+[[DialogDemand]]
 bool d_IsEnemy(Critter player, Critter npc)
 {
     BattleTeam tPlayer = bInfo.GetCritterTeam(player.Id);
@@ -477,6 +481,7 @@ bool d_IsEnemy(Critter player, Critter npc)
             tPlayer.Index != tNpc.Index);
 }
 
+[[DialogDemand]]
 bool d_IsFriend(Critter player, Critter npc)
 {
     BattleTeam tPlayer = bInfo.GetCritterTeam(player.Id);
@@ -488,7 +493,8 @@ bool d_IsFriend(Critter player, Critter npc)
 
 // Запись заявки на участие
 // team - индекс команды в поединке, начиная с 0
-void r_SaveRequest(Critter player, Critter npc, int team)
+[[DialogResult]]
+void r_SaveRequest(Critter player, Critter npc, any team)
 {
     bInfo.AddRequest(team, player.Id);
 }
@@ -510,12 +516,13 @@ void dlg_TeamCount(Critter player, Critter npc, string& lexems)
     lexems = lexems + "$total" + total;
 }
 
+[[TimeEvent]]
 void cte_RemoveNpc(Critter cr)
 {
     if (!cr.ControlledByPlayer) {
         Map map = Game.GetMap(cr.HomeMapId);
         if (cr.HomeMapId != ZERO_IDENT && map != null) {
-            cr.TransferToMap(map, cr.HomeHex, cr.HomeDir);
+            cr.TransferToMap(map, cr.HomeHex, hdir(cr.HomeDir));
             return;
         }
         // домашняя позиция не найдена или карта уже удалена
@@ -524,6 +531,7 @@ void cte_RemoveNpc(Critter cr)
     return;
 }
 
+[[TimeEvent]]
 void cte_BattleNpcSearchForTarget(Critter cr)
 {
     if (cr.IsAlive() && NpcPlanes::IsNoPlanes(cr) && bInfo != null) {
@@ -559,29 +567,31 @@ void _BattleDoorInit(Item item, bool firstTime)
     item.OnCritterUseSkill.Subscribe(_UseBattleDoor);
 }
 
-bool _UseBattleDoor(Item item, Critter cr, CritterProperty skill)
+[[Event]]
+EventResult _UseBattleDoor(Item item, Critter cr, CritterProperty skill)
 {
     if (int(bInfo.Stage) < item.Val1) {
-        Messaging::Info(cr, TextPackName::Text, STR_STAGE_ERROR);
-        return true;
+        Messaging::Info(cr, TextPackKey(TextPackName::Text, "" + (STR_STAGE_ERROR)));
+        return EventResult::StopChain;
     }
     BattleTeam bt = bInfo.GetCritterTeam(cr.Id);
     if (item.Val2 > 0) {
         if (bt == null) {
-            Messaging::Info(cr, TextPackName::Text, STR_PLAYER_ERROR);
-            return true;
+            Messaging::Info(cr, TextPackKey(TextPackName::Text, "" + (STR_PLAYER_ERROR)));
+            return EventResult::StopChain;
         }
     }
     if (item.Val3 > 0) {
         if (!bt.Winner) {
-            Messaging::Info(cr, TextPackName::Text, STR_WINNER_ERROR);
-            return true;
+            Messaging::Info(cr, TextPackKey(TextPackName::Text, "" + (STR_WINNER_ERROR)));
+            return EventResult::StopChain;
         }
     }
-    return false;
+    return EventResult::StopChain;
 }
 
 // Карты
+[[Event]]
 void _BattleMapCritterDead(Map map, Critter cr, Critter killer)
 {
     // Убитый должен быть членом одной из команд, чтобы убийство пошло в зачет
@@ -603,7 +613,7 @@ void _BattleMapCritterDead(Map map, Critter cr, Critter killer)
     bInfo.CheckWinner();
 }
 
-void _BattleMapCritterIn(Map map, Critter cr)
+void _BattleMapCritterIn_Impl(Map map, Critter cr)
 {
     DL("critter in");
     BattleTeam team = bInfo.GetCritterTeam(cr.Id);
@@ -616,6 +626,12 @@ void _BattleMapCritterIn(Map map, Critter cr)
             PlayerJoinedMessage(cr, critters[i]);
         }
     }
+}
+
+[[Event]]
+void _BattleMapCritterIn(Map map, Critter cr)
+{
+    _BattleMapCritterIn_Impl(map, cr);
 }
 
 // Сообщения
@@ -634,7 +650,7 @@ void PlayerJoinedMessage(Critter cr, Critter crTo)
     lexems += "$team" + (team.Index + 1) + "$teamColor" + team.Color;
     lexems += "$name" + _PlayerName(cr);
     DL(lexems);
-    Messaging::Info(crTo, TextPackName::Text, STR_PLAYER_JOINED, lexems);
+    Messaging::Info(crTo, TextPackKey(TextPackName::Text, "" + (STR_PLAYER_JOINED)), lexems);
 }
 
 void PlayerDeadMessage(Critter crDead, Critter crKiller, Map map)
@@ -650,7 +666,7 @@ void PlayerDeadMessage(Critter crDead, Critter crKiller, Map map)
         lexems += "$team2Color" + teamKill.Color + "$killer" + _PlayerName(crKiller);
         Critter[] critters = map.GetCritters(CritterFindType::Players);
         for (int i = 0; i < critters.length(); i++) {
-            Messaging::Info(critters[i], TextPackName::Text, STR_KILL, lexems);
+            Messaging::Info(critters[i], TextPackKey(TextPackName::Text, "" + (STR_KILL)), lexems);
         }
         DL(lexems);
     }
@@ -733,7 +749,7 @@ void test(Critter crp, any id)
     lexems += "$team2Color" + COLOR_BLUE + "$killer" + _PlayerName(crp);
     Critter[] critters = crp.GetMap().GetCritters(CritterFindType::Players);
     for (int i = 0; i < critters.length(); i++) {
-        Messaging::Info(critters[i], TextPackName::Text, STR_KILL, lexems);
+        Messaging::Info(critters[i], TextPackKey(TextPackName::Text, "" + (STR_KILL)), lexems);
     }
     DL(lexems);
 }
@@ -770,7 +786,7 @@ class PurgatoryStageChangedHandler : IBattleInfoStageChangedHandler, IBattleInfo
     void OnStageChanged(int stage)
     {
         if (bInfo.Stage == STAGE_FIGHT) {
-            Radio::SendChannelRadioMessage(0, TextPackName::Text, 7132);
+            Radio::SendChannelRadioMessage(0, TextPackKey(TextPackName::Text, "" + (7132)));
             Location loc = Game.GetLocation(Content::Location::hub_purgatory);
             if (loc != null) {
                 Map map = loc.GetMapByIndex(0);
@@ -779,7 +795,7 @@ class PurgatoryStageChangedHandler : IBattleInfoStageChangedHandler, IBattleInfo
                     // Раз в 25 секунд
                     Critter[] players = map.GetCritters(CritterFindType::Players);
                     for (int i = 0; i < players.length(); i++) {
-                        Messaging::Info(players[i], TextPackName::Text, 7132);
+                        Messaging::Info(players[i], TextPackKey(TextPackName::Text, "" + (7132)));
                     }
                 }
             }
@@ -800,7 +816,7 @@ class PurgatoryStageChangedHandler : IBattleInfoStageChangedHandler, IBattleInfo
                 Map mapInfo = loc.GetMapByIndex(0);
                 Critter[] players = mapInfo.GetCritters(CritterFindType::Players);
                 for (int i = 0; i < players.length(); i++) {
-                    Messaging::Info(players[i], TextPackName::Text, 7131, "$team" + (winners.Index + 1));
+                    Messaging::Info(players[i], TextPackKey(TextPackName::Text, "" + (7131)), "$team" + (winners.Index + 1));
                 }
 
                 int points = winners.BattlePoints;
@@ -889,13 +905,13 @@ class PurgatoryStageChangedHandler : IBattleInfoStageChangedHandler, IBattleInfo
         if (btKiller != null && btDead != null && killer.ControlledByPlayer) {
             if (btKiller.Index == btDead.Index) {
                 killer.ReplicationMoney -= 1000;
-                Messaging::Info(killer, TextPackName::Text, 7129);
+                Messaging::Info(killer, TextPackKey(TextPackName::Text, "" + (7129)));
             }
             else {
                 int xp = killer.Level * 100;
                 killer.ReplicationMoney += 300;
                 killer.Experience += xp;
-                Messaging::Info(killer, TextPackName::Text, 7130, "$xp" + xp);
+                Messaging::Info(killer, TextPackKey(TextPackName::Text, "" + (7130)), "$xp" + xp);
             }
         }
     }
@@ -942,8 +958,8 @@ class PurgatoryInviteCallback : IBattleTeamInviteCallback
         }
 
         CritterState::ToDead(cr, CritterActionAnim::DeadPulseDust, null);
-        Messaging::Info(cr, TextPackName::Text, STR_KILL);
-        Messaging::Info(cr, TextPackName::Text, STR_ITEMS);
+        Messaging::Info(cr, TextPackKey(TextPackName::Text, "" + (STR_KILL)));
+        Messaging::Info(cr, TextPackKey(TextPackName::Text, "" + (STR_ITEMS)));
         if (team != null) {
             cr.NextReplicationMap = team.StartMap;
             cr.NextReplicationEntry = team.StartEntry;
@@ -1057,7 +1073,7 @@ void RunPreparationStage()
                                1000,
                                CritterProperty::CurrentHp,
                                1500};
-                Critter npc = map.AddCritter(Content::Critter::ElronologistMale, hex, Game.Random(0, 5), Tla::GetCritPropsDict(props));
+                Critter npc = map.AddCritter(Content::Critter::ElronologistMale, hex, HDIR_Random, Tla::GetCritPropsDict(props));
                 npc.SetupScript(_RiperInit);
                 DL("Location pid" + LocPids[i] + " executor placed");
             }
@@ -1066,10 +1082,11 @@ void RunPreparationStage()
     Game.StartTimeEvent(ZERO_TIMESPAN, RadioPurgatory1); //SavedDeferredCall
 }
 
+[[TimeEvent]]
 void RadioPurgatory1()
 {
     if (bInfo != null && bInfo.Stage == STAGE_PREPARE) {
-        Radio::SendChannelRadioMessage(0, TextPackName::Text, STR_RADIO_STAGE1);
+        Radio::SendChannelRadioMessage(0, TextPackKey(TextPackName::Text, "" + (STR_RADIO_STAGE1)));
         Game.StartTimeEvent(TIME_NEXT_RADIO_STAGE1, RadioPurgatory1); //SavedDeferredCall
     }
 }
@@ -1083,10 +1100,11 @@ void _RiperInit(Critter cr, bool firstTime)
     cr.StartTimeEvent(Time::Asap(), Time::Seconds(1), _RiperIdle);
 }
 
+[[TimeEvent]]
 void cte_RipperShout(Critter cr)
 {
     if (bInfo != null && bInfo.Stage == STAGE_PREPARE) {
-        Messaging::SayShout(cr, TextPackName::Dialogs, DLGSTR(cr.DialogId, 1));
+        Messaging::SayShout(cr, TextPackKey(TextPackName::Dialogs, "" + (DLGSTR(cr.DialogId, 1))));
         timespan delayTicks = Time::Minutes(9);
         if (delayTicks != ZERO_TIMESPAN) {
             Game.RepeatCurrentTimeEvent(delayTicks);
@@ -1095,6 +1113,7 @@ void cte_RipperShout(Critter cr)
     return;
 }
 
+[[TimeEvent]]
 void _RiperIdle(Critter cr)
 {
     cr.CurrentHp = cr.MaxLife;
@@ -1165,18 +1184,20 @@ void _PurgatoryInit(Map map, bool firstTime)
     map.OnCritterOut.Subscribe(_PurgatoryMapOut);
 }
 
+[[Event]]
 void _PurgatoryMapIn(Map map, Critter cr)
 {
     cr.IsNoPvp = false;
     if (cr.ControlledByPlayer && Entrance::IsCritterInDeadZone(cr, map, 0, ENTRY_NOPVP_FIRST, ENTRY_NOPVP_LAST)) {
         cr.IsNoPvp = true;
-        Messaging::Info(cr, TextPackName::Text, 1);
+        Messaging::Info(cr, TextPackKey(TextPackName::Text, "" + (1)));
         if (cr.CountTimeEvent(cte_NoPvpOff) == 0) {
             cr.StartTimeEvent(TIME_CHECK, cte_NoPvpOff);
         }
     }
 }
 
+[[Event]]
 void _PurgatoryMapOut(Map map, Critter cr)
 {
     Map mapCr = cr.GetMap();
@@ -1184,10 +1205,11 @@ void _PurgatoryMapOut(Map map, Critter cr)
         return;
     }
     cr.IsNoPvp = false;
-    Messaging::Info(cr, TextPackName::Text, 2);
-    _BattleMapCritterIn(map, cr);
+    Messaging::Info(cr, TextPackKey(TextPackName::Text, "" + (2)));
+    _BattleMapCritterIn_Impl(map, cr);
 }
 
+[[TimeEvent]]
 void cte_NoPvpOff(Critter cr)
 {
     if (!cr.IsNoPvp) {
@@ -1201,7 +1223,7 @@ void cte_NoPvpOff(Critter cr)
         }
     }
     cr.IsNoPvp = false;
-    Messaging::Info(cr, TextPackName::Text, 2);
+    Messaging::Info(cr, TextPackKey(TextPackName::Text, "" + (2)));
     return;
 }
 
@@ -1268,6 +1290,7 @@ void dlg_Team4(Critter player, Critter npc, string& lexems)
 // Генерация итемов в ящиках
 // На третьей карте Чистилища стоят ящики с лутом
 // периодически совершается попытка переместить из одного из ящиков содержимое на территорию бг
+[[TimeEvent]]
 void _PurgatoryLoop(Map map)
 {
     if (bInfo != null && bInfo.Stage == STAGE_FIGHT) {
@@ -1291,6 +1314,7 @@ void _PurgatoryLoop(Map map)
 }
 
 // Удаление локации после того, как время истекло
+[[TimeEvent]]
 void DeletePurgatory(any value)
 {
     Location loc = Game.GetLocation(ident(value));
@@ -1301,7 +1325,7 @@ void DeletePurgatory(any value)
             critters.insertLast(map.GetCritters(CritterFindType::Players));
         }
         for (int i = 0; i < critters.length(); i++) {
-            Messaging::Info(critters[i], TextPackName::Text, 7128);
+            Messaging::Info(critters[i], TextPackKey(TextPackName::Text, "" + (7128)));
         }
         Game.DestroyLocation(loc.Id);
     }

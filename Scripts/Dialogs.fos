@@ -3,9 +3,9 @@ namespace Dialogs
 
 // Todo: ввести в работу MaxTalkers
 
-///@ Setting Common int32 TalkDistance
-///@ Setting Common int32 TalkMaxTime
-///@ Setting Common int32 MaxTalkers
+///@ Setting Common int32 Dialog.TalkDistance
+///@ Setting Common int32 Dialog.TalkMaxTime
+///@ Setting Common int32 Dialog.MaxTalkers
 
 ///@ Property Critter Common hstring DialogId Mutable PublicSync Persistent
 ///@ Property Critter Common int8 TalkDistance Mutable PublicSync Persistent
@@ -27,13 +27,11 @@ namespace Dialogs
 
 ///@ Event Server Game OnCritterTalk(Critter cr)
 
-///@ Enum TextPackName Dialogs = 15
-
 ///@ RemoteCall Server SpeechAnswer(int32 answerIndex)
-///@ RemoteCall Client ReceiveDialogContext(hstring dialogId, ident talkerId, uint32 textId, uint32[] answerTextIds, string lexems, timespan duration)
+///@ RemoteCall Client ReceiveDialogContext(hstring dialogId, ident talkerId, hstring textId, hstring[] answerTextIds, string lexems, timespan duration)
 
-// [[ModuleInit]]
-void ModuleInit()
+[[ModuleInit]]
+void InitDialogs()
 {
 #if SERVER
     Game.OnCritterSendInitialInfo.Subscribe(OnCritterSendInitialInfo);
@@ -103,10 +101,10 @@ void RunDialog(Critter cr, hstring dialogId, Critter talker, bool ignoreDistance
     // Нет ответов, просто текст над головой
     if (firstAnswerIndices.isEmpty()) {
         if (talker != null) {
-            Messaging::Say(talker, TextPackName::Dialogs, firstSpeech.TextId);
+            Messaging::Say(talker, TextPackKey(TextPackName::Dialogs, "" + (firstSpeech.TextId)));
         }
         else {
-            Messaging::Info(cr, TextPackName::Dialogs, firstSpeech.TextId);
+            Messaging::Info(cr, TextPackKey(TextPackName::Dialogs, "" + (firstSpeech.TextId)));
         }
         return;
     }
@@ -130,7 +128,7 @@ void RunDialog(Critter cr, hstring dialogId, Critter talker, bool ignoreDistance
     cr.DialogContext.MapHex = cr.Hex;
     cr.DialogContext.IgnoreDistance = ignoreDistance;
     cr.DialogContext.StartTime = Game.FrameTime;
-    cr.DialogContext.Duration = Time::Milliseconds(Settings.TalkMaxTime);
+    cr.DialogContext.Duration = Time::Milliseconds(Settings.Dialog.TalkMaxTime);
     cr.DialogContext.PrevSpeech = -1;
     cr.DialogContext.CurSpeech = firstSpeechIndex;
     cr.DialogContext.SpeechAnswers = firstAnswerIndices;
@@ -142,7 +140,7 @@ void RunDialog(Critter cr, hstring dialogId, Critter talker, bool ignoreDistance
     Game.OnCritterTalk.Fire(cr);
 }
 
-// [[ServerRemoteCall]]
+[[ServerRemoteCall]]
 void SpeechAnswer(Player player, int answerIndex)
 {
     Critter cr = player.GetControlledCritter();
@@ -301,7 +299,7 @@ bool IsTalking(Critter cr)
     return false;
 }
 
-// [[TimeEvent]]
+[[TimeEvent]]
 void ProcessDialog(Critter cr)
 {
     if (IsDialogMustBeClosed(cr)) {
@@ -320,7 +318,7 @@ bool IsDialogMustBeClosed(Critter cr)
 
     timespan elapsed = Game.FrameTime - cr.DialogContext.StartTime;
 
-    if (elapsed >= Time::Milliseconds(Settings.TalkMaxTime)) {
+    if (elapsed >= Time::Milliseconds(Settings.Dialog.TalkMaxTime)) {
         return true;
     }
 
@@ -333,7 +331,7 @@ bool IsDialogMustBeClosed(Critter cr)
             }
         }
         else {
-            int talkDistance = cr.TalkDistance != 0 ? cr.TalkDistance : Settings.TalkDistance;
+            int talkDistance = cr.TalkDistance != 0 ? cr.TalkDistance : Settings.Dialog.TalkDistance;
 
             if (cr.MapId != cr.DialogContext.MapId || Game.GetDistance(cr, cr.DialogContext.MapHex) > talkDistance) {
                 return true;
@@ -352,7 +350,7 @@ bool IsCrittersCanTalk(Critter cr, Critter talker)
     if (cr.MapId != talker.MapId) {
         return false;
     }
-    if (Game.GetDistance(cr, talker) > (cr.TalkDistance != 0 ? cr.TalkDistance : Settings.TalkDistance)) {
+    if (Game.GetDistance(cr, talker) > (cr.TalkDistance != 0 ? cr.TalkDistance : Settings.Dialog.TalkDistance)) {
         return false;
     }
     if (!talker.IsSee(cr) || !cr.IsSee(talker)) {
@@ -362,7 +360,7 @@ bool IsCrittersCanTalk(Critter cr, Critter talker)
     return true;
 }
 
-// [[Event]]
+[[Event]]
 void OnCritterSendInitialInfo(Critter cr)
 {
     if (cr.DialogContext != null && cr.DialogContext.Talking) {
@@ -370,19 +368,19 @@ void OnCritterSendInitialInfo(Critter cr)
     }
 }
 
-// [[Event]]
+[[Event]]
 void OnCritterKnockout(Critter cr)
 {
     CloseDialog(cr);
 }
 
-// [[Event]]
+[[Event]]
 void OnCritterDead(Critter cr, Critter killer)
 {
     CloseDialog(cr);
 }
 
-// [[Event]]
+[[Event]]
 void OnCritterFinish(Critter cr)
 {
     CloseDialog(cr);
@@ -397,8 +395,8 @@ void SendDialogContext(Critter cr)
         DialogPack dialogPack = Game.GetDialogPack(dialogId);
         DialogSpeech dialogSpeech = dialogPack.GetSpeech(cr.DialogContext.CurSpeech);
 
-        uint textId = dialogSpeech.TextId;
-        uint[] answerTextIds = {};
+        hstring textId = dialogSpeech.TextId;
+        hstring[] answerTextIds = {};
         auto speechAnswers = cr.DialogContext.SpeechAnswers;
 
         for (int i = 0; i < speechAnswers.length(); i++) {
@@ -408,12 +406,12 @@ void SendDialogContext(Critter cr)
 
         ident talkerId = cr.DialogContext.TalkerId;
         string lexems = cr.DialogContext.Lexems;
-        timespan duration = Time::Milliseconds(Settings.TalkMaxTime) - (Game.FrameTime - cr.DialogContext.StartTime);
+        timespan duration = Time::Milliseconds(Settings.Dialog.TalkMaxTime) - (Game.FrameTime - cr.DialogContext.StartTime);
 
         cr.PlayerClientCall.ReceiveDialogContext(dialogId, talkerId, textId, answerTextIds, lexems, duration);
     }
     else {
-        cr.PlayerClientCall.ReceiveDialogContext(EMPTY_HSTRING, ZERO_IDENT, 0, {}, "", timespan());
+        cr.PlayerClientCall.ReceiveDialogContext(EMPTY_HSTRING, ZERO_IDENT, EMPTY_HSTRING, {}, "", timespan());
     }
 }
 
@@ -700,19 +698,19 @@ int UseAnswerResults(Critter cr, Critter talker, DialogAnswer answer)
 
             switch (result.Op) {
             case '+':
-                value += result.Value;
+                value += int(result.Value);
                 break;
             case '-':
-                value -= result.Value;
+                value -= int(result.Value);
                 break;
             case '*':
-                value *= result.Value;
+                value *= int(result.Value);
                 break;
             case '/':
-                value /= result.Value;
+                value /= int(result.Value);
                 break;
             case '=':
-                value = result.Value;
+                value = int(result.Value);
                 break;
             default:
                 break;
@@ -745,19 +743,19 @@ int UseAnswerResults(Critter cr, Critter talker, DialogAnswer answer)
 
             switch (result.Op) {
             case '+':
-                needCount += result.Value;
+                needCount += int(result.Value);
                 break;
             case '-':
-                needCount -= result.Value;
+                needCount -= int(result.Value);
                 break;
             case '*':
-                needCount *= result.Value;
+                needCount *= int(result.Value);
                 break;
             case '/':
-                needCount /= result.Value;
+                needCount /= int(result.Value);
                 break;
             case '=':
-                needCount = result.Value;
+                needCount = int(result.Value);
                 break;
             default:
                 continue;
@@ -796,12 +794,10 @@ int FindSpeech(DialogPack dialogPack, int speechId)
         return -1;
     }
 
-    uint targetSpeechId = uint(speechId);
-
     for (int i = 0; i < dialogPack.SpeechesCount; i++) {
         DialogSpeech speech = dialogPack.GetSpeech(i);
 
-        if (speech.Id == targetSpeechId) {
+        if (speech.Id == speechId) {
             return i;
         }
     }
@@ -813,18 +809,18 @@ int FindSpeech(DialogPack dialogPack, int speechId)
 
 #if CLIENT
 
-// [[ClientRemoteCall]]
-void ReceiveDialogContext(hstring dialogId, ident talkerId, uint textId, uint[] answerTextIds, string lexems, timespan duration)
+[[ClientRemoteCall]]
+void ReceiveDialogContext(hstring dialogId, ident talkerId, hstring textId, hstring[] answerTextIds, string lexems, timespan duration)
 {
     if (dialogId != EMPTY_HSTRING) {
-        string text = Game.GetText(TextPackName::Dialogs, textId);
+        string text = Game.GetText(TextPackKey(TextPackName::Dialogs, "" + (textId)));
         Critter talker = talkerId != ZERO_IDENT ? Game.GetCritter(talkerId) : null;
         text = Game.FormatTags(text, lexems, talker);
 
         string answersOneLine;
 
         for (int i = 0; i < answerTextIds.length(); i++) {
-            string answerText = Game.GetText(TextPackName::Dialogs, answerTextIds[i]);
+            string answerText = Game.GetText(TextPackKey(TextPackName::Dialogs, "" + (answerTextIds[i])));
             answerText = Game.FormatTags(answerText, lexems, talker);
 
             answersOneLine += answerText;

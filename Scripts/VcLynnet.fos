@@ -31,19 +31,21 @@ void KillerInit(Critter cr, bool firstTime)
     cr.OnSomeCritterDead.Subscribe(_KillerSmthDead);
 }
 
+[[Event]]
 void _KillerDead(Critter cr, Critter killer)
 {
-    PatternSniper::_SniperDead(cr, killer);
+    PatternSniper::_SniperDead_Impl(cr, killer);
     Map map = cr.GetMap();
     if (map != null) {
-        MapText::AddText(map, cr.Hex, COLOR_BLUE, TextPackName::Text, STR_KILLER_DEAD);
+        MapText::AddText(map, cr.Hex, COLOR_BLUE, TextPackKey(TextPackName::Text, "" + (STR_KILLER_DEAD)));
     }
 }
 
+[[Event]]
 void _KillerSmthDead(Critter cr, Critter fromCr, Critter killer)
 {
     if (killer != null && killer.Id == cr.Id && fromCr.VCLynettRefuse > 0) {
-        Messaging::Say(cr, TextPackName::Text, STR_KILLER_KILL);
+        Messaging::Say(cr, TextPackKey(TextPackName::Text, "" + (STR_KILLER_KILL)));
     }
 }
 
@@ -76,6 +78,7 @@ Critter GetPrisoner(Location loc, hstring dialog)
     return null;
 }
 
+[[DialogResult]]
 int r_TrySelectPrisoner(Critter player, Critter npc)
 {
     Map map = player.GetMap();
@@ -118,7 +121,8 @@ void dlg_PrisonerName(Critter player, Critter npc, string& lexems)
     prisoner.OnTalk.Subscribe(_PrisonerTalk);
 }
 
-bool _PrisonerTalk(Critter cr, Critter player, bool attach, int talkCount)
+[[Event]]
+EventResult _PrisonerTalk(Critter cr, Critter player, bool attach, int talkCount)
 {
     auto npcStory = player.NpcStory.clone();
     bool f = npcStory.get(cr.Id, false);
@@ -131,13 +135,13 @@ bool _PrisonerTalk(Critter cr, Critter player, bool attach, int talkCount)
                 player.NpcStory = npcStory;
             }
             else {
-                return true; // Второй вызов диалога, уже нужного
+                return EventResult::StopChain; // Второй вызов диалога, уже нужного
             }
 
             // Messaging::Info(player, "DEBUG: подмена диалога...");
             Dialogs::RunDialog(player, Content::Dialog::vc_telman, cr, false);
             cr.MercCancelOnGlobal = true;
-            return false;
+            return EventResult::StopChain;
         }
     }
     else {
@@ -146,11 +150,12 @@ bool _PrisonerTalk(Critter cr, Critter player, bool attach, int talkCount)
             player.NpcStory = npcStory;
         }
     }
-    return true;
+    return EventResult::StopChain;
 }
 
 // Переключение статуса квеста происходит при наступании НПЦ на спецтриггер, если игрок тоже находится в здании
-void t_Arest(Critter cr, StaticItem trigger, bool entered, uint8 dir)
+[[ItemTrigger]]
+void t_Arest(Critter cr, StaticItem trigger, bool entered, mdir dir)
 {
     if (!cr.ControlledByPlayer && Merc::IsMerc(cr) && !entered) {
         Critter player = Merc::GetMaster(cr);
@@ -161,7 +166,7 @@ void t_Arest(Critter cr, StaticItem trigger, bool entered, uint8 dir)
             CritterState::Wait(player, 0);
             NpcPlanes::DropPlanes(cr);
             CritterState::Wait(cr, 0);
-            Messaging::Say(player, TextPackName::Dialogs, DLGSTR(Content::Dialog::vc_telman, STR_ARESTHIM));
+            Messaging::Say(player, TextPackKey(TextPackName::Dialogs, "" + (DLGSTR(Content::Dialog::vc_telman, STR_ARESTHIM))));
             Effects::FadeScreen(player, false, Time::Milliseconds(2000));
             player.VCLynettArest = 4;
             Merc::CancelMerc(cr);
@@ -172,11 +177,12 @@ void t_Arest(Critter cr, StaticItem trigger, bool entered, uint8 dir)
     }
 }
 
+[[TimeEvent]]
 void PrisonerTalk(any[] values)
 {
     Critter cr = Game.GetCritter(values[0]);
     if (cr != null) {
-        Messaging::Say(cr, TextPackName::Dialogs, DLGSTR(Content::Dialog::vc_telman, STR_PRISONER_SHOUT));
+        Messaging::Say(cr, TextPackKey(TextPackName::Dialogs, "" + (DLGSTR(Content::Dialog::vc_telman, STR_PRISONER_SHOUT))));
     }
 }
 
@@ -195,6 +201,7 @@ void PrisonerTalk(any[] values)
 #define STR_GUARDS          (5923) // Так точно!Подтверждаем!
 #define STR_MCCLURE         (5924) // Бред!
 
+[[DialogResult]]
 void r_AddDocs(Critter player, Critter npc)
 {
     Item item = player.AddItem(Content::Item::fake_letter, 1);
@@ -212,30 +219,31 @@ void _LynDocsInit(Item item, bool firstTime)
     }
 }
 
-bool _LynDocsPutCont(Item item, Critter cr, CritterProperty skill)
+[[Event]]
+EventResult _LynDocsPutCont(Item item, Critter cr, CritterProperty skill)
 {
     Map map = cr.GetMap();
     Critter npc = map.GetCritter(CritterProperty::NpcRole, ROLE_MACLUR, CritterFindType::NonDeadNpc);
 
     if (map == null || map.ProtoId != Content::Map::vcity || !cr.ControlledByPlayer) {
-        return false;
+        return EventResult::StopChain;
     }
     if (skill == SKILL_PUT_CONT) {
         if ((cr.VCLynettForgery == 1 || cr.VCLynettForgery == 3) && Entrance::IsCritterInDeadZone(cr, map, 0, HEX_FORG_FIRST, HEX_FORG_LAST)) {
             if (cr.InSneakMode && cr.SkillSneak > 50) {
                 cr.Experience += 2000;
                 cr.VCLynettForgery = 2;
-                return false; // Навык достаточен, персонаж в снике
+                return EventResult::StopChain; // Навык достаточен, персонаж в снике
             }
             if (npc != null && npc.IsAlive() && Entrance::IsCritterInDeadZone(npc, map, 0, HEX_FORG_FIRST, HEX_FORG_LAST)) {
-                Messaging::SayShout(npc, TextPackName::Text, STR_CATCH_LOW_SNEAK, "$pname" + PlayerRegistration::GetPlayerName(cr.Id));
+                Messaging::SayShout(npc, TextPackKey(TextPackName::Text, "" + (STR_CATCH_LOW_SNEAK)), "$pname" + PlayerRegistration::GetPlayerName(cr.Id));
                 cr.VCLynettForgery = 3;
-                return true;
+                return EventResult::StopChain;
             }
             else {
                 cr.Experience += 2000;
                 cr.VCLynettForgery = 2;
-                return false; // Макклюра нет на месте
+                return EventResult::StopChain; // Макклюра нет на месте
             }
         }
     }
@@ -254,17 +262,18 @@ bool _LynDocsPutCont(Item item, Critter cr, CritterProperty skill)
                     values.insertFirst(npc.Id);
                 }
                 Game.StartTimeEvent(Tla::GameSeconds(3), Answer, values); //SavedDeferredCall
-                Messaging::Info(cr, TextPackName::Text, STR_PLAYER);
+                Messaging::Info(cr, TextPackKey(TextPackName::Text, "" + (STR_PLAYER)));
             }
             else {
-                Messaging::Info(cr, TextPackName::Text, STR_NO_WITNESS);
-                return true;
+                Messaging::Info(cr, TextPackKey(TextPackName::Text, "" + (STR_NO_WITNESS)));
+                return EventResult::StopChain;
             }
         }
     }
-    return false;
+    return EventResult::StopChain;
 }
 
+[[TimeEvent]]
 void Answer(any[] values)
 {
     if (values.length() > 2) {
@@ -272,11 +281,11 @@ void Answer(any[] values)
         for (int i = 2, l = values.length(); i < l; i++) {
             Critter guard = Game.GetCritter(values[i]);
             if (guard != null) {
-                Messaging::Say(guard, TextPackName::Text, STR_GUARDS);
+                Messaging::Say(guard, TextPackKey(TextPackName::Text, "" + (STR_GUARDS)));
             }
         }
         if (mcClure != null) {
-            Messaging::Say(mcClure, TextPackName::Text, STR_MCCLURE);
+            Messaging::Say(mcClure, TextPackKey(TextPackName::Text, "" + (STR_MCCLURE)));
         }
         Critter player = Game.GetCritter(values[1]);
         if (player != null && player.VCLynettForgery == 4) {
@@ -286,6 +295,7 @@ void Answer(any[] values)
     }
 }
 // Появление гвардейцев на входе к Макклюру. Гвардейцы будут ждать игрока не более суток, потом будут удалены.
+[[DialogResult]]
 void r_AddGuards(Critter cr, Critter npc)
 {
     Map map = cr.GetMap();
@@ -318,6 +328,7 @@ void r_AddGuards(Critter cr, Critter npc)
     }
 }
 
+[[TimeEvent]]
 void cte_DeleteGuard(Critter cr)
 {
     Game.DestroyCritter(cr);
@@ -325,6 +336,7 @@ void cte_DeleteGuard(Critter cr)
 }
 
 // Смена домашней позиции у гвардейцев
+[[DialogResult]]
 void r_MoveInto(Critter cr, Critter npc)
 {
     Map map = cr.GetMap();

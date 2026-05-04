@@ -8,7 +8,8 @@ namespace Parameters
 ///@ RemoteCall Server ProcessSkillsUp(any[] params)
 ///@ RemoteCall Server ProcessPerkUp(int32 perkIndex)
 
-void ModuleInit()
+[[ModuleInit]]
+void InitParameters()
 {
     Game.SetPropertyGetter(CritterProperty::Strength, CritterGetStrength);
     Game.SetPropertyGetter(CritterProperty::Perception, CritterGetPerception);
@@ -65,6 +66,7 @@ void ModuleInit()
 }
 
 #if !CLIENT
+[[ServerRemoteCall]]
 void ProcessSkillsUp(Player player, any[] params)
 {
     if (params.length() % 2 > 0 || params.length() / 2 > CritterPropertyGroup::Skills.length()) {
@@ -77,23 +79,23 @@ void ProcessSkillsUp(Player player, any[] params)
         int skillPoints = params[i + 1];
         while (skillPoints > 0) {
             int skillValue = cr.GetAsInt(skill);
-            if (skillValue >= Settings.SkillMaxValue) {
+            if (skillValue >= Settings.Player.SkillMaxValue) {
                 break;
             }
             int needPoints = 1;
-            if (skillValue > Settings.SkillModAdd6) {
+            if (skillValue > Settings.Player.SkillModAdd6) {
                 needPoints = 6;
             }
-            else if (skillValue > Settings.SkillModAdd5) {
+            else if (skillValue > Settings.Player.SkillModAdd5) {
                 needPoints = 5;
             }
-            else if (skillValue > Settings.SkillModAdd4) {
+            else if (skillValue > Settings.Player.SkillModAdd4) {
                 needPoints = 4;
             }
-            else if (skillValue > Settings.SkillModAdd3) {
+            else if (skillValue > Settings.Player.SkillModAdd3) {
                 needPoints = 3;
             }
-            else if (skillValue > Settings.SkillModAdd2) {
+            else if (skillValue > Settings.Player.SkillModAdd2) {
                 needPoints = 2;
             }
 
@@ -103,7 +105,7 @@ void ProcessSkillsUp(Player player, any[] params)
 
             skillValue++;
 
-            if (IsTagSkill(cr, skill) && skillValue < Settings.SkillMaxValue) {
+            if (IsTagSkill(cr, skill) && skillValue < Settings.Player.SkillMaxValue) {
                 skillValue++;
             }
             cr.UnspentSkillPoints = cr.UnspentSkillPoints - needPoints;
@@ -118,6 +120,7 @@ bool IsTagSkill(Critter cr, CritterProperty prop)
     return cr.TagSkill1 == prop || cr.TagSkill2 == prop || cr.TagSkill3 == prop;
 }
 
+[[ServerRemoteCall]]
 void ProcessPerkUp(Player player, int perkIndex)
 {
     Critter cr = player.GetControlledCritter();
@@ -130,9 +133,10 @@ void ProcessPerkUp(Player player, int perkIndex)
     }
 }
 
+[[PropertySetter]]
 void CritterSetExperience(Critter cr, CritterProperty prop, int& newValue)
 {
-    if (cr.Level >= int(Settings.LevelCap) && not Settings.LevelCapAddExperience) {
+    if (cr.Level >= int(Settings.Player.LevelCap) && not Settings.Player.LevelCapAddExperience) {
         newValue = cr.Experience;
         return;
     }
@@ -143,12 +147,13 @@ void CritterSetExperience(Critter cr, CritterProperty prop, int& newValue)
         exp += exp * (cr.PerkSwiftLearner * 5) / 100; // SwiftLearner perk
 
         // Process new experience
-        if (cr.Level < int(Settings.LevelCap)) {
+        if (cr.Level < int(Settings.Player.LevelCap)) {
             Game.StartTimeEvent(ZERO_TIMESPAN, UpdateExperienceLevel, cr.Id);
         }
     }
 }
 
+[[TimeEvent]]
 void UpdateExperienceLevel(any crId)
 {
     Critter cr = Game.GetCritter(crId);
@@ -156,7 +161,7 @@ void UpdateExperienceLevel(any crId)
         return;
     }
 
-    while (cr.Level < int(Settings.LevelCap) && cr.Experience >= NextLevelNeedExp(cr)) {
+    while (cr.Level < int(Settings.Player.LevelCap) && cr.Experience >= NextLevelNeedExp(cr)) {
         cr.Level += 1;
 
         // Skill points
@@ -176,7 +181,7 @@ void UpdateExperienceLevel(any crId)
         }
 
         // Add max hp
-        if (Settings.MaxLifeLevelSoftCap == 0 || int(cr.Level) <= Settings.MaxLifeLevelSoftCap) {
+        if (Settings.Player.MaxLifeLevelSoftCap == 0 || int(cr.Level) <= Settings.Player.MaxLifeLevelSoftCap) {
             cr.MaxLifeBase += 2 + cr.EnduranceBase / 2 + cr.PerkLifegiver * 4;
         }
 
@@ -187,6 +192,7 @@ void UpdateExperienceLevel(any crId)
     }
 }
 
+[[PropertySetter]]
 void CritterSetPerks(Critter cr, CritterProperty perk, uint8& newValue)
 {
     uint8 curValue = cr.GetAsInt(perk);
@@ -215,16 +221,19 @@ void DoPerkUpDown(any[] values)
     }
 }
 
+[[PropertySetter]]
 void CritterSetHide(Critter cr)
 {
     cr.RefreshView();
 }
 
+[[PropertySetter]]
 void CritterSetFastShot(Critter cr)
 {
     cr.IsNoAim = cr.IsTraitFastShot;
 }
 
+[[PropertySetter]]
 void CritterSetKnownLocations(Critter cr)
 {
     ident[] knownLoc = cr.KnownLocations.clone();
@@ -246,27 +255,30 @@ int NextLevelNeedExp(Critter cr)
 #endif
 
 #if CLIENT
+[[PropertySetter]]
 void CritterSetPropertyQuests(Critter cr, CritterProperty prop)
 {
     int str = ("" + prop).hstr().uhash + cr.GetAsInt(prop);
-    if (Game.IsTextPresent(TextPackName::Quest, str)) {
-        Messaging::Info(Game.GetText(TextPackName::Quest, str));
+    if (Game.IsTextPresent(TextPackKey(TextPackName::Quest, "" + (str)))) {
+        Messaging::Info(Game.GetText(TextPackKey(TextPackName::Quest, "" + (str))));
     }
 }
 
+[[PropertySetter]]
 void CritterSetLevel(Critter cr, CritterProperty, int& newValue)
 {
     if (newValue > cr.Level) {
         Game.PlaySound("LEVELUP.ACM");
-        Messaging::Info(TextPackName::Game, MsgStr::StrGainLevelup);
+        Messaging::Info(TextPackKey(TextPackName::Game, "" + (MsgStr::StrGainLevelup)));
         ChosenTabs::SetChosenTabLevelUp(true);
     }
 }
 
+[[PropertySetter]]
 void CritterSetExperience(Critter cr, CritterProperty, int& newValue)
 {
     if (newValue > cr.Experience) {
-        Messaging::Info(Game.ReplaceText(Game.GetText(TextPackName::Game, MsgStr::StrGainExperience), "VALUE", newValue - cr.Experience));
+        Messaging::Info(Game.ReplaceText(Game.GetText(TextPackKey(TextPackName::Game, "" + (MsgStr::StrGainExperience))), "VALUE", newValue - cr.Experience));
     }
 }
 
@@ -460,7 +472,7 @@ bool CritterGenerateCheck(dict<CritterProperty, int> props)
     // Check name
     int nameError = CheckPlayerName(Game.GetCacheText("RegName__"));
     if (nameError != 0) {
-        Messaging::Info(Game.GetText(TextPackName::Game, nameError));
+        Messaging::Info(Game.GetText(TextPackKey(TextPackName::Game, "" + (nameError))));
         return false;
     }
 
@@ -468,13 +480,13 @@ bool CritterGenerateCheck(dict<CritterProperty, int> props)
     int special = 0;
     for (int i = 0; i < CritterPropertyGroup::SpecialBase.length(); i++) {
         if (props[CritterPropertyGroup::SpecialBase[i]] < 1 || props[CritterPropertyGroup::SpecialBase[i]] > 10) {
-            Messaging::Info(Game.GetText(TextPackName::Game, MsgStr::StrNetWrongSpecial));
+            Messaging::Info(Game.GetText(TextPackKey(TextPackName::Game, "" + (MsgStr::StrNetWrongSpecial))));
             return false;
         }
         special += props[CritterPropertyGroup::SpecialBase[i]];
     }
-    if (special != Settings.StartSpecialPoints) {
-        Messaging::Info(Game.GetText(TextPackName::Game, MsgStr::StrNetWrongSpecial));
+    if (special != Settings.Player.StartSpecialPoints) {
+        Messaging::Info(Game.GetText(TextPackKey(TextPackName::Game, "" + (MsgStr::StrNetWrongSpecial))));
         return false;
     }
 
@@ -485,7 +497,7 @@ bool CritterGenerateCheck(dict<CritterProperty, int> props)
          CritterPropertyGroup::Skills.find(CritterProperty(props[CritterProperty::TagSkill2])) == -1) ||
         (props[CritterProperty::TagSkill3] != CritterProperty::None &&
          CritterPropertyGroup::Skills.find(CritterProperty(props[CritterProperty::TagSkill3])) == -1)) {
-        Messaging::Info(Game.GetText(TextPackName::Game, MsgStr::StrNetWrongTagskill));
+        Messaging::Info(Game.GetText(TextPackKey(TextPackName::Game, "" + (MsgStr::StrNetWrongTagskill))));
         return false;
     }
     return true;
@@ -506,9 +518,15 @@ int GetCritterSneakCoefficient(Critter cr)
     return cr.SkillSneak;
 }
 
-int CritterGetBarterCoefficient(Critter cr)
+int CritterGetBarterCoefficient_Impl(Critter cr)
 {
     return cr.SkillBarter;
+}
+
+[[PropertyGetter]]
+int CritterGetBarterCoefficient(Critter cr)
+{
+    return CritterGetBarterCoefficient_Impl(cr);
 }
 #endif
 
@@ -520,7 +538,7 @@ int CheckPlayerName(string name)
     }
 
     // Valid letters
-    string allLetters = Settings.ValidNameLettersCommon + Settings.ValidNameLettersCulture1 + Settings.ValidNameLettersCulture2;
+    string allLetters = Settings.Account.ValidNameLettersCommon + Settings.Account.ValidNameLettersCulture1 + Settings.Account.ValidNameLettersCulture2;
 
     for (int i = 0, j = name.length(); i < j; i++) {
         if (allLetters.find(name[i]) == -1) {
@@ -540,10 +558,10 @@ int CheckPlayerName(string name)
     int letters1 = 0;
     int letters2 = 0;
     for (int i = 0, j = name.length() - 1; i < j; i++) {
-        if (Settings.ValidNameLettersCulture1.find(name[i]) != -1) {
+        if (Settings.Account.ValidNameLettersCulture1.find(name[i]) != -1) {
             letters1++;
         }
-        else if (Settings.ValidNameLettersCulture2.find(name[i]) != -1) {
+        else if (Settings.Account.ValidNameLettersCulture2.find(name[i]) != -1) {
             letters2++;
         }
     }
@@ -655,19 +673,18 @@ void SwitchUnarmedWeapon(Critter cr, bool next)
 
 void UseMainItem()
 {
-    Critter chosen = Game.GetChosen();
-    if (chosen == null) {
+    if (Chosen == null) {
         return;
     }
 
-    if (Settings.Cursor == CursorType::UseWeapon) {
-        Settings.Cursor = CursorType::Default;
+    if (Gui::Cursor == CursorType::UseWeapon) {
+        Gui::Cursor = CursorType::Default;
         return;
     }
 
-    AbstractItem item = CritterItem::GetActive(chosen);
+    AbstractItem item = CritterItem::GetActive(Chosen);
     if (item == null) {
-        Settings.Cursor = CursorType::UseWeapon;
+        Gui::Cursor = CursorType::UseWeapon;
         return;
     }
 
@@ -679,12 +696,12 @@ void UseMainItem()
         ChosenActions::SetChosenActions({Tla::ChosenUseItem, itemId, 0, TARGET_SELF_ITEM, 0, USE_RELOAD, 0});
     }
     else if (mode < MAX_USES && item.Type == ItemType::Weapon) {
-        Settings.Cursor = CursorType::UseWeapon;
+        Gui::Cursor = CursorType::UseWeapon;
     }
     else if (mode == USE_USE && item.IsCanUseOnSmth) {
         // Self->CurUseItem = 0;
         // Self->SetCurMode( CUR_USE_ITEM );
-        Settings.Cursor = CursorType::UseItem;
+        Gui::Cursor = CursorType::UseItem;
     }
     else if (mode == USE_USE && item.IsCanUse) {
         // Отдельная ветка на юз с таймером
@@ -694,7 +711,7 @@ void UseMainItem()
 
 void SwitchMainItemMode(bool next)
 {
-    Critter chosen = Game.GetChosen();
+    Critter chosen = Chosen;
     if (chosen == null) {
         return;
     }
@@ -855,6 +872,7 @@ void SetWeaponMode(AbstractItem cItem, int mode)
     item.Mode = mode;
 }
 
+[[PropertySetter]]
 void CritterSetHandsProtoItemId(Critter cr, CritterProperty prop, hstring& newValue)
 {
     if (!VerifyUnarmedItem(cr, newValue)) {
@@ -862,6 +880,7 @@ void CritterSetHandsProtoItemId(Critter cr, CritterProperty prop, hstring& newVa
     }
 }
 
+[[PropertySetter]]
 void CritterSetHandsItemMode(Critter cr, CritterProperty prop, uint8& newValue)
 {
     // Check uses and aiming
@@ -870,7 +889,7 @@ void CritterSetHandsItemMode(Critter cr, CritterProperty prop, uint8& newValue)
 #define CONVERT_GRAMM           #(x)((x) * 453)
 #define TB_BATTLE_TIMEOUT_CHECK #(to)((to) > Game.SynchronizedTime && (to) - Game.SynchronizedTime > 10000000)
 
-int CritterGetStrength(Critter cr)
+int CritterGetStrength_Impl(Critter cr)
 {
     // Base value
     int val = cr.StrengthBase;
@@ -896,7 +915,13 @@ int CritterGetStrength(Critter cr)
     return CLAMP(val, 1, 10);
 }
 
-int CritterGetPerception(Critter cr)
+[[PropertyGetter]]
+int CritterGetStrength(Critter cr)
+{
+    return CritterGetStrength_Impl(cr);
+}
+
+int CritterGetPerception_Impl(Critter cr)
 {
     // Base value
     int val = (cr.IsDamagedEye ? 1 : cr.PerceptionBase);
@@ -912,7 +937,13 @@ int CritterGetPerception(Critter cr)
     return CLAMP(val, 1, 10);
 }
 
-int CritterGetEndurance(Critter cr)
+[[PropertyGetter]]
+int CritterGetPerception(Critter cr)
+{
+    return CritterGetPerception_Impl(cr);
+}
+
+int CritterGetEndurance_Impl(Critter cr)
 {
     // Base value
     int val = cr.EnduranceBase;
@@ -923,6 +954,13 @@ int CritterGetEndurance(Critter cr)
     return CLAMP(val, 1, 10);
 }
 
+[[PropertyGetter]]
+int CritterGetEndurance(Critter cr)
+{
+    return CritterGetEndurance_Impl(cr);
+}
+
+[[PropertyGetter]]
 int CritterGetCharisma(Critter cr)
 {
     // Base value
@@ -939,6 +977,7 @@ int CritterGetCharisma(Critter cr)
     return CLAMP(val, 1, 10);
 }
 
+[[PropertyGetter]]
 int CritterGetIntellegence(Critter cr)
 {
     // Base value
@@ -955,7 +994,7 @@ int CritterGetIntellegence(Critter cr)
     return CLAMP(val, 1, 10);
 }
 
-int CritterGetAgility(Critter cr)
+int CritterGetAgility_Impl(Critter cr)
 {
     // Base value
     int val = cr.AgilityBase;
@@ -966,7 +1005,13 @@ int CritterGetAgility(Critter cr)
     return CLAMP(val, 1, 10);
 }
 
-int CritterGetLuck(Critter cr)
+[[PropertyGetter]]
+int CritterGetAgility(Critter cr)
+{
+    return CritterGetAgility_Impl(cr);
+}
+
+int CritterGetLuck_Impl(Critter cr)
 {
     // Base value
     int val = cr.LuckBase;
@@ -977,21 +1022,31 @@ int CritterGetLuck(Critter cr)
     return CLAMP(val, 1, 10);
 }
 
+[[PropertyGetter]]
+int CritterGetLuck(Critter cr)
+{
+    return CritterGetLuck_Impl(cr);
+}
+
+[[PropertyGetter]]
 bool CritterGetIsNoMove(Critter cr)
 {
     return cr.IsNoMoveBase;
 }
 
+[[PropertyGetter]]
 bool CritterGetIsNoRun(Critter cr)
 {
     return cr.IsNoRunBase;
 }
 
+[[PropertyGetter]]
 int CritterGetWalkSpeed(Critter cr)
 {
     return cr.WalkSpeedBase > 0 ? cr.WalkSpeedBase : 80;
 }
 
+[[PropertyGetter]]
 int CritterGetMaxLife(Critter cr)
 {
     int val = cr.MaxLifeBase + cr.StrengthBase + cr.EnduranceBase * 2;
@@ -999,56 +1054,69 @@ int CritterGetMaxLife(Critter cr)
     return CLAMP(val, 1, 9999);
 }
 
+[[PropertyGetter]]
 int CritterGetActionPoints(Critter cr)
 {
-    int val = cr.ActionPointsBase + CritterGetAgility(cr) / 2;
+    int val = cr.ActionPointsBase + CritterGetAgility_Impl(cr) / 2;
     val += Drugs::GetDrugEffect(cr, CritterProperty::ActionPointsBase);
     return CLAMP(val, 1, 9999);
 }
 
+[[PropertyGetter]]
 bool CritterGetIsOverweight(Critter cr)
 {
-    return int(cr.ItemsWeight) > CritterGetCarryWeight(cr);
+    return int(cr.ItemsWeight) > CritterGetCarryWeight_Impl(cr);
 }
 
-int CritterGetCarryWeight(Critter cr)
+int CritterGetCarryWeight_Impl(Critter cr)
 {
     int val = MAX(cr.CarryWeightBase, 0);
     val += Drugs::GetDrugEffect(cr, CritterProperty::CarryWeightBase);
-    val += CONVERT_GRAMM(25 + CritterGetStrength(cr) * (25 - (cr.IsTraitSmallFrame ? 10 : 0)));
+    val += CONVERT_GRAMM(25 + CritterGetStrength_Impl(cr) * (25 - (cr.IsTraitSmallFrame ? 10 : 0)));
     return CLAMP(val, 0, 2000000000);
 }
 
+[[PropertyGetter]]
+int CritterGetCarryWeight(Critter cr)
+{
+    return CritterGetCarryWeight_Impl(cr);
+}
+
+[[PropertyGetter]]
 int CritterGetSequence(Critter cr)
 {
-    int val = cr.SequenceBase + CritterGetPerception(cr) * 2;
+    int val = cr.SequenceBase + CritterGetPerception_Impl(cr) * 2;
     val += Drugs::GetDrugEffect(cr, CritterProperty::SequenceBase);
     return CLAMP(val, 0, 9999);
 }
 
+[[PropertyGetter]]
 int CritterGetMeleeDamage(Critter cr)
 {
-    int strength = CritterGetStrength(cr);
+    int strength = CritterGetStrength_Impl(cr);
     int val = cr.MeleeDamageBase + (strength > 6 ? strength - 5 : 1);
     val += Drugs::GetDrugEffect(cr, CritterProperty::MeleeDamageBase);
     return CLAMP(val, 1, 9999);
 }
 
+[[PropertyGetter]]
 int CritterGetHealingRate(Critter cr)
 {
-    int e = CritterGetEndurance(cr);
+    int e = CritterGetEndurance_Impl(cr);
     int val = cr.HealingRateBase + MAX(1, e / 3);
     val += Drugs::GetDrugEffect(cr, CritterProperty::HealingRateBase);
     return CLAMP(val, 0, 9999);
 }
 
+[[PropertyGetter]]
 int CritterGetCriticalChance(Critter cr)
 {
-    int val = cr.CriticalChanceBase + CritterGetLuck(cr);
+    int val = cr.CriticalChanceBase + CritterGetLuck_Impl(cr);
     val += Drugs::GetDrugEffect(cr, CritterProperty::CriticalChanceBase);
     return CLAMP(val, 0, 100);
 }
 
+[[PropertyGetter]]
 int CritterGetMaxCritical(Critter cr)
 {
     int val = cr.MaxCriticalBase;
@@ -1068,9 +1136,10 @@ int GetDeteriorationProc(AbstractItem item)
     return CLAMP(value, 0, 100);
 }
 
+[[PropertyGetter]]
 int CritterGetArmorClass(Critter cr)
 {
-    int val = cr.ArmorClassBase + CritterGetAgility(cr);
+    int val = cr.ArmorClassBase + CritterGetAgility_Impl(cr);
     val += Drugs::GetDrugEffect(cr, CritterProperty::ArmorClassBase);
     AbstractItem armor = CritterItem::GetActive(cr, CritterItemSlot::Armor);
     if (armor != null && armor.Type == ItemType::Armor) {
@@ -1079,7 +1148,7 @@ int CritterGetArmorClass(Critter cr)
     return CLAMP(val, 0, 90);
 }
 
-int[] CritterGetDamageResistance(Critter cr)
+int[] CritterGetDamageResistance_Impl(Critter cr)
 {
     AbstractItem armor = CritterItem::GetActive(cr, CritterItemSlot::Armor);
     int dp = 0;
@@ -1096,8 +1165,8 @@ int[] CritterGetDamageResistance(Critter cr)
         cr.ElectricityResistanceBase + armor.Armor_DRElectr * dp / 100,
         cr.EmpResistanceBase + armor.Armor_DREmp * dp / 100,
         cr.ExplodeResistanceBase + armor.Armor_DRExplode * dp / 100,
-        cr.PoisonResistanceBase + CritterGetEndurance(cr) * 5,
-        cr.RadiationResistanceBase + CritterGetEndurance(cr) * 2,
+        cr.PoisonResistanceBase + CritterGetEndurance_Impl(cr) * 5,
+        cr.RadiationResistanceBase + CritterGetEndurance_Impl(cr) * 2,
     };
 
     // Armor perk
@@ -1127,21 +1196,31 @@ int[] CritterGetDamageResistance(Critter cr)
     return result;
 }
 
+[[PropertyGetter]]
+int[] CritterGetDamageResistance(Critter cr)
+{
+    return CritterGetDamageResistance_Impl(cr);
+}
+
+[[PropertyGetter]]
 int CritterGetNormalResistance(Critter cr)
 {
-    return CritterGetDamageResistance(cr)[DamageTypes::Normal];
+    return CritterGetDamageResistance_Impl(cr)[DamageTypes::Normal];
 }
 
+[[PropertyGetter]]
 int CritterGetPoisonResistance(Critter cr)
 {
-    return CritterGetDamageResistance(cr)[DamageTypes::Poison];
+    return CritterGetDamageResistance_Impl(cr)[DamageTypes::Poison];
 }
 
+[[PropertyGetter]]
 int CritterGetRadiationResistance(Critter cr)
 {
-    return CritterGetDamageResistance(cr)[DamageTypes::Radiation];
+    return CritterGetDamageResistance_Impl(cr)[DamageTypes::Radiation];
 }
 
+[[PropertyGetter]]
 int[] CritterGetDamageThreshold(Critter cr)
 {
     AbstractItem armor = CritterItem::GetActive(cr, CritterItemSlot::Armor);
@@ -1175,11 +1254,13 @@ int[] CritterGetDamageThreshold(Critter cr)
     return result;
 }
 
+[[PropertyGetter]]
 bool CritterGetIsInjured(Critter cr)
 {
     return cr.IsDamagedEye || cr.IsDamagedRightLeg || cr.IsDamagedLeftLeg || cr.IsDamagedRightArm || cr.IsDamagedLeftArm;
 }
 
+[[PropertyGetter]]
 bool CritterGetIsAddicted(Critter cr)
 {
     bool[] addictions = cr.Addictions.clone();
@@ -1191,6 +1272,7 @@ bool CritterGetIsAddicted(Critter cr)
     return false;
 }
 
+[[PropertyGetter]]
 CritterProperty[] CritterGetTagSkills(Critter cr)
 {
     CritterProperty[] result = {};
@@ -1208,9 +1290,9 @@ CritterProperty[] CritterGetTagSkills(Critter cr)
 
 int GetCritterLookDistance(Critter cr)
 {
-    int look = Settings.LookNormal + cr.Perception * 3 + cr.BonusLook + cr.Multihex;
-    if (look < int(Settings.LookMinimum)) {
-        look = Settings.LookMinimum;
+    int look = Settings.Look.LookNormal + cr.Perception * 3 + cr.BonusLook + cr.Multihex;
+    if (look < Settings.Look.LookMinimum) {
+        look = Settings.Look.LookMinimum;
     }
     return look;
 }
@@ -1259,10 +1341,10 @@ int GetItemUseApCost(Critter cr, AbstractItem item, int mode)
     int apCost = 1;
 
     if (use == USE_USE) {
-        apCost = Settings.RtApCostUseItem;
+        apCost = Settings.Movement.RtApCostUseItem;
     }
     else if (use == USE_RELOAD) {
-        apCost = Settings.RtApCostReloadWeapon;
+        apCost = Settings.Movement.RtApCostReloadWeapon;
 
         if (item.Type == ItemType::Weapon && item.Weapon_Perk == ItemPerks::FastReload) {
             apCost--;
@@ -1309,7 +1391,7 @@ int GetItemAttackDistance(Critter cr, AbstractItem item, int mode)
     int use = mode & 0xF;
     CritterProperty skill = _WeaponSkill(item, use);
     int dist = _WeaponMaxDist(item, use);
-    int strength = CritterGetStrength(cr);
+    int strength = CritterGetStrength_Impl(cr);
     int heaveHo = cr.PerkHeaveHo;
     if (skill == CritterProperty::SkillThrowing) {
         dist = MIN(dist, int(3) * MIN(int(10), strength + 2 * heaveHo));
@@ -1367,19 +1449,19 @@ int GetAimApCost(int hitLocation)
 {
     switch (hitLocation) {
     case HitLocations::LocationTorso:
-        return Settings.ApCostAimTorso;
+        return Settings.Combat.ApCostAimTorso;
     case HitLocations::LocationEyes:
-        return Settings.ApCostAimEyes;
+        return Settings.Combat.ApCostAimEyes;
     case HitLocations::LocationHead:
-        return Settings.ApCostAimHead;
+        return Settings.Combat.ApCostAimHead;
     case HitLocations::LocationLeftArm:
     case HitLocations::LocationRightArm:
-        return Settings.ApCostAimArms;
+        return Settings.Combat.ApCostAimArms;
     case HitLocations::LocationGroin:
-        return Settings.ApCostAimGroin;
+        return Settings.Combat.ApCostAimGroin;
     case HitLocations::LocationRightLeg:
     case HitLocations::LocationLeftLeg:
-        return Settings.ApCostAimLegs;
+        return Settings.Combat.ApCostAimLegs;
     case HitLocations::LocationNone:
     case HitLocations::LocationUncalled:
     default:
@@ -1388,6 +1470,7 @@ int GetAimApCost(int hitLocation)
     return 0;
 }
 
+[[PropertyGetter]]
 int CritterGetItemsWeight(Critter cr)
 {
 #if CLIENT

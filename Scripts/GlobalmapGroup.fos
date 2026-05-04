@@ -22,17 +22,18 @@ namespace GlobalmapGroup
 
 #if CLIENT
 
-void ModuleInit()
+[[ModuleInit]]
+void InitGlobalmapGroup()
 {
     Game.OnLoop.Subscribe(OnLoop);
 }
 
+[[Event]]
 void OnLoop()
 {
     auto group = GetCurrentGroup();
     if (group != null && group.IsMoving) {
-        Critter chosen = Game.GetChosen();
-        if (chosen == null || CurMap != null) {
+        if (Chosen == null || CurMap != null) {
             group.IsMoving = false;
             return;
         }
@@ -100,6 +101,7 @@ void RuleGlobalCommand(int command, any param1, any param2)
     CurPlayer.ServerCall.ProcessGlobalMapCommand(command, param1, param2);
 }
 
+[[ClientRemoteCall]]
 void SetCurrentLocationEntrances(hstring locPid, hstring[] mapEntrances)
 {
 }
@@ -113,15 +115,15 @@ void LoadGlobalMapGroupData(Serializator::Serializator load)
 
 #if SERVER
 
-///@ Setting Common int32 GlobalMapGroupMaxCount = 6                     // Макс размер группы
+///@ Setting Common int32 GlobalMap.GlobalMapGroupMaxCount // Макс размер группы (default: 6)
 #define TIME_CAN_FOLLOW_GM (Time::Seconds(5)) // Can less than Map timeout
 
 ///@ Property Game Server int32 LastGlobalMapTrip Mutable Persistent // Индекс последней группы на глобальной карте
 
 // Global map
-#define GM_MAXX                (Settings.GlobalMapWidth * Settings.GlobalMapZoneLength)
-#define GM_MAXY                (Settings.GlobalMapHeight * Settings.GlobalMapZoneLength)
-#define GM_ZONE_LEN            (Settings.GlobalMapZoneLength) // Can be multiple to GM_MAXX and GM_MAXY
+#define GM_MAXX                (Settings.GlobalMap.GlobalMapWidth * Settings.GlobalMap.GlobalMapZoneLength)
+#define GM_MAXY                (Settings.GlobalMap.GlobalMapHeight * Settings.GlobalMap.GlobalMapZoneLength)
+#define GM_ZONE_LEN            (Settings.GlobalMap.GlobalMapZoneLength) // Can be multiple to GM_MAXX and GM_MAXY
 
 #define GM_MAX_GROUP_COUNT     (6)
 #define GM_ANSWER_WAIT_TIME    (Time::Seconds(20))
@@ -154,7 +156,8 @@ void LoadGlobalMapGroupData(Serializator::Serializator load)
 #define GM_INFO_FOG         (0x10)
 #define GM_INFO_LOCATION    (0x20)
 
-void ModuleInit()
+[[ModuleInit]]
+void InitGlobalmapGroup()
 {
     Game.OnGlobalMapCritterIn.Subscribe(OnGlobalMapCritterIn);
     Game.OnGlobalMapCritterOut.Subscribe(OnGlobalMapCritterOut);
@@ -162,11 +165,13 @@ void ModuleInit()
     Game.LoadImage(Tla::ImageRelief, "relief_tla.png");
 }
 
+[[Event]]
 void OnCritterInit(Critter cr, bool firstTime)
 {
     cr.StartTimeEvent(Time::Milliseconds(0), Time::Milliseconds(1000), OnCritterIdle);
 }
 
+[[TimeEvent]]
 void OnCritterIdle(Critter cr)
 {
     // Global map
@@ -179,6 +184,7 @@ void OnCritterIdle(Critter cr)
     }
 }
 
+[[Event]]
 void OnGlobalMapCritterIn(Critter cr)
 {
     int tripId = cr.GlobalMapTripId;
@@ -196,6 +202,7 @@ void OnGlobalMapCritterIn(Critter cr)
     }
 }
 
+[[Event]]
 void OnGlobalMapCritterOut(Critter cr)
 {
     int tripId = cr.GlobalMapTripId;
@@ -253,7 +260,7 @@ void global_process(int processType, Critter cr, Item car, float& curX, float& c
         float lastDist = DISTANCE(curX, curY, toX, toY);
 
         // Calcuate speed
-        float speedPix = speed * float(Settings.GlobalMapMoveTime) / 1000.0f;
+        float speedPix = speed * float(Settings.GlobalMap.GlobalMapMoveTime) / 1000.0f;
         float speedAngle = math::atan2(toY - curY, toX - curX);
         float speedX = math::cos(speedAngle) * speedPix;
         float speedY = math::sin(speedAngle) * speedPix;
@@ -345,8 +352,8 @@ void global_process(int processType, Critter cr, Item car, float& curX, float& c
         // Check new position
         if (oldXi != curXi || oldYi != curYi) {
             // Check borders
-            int gmWidth = Settings.GlobalMapWidth * Settings.GlobalMapZoneLength;
-            int gmHeight = Settings.GlobalMapHeight * Settings.GlobalMapZoneLength;
+            int gmWidth = Settings.GlobalMap.GlobalMapWidth * Settings.GlobalMap.GlobalMapZoneLength;
+            int gmHeight = Settings.GlobalMap.GlobalMapHeight * Settings.GlobalMap.GlobalMapZoneLength;
             if (curXi < 0 || curYi < 0 || curXi >= gmWidth || curYi >= gmHeight) {
                 if (curXi < 0) {
                     curXi = 0;
@@ -407,10 +414,10 @@ void global_process(int processType, Critter cr, Item car, float& curX, float& c
             }
 
             // Zone
-            int oldZoneX = oldXi / Settings.GlobalMapZoneLength;
-            int oldZoneY = oldYi / Settings.GlobalMapZoneLength;
-            int curZoneX = curXi / Settings.GlobalMapZoneLength;
-            int curZoneY = curYi / Settings.GlobalMapZoneLength;
+            int oldZoneX = oldXi / Settings.GlobalMap.GlobalMapZoneLength;
+            int oldZoneY = oldYi / Settings.GlobalMap.GlobalMapZoneLength;
+            int curZoneX = curXi / Settings.GlobalMap.GlobalMapZoneLength;
+            int curZoneY = curYi / Settings.GlobalMap.GlobalMapZoneLength;
 
             // Change zone
             if (oldZoneX != curZoneX || oldZoneY != curZoneY) {
@@ -435,14 +442,14 @@ void global_process(int processType, Critter cr, Item car, float& curX, float& c
 
             if (fuel <= 0 || deterioration >= int(car.Car_MaxDeterioration)) {
                 int str = (fuel <= 0 ? MsgStr::StrCarFuelEmpty : MsgStr::StrCarBroken);
-                Messaging::Info(cr, TextPackName::Game, str);
+                Messaging::Info(cr, TextPackKey(TextPackName::Game, "" + (str)));
                 speed = 0.0f;
                 return;
             }
 
             // Car values created for the call every 500 ms
-            fuel -= car.Car_FuelConsumption * Settings.GlobalMapMoveTime / 500;
-            deterioration += car.Car_DeteriorationRate * Settings.GlobalMapMoveTime / 500;
+            fuel -= car.Car_FuelConsumption * Settings.GlobalMap.GlobalMapMoveTime / 500;
+            deterioration += car.Car_DeteriorationRate * Settings.GlobalMap.GlobalMapMoveTime / 500;
             if (fuel < 0) {
                 fuel = 0;
             }
@@ -457,13 +464,13 @@ void global_process(int processType, Critter cr, Item car, float& curX, float& c
         }
 
         cr.GlobalMapMoveCounter += 1;
-        if (cr.GlobalMapMoveCounter % (Settings.EncounterTime / Settings.GlobalMapMoveTime) == 0) {
+        if (cr.GlobalMapMoveCounter % (Settings.GlobalMap.EncounterTime / Settings.GlobalMap.GlobalMapMoveTime) == 0) {
             Critter[] group = GlobalmapGroupExtended::GetGlobalGroup(cr);
             Game.Log("cr.GlobalMapMoveCounter" + cr.GlobalMapMoveCounter + "gogo");
             // Validate charisma
             Critter leader = group[0];
             if (int(group.length()) > leader.Charisma + leader.PerkMagneticPersonality) {
-                Messaging::Info(leader, TextPackName::Game, MsgStr::StrCritBadCharisma);
+                Messaging::Info(leader, TextPackKey(TextPackName::Game, "" + (MsgStr::StrCritBadCharisma)));
                 speed = 0.0f; // Stop
                 return;
             }
@@ -479,8 +486,8 @@ void global_process(int processType, Critter cr, Item car, float& curX, float& c
         if (movementType == Tla::GmWalkWater && Worldmap::GetGlobalMapRelief(curXi, curYi) == 0) {
             // Find land
             bool landFounded = false;
-            const int maxx = Settings.GlobalMapWidth * Settings.GlobalMapZoneLength;
-            const int maxy = Settings.GlobalMapHeight * Settings.GlobalMapZoneLength;
+            const int maxx = Settings.GlobalMap.GlobalMapWidth * Settings.GlobalMap.GlobalMapZoneLength;
+            const int maxy = Settings.GlobalMap.GlobalMapHeight * Settings.GlobalMap.GlobalMapZoneLength;
             for (int ox = -1; ox <= 1; ox++) {
                 for (int oy = -1; oy <= 1; oy++) {
                     int xx = curXi + ox;
@@ -507,7 +514,7 @@ void global_process(int processType, Critter cr, Item car, float& curX, float& c
         // Validate charisma
         Critter leader = group[0];
         if (int(group.length()) > leader.Charisma + leader.PerkMagneticPersonality) {
-            Messaging::Info(leader, TextPackName::Game, MsgStr::StrCritBadCharisma);
+            Messaging::Info(leader, TextPackKey(TextPackName::Game, "" + (MsgStr::StrCritBadCharisma)));
             if (car != null) {
                 CheckForLocationWithoutParking(cr, car, curX, curY);
             }
@@ -530,7 +537,7 @@ void global_process(int processType, Critter cr, Item car, float& curX, float& c
                 strNum = MsgStr::StrCarBroken;
             }
             if (strNum != 0) {
-                Messaging::Info(leader, TextPackName::Game, strNum);
+                Messaging::Info(leader, TextPackKey(TextPackName::Game, "" + (strNum)));
                 speed = 0.0f;
                 CheckForLocationWithoutParking(cr, car, curX, curY);
                 return;
@@ -542,11 +549,11 @@ void global_process(int processType, Critter cr, Item car, float& curX, float& c
             // In radius of one zone (left, top, right, bottom)
             if (car.Car_MovementType == Tla::GmWalkWater) {
                 if (Worldmap::GetGlobalMapRelief(curXi, curYi) != 0) {
-                    const int maxx = Settings.GlobalMapWidth * Settings.GlobalMapZoneLength;
-                    const int maxy = Settings.GlobalMapHeight * Settings.GlobalMapZoneLength;
+                    const int maxx = Settings.GlobalMap.GlobalMapWidth * Settings.GlobalMap.GlobalMapZoneLength;
+                    const int maxy = Settings.GlobalMap.GlobalMapHeight * Settings.GlobalMap.GlobalMapZoneLength;
                     const int[] ox = {-1, 0, 1, 0};
                     const int[] oy = {0, -1, 0, 1};
-                    for (int i = 1, ii = Settings.GlobalMapZoneLength; i <= ii; i++) {
+                    for (int i = 1, ii = Settings.GlobalMap.GlobalMapZoneLength; i <= ii; i++) {
                         for (int j = 0; j < 4; j++) {
                             int xx = curXi + ox[j] * i;
                             int yy = curYi + oy[j] * i;
@@ -585,7 +592,7 @@ void global_process(int processType, Critter cr, Item car, float& curX, float& c
         if (Worldmap::GetGlobalMapRelief(curXi, curYi) == 0) {
             // Say to leader
             Critter[] group = GlobalmapGroupExtended::GetGlobalGroup(cr);
-            Messaging::Info(group[0], TextPackName::Game, MsgStr::StrCantKickOnWater);
+            Messaging::Info(group[0], TextPackKey(TextPackName::Game, "" + (MsgStr::StrCantKickOnWater)));
             return;
         }
 
@@ -596,7 +603,7 @@ void global_process(int processType, Critter cr, Item car, float& curX, float& c
 // //////////////////////////////////////////////////////////////////////////////////////////////////
 // Call on invite to encaunter.
 // If mapId != 0 than group enter to it.
-void global_invite(Critter leader, Item car, int encounterDescriptor, int combatMode, ident& mapId, mpos& hex, uint8& dir)
+void global_invite(Critter leader, Item car, int encounterDescriptor, int combatMode, ident& mapId, mpos& hex, mdir& dir)
 {
     // Enter to map under group
     if (encounterDescriptor == int(-1)) {
@@ -606,14 +613,16 @@ void global_invite(Critter leader, Item car, int encounterDescriptor, int combat
             Map map = loc.GetMapByIndex(0);
             if (map != null && Entrance::MapGetEntryCoords(map, 0, 0, hex)) {
                 mapId = map.Id;
-                dir = 0xFF;
+                dir = mdir(hdir(0xFF));
             }
         }
         return;
     }
 
     // Find encounter
-    Worldmap::InviteToEncounter(GlobalmapGroupExtended::GetGlobalGroup(leader), car, encounterDescriptor, combatMode, mapId, hex, dir);
+    uint8 dirByte = dir.hex.value;
+    Worldmap::InviteToEncounter(GlobalmapGroupExtended::GetGlobalGroup(leader), car, encounterDescriptor, combatMode, mapId, hex, dirByte);
+    dir = mdir(hdir(dirByte));
 }
 
 void ScanZone(Critter[] group, int zx, int zy)
@@ -637,8 +646,8 @@ void ScanZone(Critter[] group, int zx, int zy)
         }
 
         // Open fog
-        int mapw = Settings.GlobalMapWidth;
-        int maph = Settings.GlobalMapHeight;
+        int mapw = Settings.GlobalMap.GlobalMapWidth;
+        int maph = Settings.GlobalMap.GlobalMapHeight;
         for (int x = -lookLen; x <= lookLen; x++) {
             for (int y = -lookLen; y <= lookLen; y++) {
                 int zx_ = zx + x;
@@ -859,7 +868,8 @@ void GM_GlobalProcess(Critter cr, GlobalMapGroup group, int type) // 13 hits
     float base_speed = group.Speed;
     bool callGlobalProcess = true;
 
-    if (!cr.OnGlobalMapProcess.Fire(type, group.GetCar(), cur_wx, cur_wy, to_wx, to_wy, speed, encounter_descriptor, wait_for_answer)) {
+    if ((cr.OnGlobalMapProcess.Fire(type, group.GetCar(), cur_wx, cur_wy, to_wx, to_wy, speed, encounter_descriptor, wait_for_answer) ==
+         EventResult::StopChain)) {
         callGlobalProcess = false;
     }
     else {
@@ -1036,13 +1046,13 @@ bool GM_GroupToMap(GlobalMapGroup group, Map map, hstring entry, mpos hexMap, in
             }
 
             if (entryNum < 0) {
-                Messaging::Info(rule, TextPackName::Game, STR_GLOBAL_CAR_PLACE_NOT_FOUND);
+                Messaging::Info(rule, TextPackKey(TextPackName::Game, "" + (STR_GLOBAL_CAR_PLACE_NOT_FOUND)));
                 return false;
             }
 
             Entrance::MapGetEntryCoords(map, ENTRY_CAR, entryNum, hex);
             if (!map.CheckPlaceForItem(car_hex, car.ProtoId)) {
-                Messaging::Info(rule, TextPackName::Game, STR_GLOBAL_CAR_PLACE_NOT_FOUND);
+                Messaging::Info(rule, TextPackKey(TextPackName::Game, "" + (STR_GLOBAL_CAR_PLACE_NOT_FOUND)));
                 return false;
             }
             if (mdir < 6) {
@@ -1051,7 +1061,7 @@ bool GM_GroupToMap(GlobalMapGroup group, Map map, hstring entry, mpos hexMap, in
         }
         else {
             if (!Entrance::GetEntryFreeHex(map, ENTRY_DEFAULT, hex)) {
-                Messaging::Info(rule, TextPackName::Game, STR_GLOBAL_PLACE_NOT_FOUND);
+                Messaging::Info(rule, TextPackKey(TextPackName::Game, "" + (STR_GLOBAL_PLACE_NOT_FOUND)));
                 return false;
             }
         }
@@ -1074,7 +1084,7 @@ bool GM_GroupToMap(GlobalMapGroup group, Map map, hstring entry, mpos hexMap, in
             }
 
             if (entryNum < 0) {
-                Messaging::Info(rule, TextPackName::Game, STR_GLOBAL_CAR_PLACE_NOT_FOUND);
+                Messaging::Info(rule, TextPackKey(TextPackName::Game, "" + (STR_GLOBAL_CAR_PLACE_NOT_FOUND)));
                 return false;
             }
         }
@@ -1088,7 +1098,7 @@ bool GM_GroupToMap(GlobalMapGroup group, Map map, hstring entry, mpos hexMap, in
         ItemMovement::MoveItem(car, 1, map, car_hex);
     }
 
-    rule.TransferToMap(map, hex, Game.Random(0, 5));
+    rule.TransferToMap(map, hex, HDIR_Random);
 
     // Transit other
     for (int i = 0, l = transitCr.length(); i < l; i++) {
@@ -1099,7 +1109,7 @@ bool GM_GroupToMap(GlobalMapGroup group, Map map, hstring entry, mpos hexMap, in
 
         cr1.WorldPos = ipos(int(group.CurX), int(group.CurY));
 
-        cr1.TransferToMap(map, hex, Game.Random(0, 5));
+        cr1.TransferToMap(map, hex, HDIR_Random);
         if (cr1.GetMap() == null) // Проверить, что криттер успеет сюда попасть
         // if( !Transit( cr, map, hx, hy, dir,  car  != null ? 3 : 2, true ) )
         {
@@ -1141,7 +1151,7 @@ bool GM_GroupToLoc(Critter rule, ident locId, int entrance, bool force = false) 
         }
         GlobalMapLocations::SetGlobalMapData(GM_INFO_LOCATIONS, rule);
         // rule->Send_GlobalInfo( GM_INFO_LOCATIONS );
-        Messaging::Info(rule, TextPackName::Game, STR_GLOBAL_LOCATION_NOT_FOUND);
+        Messaging::Info(rule, TextPackKey(TextPackName::Game, "" + (STR_GLOBAL_LOCATION_NOT_FOUND)));
         return false;
     }
 
@@ -1150,12 +1160,12 @@ bool GM_GroupToLoc(Critter rule, ident locId, int entrance, bool force = false) 
         if (rule.ControlledByPlayer) {
             GlobalMapLocations::SetGlobalMapData(GM_INFO_LOCATIONS, rule);
         }
-        Messaging::Info(rule, TextPackName::Game, STR_GLOBAL_LOCATION_REMOVED);
+        Messaging::Info(rule, TextPackKey(TextPackName::Game, "" + (STR_GLOBAL_LOCATION_REMOVED)));
         return false;
     }
 
     if (!force && !Location::IsCanEnter(loc, group.CritMove.length())) {
-        Messaging::Info(rule, TextPackName::Game, STR_GLOBAL_PLAYERS_OVERFLOW);
+        Messaging::Info(rule, TextPackKey(TextPackName::Game, "" + (STR_GLOBAL_PLAYERS_OVERFLOW)));
         return false;
     }
 
@@ -1178,7 +1188,7 @@ bool GM_GroupToLoc(Critter rule, ident locId, int entrance, bool force = false) 
         return false;
     }
 
-    if (!Game.OnLocationEnter.Fire(loc, group.CritMove, entrance)) {
+    if ((Game.OnLocationEnter.Fire(loc, group.CritMove, entrance) == EventResult::StopChain)) {
         return false;
     }
 
@@ -1221,7 +1231,7 @@ void GM_GroupSetMove(GlobalMapGroup group, float to_x, float to_y, float speed) 
 
     GlobalMapLocations::SetGlobalMapData(GM_INFO_GROUP_PARAM, group.Rule);
     // group->Rule->SendA_GlobalInfo( group, GM_INFO_GROUP_PARAM );
-    if (Game.GetPrecisionTime() > group.ProcessLastTick + Time::Milliseconds(Settings.GlobalMapMoveTime)) {
+    if (Game.GetPrecisionTime() > group.ProcessLastTick + Time::Milliseconds(Settings.GlobalMap.GlobalMapMoveTime)) {
         group.ProcessLastTick = Game.GetPrecisionTime();
     }
     if (!group.IsSetMove) {
@@ -1263,11 +1273,11 @@ void GM_GroupMove(GlobalMapGroup group) // 3hits
     // Move
     if (group.IsMoving()) {
         auto dtime = tick - group.ProcessLastTick;
-        if (dtime >= Time::Milliseconds(Settings.GlobalMapMoveTime)) {
-            if (dtime >= Time::Milliseconds(Settings.GlobalMapMoveTime * 2)) {
+        if (dtime >= Time::Milliseconds(Settings.GlobalMap.GlobalMapMoveTime)) {
+            if (dtime >= Time::Milliseconds(Settings.GlobalMap.GlobalMapMoveTime * 2)) {
                 dtime = ZERO_TIMESPAN;
             }
-            group.ProcessLastTick = tick - Time::Milliseconds(dtime.milliseconds % Settings.GlobalMapMoveTime);
+            group.ProcessLastTick = tick - Time::Milliseconds(dtime.milliseconds % Settings.GlobalMap.GlobalMapMoveTime);
 
             if (rule.ControlledByPlayer && rule.IsDead()) // && rule.IsOffline() )
             {
@@ -1288,11 +1298,11 @@ void GM_GlobalInvite(GlobalMapGroup group, int combat_mode) // 5hits
 
     ident map_id;
     mpos hex;
-    uint8 dir = 0;
+    mdir dir;
     Critter rule = group.Rule;
     bool global_invite = true;
 
-    if (!rule.OnGlobalMapInvite.Fire(group.GetCar(), encounter_descriptor, combat_mode, map_id, hex, dir)) {
+    if ((rule.OnGlobalMapInvite.Fire(group.GetCar(), encounter_descriptor, combat_mode, map_id, hex, dir) == EventResult::StopChain)) {
         global_invite = false;
     }
     else {
@@ -1315,7 +1325,7 @@ void GM_GlobalInvite(GlobalMapGroup group, int combat_mode) // 5hits
     if (map_id != ZERO_IDENT) {
         Map map = Game.GetMap(map_id);
         if (map != null) {
-            GM_GroupToMap(group, map, "0".hstr(), hex, (dir < 6 ? dir : rule.Dir));
+            GM_GroupToMap(group, map, "0".hstr(), hex, (dir.hex.value < 6 ? int(dir.hex.value) : int(rule.Dir.hex.value)));
         }
     }
     else {
@@ -1325,10 +1335,10 @@ void GM_GlobalInvite(GlobalMapGroup group, int combat_mode) // 5hits
 
 bool GM_CheckEntrance(Location loc, Critter[] arr, int entrance) // 5 hits
 {
-    return Game.OnGlobalMapCheckEntranceAllowed.Fire(loc, arr, entrance);
+    return Game.OnGlobalMapCheckEntranceAllowed.Fire(loc, arr, entrance) == EventResult::ContinueChain;
 }
 
-void ProcessGlobalMapCommand(Player player, int command, any param1, any param2) // Process_RuleGlobal
+void ProcessGlobalMapCommand_Impl(Player player, int command, any param1, any param2)
 {
     Critter cl = player.GetControlledCritter();
 
@@ -1377,7 +1387,7 @@ void ProcessGlobalMapCommand(Player player, int command, any param1, any param2)
             break;
         }
         if (Time::IsTimeoutActive(cl.TimeoutTransfer)) {
-            Messaging::Info(cl, TextPackName::Game, MsgStr::StrTimeoutTransferWait);
+            Messaging::Info(cl, TextPackKey(TextPackName::Game, "" + (MsgStr::StrTimeoutTransferWait)));
             break;
         }
 
@@ -1569,7 +1579,13 @@ void ProcessGlobalMapCommand(Player player, int command, any param1, any param2)
         break;
     }
 
-    CritterState::Wait(cl, Settings.Breaktime);
+    CritterState::Wait(cl, Settings.Movement.Breaktime);
+}
+
+[[ServerRemoteCall]]
+void ProcessGlobalMapCommand(Player player, int command, any param1, any param2) // Process_RuleGlobal
+{
+    ProcessGlobalMapCommand_Impl(player, command, param1, param2);
 }
 
 #endif

@@ -5,60 +5,60 @@
 #include "EngineBase.h"
 #include "TextPack.h"
 
-FO_BEGIN_NAMESPACE
+FO_USING_NAMESPACE();
 
 FO_DECLARE_EXCEPTION(DialogManagerException);
 FO_DECLARE_EXCEPTION(DialogParseException);
 FO_DECLARE_EXCEPTION(DialogException);
 
 // Types
-static constexpr uint8 DR_NONE = 0;
-static constexpr uint8 DR_PROP_GLOBAL = 1;
-static constexpr uint8 DR_PROP_CRITTER = 2;
-static constexpr uint8 DR_PROP_ITEM = 4;
-static constexpr uint8 DR_PROP_LOCATION = 5;
-static constexpr uint8 DR_PROP_MAP = 6;
-static constexpr uint8 DR_ITEM = 7;
-static constexpr uint8 DR_SCRIPT = 8;
-static constexpr uint8 DR_NO_RECHECK = 9;
-static constexpr uint8 DR_OR = 10;
+static constexpr uint8_t DR_NONE = 0;
+static constexpr uint8_t DR_PROP_GLOBAL = 1;
+static constexpr uint8_t DR_PROP_CRITTER = 2;
+static constexpr uint8_t DR_PROP_ITEM = 4;
+static constexpr uint8_t DR_PROP_LOCATION = 5;
+static constexpr uint8_t DR_PROP_MAP = 6;
+static constexpr uint8_t DR_ITEM = 7;
+static constexpr uint8_t DR_SCRIPT = 8;
+static constexpr uint8_t DR_NO_RECHECK = 9;
+static constexpr uint8_t DR_OR = 10;
 
 // Who types
-static constexpr uint8 DR_WHO_NONE = 0;
-static constexpr uint8 DR_WHO_PLAYER = 1;
-static constexpr uint8 DR_WHO_NPC = 2;
+static constexpr uint8_t DR_WHO_NONE = 0;
+static constexpr uint8_t DR_WHO_PLAYER = 1;
+static constexpr uint8_t DR_WHO_NPC = 2;
 
 ///@ ExportRefType Server RefCounted Export = Type, Who, ParamIndex, ParamHash, AnswerScriptFuncName, NoRecheck, Op, ValuesCount, Value, ValueExt0, ValueExt1, ValueExt2, ValueExt3, ValueExt4
 class DialogAnswerReq : public RefCounted<DialogAnswerReq>
 {
 public:
-    uint8 Type {DR_NONE};
-    uint8 Who {DR_WHO_NONE};
-    int32 ParamIndex {};
+    uint8_t Type {DR_NONE};
+    uint8_t Who {DR_WHO_NONE};
+    int32_t ParamIndex {};
     hstring ParamHash {};
     hstring AnswerScriptFuncName {};
     bool NoRecheck {};
-    uint8 Op {};
-    uint8 ValuesCount {};
-    int32 Value {};
-    int32 ValueExt0 {};
-    int32 ValueExt1 {};
-    int32 ValueExt2 {};
-    int32 ValueExt3 {};
-    int32 ValueExt4 {};
+    uint8_t Op {};
+    uint8_t ValuesCount {};
+    any_t Value {};
+    any_t ValueExt0 {};
+    any_t ValueExt1 {};
+    any_t ValueExt2 {};
+    any_t ValueExt3 {};
+    any_t ValueExt4 {};
 };
 
 ///@ ExportRefType Server RefCounted Export = Link, TextId, DemandsCount, ResultsCount, GetDemand, GetResult
 class DialogAnswer : public RefCounted<DialogAnswer>
 {
 public:
-    auto GetDemand(int32 index) -> DialogAnswerReq*;
-    auto GetResult(int32 index) -> DialogAnswerReq*;
+    auto GetDemand(int32_t index) -> DialogAnswerReq*;
+    auto GetResult(int32_t index) -> DialogAnswerReq*;
 
-    uint32 Link {};
-    uint32 TextId {};
-    int32 DemandsCount {};
-    int32 ResultsCount {};
+    int32_t Link {};
+    hstring TextId {};
+    int32_t DemandsCount {};
+    int32_t ResultsCount {};
     vector<refcount_ptr<DialogAnswerReq>> Demands {};
     vector<refcount_ptr<DialogAnswerReq>> Results {};
 };
@@ -67,12 +67,12 @@ public:
 class DialogSpeech : public RefCounted<DialogSpeech>
 {
 public:
-    auto GetAnswer(int32 index) -> DialogAnswer*;
+    auto GetAnswer(int32_t index) -> DialogAnswer*;
 
-    uint32 Id {};
-    uint32 TextId {};
+    int32_t Id {};
+    hstring TextId {};
     hstring DlgScriptFuncName {};
-    int32 AnswersCount {};
+    int32_t AnswersCount {};
     vector<refcount_ptr<DialogAnswer>> Answers {};
 };
 
@@ -80,10 +80,10 @@ public:
 class DialogPack : public RefCounted<DialogPack>
 {
 public:
-    auto GetSpeech(int32 index) -> DialogSpeech*;
+    auto GetSpeech(int32_t index) -> DialogSpeech*;
 
     hstring PackId {};
-    int32 SpeechesCount {};
+    int32_t SpeechesCount {};
     vector<refcount_ptr<DialogSpeech>> Speeches {};
     vector<pair<string, TextPack>> Texts {};
     string Comment {};
@@ -108,13 +108,11 @@ public:
     void AddDialog(refcount_ptr<DialogPack> pack);
 
 private:
-    [[nodiscard]] auto GetDrType(string_view str) const -> uint8;
-    [[nodiscard]] auto CheckOper(uint8 oper) const -> bool;
+    [[nodiscard]] auto GetDrType(string_view str) const -> uint8_t;
+    [[nodiscard]] auto CheckOper(uint8_t oper) const -> bool;
 
     auto LoadDemandResult(istringstream& input, bool is_demand) const -> refcount_ptr<DialogAnswerReq>;
 
     raw_ptr<EngineMetadata> _meta;
     map<hstring, refcount_ptr<DialogPack>> _dialogPacks {};
 };
-
-FO_END_NAMESPACE

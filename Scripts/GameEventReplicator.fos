@@ -175,7 +175,7 @@ void PlaceSandbags(Map map, int eFrom, int eTo, int sandbagCount)
     Entrance::Entry entryTo = Entrance::GetEntry(map, eTo, 0);
     if (entryFrom != null && entryTo != null) {
         mpos hexFrom = entryFrom.Hex;
-        uint8 dir = Game.GetDirection(hexFrom, entryTo.Hex);
+        mdir dir = Game.GetDirection(hexFrom, entryTo.Hex);
         int distantion = Game.GetDistance(hexFrom, entryTo.Hex);
         for (int i = 0; i < distantion; i++) {
             map.MoveHexByDir(hexFrom, dir, 1);
@@ -241,6 +241,7 @@ void StopEvent()
     }
 }
 
+[[TimeEvent]]
 void DeleteSandbags(any value)
 {
     Map map = Game.GetMap(ident(value));
@@ -276,7 +277,8 @@ void DeleteSandbags(any value)
 }
 
 // Скрипт люка
-void t_ReplDoor(Critter player, StaticItem trigger, bool entered, uint8 dir)
+[[ItemTrigger]]
+void t_ReplDoor(Critter player, StaticItem trigger, bool entered, mdir dir)
 {
     if (player.ControlledByPlayer) {
         if (Game.GEReplStationStatus) {
@@ -291,18 +293,19 @@ void t_ReplDoor(Critter player, StaticItem trigger, bool entered, uint8 dir)
     }
 }
 
-void t_Attack(Critter player, StaticItem trigger, bool entered, uint8 dir)
+[[ItemTrigger]]
+void t_Attack(Critter player, StaticItem trigger, bool entered, mdir dir)
 {
     if (player.ControlledByPlayer && entered) {
         Map map = player.GetMap();
         if (map != null) {
-            Critter[] critters = map.GetCritters(player.Hex, 20, CritterFindType::NonDeadNpc);
+            Critter[] critters = map.GetCrittersInRadius(player.Hex, 20, CritterFindType::NonDeadNpc);
             for (int i = 0; i < critters.length(); i++) {
                 Critter cr = critters[i];
                 if (cr.NpcRole == ROLE_ZOMBIE) {
                     NpcPlanes::AddAttackPlane(cr, 0, player);
                     if (Game.Random(1, 3) == 2) {
-                        Messaging::SayShout(cr, TextPackName::Text, 4001);
+                        Messaging::SayShout(cr, TextPackKey(TextPackName::Text, "" + (4001)));
                     }
                 }
             }
@@ -336,6 +339,7 @@ void _MapInit(Map map, bool firstTime)
 }
 
 // Случайная подсветка репликатора, чтобы было понятно какой взрывать
+[[TimeEvent]]
 void _MapLoop(Map map)
 {
     Item[] items = map.GetItems(Content::Item::replicator_tank);
@@ -351,6 +355,7 @@ void _MapLoop(Map map)
 }
 
 // Генерация мобов, если их меньше 20
+[[TimeEvent]]
 void _MapLoop2(Map map)
 {
     if (!GameEvent::CheckEventStatus(EVENT_ZOMBIE, PHASE_STATE_RUNNING)) {
@@ -383,7 +388,7 @@ void _MapLoop2(Map map)
                                        ROLE_ZOMBIE};
                         Critter zmb = map.AddCritter(Content::Critter::Zombie, hex, 6, Tla::GetCritPropsDict2(props));
                         zmb.SetupScript(_ZombieInit);
-                        MapText::AddText(map, replicator.Hex, COLOR_GREEN, TextPackName::Text, 4003);
+                        MapText::AddText(map, replicator.Hex, COLOR_GREEN, TextPackKey(TextPackName::Text, "" + (4003)));
                     }
                 }
             }
@@ -392,6 +397,7 @@ void _MapLoop2(Map map)
 }
 
 // Перемещение мобов на следующий пункт сбора
+[[TimeEvent]]
 void _MapLoopEx1(Map map)
 {
     mpos hex;
@@ -419,7 +425,7 @@ void _MapLoopEx1(Map map)
                         cr.GEReplEntryZombie += 1;
                         cr.HomeMapId = map.Id;
                         cr.HomeHex = hex;
-                        cr.HomeDir = Game.Random(0, 5);
+                        cr.HomeDir = HDIR_Random.value;
                     }
                 }
                 break;
@@ -448,7 +454,8 @@ void _ReplTankInit(Item item, bool firstTime)
     item.OnCritterUseOnSelf.Subscribe(_ReplTankUseOnMe);
 }
 
-bool _ReplTankUseOnMe(Item item, Critter cr, Item usedItem, int param)
+[[Event]]
+EventResult _ReplTankUseOnMe(Item item, Critter cr, Item usedItem, int param)
 {
     if ((usedItem.ProtoId == Content::Item::plastic_explosives || usedItem.ProtoId == Content::Item::active_plastic_explosive) &&
         cr.GEReplExplodeTank == STATUS_QVAR_ACTIVE) {
@@ -462,11 +469,12 @@ bool _ReplTankUseOnMe(Item item, Critter cr, Item usedItem, int param)
         }
         any[] values = {cr.Id, item.Id, mapId};
         Game.StartTimeEvent(TOUT_EXPLODE, ExplodeReplTank, values); //SavedDeferredCall
-        return true;
+        return EventResult::StopChain;
     }
-    return false;
+    return EventResult::StopChain;
 }
 
+[[TimeEvent]]
 void ExplodeReplTank(any[] values)
 {
     ident crId = values[0];
@@ -507,13 +515,14 @@ void _ZombieOutInit(Critter cr, bool firstTime)
     cr.OnNpcPlaneEnd.Subscribe(_OnZombiePlaneEnd);
 }
 
-bool _OnZombieAttackedGround(Critter cr, Critter attacker)
+[[Event]]
+EventResult _OnZombieAttackedGround(Critter cr, Critter attacker)
 {
     SendMessage::ToWhoISee(cr, MSG_ALARM, attacker.Id);
 
     if (Game.Random(1, 11) > 10) {
-        Messaging::SayEmote(cr, TextPackName::Text, 4001);
-        return false;
+        Messaging::SayEmote(cr, TextPackKey(TextPackName::Text, "" + (4001)));
+        return EventResult::StopChain;
     }
 
     if (not cr.GEReplIsAddedAttackPlane) {
@@ -526,14 +535,15 @@ bool _OnZombieAttackedGround(Critter cr, Critter attacker)
                     NpcPlanes::AddAttackPlane(cr, 0, target);
                 }
             }
-            Messaging::SayShout(cr, TextPackName::Text, 4001);
+            Messaging::SayShout(cr, TextPackKey(TextPackName::Text, "" + (4001)));
         }
         cr.GEReplIsAddedAttackPlane = true;
     }
 
-    return false;
+    return EventResult::StopChain;
 }
 
+[[TimeEvent]]
 void _OnZombieIdleGround(Critter cr)
 {
     if (!cr.IsAlive()) {
@@ -556,7 +566,7 @@ void _OnZombieIdleGround(Critter cr)
             cr.GEReplEntryZombie = ENTRY_ZOMBIE_EXIT;
             cr.HomeMapId = map.Id;
             cr.HomeHex = hex;
-            cr.HomeDir = Game.Random(0, 5);
+            cr.HomeDir = HDIR_Random.value;
         }
     }
 }
@@ -573,30 +583,33 @@ void _ZombieInit(Critter cr, bool firstTime)
     cr.OnNpcPlaneEnd.Subscribe(_OnZombiePlaneEnd);
 }
 
-bool _OnZombiePlaneEnd(Critter cr, int planeId, int reason, Critter someCr, Item someItem)
+[[Event]]
+EventResult _OnZombiePlaneEnd(Critter cr, int planeId, int reason, Critter someCr, Item someItem)
 {
     NpcPlanes::NpcPlane plane = NpcPlanes::GetCritterPlane(cr, planeId);
 
     if (reason != REASON_SUCCESS && cr.IsAlive()) {
         // Проверяем, не домой ли он шел
         Map map = cr.GetMap();
-        if (plane.Type == AI_PLANE_WALK && plane.Walk_Hex == cr.HomeHex && plane.Walk_Dir == int(cr.HomeDir) && map.GetPathLength(cr.Hex, cr.HomeHex, 0) == 0) {
+        if (plane.Type == AI_PLANE_WALK && plane.Walk_Hex == cr.HomeHex && plane.Walk_Dir == int(cr.HomeDir) &&
+            map.GetPathLength(cr.Hex, cr.HomeHex, 0, null) == 0) {
             // Застрял
             DL("Homepos gag");
             mpos hex;
             if (Entrance::GetEntryFreeHex(map, HASHI(cr.GEReplEntryZombie), hex) && Entrance::GetFreeHex(map, 7, hex)) {
                 cr.HomeMapId = map.Id;
                 cr.HomeHex = hex;
-                cr.HomeDir = Game.Random(0, 5);
+                cr.HomeDir = HDIR_Random.value;
             }
         }
-        return false;
+        return EventResult::StopChain;
     }
-    return true;
+    return EventResult::StopChain;
 }
 
 #define STR_IDLE (4002)
 #define RADIUS_ATTACK(10)
+[[TimeEvent]]
 void _OnZombieIdle(Critter cr)
 {
     if (cr.IsDead()) {
@@ -605,7 +618,7 @@ void _OnZombieIdle(Critter cr)
 
     Map map = cr.GetMap();
     if (map != null && map.ProtoId == Content::Map::repl4a && Game.Random(1, 3) == 3) {
-        Critter[] critters = map.GetCritters(cr.Hex, RADIUS_ATTACK, CritterFindType::NonDeadPlayers);
+        Critter[] critters = map.GetCrittersInRadius(cr.Hex, RADIUS_ATTACK, CritterFindType::NonDeadPlayers);
         if (!critters.isEmpty()) {
             for (int i = 0, l = critters.length(); i < l; i++) {
                 Critter target = critters[i];
@@ -614,7 +627,7 @@ void _OnZombieIdle(Critter cr)
                     EnemyStack::AddEnemyToStack(cr, cr.Id);
                 }
             }
-            Messaging::SayShout(cr, TextPackName::Text, 4001);
+            Messaging::SayShout(cr, TextPackKey(TextPackName::Text, "" + (4001)));
             return;
         }
     }
@@ -622,11 +635,12 @@ void _OnZombieIdle(Critter cr)
     if (cr.IsAlive() && NpcPlanes::IsNoPlanes(cr) && Game.Random(0, 3) == 1) {
         MoveRandom::CritterMoveRandom(cr);
         if (Game.Random(1, 12) == 1) {
-            Messaging::SayEmote(cr, TextPackName::Text, 4002);
+            Messaging::SayEmote(cr, TextPackKey(TextPackName::Text, "" + (4002)));
         }
     }
 }
 
+[[Event]]
 void _OnZombieMessage(Critter cr, Critter fromCr, int message, any value)
 {
     if (message == MSG_ALARM && !cr.ControlledByPlayer && NpcPlanes::GetPlanes(cr, null) == 0) {
@@ -638,22 +652,24 @@ void _OnZombieMessage(Critter cr, Critter fromCr, int message, any value)
     }
 }
 
-bool _OnZombieAttacked(Critter cr, Critter attacker)
+[[Event]]
+EventResult _OnZombieAttacked(Critter cr, Critter attacker)
 {
     // if(attacker.ControlledByPlayer)
     // {
     SendMessage::ToAllOnMap(cr, MSG_ALARM, attacker.Id);
     // }
-    return false;
+    return EventResult::StopChain;
 }
 
+[[Event]]
 void _OnZombieDead(Critter cr, Critter killer)
 {
     ident killerId;
     if (killer != null) {
         killerId = killer.Id;
         if (killer.GEReplNopasaran > 0 && killer.GEReplNopasaran < 6) {
-            Messaging::Info(killer, TextPackName::Text, 4005);
+            Messaging::Info(killer, TextPackKey(TextPackName::Text, "" + (4005)));
         }
     }
     cr.StartTimeEvent(Time::Seconds(Game.Random(30, 90)), cte_RespawnZombie, killerId);
@@ -661,6 +677,7 @@ void _OnZombieDead(Critter cr, Critter killer)
 }
 
 #define STR_RESPAWN (4000)
+[[TimeEvent]]
 void cte_RespawnZombie(Critter cr, any identifier)
 {
     DL("respawn/ Anim:" + cr.DeadActionAnim);
@@ -674,14 +691,14 @@ void cte_RespawnZombie(Critter cr, any identifier)
     if (cr.IsDead() && cr.DeadActionAnim < CritterActionAnim::DeadBloodySingle) {
         cr.CurrentHp = cr.MaxLife / 2;
         CritterState::ToAlive(cr);
-        Messaging::SayEmoteOnHead(cr, TextPackName::Text, STR_RESPAWN);
+        Messaging::SayEmoteOnHead(cr, TextPackKey(TextPackName::Text, "" + (STR_RESPAWN)));
         DL("success");
         if (killer != null && qStatus > 0 && qStatus < 6) {
-            Messaging::Info(killer, TextPackName::Text, 4007);
+            Messaging::Info(killer, TextPackKey(TextPackName::Text, "" + (4007)));
         }
     }
     else if (killer != null && qStatus > 0 && qStatus < 6) {
-        Messaging::Info(killer, TextPackName::Text, 4006);
+        Messaging::Info(killer, TextPackKey(TextPackName::Text, "" + (4006)));
         killer.GEReplNopasaran += 1;
     }
     return;
@@ -689,7 +706,8 @@ void cte_RespawnZombie(Critter cr, any identifier)
 
 // Хабологи-торговцы на репл. станциях
 
-void t_Notify(Critter player, StaticItem trigger, bool entered, uint8 dir)
+[[ItemTrigger]]
+void t_Notify(Critter player, StaticItem trigger, bool entered, mdir dir)
 {
     if (entered && player.ControlledByPlayer && player.Level > 9) {
         if (Game.GEReplStationStatus) {
@@ -700,7 +718,7 @@ void t_Notify(Critter player, StaticItem trigger, bool entered, uint8 dir)
                     for (int i = 0; i < critters.length(); i++) {
                         Critter cr = critters[i];
                         if (cr.DialogId == Content::Dialog::repl_trader) {
-                            Messaging::Say(cr, TextPackName::Text, 4004, "$player" + PlayerRegistration::GetPlayerName(player.Id));
+                            Messaging::Say(cr, TextPackKey(TextPackName::Text, "" + (4004)), "$player" + PlayerRegistration::GetPlayerName(player.Id));
                             player.GEReplNotifictions += 1;
                             return;
                         }

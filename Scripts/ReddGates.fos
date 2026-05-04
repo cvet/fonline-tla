@@ -367,18 +367,20 @@ void _GatesInit(Item gates, bool firstTime)
     gates.OnCritterWalk.Subscribe(_GatesWalk);
 }
 
-bool _GatesSkill(Item gates, Critter player, CritterProperty skill) // Попытка открыть или взломать дверь. Запрещено открывать дверь, этим занимается охрана
+[[Event]]
+EventResult _GatesSkill(Item gates, Critter player,
+                        CritterProperty skill) // Попытка открыть или взломать дверь. Запрещено открывать дверь, этим занимается охрана
 {
     GatesControl gc = GatesControlFromItem(gates);
     if (gc == null || !player.ControlledByPlayer) {
         if (gates.Val5 == 0) {
             gates.Val5 = Game.StartTimeEvent(TIME_TO_CLOSE, CloseGates, gates.Id); //SavedDeferredCall
         }
-        return false;
+        return EventResult::StopChain;
     }
     int pos = gc.GetPlayerGatesDisposition(player);
     if (pos == POS_UNKNOWN || pos == PLAYER_FAR) {
-        return true;
+        return EventResult::StopChain;
     }
     int guardRole = GUARD_ROLE_OUTER;
     if (pos == PLAYER_NEAR_IN) {
@@ -390,23 +392,24 @@ bool _GatesSkill(Item gates, Critter player, CritterProperty skill) // Попы�
         if (gates.Val5 == 0) {
             gates.Val5 = Game.StartTimeEvent(TIME_TO_CLOSE, CloseGates, gates.Id); //SavedDeferredCall
         }
-        return false; // Не найдено живых охранников с нужной стороны ворот
+        return EventResult::StopChain; // Не найдено живых охранников с нужной стороны ворот
     }
     string lex = "$pname" + PlayerRegistration::GetPlayerName(player.Id) + "$sex" +
                  (player.Gender == GenderType::Male ? "" : "а"); // лексемы. имя игрока и родовое окончание
     if (gc.CheckPlayerIsBad(player)) {
         gc.AttackPlayer(player, guardRole);
-        Messaging::SayShoutOnHead(guard, TextPackName::Text, STR_ATTACK_LOCKPIKER, lex);
+        Messaging::SayShoutOnHead(guard, TextPackKey(TextPackName::Text, "" + (STR_ATTACK_LOCKPIKER)), lex);
         gc.SetPlayerIsNotBad(player);
     }
     else {
-        Messaging::SayShoutOnHead(guard, TextPackName::Text, STR_DONTTOUCH_THE_DOOR, lex);
+        Messaging::SayShoutOnHead(guard, TextPackKey(TextPackName::Text, "" + (STR_DONTTOUCH_THE_DOOR)), lex);
         gc.SetPlayerIsBad(player);
     }
-    return true;
+    return EventResult::StopChain;
 }
 
-void _GatesWalk(Item gates, Critter player, bool entered, uint8 dir) // Проход игрока через ворота
+[[Event]]
+void _GatesWalk(Item gates, Critter player, bool entered, mdir dir) // Проход игрока через ворота
 {
     if (!player.ControlledByPlayer) {
         return;
@@ -419,7 +422,7 @@ void _GatesWalk(Item gates, Critter player, bool entered, uint8 dir) // Прох
     if (!gc.CheckPlayerIsGood(player, PASS_TYPE_OUT) && !gc.CheckPlayerIsGood(player, PASS_TYPE_IN)) {
         Critter guard = gc.GetClosestGuard(GUARD_ROLE_HELPER, CritterFindType::NonDeadNpc, player);
         if (guard != null) {
-            Messaging::SayShout(guard, TextPackName::Text, STR_ATTACK_NO_ACCESS);
+            Messaging::SayShout(guard, TextPackKey(TextPackName::Text, "" + (STR_ATTACK_NO_ACCESS)));
         }
         gc.AttackPlayer(player, GUARD_ROLE_HELPER);
     }
@@ -427,7 +430,8 @@ void _GatesWalk(Item gates, Critter player, bool entered, uint8 dir) // Прох
 
 /* Функции для диалогов */
 
-bool d_CheckPlayerIsGood(Critter player, Critter npc, int gateNumber, int passType)
+[[DialogDemand]]
+bool d_CheckPlayerIsGood(Critter player, Critter npc, any gateNumber, any passType)
 {
     Map map = player.GetMap();
     if (map == null) {
@@ -442,8 +446,9 @@ bool d_CheckPlayerIsGood(Critter player, Critter npc, int gateNumber, int passTy
     return false;
 }
 
-void r_SetPlayerAccess(Critter player, Critter npc, int gateNumber, int passType,
-                       int time) // добавление игроку доступа на проход на time игровых минут типа passType через врата с условным номером gateNumber
+[[DialogResult]]
+void r_SetPlayerAccess(Critter player, Critter npc, any gateNumber, any passType,
+                       any time) // добавление игроку доступа на проход на time игровых минут типа passType через врата с условным номером gateNumber
 {
     Map map = player.GetMap();
     if (map == null) {
@@ -455,7 +460,8 @@ void r_SetPlayerAccess(Critter player, Critter npc, int gateNumber, int passType
     }
 }
 
-void r_OpenGates(Critter player, Critter npc, int gateNumber, int time) // Открытие врат с условным номером gateNumber на time игровых минут
+[[DialogResult]]
+void r_OpenGates(Critter player, Critter npc, any gateNumber, any time) // Открытие врат с условным номером gateNumber на time игровых минут
 {
     Map map = player.GetMap();
     if (map == null) {
@@ -475,6 +481,7 @@ void r_OpenGates(Critter player, Critter npc, int gateNumber, int time) // От�
     }
 }
 
+[[TimeEvent]]
 void CloseGates(any value)
 {
     // Если в проеме стоит игрок, он будет смещен на энтайр хекс выхода
@@ -486,7 +493,7 @@ void CloseGates(any value)
             return;
         }
         mpos hex = gates.Hex;
-        Critter cr = map.GetCritter(hex);
+        Critter cr = map.GetCritterOnHex(hex);
         if (cr != null) {
             if (Entrance::GetNearEntry(map, ENTRY_GATES_OUT, hex)) {
                 cr.TransferToMap(map, hex, Game.GetDirection(hex, gates.Hex));

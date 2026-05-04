@@ -12,6 +12,10 @@ FO_END_NAMESPACE
 
 void FO_NAMESPACE SetupBakersHook(const_span<string> request_bakers, vector<unique_ptr<BaseBaker>>& bakers, shared_ptr<BakingContext> ctx)
 {
+    if (IsTestingInProgress) {
+        return;
+    }
+
     if (vec_exists(request_bakers, DialogBaker::NAME)) {
         bakers.emplace_back(SafeAlloc::MakeUnique<DialogBaker>(ctx));
     }

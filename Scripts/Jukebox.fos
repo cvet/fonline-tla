@@ -19,19 +19,20 @@ void _JukeBoxInit(Item item, bool firstTime)
     item.OnCritterUseOnSelf.Subscribe(_UseOnJukeBox);
 }
 
-bool _UseOnJukeBox(Item item, Critter cr, Item usedItem, int param)
+[[Event]]
+EventResult _UseOnJukeBox(Item item, Critter cr, Item usedItem, int param)
 {
     if (usedItem != null && usedItem.ProtoId == Content::Item::bottle_caps) {
         if (usedItem.Count < PRICE) {
             // Не хватает денег
-            Messaging::Info(cr, TextPackName::Text, STR_LOWMONEY, "$price" + PRICE);
-            return true;
+            Messaging::Info(cr, TextPackKey(TextPackName::Text, "" + (STR_LOWMONEY)), "$price" + PRICE);
+            return EventResult::StopChain;
         }
         else {
             if (item.LastUsedTime != ZERO_SYNCTIME && item.LastUsedTime + SILENCE_TIME > Game.SynchronizedTime) {
                 // Недавно использовался
-                Messaging::Info(cr, TextPackName::Text, STR_OUTOFORDER);
-                return true;
+                Messaging::Info(cr, TextPackKey(TextPackName::Text, "" + (STR_OUTOFORDER)));
+                return EventResult::StopChain;
             }
             else {
                 int idx = Game.Random(0, trackList.length() - 1);
@@ -40,20 +41,21 @@ bool _UseOnJukeBox(Item item, Critter cr, Item usedItem, int param)
                 if (map != null) {
                     item.IsShowAnim = true;
                     Game.StartTimeEvent(Time::Seconds(30), OffJukeBox, item.Id); //SavedDeferredCall
-                    Critter[] critters = map.GetCritters(hex, PLAY_RADIUS, CritterFindType::Players);
+                    Critter[] critters = map.GetCrittersInRadius(hex, PLAY_RADIUS, CritterFindType::Players);
                     Game.DestroyItem(usedItem, 10);
                     item.LastUsedTime = Game.SynchronizedTime;
                     for (int i = 0; i < critters.length(); i++) {
                         Media::PlayMusic(critters[i], trackList[idx], 0, 0);
                     }
-                    return true;
+                    return EventResult::StopChain;
                 }
             }
         }
     }
-    return false;
+    return EventResult::StopChain;
 }
 
+[[TimeEvent]]
 void OffJukeBox(any value)
 {
     Item item = Game.GetItem(value);
@@ -66,7 +68,7 @@ void OffJukeBox(any value)
 
 #define ENTRY_JB (142)
 
-bool d_JukeboxesCheck(Critter player, Critter npc)
+bool d_JukeboxesCheck_Impl(Critter player, Critter npc)
 {
     Map map = Game.GetMap(Content::Map::newr_eld);
     if (map != null) {
@@ -77,12 +79,19 @@ bool d_JukeboxesCheck(Critter player, Critter npc)
     return false;
 }
 
-bool d_NotJukeboxesCheck(Critter player, Critter npc)
+[[DialogDemand]]
+bool d_JukeboxesCheck(Critter player, Critter npc)
 {
-    return !d_JukeboxesCheck(player, npc);
+    return d_JukeboxesCheck_Impl(player, npc);
 }
 
-bool d_CanPlaceJukeBox(Critter player, Critter npc)
+[[DialogDemand]]
+bool d_NotJukeboxesCheck(Critter player, Critter npc)
+{
+    return !d_JukeboxesCheck_Impl(player, npc);
+}
+
+bool d_CanPlaceJukeBox_Impl(Critter player, Critter npc)
 {
     Location loc = Game.GetLocation(QuestWarehouse::GetLocId(player));
     if (loc != null) {
@@ -98,11 +107,18 @@ bool d_CanPlaceJukeBox(Critter player, Critter npc)
     return false;
 }
 
-bool d_CanNotPlaceJukeBox(Critter player, Critter npc)
+[[DialogDemand]]
+bool d_CanPlaceJukeBox(Critter player, Critter npc)
 {
-    return !d_CanPlaceJukeBox(player, npc);
+    return d_CanPlaceJukeBox_Impl(player, npc);
 }
 
+bool d_CanNotPlaceJukeBox(Critter player, Critter npc)
+{
+    return !d_CanPlaceJukeBox_Impl(player, npc);
+}
+
+[[DialogDemand]]
 bool d_AlreadyHasJukeBox(Critter player, Critter npc)
 {
     Location loc = Game.GetLocation(QuestWarehouse::GetLocId(player));
@@ -119,6 +135,7 @@ bool d_AlreadyHasJukeBox(Critter player, Critter npc)
     return false;
 }
 
+[[DialogResult]]
 void r_SellJukeBox(Critter player, Critter npc)
 {
     Location loc = Game.GetLocation(QuestWarehouse::GetLocId(player));

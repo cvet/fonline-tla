@@ -12,7 +12,8 @@ namespace Main // Sort 2
 ///@ Property Critter Server ident=>int32 StealExpCount Mutable Persistent
 ///@ Property Critter Server ident=>int32 FirstAidCount Mutable Persistent
 
-void ModuleInit()
+[[ModuleInit]]
+void InitMain()
 {
     Game.OnInit.Subscribe(init);
     Game.OnStart.Subscribe(start);
@@ -30,8 +31,9 @@ void ModuleInit()
     Game.OnCritterRespawn.Subscribe(critter_respawn);
     Game.OnMapCritterIn.Subscribe(map_critter_in);
     Game.OnMapCritterOut.Subscribe(map_critter_out);
-    Game.OnMapCheckLook.Subscribe(check_look);
-    Game.OnMapCheckTrapLook.Subscribe(check_trap_look);
+    // OnMapCheckLook/OnMapCheckTrapLook removed from engine; visibility now handled via Properties refresh
+    // Game.OnMapCheckLook.Subscribe(check_look);
+    // Game.OnMapCheckTrapLook.Subscribe(check_trap_look);
     Game.OnItemsBarter.Subscribe(items_barter);
     Game.OnPlayerLogin.Subscribe(player_login);
     Game.OnPlayerAllowCommand.Subscribe(player_allowcommand);
@@ -42,13 +44,15 @@ void ModuleInit()
 
 // //////////////////////////////////////////////////////////////////////////////////////////////////
 // Called before world generation.
+[[Event]]
 void init()
 {
 }
 
 // //////////////////////////////////////////////////////////////////////////////////////////////////
 // Call on start server.
-bool start()
+[[Event]]
+EventResult start()
 {
     // Global map initialization
     Worldmap::WorldmapInit();
@@ -66,7 +70,7 @@ bool start()
     // Bulletin boards
     // BulletinBoard::StartMessenger();
 
-    return true;
+    return EventResult::ContinueChain;
 }
 
 // //////////////////////////////////////////////////////////////////////////////////////////////////
@@ -80,11 +84,12 @@ bool start()
 // minute            0      59
 // //////////////////////////////////////////////////////////////////////////////////////////////////
 // Call on world generation.
-bool generate_world()
+[[Event]]
+EventResult generate_world()
 {
     Game.SFImperatorMemory = 50;
 
-    int multiplier = Settings.TimeMultiplier;
+    int multiplier = Settings.WorldTime.Multiplier;
     int year = 2246;
     int month = 10;
     int day = 30;
@@ -122,14 +127,15 @@ bool generate_world()
                                                                                 Location::CreateLocation( Content::Location::replication_hell, 777, 466, null ) == null*/
     ) {
         Game.Log("Generate world fail!");
-        return false;
+        return EventResult::StopChain;
     }
 
-    return true;
+    return EventResult::ContinueChain;
 }
 
 // //////////////////////////////////////////////////////////////////////////////////////////////////
 // Call on something critter attack another.
+[[Event]]
 void critter_attack(Critter cr, Critter target, Item weapon, int weaponMode, ProtoItem ammo)
 {
     if (cr.ControlledByPlayer && ammo != null && ammo.ProtoId == Content::Item::emp_rocket && target.BodyType == BodyTypes::Robot) {
@@ -148,6 +154,7 @@ void critter_attack(Critter cr, Critter target, Item weapon, int weaponMode, Pro
 
 // //////////////////////////////////////////////////////////////////////////////////////////////////
 // Call on something critter attack another.
+[[Event]]
 void critter_attacked(Critter cr, Critter attacker)
 {
     Critter[] other = cr.GetCritters(CritterSeeType::WhoSeeMe, CritterFindType::NonDead);
@@ -242,23 +249,24 @@ void critter_attacked(Critter cr, Critter attacker)
 
 // //////////////////////////////////////////////////////////////////////////////////////////////////
 // Call on something critter steal another.
-bool critter_stealing(Critter cr, Critter thief, Item item, int count)
+[[Event]]
+EventResult critter_stealing(Critter cr, Critter thief, Item item, int count)
 {
     thief.TimeoutAggressor = Game.SynchronizedTime + Time::Minutes(1);
 
     if (cr.IsDead() || Time::IsTimeoutActive(cr.TimeoutBattle) || Time::IsTimeoutActive(thief.TimeoutBattle)) {
         thief.LastStealCrId = ZERO_IDENT;
         thief.StealCount = 0;
-        return false;
+        return EventResult::StopChain;
     }
 
     if (cr.IsNoPvp || thief.IsNoPvp) {
         Messaging::Info(thief, "No PvP.");
-        return false;
+        return EventResult::StopChain;
     }
 
-    uint8 dir1 = cr.Dir;
-    uint8 dir2 = thief.Dir;
+    uint8 dir1 = cr.Dir.hex.value;
+    uint8 dir2 = thief.Dir.hex.value;
     int kDir = MAX(dir1, dir2) - MIN(dir1, dir2);
     if (kDir > 3) {
         kDir = 6 - kDir;
@@ -334,7 +342,7 @@ bool critter_stealing(Critter cr, Critter thief, Item item, int count)
             NpcPlanes::AddAttackPlane(cr,
                                       0,
                                       thief,
-                                      thiefHp < 10 || Game.Random(1, 10) > cr.Luck + 4 || cr.Charisma < 3 ? Settings.DeadHitPoints :
+                                      thiefHp < 10 || Game.Random(1, 10) > cr.Luck + 4 || cr.Charisma < 3 ? Settings.Combat.DeadHitPoints :
                                                                                                             Game.Random(thiefHp / 4, thiefHp / 2));
         }
     }
@@ -351,12 +359,13 @@ bool critter_stealing(Critter cr, Critter thief, Item item, int count)
         // Critter whoUse, CritterProperty skill, Critter onCritter, Item onItem, StaticItem onScenery )" deferred
     }
 
-    return success;
+    return (success) ? EventResult::StopChain : EventResult::StopChain;
 }
 
 // //////////////////////////////////////////////////////////////////////////////////////////////////
 // Call on something critter use item.
-bool critter_use_item(Critter cr, Item item, Critter targetCr, Item targetItem, StaticItem targetScen, int param)
+[[Event]]
+EventResult critter_use_item(Critter cr, Item item, Critter targetCr, Item targetItem, StaticItem targetScen, int param)
 {
     bool isPlayer = cr.ControlledByPlayer;
     hstring pid = item.ProtoId;
@@ -365,7 +374,7 @@ bool critter_use_item(Critter cr, Item item, Critter targetCr, Item targetItem, 
     // Holodisk
     if (useOnSelf && item.IsHolodisk) {
         Holodisk::ReadHolodisk(cr, item);
-        return true;
+        return EventResult::StopChain;
     }
 
     // Radio
@@ -373,23 +382,23 @@ bool critter_use_item(Critter cr, Item item, Critter targetCr, Item targetItem, 
         if (isPlayer) {
             Radio::EditRadioSettings(cr, item);
         }
-        return true;
+        return EventResult::StopChain;
     }
 
     // Book reading
     if (useOnSelf && Books::IsReadableBook(pid)) {
         Books::TryReadBook(cr, item);
-        return true;
+        return EventResult::StopChain;
     }
 
     // Explosion
     if (Explode::OnUseExplode(cr, item, targetCr, targetItem, targetScen, param)) {
-        return true;
+        return EventResult::StopChain;
     }
 
     // Cars
     if (targetItem != null && targetItem.Type == ItemType::Car && Car::UseItemOnCar(cr, targetItem, item)) {
-        return true;
+        return EventResult::StopChain;
     }
 
     // Drugs
@@ -401,45 +410,45 @@ bool critter_use_item(Critter cr, Item item, Critter targetCr, Item targetItem, 
             Drugs::UseDrugOn(cr, targetCr, item);
         }
         else {
-            Messaging::Info(cr, TextPackName::Game, MsgStr::StrUseNothing);
+            Messaging::Info(cr, TextPackKey(TextPackName::Game, "" + (MsgStr::StrUseNothing)));
         }
-        return true;
+        return EventResult::StopChain;
     }
 
     // Play dice
     if (pid == Content::Item::dice) {
-        Messaging::SayEmoteOnHead(cr, TextPackName::Text, MsgStr::StrDiceThrow, "$result" + Game.Random(1, 6));
-        return true;
+        Messaging::SayEmoteOnHead(cr, TextPackKey(TextPackName::Text, "" + (MsgStr::StrDiceThrow)), "$result" + Game.Random(1, 6));
+        return EventResult::StopChain;
     }
     if (pid == Content::Item::loaded_dice) {
-        Messaging::SayEmoteOnHead(cr, TextPackName::Text, MsgStr::StrDiceThrow, "$result" + int((item.Id.value % 6) + 1));
-        return true;
+        Messaging::SayEmoteOnHead(cr, TextPackKey(TextPackName::Text, "" + (MsgStr::StrDiceThrow)), "$result" + int((item.Id.value % 6) + 1));
+        return EventResult::StopChain;
     }
 
     // Magic ball
     if (pid == Content::Item::magic_8_ball) {
-        // Messaging::SayEmoteOnHead(cr,TextPackName::Text,Game.Random(1,2)==1?MsgStr::StrMagicBallYes:MsgStr::StrMagicBallNo);
-        return true;
+        // Messaging::SayEmoteOnHead(cr, TextPackKey(TextPackName::Text, "" + (Game.Random(1,2)==1?MsgStr::StrMagicBallYes:MsgStr::StrMagicBallNo)));
+        return EventResult::StopChain;
     }
 
     // Cosmetic
     if (pid == Content::Item::cosmetic_case && cr.Gender == GenderType::Female) {
-        Messaging::SayEmoteOnHead(cr, TextPackName::Text, MsgStr::StrCosmeticUse);
-        return true;
+        Messaging::SayEmoteOnHead(cr, TextPackKey(TextPackName::Text, "" + (MsgStr::StrCosmeticUse)));
+        return EventResult::StopChain;
     }
 
     // Cigarettes smoking
     if (pid == Content::Item::cigarettes && cr.CountItem(Content::Item::lighter) > 0) {
-        Messaging::SayEmoteOnHead(cr, TextPackName::Text, MsgStr::StrCigarettesSmoke);
-        return true;
+        Messaging::SayEmoteOnHead(cr, TextPackKey(TextPackName::Text, "" + (MsgStr::StrCigarettesSmoke)));
+        return EventResult::StopChain;
     }
 
     // Geiger counter
     if (pid == Content::Item::geiger_counter && useOnSelf && Geiger::UseGeiger(cr, item)) {
-        return true;
+        return EventResult::StopChain;
     }
     if (targetItem != null && targetItem.ProtoId == Content::Item::geiger_counter && Geiger::UseItemOnGeiger(cr, targetItem, item)) {
-        return true;
+        return EventResult::StopChain;
     }
 
     // Доп. события
@@ -453,29 +462,30 @@ bool critter_use_item(Critter cr, Item item, Critter targetCr, Item targetItem, 
     }
 
     // Take process to engine
-    return false;
+    return EventResult::StopChain;
 }
 
 // //////////////////////////////////////////////////////////////////////////////////////////////////
 // Call on something critter use skill.
-bool critter_use_skill(Critter cr, CritterProperty skill, Critter targetCr, Item targetItem, StaticItem targetScen)
+[[Event]]
+EventResult critter_use_skill(Critter cr, CritterProperty skill, Critter targetCr, Item targetItem, StaticItem targetScen)
 {
     bool isPlayer = cr.ControlledByPlayer;
 
     // Cars
     if (targetItem != null && targetItem.Type == ItemType::Car && Car::UseSkillOnCar(cr, targetItem, skill)) {
-        return true;
+        return EventResult::StopChain;
     }
 
     // Geiger counter
     if (targetItem != null && targetItem.ProtoId == Content::Item::geiger_counter && Geiger::UseSkillOnGeiger(cr, targetItem, skill)) {
-        return true;
+        return EventResult::StopChain;
     }
 
     // Doors or containers
     if (targetItem != null && (targetItem.Type == ItemType::Door || targetItem.Type == ItemType::Container) &&
         Lockers::UseSkillOnLocker(cr, targetItem, skill)) {
-        return true;
+        return EventResult::StopChain;
     }
 
     switch (skill) {
@@ -484,38 +494,38 @@ bool critter_use_skill(Critter cr, CritterProperty skill, Critter targetCr, Item
         // Scenery
         if (targetScen != null) {
             if (targetScen.StaticScript != EMPTY_HSTRING && Game.CallStaticItemFunction(cr, targetScen, null, int(skill))) {
-                return true;
+                return EventResult::StopChain;
             }
             if (targetScen.Grid_ToMap != EMPTY_HSTRING) {
                 Map map = Game.GetMap(targetScen.Grid_ToMap, 0);
                 if (map != null) {
                     hstring entry_proto = (targetScen.Grid_ToMapEntry == EMPTY_HSTRING ? ("" + 0).hstr() : targetScen.Grid_ToMapEntry);
                     auto entry = Entrance::GetEntry(map, entry_proto, 0);
-                    cr.TransferToMap(map, entry.Hex, targetScen.Grid_ToMapDir);
-                    return true;
+                    cr.TransferToMap(map, entry.Hex, hdir(targetScen.Grid_ToMapDir));
+                    return EventResult::StopChain;
                 }
             }
             if (isPlayer) {
-                Messaging::Info(cr, TextPackName::Game, MsgStr::StrUseNothing);
+                Messaging::Info(cr, TextPackKey(TextPackName::Game, "" + (MsgStr::StrUseNothing)));
             }
-            return true;
+            return EventResult::StopChain;
         }
 
         // Wanted
         if (targetItem != null && targetItem.ProtoId == Content::Item::wanted_sign &&
             Wanted::WantedSignSet(Game.GetItem(targetItem.Id), cr.Name, Game.Random(1000, 2000))) {
-            return true;
+            return EventResult::StopChain;
         }
         // Explosion
         if (targetItem != null && targetItem.ProtoId == Content::Item::active_mine && Explode::OnUseExplode(cr, targetItem, null, null, null, 0)) {
-            return true;
+            return EventResult::StopChain;
         }
         // Pick some item
         if (targetItem != null) {
             Item item = targetItem;
             if (not item.IsCanPickUp) {
                 if (isPlayer) {
-                    Messaging::Info(cr, TextPackName::Game, MsgStr::StrUseNothing);
+                    Messaging::Info(cr, TextPackKey(TextPackName::Game, "" + (MsgStr::StrUseNothing)));
                 }
                 break;
             }
@@ -532,7 +542,7 @@ bool critter_use_skill(Critter cr, CritterProperty skill, Critter targetCr, Item
                 }
                 // Overweight
                 else {
-                    Messaging::Info(cr, TextPackName::Game, MsgStr::StrOverweight);
+                    Messaging::Info(cr, TextPackKey(TextPackName::Game, "" + (MsgStr::StrOverweight)));
                 }
             }
         }
@@ -540,38 +550,38 @@ bool critter_use_skill(Critter cr, CritterProperty skill, Critter targetCr, Item
     case SKILL_PUT_CONT:                           // Put item in container, only targetItem is valid
     case SKILL_TAKE_CONT:                          // Take item from container, only targetItem is valid
     case SKILL_TAKE_ALL_CONT:                      // Take all items from critter or item container
-        return false;                              // Allow transactions
+        return EventResult::StopChain;             // Allow transactions
     case CritterProperty::SpecialSkillLootCritter: // Loot critter, only targetCr is valid
         Lockers::ShowContainer(cr, targetCr, null, TransferTypes::CritLoot);
-        return true;
+        return EventResult::StopChain;
     case SKILL_PUSH_CRITTER: // Push critter, only targetCr is valid
         cr.Action(CritterAction::PickCritter, 2, null);
         if ((!Time::IsTimeoutActive(cr.TimeoutBattle) && !Time::IsTimeoutActive(targetCr.TimeoutBattle)) &&
             (targetCr.ControlledByPlayer || (NpcPlanes::IsNoPlanes(targetCr) && !Dialogs::IsTalking(targetCr)))) {
             MoveRandom::CritterMoveRandom(targetCr);
         }
-        return true;
+        return EventResult::StopChain;
     case CritterProperty::SkillScience: {
         // Radio
         if (targetItem != null && targetItem.Radio != null && targetItem.Ownership == ItemOwnership::CritterInventory && targetItem.CritterId == cr.Id) {
             if (isPlayer) {
                 Radio::EditRadioSettings(cr, targetItem);
             }
-            return true;
+            return EventResult::StopChain;
         }
         if (targetScen != null && targetScen.StaticScript != EMPTY_HSTRING) {
             Game.CallStaticItemFunction(cr, targetScen, null, int(skill));
-            return true;
+            return EventResult::StopChain;
         }
-        Messaging::Info(cr, TextPackName::Game, MsgStr::StrUseNothing); // Todo: "You fail to learn anything."
+        Messaging::Info(cr, TextPackKey(TextPackName::Game, "" + (MsgStr::StrUseNothing))); // Todo: "You fail to learn anything."
     } break;
     case CritterProperty::SkillRepair: {
         // Generic repair
         if (targetItem != null && targetItem.Ownership == ItemOwnership::CritterInventory && targetItem.Deteriorable && Repair::TryRepairItem(cr, targetItem)) {
-            return true;
+            return EventResult::StopChain;
         }
 
-        Messaging::Info(cr, TextPackName::Game, MsgStr::StrUseNothing);
+        Messaging::Info(cr, TextPackKey(TextPackName::Game, "" + (MsgStr::StrUseNothing)));
     } break;
     case CritterProperty::SkillSneak: {
         if (cr.InSneakMode) {
@@ -582,7 +592,7 @@ bool critter_use_skill(Critter cr, CritterProperty skill, Critter targetCr, Item
         }
         else {
             if (Time::IsTimeoutActive(cr.TimeoutSneak)) {
-                Messaging::Info(cr, TextPackName::Game, MsgStr::StrTimeoutSneakWait);
+                Messaging::Info(cr, TextPackKey(TextPackName::Game, "" + (MsgStr::StrTimeoutSneakWait)));
             }
             else {
                 cr.InSneakMode = true;
@@ -591,7 +601,7 @@ bool critter_use_skill(Critter cr, CritterProperty skill, Critter targetCr, Item
     } break;
     case CritterProperty::SkillSteal: {
         if (targetItem != null) {
-            Messaging::Info(cr, TextPackName::Game, MsgStr::StrUseNothing);
+            Messaging::Info(cr, TextPackKey(TextPackName::Game, "" + (MsgStr::StrUseNothing)));
         }
         else if (targetCr != null) {
             // Loot
@@ -602,11 +612,11 @@ bool critter_use_skill(Critter cr, CritterProperty skill, Critter targetCr, Item
             // Steal
             else {
                 if (isPlayer && Time::IsTimeoutActive(cr.TimeoutSkSteal)) {
-                    Messaging::Info(cr, TextPackName::Game, MsgStr::StrSkillWeariness);
+                    Messaging::Info(cr, TextPackKey(TextPackName::Game, "" + (MsgStr::StrSkillWeariness)));
                 }
                 else {
                     if (targetCr.IsNoSteal) {
-                        Messaging::Info(cr, TextPackName::Game, MsgStr::StrNoStealCritter);
+                        Messaging::Info(cr, TextPackKey(TextPackName::Game, "" + (MsgStr::StrNoStealCritter)));
                     }
                     else {
                         cr.Action(CritterAction::PickCritter, 1, null);
@@ -619,12 +629,12 @@ bool critter_use_skill(Critter cr, CritterProperty skill, Critter targetCr, Item
             }
         }
         else {
-            Messaging::Info(cr, TextPackName::Game, MsgStr::StrUseNothing);
+            Messaging::Info(cr, TextPackKey(TextPackName::Game, "" + (MsgStr::StrUseNothing)));
         }
     } break;
     case CritterProperty::SkillFirstAid: {
         if (targetItem != null || targetScen != null) {
-            Messaging::Info(cr, TextPackName::Game, MsgStr::StrUseNothing);
+            Messaging::Info(cr, TextPackKey(TextPackName::Game, "" + (MsgStr::StrUseNothing)));
             break;
         }
 
@@ -634,22 +644,22 @@ bool critter_use_skill(Critter cr, CritterProperty skill, Critter targetCr, Item
         bool is_self = (targetCr.Id == cr.Id);
 
         if (targetCr.IsDead()) {
-            Messaging::Info(cr, TextPackName::Game, MsgStr::StrSkillNoressurect);
+            Messaging::Info(cr, TextPackKey(TextPackName::Game, "" + (MsgStr::StrSkillNoressurect)));
             break;
         }
 
         if (targetCr.CurrentHp >= targetCr.MaxLife) {
             if (_CritIsInjured(targetCr)) {
-                Messaging::Info(cr, TextPackName::Game, MsgStr::StrSkillNofirstaidNeeddoctor);
+                Messaging::Info(cr, TextPackKey(TextPackName::Game, "" + (MsgStr::StrSkillNofirstaidNeeddoctor)));
             }
             else if (is_self) {
-                Messaging::Info(cr, TextPackName::Game, MsgStr::StrSkillNoneedFirstaid);
+                Messaging::Info(cr, TextPackKey(TextPackName::Game, "" + (MsgStr::StrSkillNoneedFirstaid)));
             }
             break;
         }
 
         if (isPlayer && Time::IsTimeoutActive(cr.TimeoutSkFirstAid)) {
-            Messaging::Info(cr, TextPackName::Game, MsgStr::StrSkillWeariness);
+            Messaging::Info(cr, TextPackKey(TextPackName::Game, "" + (MsgStr::StrSkillWeariness)));
             break;
         }
 
@@ -706,7 +716,7 @@ bool critter_use_skill(Critter cr, CritterProperty skill, Critter targetCr, Item
     } break;
     case CritterProperty::SkillDoctor: {
         if (targetItem != null || targetScen != null) {
-            Messaging::Info(cr, TextPackName::Game, MsgStr::StrUseNothing);
+            Messaging::Info(cr, TextPackKey(TextPackName::Game, "" + (MsgStr::StrUseNothing)));
             break;
         }
 
@@ -716,22 +726,22 @@ bool critter_use_skill(Critter cr, CritterProperty skill, Critter targetCr, Item
         bool is_self = (targetCr.Id == cr.Id);
 
         if (targetCr.IsDead()) {
-            Messaging::Info(cr, TextPackName::Game, MsgStr::StrSkillNoressurect);
+            Messaging::Info(cr, TextPackKey(TextPackName::Game, "" + (MsgStr::StrSkillNoressurect)));
             break;
         }
 
         if (not _CritIsInjured(targetCr)) {
             if (targetCr.CurrentHp < targetCr.MaxLife) {
-                Messaging::Info(cr, TextPackName::Game, MsgStr::StrSkillNodoctorNeedfirstaid);
+                Messaging::Info(cr, TextPackKey(TextPackName::Game, "" + (MsgStr::StrSkillNodoctorNeedfirstaid)));
             }
             else if (is_self) {
-                Messaging::Info(cr, TextPackName::Game, MsgStr::StrSkillNoneedDoctor);
+                Messaging::Info(cr, TextPackKey(TextPackName::Game, "" + (MsgStr::StrSkillNoneedDoctor)));
             }
             break;
         }
 
         if (isPlayer && Time::IsTimeoutActive(cr.TimeoutSkDoctor)) {
-            Messaging::Info(cr, TextPackName::Game, MsgStr::StrSkillWeariness);
+            Messaging::Info(cr, TextPackKey(TextPackName::Game, "" + (MsgStr::StrSkillWeariness)));
             break;
         }
 
@@ -763,11 +773,11 @@ bool critter_use_skill(Critter cr, CritterProperty skill, Critter targetCr, Item
             if (targetCr.GetAsInt(damages[i]) != 0) {
                 if (sk > Game.Random(5, 95)) {
                     targetCr.SetAsInt(damages[i], 0);
-                    Messaging::Info(cr, TextPackName::Game, STR_SKILL_HEAL_DMG(damages[i]));
+                    Messaging::Info(cr, TextPackKey(TextPackName::Game, "" + (STR_SKILL_HEAL_DMG(damages[i]))));
                     uninjured++;
                 }
                 else {
-                    Messaging::Info(cr, TextPackName::Game, STR_SKILL_NOHEAL_DMG(damages[i]));
+                    Messaging::Info(cr, TextPackKey(TextPackName::Game, "" + (STR_SKILL_NOHEAL_DMG(damages[i]))));
                 }
                 sk /= 2;
             }
@@ -790,30 +800,31 @@ bool critter_use_skill(Critter cr, CritterProperty skill, Critter targetCr, Item
             hstring pid = targetItem.ProtoId;
             if ((pid == Content::Item::active_dynamite || pid == Content::Item::active_plastic_explosive || pid == Content::Item::active_mine) &&
                 Explode::OnUseExplode(cr, targetItem, null, null, null, 0)) {
-                return true;
+                return EventResult::StopChain;
             }
         }
 
-        Messaging::Info(cr, TextPackName::Game, MsgStr::StrUseNothing);
+        Messaging::Info(cr, TextPackKey(TextPackName::Game, "" + (MsgStr::StrUseNothing)));
     } break;
     default: {
-        Messaging::Info(cr, TextPackName::Game, MsgStr::StrUseNothing);
+        Messaging::Info(cr, TextPackKey(TextPackName::Game, "" + (MsgStr::StrUseNothing)));
     } break;
     }
 
-    return true;
+    return EventResult::StopChain;
 }
 
 // //////////////////////////////////////////////////////////////////////////////////////////////////
 // Call on something critter reload weapon.
 // If ammo is not valid than only unload.
+[[Event]]
 void critter_reload_weapon(Critter cr, Item weapon, Item ammo)
 {
     // Special weapons
     if (weapon.Weapon_Caliber == 0) {
         if (weapon.ProtoId == Content::Item::solar_scorcher) {
             if (IS_NIGHT(GameTime::GetHour())) {
-                Messaging::Info(cr, TextPackName::Game, MsgStr::StrSolarScorcherNoLight);
+                Messaging::Info(cr, TextPackKey(TextPackName::Game, "" + (MsgStr::StrSolarScorcherNoLight)));
             }
             else {
                 weapon.AmmoCount = weapon.Weapon_MaxAmmoCount;
@@ -850,6 +861,7 @@ void critter_reload_weapon(Critter cr, Item weapon, Item ammo)
 // //////////////////////////////////////////////////////////////////////////////////////////////////
 // Call on player register/login in game or npc created/loaded.
 // Default start position for players is center of global map.
+[[Event]]
 void critter_init(Critter cr, bool firstTime)
 {
     if (firstTime) {
@@ -881,7 +893,7 @@ void critter_init(Critter cr, bool firstTime)
             cr.LuckBase = CLAMP(cr.LuckBase, 1, 10);
 
             if ((cr.StrengthBase + cr.PerceptionBase + cr.EnduranceBase + cr.CharismaBase + cr.IntellectBase + cr.AgilityBase + cr.LuckBase) !=
-                Settings.StartSpecialPoints) {
+                Settings.Player.StartSpecialPoints) {
                 cr.StrengthBase = 5;
                 cr.PerceptionBase = 5;
                 cr.EnduranceBase = 5;
@@ -932,7 +944,7 @@ void critter_init(Critter cr, bool firstTime)
             Replication::SetStartLocation(cr);
 
             // Main quest
-            if (Settings.MainStoryLineActive) {
+            if (Settings.Story.MainStoryLineActive) {
                 MainIntro::SetPlayerStoryLineLocation(cr);
             }
             else {
@@ -951,7 +963,7 @@ void critter_init(Critter cr, bool firstTime)
     }
     else {
         // Main quest
-        if (cr.ControlledByPlayer && Settings.MainStoryLineActive) {
+        if (cr.ControlledByPlayer && Settings.Story.MainStoryLineActive) {
             MainIntro::SetPlayerStoryLineLocation(cr);
         }
         else {
@@ -1004,6 +1016,7 @@ void critter_init(Critter cr, bool firstTime)
 
 // //////////////////////////////////////////////////////////////////////////////////////////////////
 // Call on critter exit from game.
+[[Event]]
 void critter_finish(Critter cr)
 {
     bool toDelete = true;
@@ -1017,7 +1030,8 @@ void critter_finish(Critter cr)
 }
 
 // //////////////////////////////////////////////////////////////////////////////////////////////////
-// Call every Settings.CritterIdleTick time.
+// Call every Settings.Critter.CritterIdleTick time.
+[[TimeEvent]]
 void critter_idle(Critter cr)
 {
     // Replication
@@ -1054,7 +1068,7 @@ void critter_idle(Critter cr)
             int apRegeneration = cr.ApRegenerationTime;
 
             if (apRegeneration == 0) {
-                apRegeneration = Settings.ApRegeneration; // 7000
+                apRegeneration = Settings.Combat.ApRegeneration; // 7000
             }
 
             int maxAp = cr.ActionPoints * AP_DIVIDER; // 100
@@ -1077,12 +1091,13 @@ void critter_idle(Critter cr)
     }
 
     // Auto unload player critter
-    if (cr.ControlledByPlayer && cr.GetPlayer() == null && cr.GetPlayerOfflineTime() >= Time::Milliseconds(Settings.MinimumOfflineTime) &&
+    if (cr.ControlledByPlayer && cr.GetPlayer() == null && cr.GetPlayerOfflineTime() >= Time::Milliseconds(Settings.Account.MinimumOfflineTime) &&
         !Time::IsTimeoutActive(cr.TimeoutRemoveFromGame)) {
         Game.UnloadCritter(cr);
     }
 }
 
+[[Event]]
 void critter_knockout(Critter cr)
 {
     if (!cr.ControlledByPlayer) {
@@ -1092,6 +1107,7 @@ void critter_knockout(Critter cr)
 // //////////////////////////////////////////////////////////////////////////////////////////////////
 // Call on something critter dies.
 // Killer can be null.
+[[Event]]
 void critter_dead(Critter cr, Critter killer)
 {
     // Move slot items to inventory
@@ -1242,6 +1258,7 @@ void critter_dead(Critter cr, Critter killer)
 
 // //////////////////////////////////////////////////////////////////////////////////////////////////
 // Call on something critter reswapned.
+[[Event]]
 void critter_respawn(Critter cr)
 {
     if (cr.DeadBlockerId != ZERO_IDENT) {
@@ -1255,6 +1272,7 @@ void critter_respawn(Critter cr)
 
 // //////////////////////////////////////////////////////////////////////////////////////////////////
 // Call on something critter in to map.
+[[Event]]
 void map_critter_in(Map map, Critter cr)
 {
     map.OnCritterIn.Fire(cr);
@@ -1271,13 +1289,14 @@ void map_critter_in(Map map, Critter cr)
         cr.HomeMapId = map.Id;
         cr.HomeMapPid = map.ProtoId;
         cr.HomeHex = cr.Hex;
-        cr.HomeDir = cr.Dir;
+        cr.HomeDir = cr.Dir.hex.value;
     }
     cr.WorldPos = map.GetLocation().WorldPos;
 }
 
 // //////////////////////////////////////////////////////////////////////////////////////////////////
 // Call on something critter out from map.
+[[Event]]
 void map_critter_out(Map map, Critter cr)
 {
     map.OnCritterOut.Fire(cr);
@@ -1286,7 +1305,7 @@ void map_critter_out(Map map, Critter cr)
     NoPvpMaps::OnCritterMapOut(cr, map);
     cr.MapLeaveHex = cr.Hex;
 
-    Critter[] players = map.GetCritters(cr.MapLeaveHex, 11, CritterFindType::NonDeadPlayers);
+    Critter[] players = map.GetCrittersInRadius(cr.MapLeaveHex, 11, CritterFindType::NonDeadPlayers);
     for (int i = 0, l = players.length(); i < l; i++) {
         if (players[i].FollowLeaderId == cr.Id) {
             Dialogbox::RunDialogBox(players[i], DialogBoxType::AskFollowGlobalGroupRuler, 2, "$who" + cr.Name);
@@ -1307,7 +1326,7 @@ void karma_voting(Critter crFrom, Critter crTo, bool valUp)
 
 // //////////////////////////////////////////////////////////////////////////////////////////////////
 // Call to determine visibility of critters.
-// To start working set flag LOOK_CHECK_SCRIPT to Settings.LookChecks global var.
+// To start working set flag LOOK_CHECK_SCRIPT to Settings.CommonGameplay.LookChecks global var.
 // Return true to allow see one critter another, false to disallow.
 // Note: CRITTER_EVENT_SHOW_CRITTER_X, CRITTER_EVENT_HIDE_CRITTER_X is not processed.
 bool check_look(Map map, Critter critter, Critter target)
@@ -1317,7 +1336,7 @@ bool check_look(Map map, Critter critter, Critter target)
 
 // //////////////////////////////////////////////////////////////////////////////////////////////////
 // Call to determine visibility of items with ITEM_TRAP flag.
-// To start working set flag LOOK_CHECK_SCRIPT to Settings.LookChecks global var.
+// To start working set flag LOOK_CHECK_SCRIPT to Settings.CommonGameplay.LookChecks global var.
 bool check_trap_look(Map map, Critter critter, Item item)
 {
     return true;
@@ -1326,25 +1345,26 @@ bool check_trap_look(Map map, Critter critter, Item item)
 // //////////////////////////////////////////////////////////////////////////////////////////////////
 // Call on barter transaction.
 // Return false to cancel transaction.
-bool items_barter(Item[] saleItems, int[] saleItemsCount, Item[] buyItems, int[] buyItemsCount, Critter player, Critter npc)
+[[Event]]
+EventResult items_barter(Item[] saleItems, int[] saleItemsCount, Item[] buyItems, int[] buyItemsCount, Critter player, Critter npc)
 {
     if (npc.IsBarterOnlyCash) {
         for (int i = 0, j = saleItems.length(); i < j; i++) {
             Item item = saleItems[i];
             if (item != null && item.ProtoId != Content::Item::bottle_caps) {
-                Messaging::Info(npc, TextPackName::Game, MsgStr::StrBarterOnlyCash);
+                Messaging::Info(npc, TextPackKey(TextPackName::Game, "" + (MsgStr::StrBarterOnlyCash)));
                 // Todo: npc.SayMsg(SAY_DIALOG, TextPackName::Game, MsgStr::StrBarterOnlyCash);
-                return false;
+                return EventResult::StopChain;
             }
         }
     }
 
     if (!LimitedBarter::BarterAllowed(npc.Id, buyItems, saleItems)) {
-        Messaging::Info(npc, TextPackName::Game, MsgStr::StrBarterItemNotAllowed);
-        return false;
+        Messaging::Info(npc, TextPackKey(TextPackName::Game, "" + (MsgStr::StrBarterItemNotAllowed)));
+        return EventResult::StopChain;
     }
 
-    return true;
+    return EventResult::StopChain;
 }
 
 // Call on player try register
@@ -1355,7 +1375,7 @@ bool player_registration(Player player, string name)
     Game.Log("player register. Name: " + name);
     int nameError = Parameters::CheckPlayerName(name);
     if (nameError != 0) {
-        Messaging::Info(player, TextPackName::Game, nameError);
+        Messaging::Info(player, TextPackKey(TextPackName::Game, "" + (nameError)));
         Game.Log("player register failed error=" + nameError);
         return false;
     }
@@ -1365,11 +1385,12 @@ bool player_registration(Player player, string name)
 
 // Call on player try login
 // Return true to allow, false to disallow
-bool player_login(Player player, Player unloginedPlayer)
+[[Event]]
+EventResult player_login(Player player, Player unloginedPlayer)
 {
-    if (Settings.PermanentDeath > 0 && Replication::IsPermanentDeath(player.Id)) {
-        Messaging::Info(player, TextPackName::Game, MsgStr::StrNetPermanentDeath);
-        return false;
+    if (Settings.Combat.PermanentDeath > 0 && Replication::IsPermanentDeath(player.Id)) {
+        Messaging::Info(player, TextPackKey(TextPackName::Game, "" + (MsgStr::StrNetPermanentDeath)));
+        return EventResult::StopChain;
     }
 
     player.DisplayName = unloginedPlayer != null ? unloginedPlayer.Name : player.Name;
@@ -1378,7 +1399,7 @@ bool player_login(Player player, Player unloginedPlayer)
         OnPlayerEnter(player);
     }
 
-    return true;
+    return EventResult::ContinueChain;
 }
 
 void OnPlayerEnter(Player player)
@@ -1401,12 +1422,13 @@ void OnPlayerEnter(Player player)
     cr.DisplayName = player.DisplayName;
 }
 
-bool player_allowcommand(Player player, uint8 command)
+[[Event]]
+EventResult player_allowcommand(Player player, uint8 command)
 {
     switch (command) {
     case COMMAND_EXIT:
     case COMMAND_MYINFO:
-        return true;
+        return EventResult::ContinueChain;
     case COMMAND_PROPERTY:
     case COMMAND_CRITID:
     case COMMAND_GAMEINFO:
@@ -1420,31 +1442,32 @@ bool player_allowcommand(Player player, uint8 command)
     case COMMAND_LOG:
     case COMMAND_REGENMAP:
     case COMMAND_RUNSCRIPT:
-        return true;
+        return EventResult::ContinueChain;
     }
 
-    return false;
+    return EventResult::StopChain;
 }
 
-bool OnPlayerMoveCritter(Player player, Critter cr, int& speed)
+[[Event]]
+EventResult OnPlayerMoveCritter(Player player, Critter cr, int& speed)
 {
     Player crOwner = cr.GetPlayer();
     if (crOwner == null || crOwner.Id != player.Id) {
-        return false;
+        return EventResult::StopChain;
     }
 
     if (speed == 0) {
-        return true;
+        return EventResult::StopChain;
     }
 
     if (cr.IsNoMove) {
-        return false;
+        return EventResult::StopChain;
     }
 
     /*
-                if (!Settings.RunOnCombat && Time::IsTimeoutActive(chosen.TimeoutBattle))
+                if (!Settings.Movement.RunOnCombat && Time::IsTimeoutActive(chosen.TimeoutBattle))
                 isRun = false;
-            else if (!Settings.RunOnTransfer && Time::IsTimeoutActive(chosen.TimeoutTransfer))
+            else if (!Settings.Movement.RunOnTransfer && Time::IsTimeoutActive(chosen.TimeoutTransfer))
                 isRun = false;
             else if (chosen.IsDamagedRightLeg || chosen.IsDamagedLeftLeg || chosen.IsOverweight)
                 isRun = false;
@@ -1455,7 +1478,7 @@ bool OnPlayerMoveCritter(Player player, Critter cr, int& speed)
     int walkSpeed = cr.WalkSpeed;
     int maxSpeed = cr.IsNoRun ? walkSpeed : walkSpeed * 2;
     if (maxSpeed == 0) {
-        return false;
+        return EventResult::StopChain;
     }
 
     if (speed > maxSpeed) {
@@ -1469,21 +1492,23 @@ bool OnPlayerMoveCritter(Player player, Critter cr, int& speed)
         cr.InSneakMode = false;
     }
 
-    return true;
+    return EventResult::ContinueChain;
 }
 
-bool OnPlayerDirCritter(Player player, Critter cr, int16& dirAngle)
+[[Event]]
+EventResult OnPlayerDirCritter(Player player, Critter cr, mdir& dir)
 {
     Player crOwner = cr.GetPlayer();
     if (crOwner == null || crOwner.Id != player.Id) {
-        return false;
+        return EventResult::StopChain;
     }
 
-    dirAngle = Game.DirToAngle(Game.AngleToDir(dirAngle));
+    dir = mdir(dir.hex);
 
-    return true;
+    return EventResult::ContinueChain;
 }
 
+[[Event]]
 void OnCritterTalk(Critter cr)
 {
     cr.InSneakMode = false;

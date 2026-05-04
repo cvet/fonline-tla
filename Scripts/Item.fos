@@ -19,12 +19,14 @@ void _DoorAutoCloseInit(Item door, bool firstTime)
     door.OnCritterUseSkill.Subscribe(e_UseAutoCloseDoor);
 }
 
-bool e_UseAutoCloseDoor(Item door, Critter cr, CritterProperty skill)
+[[Event]]
+EventResult e_UseAutoCloseDoor(Item door, Critter cr, CritterProperty skill)
 {
     Game.StartTimeEvent(Time::Seconds(door.DoorAutoCloseTime == 0 ? 2 * 60 : door.DoorAutoCloseTime), AutoCloseDoor, door.Id); //SavedDeferredCall
-    return false;
+    return EventResult::StopChain;
 }
 
+[[TimeEvent]]
 void AutoCloseDoor(any value)
 {
     Item door = Game.GetItem(value);
@@ -41,7 +43,7 @@ void AutoCloseDoor(any value)
         return;
     }
 
-    Critter cr = map.GetCritter(hex);
+    Critter cr = map.GetCritterOnHex(hex);
     if (cr != null) {
         if (cr.IsAlive()) {
             Game.StartTimeEvent(Time::Seconds(3), AutoCloseDoor, value); //SavedDeferredCall
@@ -64,24 +66,26 @@ void _ClosedDoorInit(Item door, bool firstTime)
     door.OnCritterUseSkill.Subscribe(_UseDoor);
 }
 
-bool _UseDoor(Item item, Critter cr, CritterProperty skill)
+[[Event]]
+EventResult _UseDoor(Item item, Critter cr, CritterProperty skill)
 {
-    return false;
+    return EventResult::StopChain;
 }
 
 // Дверь, при использовании которой открывается диалог
 void _DialogDoorInit(Item door, bool firstTime)
 {
     if (firstTime) {
-        door.DoorAutoDialog = hstring_fromHash(door.Val3);
+        door.DoorAutoDialog = hstring(door.Val3);
     }
     door.OnCritterUseSkill.Subscribe(_UseDialogDoor);
 }
 
-bool _UseDialogDoor(Item door, Critter cr, CritterProperty skill)
+[[Event]]
+EventResult _UseDialogDoor(Item door, Critter cr, CritterProperty skill)
 {
     Dialogs::RunDialog(cr, door.DoorAutoDialog, false);
-    return true;
+    return EventResult::StopChain;
 }
 
 // Голодиск с номером, присвоенном в Val0
@@ -100,6 +104,7 @@ void SetDestroyItem(Item item, int delHours)
     Game.StartTimeEvent(Time::GameHours(delHours), DeferredDestroyItem, item.Id); //SavedDeferredCall
 }
 
+[[TimeEvent]]
 void DeferredDestroyItem(any value)
 {
     Item item = Game.GetItem(value);
@@ -120,7 +125,7 @@ void _GuardedItemInit(Item item, bool firstTime)
     item.OnCritterUseSkill.Subscribe(_GuardedItemSkill);
 }
 
-bool _GuardedItemSkill(Item item, Critter cr, CritterProperty skill)
+bool _GuardedItemSkill_Impl(Item item, Critter cr, CritterProperty skill)
 {
     Map map = cr.GetMap();
     if (map == null) {
@@ -166,7 +171,7 @@ bool _GuardedItemSkill(Item item, Critter cr, CritterProperty skill)
 
             guardedItemSkill[cr.Id] = guardedItemSkill[cr.Id] + 1;
             guard.GuardedItemSkill = guardedItemSkill;
-            Messaging::SayShout(guard, TextPackName::Text, STR_DONTOUCH, "$pname" + PlayerRegistration::GetPlayerName(cr.Id));
+            Messaging::SayShout(guard, TextPackKey(TextPackName::Text, "" + (STR_DONTOUCH)), "$pname" + PlayerRegistration::GetPlayerName(cr.Id));
         }
         else {
             guardedItemSkill[cr.Id] = 0;
@@ -180,6 +185,12 @@ bool _GuardedItemSkill(Item item, Critter cr, CritterProperty skill)
         // Нпц такие двери открыть тоже не смогут
         return true;
     }
+}
+
+[[Event]]
+EventResult _GuardedItemSkill(Item item, Critter cr, CritterProperty skill)
+{
+    return (_GuardedItemSkill_Impl(item, cr, skill)) ? EventResult::StopChain : EventResult::StopChain;
 }
 
 Item ChangeProto(Item item, hstring newProto)

@@ -63,27 +63,30 @@ namespace MapGeckCity // Sort 2
 #define BM_HALF_ON      (2)
 #define BM_OFF_NO_GUARD (3)
 
-void ModuleInit()
+[[ModuleInit]]
+void InitMapGeckCity()
 {
     Game.OnGlobalMapCheckEntranceAllowed.Subscribe(entrance_Geck);
 }
 
-bool entrance_Geck(Location geck, Critter[] critters, int entrance)
+[[Event]]
+EventResult entrance_Geck(Location geck, Critter[] critters, int entrance)
 {
     if (geck.ProtoId == Content::Location::geck_city) {
         if (entrance == ENTANCE_CITYHALL) {
             for (int k = 0, l = critters.length(); k < l; k++) {
                 Critter cr = critters[k];
                 if (cr != null && !IsPlayerCitizen(cr, geck)) {
-                    return false;
+                    return EventResult::StopChain;
                 }
             }
         }
     }
-    return true;
+    return EventResult::StopChain;
 }
 
 // Выдача ГЕККА игроку с присвоением скрипта
+[[DialogResult]]
 void r_GiveGeck(Critter cr, Critter npc)
 {
     Item geck = cr.AddItem(Content::Item::geck, 1);
@@ -98,29 +101,30 @@ void _GeckInit(Item geck, bool firstTime)
     geck.OnCritterUse.Subscribe(_GeckUse);
 }
 
-bool _GeckUse(Item geck, Critter cr, int param)
+[[Event]]
+EventResult _GeckUse(Item geck, Critter cr, int param)
 {
     Map map = cr.GetMap();
     if (map == null) {
-        return false;
+        return EventResult::StopChain;
     }
 
     Location loc = map.GetLocation();
     if (loc == null) {
-        return false;
+        return EventResult::StopChain;
     }
 
     if (!loc.AutoGarbage) {
-        return false;
+        return EventResult::StopChain;
     }
 
     if (PidsGroups::Pids_MapDeserts.find(loc.ProtoId) == -1) {
-        Messaging::Info(cr, TextPackName::Text, STR_WRONG_LOC);
-        return true;
+        Messaging::Info(cr, TextPackKey(TextPackName::Text, "" + (STR_WRONG_LOC)));
+        return EventResult::StopChain;
     }
 
     CreateCity(cr, geck);
-    return true;
+    return EventResult::StopChain;
 }
 
 void CreateCity(Critter player, Item geck)
@@ -161,12 +165,12 @@ void CreateCity(Critter player, Item geck)
 
         cr.GCityCitizen = loc.Id;
         acceptedPlayers.insertLast(cr.Id);
-        Messaging::Info(leader, TextPackName::Text, STR_ACCESS_LEADER, "$pname" + PlayerRegistration::GetPlayerName(cr.Id));
-        Messaging::Info(cr, TextPackName::Text, STR_ACCESS_MEMBER);
+        Messaging::Info(leader, TextPackKey(TextPackName::Text, "" + (STR_ACCESS_LEADER)), "$pname" + PlayerRegistration::GetPlayerName(cr.Id));
+        Messaging::Info(cr, TextPackKey(TextPackName::Text, "" + (STR_ACCESS_MEMBER)));
         cr.Experience += XP_CREATE_CITY;
-        Messaging::Info(cr, TextPackName::Text, 3480, "$exp" + XP_CREATE_CITY);
+        Messaging::Info(cr, TextPackKey(TextPackName::Text, "" + (3480)), "$exp" + XP_CREATE_CITY);
     }
-    Messaging::Info(player, TextPackName::Text, STR_CREATION_END);
+    Messaging::Info(player, TextPackKey(TextPackName::Text, "" + (STR_CREATION_END)));
     player.AddItem(Content::Item::used_geck, 1);
     loc.GeckCityLeader = player.Id;
     loc.GeckCityMembers = acceptedPlayers;
@@ -313,6 +317,7 @@ void ClearCitizens(Critter leader)
 }
 
 // Работа со списком жителей города
+[[DialogDemand]]
 bool d_IsPlayerLeader(Critter player, Critter none)
 {
     return IsPlayerLeader(player);
@@ -324,7 +329,7 @@ int dlg_RemoveCitizen(Critter player, Critter npc, string& playerName)
         return 0;
     }
 
-    Player playerOwner = Game.GetPlayer(playerName);
+    Player playerOwner = PlayerRegistration::GetPlayerByName(playerName);
     if (playerOwner == null) {
         return FORCE_DIALOG_PLAYER_NOTFOUND;
     }
@@ -335,7 +340,7 @@ int dlg_RemoveCitizen(Critter player, Critter npc, string& playerName)
     }
 
     if (RemoveCitizen(player, cr)) {
-        Messaging::Info(cr, TextPackName::Text, STR_CITIZEN_REMOVED, "$leadername" + PlayerRegistration::GetPlayerName(player.Id));
+        Messaging::Info(cr, TextPackKey(TextPackName::Text, "" + (STR_CITIZEN_REMOVED)), "$leadername" + PlayerRegistration::GetPlayerName(player.Id));
         return FORCE_DIALOG_PLAYER_REMOVED;
     }
 
@@ -348,13 +353,13 @@ int dlg_AddCitizen(Critter player, Critter npc, string& playerName)
         return 0;
     }
 
-    Critter cr = Game.GetCritter(Game.GetPlayer(playerName).Id);
+    Critter cr = Game.GetCritter(PlayerRegistration::GetPlayerByName(playerName).Id);
     if (cr != null) {
         if (cr.Id == player.Id) {
             return FORCE_DIALOG_PLAYER_NOTFOUND;
         }
         if (AddCitizen(player, cr)) {
-            Messaging::Info(cr, TextPackName::Text, STR_CITIZEN_ADDED, "$leadername" + PlayerRegistration::GetPlayerName(player.Id));
+            Messaging::Info(cr, TextPackKey(TextPackName::Text, "" + (STR_CITIZEN_ADDED)), "$leadername" + PlayerRegistration::GetPlayerName(player.Id));
             return FORCE_DIALOG_PLAYER_ADDED;
         }
         else {
@@ -364,6 +369,7 @@ int dlg_AddCitizen(Critter player, Critter npc, string& playerName)
     return FORCE_DIALOG_PLAYER_NOTFOUND;
 }
 
+[[DialogResult]]
 void r_ClearCitizens(Critter player, Critter none)
 {
     ClearCitizens(player);
@@ -372,6 +378,7 @@ void r_ClearCitizens(Critter player, Critter none)
 // Двери центрального здания (Штабквартиры)
 // К штабквартире имеют доступ только граждане города. Гражданами считаются те, кто был в группе, установившей ГЕКК, а также добавленные лидером позже.
 // bool s_UseDoorComputer( Critter player, StaticItem scenery, CritterProperty skill, Item item )
+[[ItemStatic]]
 bool s_UseDoorComputer(Critter player, StaticItem scenery, Item item, any skill)
 {
     if (item != null || skill != CritterProperty::SpecialSkillPickOnGround) {
@@ -382,14 +389,21 @@ bool s_UseDoorComputer(Critter player, StaticItem scenery, Item item, any skill)
     return true;
 }
 
-bool d_IsCitizen(Critter player, Critter npc)
+bool d_IsCitizen_Impl(Critter player, Critter npc)
 {
     return IsPlayerCitizen(player);
 }
 
+[[DialogDemand]]
+bool d_IsCitizen(Critter player, Critter npc)
+{
+    return d_IsCitizen_Impl(player, npc);
+}
+
+[[DialogDemand]]
 bool d_NotCitizen(Critter player, Critter npc)
 {
-    return !d_IsCitizen(player, npc);
+    return !d_IsCitizen_Impl(player, npc);
 }
 
 void _DoorInit(Item door, bool firstTime)
@@ -402,16 +416,18 @@ void _DoorInit(Item door, bool firstTime)
     door.OnCritterUseSkill.Subscribe(_DoorSkill);
 }
 
-bool _DoorSkill(Item door, Critter cr, CritterProperty skill)
+[[Event]]
+EventResult _DoorSkill(Item door, Critter cr, CritterProperty skill)
 {
     if (door.Opened) {
-        return false;
+        return EventResult::StopChain;
     }
 
-    Messaging::Info(cr, TextPackName::Text, STR_CANT_OPEN_DOOR);
-    return true;
+    Messaging::Info(cr, TextPackKey(TextPackName::Text, "" + (STR_CANT_OPEN_DOOR)));
+    return EventResult::StopChain;
 }
 
+[[DialogResult]]
 void r_OpenDoor(Critter player, Critter none)
 {
     Item door = GetGeckDoor(player.GetMap());
@@ -423,6 +439,7 @@ void r_OpenDoor(Critter player, Critter none)
     Game.StartTimeEvent(CLOSE_DOOR_TIME, Item::AutoCloseDoor, door.Id); //SavedDeferredCall
 }
 
+[[DialogResult]]
 void r_CloseDoor(Critter player, Critter none)
 {
     Item door = GetGeckDoor(player.GetMap());
@@ -458,7 +475,7 @@ Location GetGeckLocation(Critter player)
 // npcPid - прототип НПЦ
 // maxNum - максимальное число НПЦ такого типа на карте
 // homeEntry - номер гекса с домашней позицией НПЦ
-bool d_CanHireNpc(Critter player, Critter npc, int npcPidHash, int maxNum, int homeEntry)
+bool d_CanHireNpc_Impl(Critter player, Critter npc, hstring npcPidHash, int maxNum, int homeEntry)
 {
     if (maxNum < 1) {
         return false;
@@ -476,7 +493,7 @@ bool d_CanHireNpc(Critter player, Critter npc, int npcPidHash, int maxNum, int h
         return false;
     }
 
-    int count = map.GetCritters(hstring_fromHash(npcPidHash), CritterFindType::Any).length();
+    int count = map.GetCritters(npcPidHash, CritterFindType::Any).length();
     if (count >= int(maxNum)) {
         return false;
     }
@@ -484,28 +501,42 @@ bool d_CanHireNpc(Critter player, Critter npc, int npcPidHash, int maxNum, int h
     return Entrance::MapCountEntry(map, homeEntry) > count;
 }
 
-bool d_CanNotHireNpc(Critter player, Critter npc, int npcPidHash, int maxNum, int homeEntry)
+[[DialogDemand]]
+bool d_CanHireNpc(Critter player, Critter npc, any npcPidHash, any maxNum, any homeEntry)
 {
-    return !d_CanHireNpc(player, npc, npcPidHash, maxNum, homeEntry);
+    return d_CanHireNpc_Impl(player, npc, npcPidHash, maxNum, homeEntry);
 }
 
-bool d_CanHireNpc(Critter player, Critter npc, int maxNum, int homeEntry)
+[[DialogDemand]]
+bool d_CanNotHireNpc(Critter player, Critter npc, any npcPidHash, any maxNum, any homeEntry)
+{
+    return !d_CanHireNpc_Impl(player, npc, npcPidHash, maxNum, homeEntry);
+}
+
+bool d_CanHireNpc2_Impl(Critter player, Critter npc, int maxNum, int homeEntry)
 {
     if (npc == null) {
         return false;
     }
 
-    return d_CanHireNpc(player, npc, npc.ProtoId.hash, maxNum, homeEntry);
+    return d_CanHireNpc_Impl(player, npc, npc.ProtoId, maxNum, homeEntry);
 }
 
-bool d_CanNotHireNpc(Critter player, Critter npc, int maxNum, int homeEntry)
+[[DialogDemand]]
+bool d_CanHireNpc(Critter player, Critter npc, any maxNum, any homeEntry)
 {
-    return !d_CanHireNpc(player, npc, maxNum, homeEntry);
+    return d_CanHireNpc2_Impl(player, npc, maxNum, homeEntry);
+}
+
+[[DialogDemand]]
+bool d_CanNotHireNpc(Critter player, Critter npc, any maxNum, any homeEntry)
+{
+    return !d_CanHireNpc2_Impl(player, npc, maxNum, homeEntry);
 }
 
 // Проверка, найдена ли новая домашняя позиция в Городе из ГЕККа для НПЦ
 // homeEntry - номер гекса с домашней позицией НПЦ
-bool d_HomeFound(Critter player, Critter npc, int homeEntry)
+bool d_HomeFound_Impl(Critter player, Critter npc, int homeEntry)
 {
     if (npc == null) {
         return false;
@@ -539,14 +570,22 @@ bool d_HomeFound(Critter player, Critter npc, int homeEntry)
     return false;
 }
 
-bool d_NotHomeFound(Critter player, Critter npc, int homeEntry)
+[[DialogDemand]]
+bool d_HomeFound(Critter player, Critter npc, any homeEntry)
 {
-    return !d_HomeFound(player, npc, homeEntry);
+    return d_HomeFound_Impl(player, npc, homeEntry);
+}
+
+[[DialogDemand]]
+bool d_NotHomeFound(Critter player, Critter npc, any homeEntry)
+{
+    return !d_HomeFound_Impl(player, npc, homeEntry);
 }
 
 // Установка новой домашней позиции для НПЦ рядом с ближайшим Entry гексом
 // homeEntry - номер гекса с домашней позицией НПЦ
-void r_SetNewHome(Critter player, Critter npc, int homeEntry)
+[[DialogResult]]
+void r_SetNewHome(Critter player, Critter npc, any homeEntry)
 {
     if (npc == null) {
         return;
@@ -562,7 +601,7 @@ void r_SetNewHome(Critter player, Critter npc, int homeEntry)
         if (Game.GetDistance(npc.Hex, entries[i].Hex) <= HOMEPOS_RADIUS) {
             npc.HomeMapId = map.Id;
             npc.HomeHex = entries[i].Hex;
-            npc.HomeDir = Game.GetDirection(entries[i].Hex, npc.Hex);
+            npc.HomeDir = Game.GetDirection(entries[i].Hex, npc.Hex).hex.value;
             return;
         }
     }
@@ -575,6 +614,7 @@ void _MapInit(Map map, bool firstTime)
     map.StartTimeEvent(Time::Milliseconds(0), Time::Milliseconds(MAPLOOP_0), _GeckMapLoop);
 }
 
+[[TimeEvent]]
 void _GeckMapLoop(Map map)
 {
     Location loc = map.GetLocation();
@@ -598,6 +638,7 @@ void _GeckMapLoop(Map map)
 // Жители сразу попадают в штабквартиру, если заходят на карту города из ГЕККа
 // Отменено, теперь попадание на карту зависит определяется функцией входа
 // Оставлено на будущее, возможно будет логика для автомобилей
+[[Event]]
 void _GeckMapInCritter(Map map, Critter cr) // obsolete
 {
     if (cr.ControlledByPlayer && !cr.ControlledByPlayer) {
@@ -616,7 +657,7 @@ void _GeckMapInCritter(Map map, Critter cr) // obsolete
                 return;
             }
             if (Entrance::GetEntryFreeHex(map, ENTRY_CITYHALL, hex)) {
-                cr.TransferToHex(hex, Game.Random(0, 5));
+                cr.TransferToHex(hex, HDIR_Random);
                 TryMoveCar(cr, map);
             }
         }
@@ -649,6 +690,7 @@ void TryMoveCar(Critter cr, Map map)
 }
 
 // Энергобарьер на карте города из ГЭКК требует подпитки батареями
+[[DialogDemand]]
 bool d_HasGeneratorCharges(Critter player, Critter npc)
 {
     Map map = player.GetMap();
@@ -659,6 +701,7 @@ bool d_HasGeneratorCharges(Critter player, Critter npc)
     return map.GeckCityCharges > 0;
 }
 
+[[DialogDemand]]
 bool d_NoGeneratoreCharges(Critter player, Critter npc)
 {
     Map map = player.GetMap();
@@ -669,17 +712,18 @@ bool d_NoGeneratoreCharges(Critter player, Critter npc)
 }
 
 // bool s_TerminalOuter( Critter player, StaticItem terminal, CritterProperty skill, Item item )
+[[ItemStatic]]
 bool s_TerminalOuter(Critter player, StaticItem terminal, Item item, any skill)
 {
     Map map = player.GetMap();
     if (map != null && map.GeckCityTimeBroken > Game.SynchronizedTime) {
-        Messaging::Info(player, TextPackName::Text, STR_CONSOLE_OUT_OF_ORDER);
+        Messaging::Info(player, TextPackKey(TextPackName::Text, "" + (STR_CONSOLE_OUT_OF_ORDER)));
         return true;
     }
-    return EnergyBarier::s_Terminal(player, terminal, item, skill);
+    return EnergyBarier::s_Terminal_Impl(player, terminal, item, skill);
 }
 
-bool d_IsTerminalBroken(Critter player, Critter npc)
+bool d_IsTerminalBroken_Impl(Critter player, Critter npc)
 {
     Map map = player.GetMap();
     if (map == null) {
@@ -688,12 +732,20 @@ bool d_IsTerminalBroken(Critter player, Critter npc)
     return map.GeckCityTimeBroken > Game.SynchronizedTime;
 }
 
+[[DialogDemand]]
+bool d_IsTerminalBroken(Critter player, Critter npc)
+{
+    return d_IsTerminalBroken_Impl(player, npc);
+}
+
+[[DialogDemand]]
 bool d_NotTerminalBroken(Critter player, Critter npc)
 {
-    return !d_IsTerminalBroken(player, npc);
+    return !d_IsTerminalBroken_Impl(player, npc);
 }
 
 // НПЦ, который может сломать терминал
+[[DialogResult]]
 void r_BrakeTerminal(Critter player, Critter npc)
 {
     if (npc == null) {
@@ -706,7 +758,7 @@ void r_BrakeTerminal(Critter player, Critter npc)
         return;
     }
 
-    if (map.GetPathLength(npc, hex, 1) > 0) {
+    if (map.GetPathLength(npc, hex, 1, null) > 0) {
         if (NpcPlanes::AddWalkPlane(npc, 0, hex, 0, true, 1)) {
             NpcPlanes::AddMiscPlane(npc, 0, Time::Seconds(1), MapGeckCity::plane_Brake);
         }
@@ -715,7 +767,7 @@ void r_BrakeTerminal(Critter player, Critter npc)
 
 void plane_Brake(Critter npc)
 {
-    Messaging::Say(npc, TextPackName::Text, STR_BRAKE_CONSOLE);
+    Messaging::Say(npc, TextPackKey(TextPackName::Text, "" + (STR_BRAKE_CONSOLE)));
     Map map = npc.GetMap();
     if (map != null) {
         map.GeckCityTimeBroken = Game.SynchronizedTime + Time::Hours(16);
@@ -724,6 +776,7 @@ void plane_Brake(Critter npc)
 
 // Использование батарей на генератор
 // bool s_UseGenerator( Critter cr, StaticItem scen, CritterProperty skill, Item item )
+[[ItemStatic]]
 bool s_UseGenerator(Critter cr, StaticItem scen, Item item, any skill)
 {
     if (item == null) {
@@ -750,11 +803,12 @@ bool s_UseGenerator(Critter cr, StaticItem scen, Item item, any skill)
 
     charges = map.GeckCityCharges + charges;
     map.GeckCityCharges = charges;
-    Messaging::Info(cr, TextPackName::Text, STR_GENERATOR_CHARGED, "$charges" + charges + "$time" + _GetUptime(charges));
+    Messaging::Info(cr, TextPackKey(TextPackName::Text, "" + (STR_GENERATOR_CHARGED)), "$charges" + charges + "$time" + _GetUptime(charges));
     Game.DestroyItem(item, itemCount);
     return true;
 }
 
+[[DialogDemand]]
 bool d_BarrierOn(Critter player, Critter npc)
 {
     Map map = player.GetMap();
@@ -770,6 +824,7 @@ bool d_BarrierOn(Critter player, Critter npc)
     return (EnergyBarier::GetNetState(loc.Id, GATES_NET_NUM) == BM_ON);
 }
 
+[[DialogDemand]]
 bool d_BarrierOff(Critter player, Critter npc)
 {
     Map map = player.GetMap();
@@ -786,7 +841,8 @@ bool d_BarrierOff(Critter player, Critter npc)
     return (state == BM_OFF || state == BM_OFF_NO_GUARD);
 }
 
-void r_SwitchBarrierMode(Critter player, Critter npc, int mode)
+[[DialogResult]]
+void r_SwitchBarrierMode(Critter player, Critter npc, any mode)
 {
     Map map = player.GetMap();
     if (map == null) {
@@ -814,7 +870,8 @@ void _GeckTraderInit(Critter cr, bool firstTime)
     cr.OnBarter.Subscribe(_GeckTraderBarter);
 }
 
-bool _GeckTraderBarter(Critter cr, Critter player, bool attach, int barterCount)
+[[Event]]
+EventResult _GeckTraderBarter(Critter cr, Critter player, bool attach, int barterCount)
 {
     // Для сохранения оригинального значения навыка торговли НПЦ используется VAR_0
     if (cr.MapGeckCityTraderSkillBarter == 0) {
@@ -828,11 +885,11 @@ bool _GeckTraderBarter(Critter cr, Critter player, bool attach, int barterCount)
         cr.SkillBarter = cr.MapGeckCityTraderSkillBarter;
     }
 
-    return true;
+    return EventResult::StopChain;
 }
 
 // Проверка на наличие предмета на карте ГизГ
-bool d_ItemExist(Critter player, Critter npc, int pidItem)
+bool d_ItemExist_Impl(Critter player, Critter npc, hstring pidItem)
 {
     Location loc = GetGeckLocation(player);
     if (loc == null) {
@@ -841,7 +898,7 @@ bool d_ItemExist(Critter player, Critter npc, int pidItem)
 
     for (int i = 0; i < loc.GetMapCount(); i++) {
         Map map = loc.GetMapByIndex(i);
-        if (map.GetItems(hstring_fromHash(pidItem)).length() > 0) {
+        if (map.GetItems(pidItem).length() > 0) {
             return true;
         }
     }
@@ -849,11 +906,19 @@ bool d_ItemExist(Critter player, Critter npc, int pidItem)
     return false;
 }
 
-bool d_NotItemExist(Critter player, Critter npc, int pidItem)
+[[DialogDemand]]
+bool d_ItemExist(Critter player, Critter npc, any pidItem)
 {
-    return !d_ItemExist(player, npc, pidItem);
+    return d_ItemExist_Impl(player, npc, pidItem);
 }
 
+[[DialogDemand]]
+bool d_NotItemExist(Critter player, Critter npc, any pidItem)
+{
+    return !d_ItemExist_Impl(player, npc, pidItem);
+}
+
+[[DialogResult]]
 void r_AddReplicator(Critter player, Critter npc)
 {
     Location loc = GetGeckLocation(player);
@@ -874,6 +939,7 @@ void r_AddReplicator(Critter player, Critter npc)
     }
 }
 
+[[DialogResult]]
 void r_SetGeckReplication(Critter player, Critter npc)
 {
     Location loc = GetGeckLocation(player);

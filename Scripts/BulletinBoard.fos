@@ -250,7 +250,7 @@ bool d_NotSelfMsg(Critter cr, Critter npc)
     return !d_IsSelfMsg(cr, npc);
 }
 
-bool d_IsPrivateMsg(Critter cr, Critter npc)
+bool d_IsPrivateMsg_Impl(Critter cr, Critter npc)
 {
     Map map = cr.GetMap();
     if (map != null) {
@@ -259,12 +259,20 @@ bool d_IsPrivateMsg(Critter cr, Critter npc)
     return false;
 }
 
-bool d_NotPrivateMsg(Critter cr, Critter npc)
+[[DialogDemand]]
+bool d_IsPrivateMsg(Critter cr, Critter npc)
 {
-    return !d_IsPrivateMsg(cr, npc);
+    return d_IsPrivateMsg_Impl(cr, npc);
 }
 
-bool d_IsPrivateMsg(Critter cr, Critter npc, int numMsg, int msgPerPage)
+[[DialogDemand]]
+bool d_NotPrivateMsg(Critter cr, Critter npc)
+{
+    return !d_IsPrivateMsg_Impl(cr, npc);
+}
+
+[[DialogDemand]]
+bool d_IsPrivateMsg(Critter cr, Critter npc, any numMsg, any msgPerPage)
 {
     Map map = cr.GetMap();
     if (map != null) {
@@ -291,9 +299,10 @@ void dlg_PrivateMsg5(Critter cr, Critter npc, string& lexems)
     }
 }
 
-void r_SetPrivateMsg(Critter cr, Critter npc, int numMsg, int msgPerPage)
+[[DialogResult]]
+void r_SetPrivateMsg(Critter cr, Critter npc, any numMsg, any msgPerPage)
 {
-    cr.BBSelectedMsg = Messenger.GetPrivateMessages(cr.GetMap().Id, cr.Id)[msgPerPage * cr.BBMsgPage + numMsg].Idx;
+    cr.BBSelectedMsg = Messenger.GetPrivateMessages(cr.GetMap().Id, cr.Id)[int(msgPerPage) * cr.BBMsgPage + int(numMsg)].Idx;
 }
 
 void dlg_GetMsg(Critter cr, Critter npc, string& lexems)
@@ -306,29 +315,43 @@ void dlg_GetMsg(Critter cr, Critter npc, string& lexems)
     lexems = "$fromWho" + PlayerRegistration::GetPlayerName(m.WriterId) + "$msg" + m.Message;
 }
 
-bool d_IsPublicMsg(Critter cr, Critter npc)
+bool d_IsPublicMsg_Impl(Critter cr, Critter npc)
 {
     return Messenger.CountPublicMessages(cr.GetMap().Id) > 0;
 }
 
+[[DialogDemand]]
+bool d_IsPublicMsg(Critter cr, Critter npc)
+{
+    return d_IsPublicMsg_Impl(cr, npc);
+}
+
+[[DialogDemand]]
 bool d_NotPublicMsg(Critter cr, Critter npc)
 {
-    return !d_IsPublicMsg(cr, npc);
+    return !d_IsPublicMsg_Impl(cr, npc);
 }
 
-bool d_IsPublicMsg(Critter cr, Critter npc, int numMsg, int msgPerPage)
+[[DialogDemand]]
+bool d_IsPublicMsg(Critter cr, Critter npc, any numMsg, any msgPerPage)
 {
-    return (Messenger.GetPublicMessages(cr.GetMap().Id, cr.BBMsgPage * msgPerPage, msgPerPage + numMsg).length() > int(numMsg));
+    int n = numMsg;
+    int p = msgPerPage;
+    return (Messenger.GetPublicMessages(cr.GetMap().Id, cr.BBMsgPage * p, p + n).length() > n);
 }
 
-void r_SetPublicMsg(Critter cr, Critter npc, int numMsg, int msgPerPage)
+[[DialogResult]]
+void r_SetPublicMsg(Critter cr, Critter npc, any numMsg, any msgPerPage)
 {
-    BBMessage[] messages = Messenger.GetPublicMessages(cr.GetMap().Id, cr.BBMsgPage * msgPerPage, msgPerPage + numMsg);
-    if (messages.length() > int(numMsg)) {
-        cr.BBSelectedMsg = messages[numMsg].Idx;
+    int n = numMsg;
+    int p = msgPerPage;
+    BBMessage[] messages = Messenger.GetPublicMessages(cr.GetMap().Id, cr.BBMsgPage * p, p + n);
+    if (messages.length() > n) {
+        cr.BBSelectedMsg = messages[n].Idx;
     }
 }
 
+[[DialogResult]]
 int r_SetRandomMsg(Critter cr, Critter npc)
 {
     BBMessage msg = Messenger.GetRandomMessage(cr.GetMap().Id);
@@ -379,7 +402,7 @@ int dlg_GetReaderId(Critter cr, Critter npc, string& lexems)
         return 0;
     }
 
-    Player player = Game.GetPlayer(lexems);
+    Player player = PlayerRegistration::GetPlayerByName(lexems);
     if (player == null) {
         return DLG_NOTFOUND;
     }
@@ -388,6 +411,7 @@ int dlg_GetReaderId(Critter cr, Critter npc, string& lexems)
     return DLG_FOUND;
 }
 
+[[DialogResult]]
 void r_MoveAldo(Critter player, Critter npc)
 {
     if (npc == null) {
@@ -401,7 +425,7 @@ void r_MoveAldo(Critter player, Critter npc)
 
     npc.KlamAldoBusy = 1;
     if (!NpcPlanes::AddWalkPlane(npc, ENTRY_ALDO, 0, false)) {
-        Messaging::SayOnHead(npc, TextPackName::Dialogs, DLGSTR(npc.DialogId, STR_CANT_REACH));
+        Messaging::SayOnHead(npc, TextPackKey(TextPackName::Dialogs, "" + (DLGSTR(npc.DialogId, STR_CANT_REACH))));
         npc.KlamAldoBusy = 0;
         return;
     }
@@ -415,13 +439,14 @@ void r_MoveAldo(Critter player, Critter npc)
     }
 }
 
-bool _AldoPlaneEnd(Critter cr, int planeId, int reason, Critter someCr, Item someItem)
+[[Event]]
+EventResult _AldoPlaneEnd(Critter cr, int planeId, int reason, Critter someCr, Item someItem)
 {
     NpcPlanes::NpcPlane plane = NpcPlanes::GetCritterPlane(cr, planeId);
 
     if (cr.KlamAldoBusy == 1 && plane.Type == AI_PLANE_WALK && reason == REASON_SUCCESS) {
         cr.KlamAldoBusy = 2;
-        Messaging::SayOnHead(cr, TextPackName::Dialogs, DLGSTR(cr.DialogId, STR_IN_PLACE));
+        Messaging::SayOnHead(cr, TextPackKey(TextPackName::Dialogs, "" + (DLGSTR(cr.DialogId, STR_IN_PLACE))));
         // Todo: Game.AddTextListener(SAY_NORM, KEYWORD, cr.GetMap().ProtoId.hash, listen_FirstMessage);
         NpcPlanes::AddMiscPlane(cr, 0, Game.SynchronizedTime + Time::Minutes(2), BulletinBoard::plane_AldoFinished);
         if (cr.CountTimeEvent(cte_ClearVars) == 0) {
@@ -429,11 +454,11 @@ bool _AldoPlaneEnd(Critter cr, int planeId, int reason, Critter someCr, Item som
         }
         // cr.SetEvent( CRITTER_EVENT_PLANE_END, "" );
         cr.OnNpcPlaneEnd.Unsubscribe(_AldoPlaneEnd);
-        // return PLANE_DISCARD;
-        return false;
+        // return (PLANE_DISCARD) ? EventResult::StopChain : EventResult::StopChain;
+        return EventResult::StopChain;
     }
-    // return PLANE_RUN_GLOBAL;
-    return true;
+    // return (PLANE_RUN_GLOBAL) ? EventResult::StopChain : EventResult::StopChain;
+    return EventResult::StopChain;
 }
 
 void listen_Next(Critter player, string text)
@@ -448,8 +473,8 @@ void listen_Next(Critter player, string text)
         dict<ident, int> bbMsgCount = player.BBMsgCount.clone();
         if (bbMsgCount.get(cr.Id, 0) >= 3) {
             ClearTempVariables(cr);
-            Messaging::SayOnHead(cr, TextPackName::Dialogs, DLGSTR(cr.DialogId, 6));
-            NpcPlanes::AddWalkPlane(cr, 0, cr.HomeHex, cr.HomeDir, false, 0);
+            Messaging::SayOnHead(cr, TextPackKey(TextPackName::Dialogs, "" + (DLGSTR(cr.DialogId, 6))));
+            NpcPlanes::AddWalkPlane(cr, 0, cr.HomeHex, hdir(cr.HomeDir), false, 0);
             return;
         }
         else {
@@ -460,8 +485,8 @@ void listen_Next(Critter player, string text)
         if (cr.KlamAldoListenId == player.Id) {
             Messenger.ContinueMessage(map.Id, cr.KlamAldoListenId, cr.KlamAldoReaderId, "\n" + _MsgFromText2(text));
             // ClearTempVariables(cr);
-            // cr.AddTimeEvent(cte_SayMsgSaved, Settings.TimeMultiplier*2, CTE_CONFIRM_SAVE);
-            Messaging::SayOnHead(cr, TextPackName::Dialogs, DLGSTR(cr.DialogId, 5));
+            // cr.AddTimeEvent(cte_SayMsgSaved, Settings.WorldTime.Multiplier*2, CTE_CONFIRM_SAVE);
+            Messaging::SayOnHead(cr, TextPackKey(TextPackName::Dialogs, "" + (DLGSTR(cr.DialogId, 5))));
         }
     }
 }
@@ -504,9 +529,10 @@ void plane_AldoFinished(Critter cr)
     NpcPlanes::DropPlanes(cr);
 }
 
+[[TimeEvent]]
 void cte_SayMsgFirstSaved(Critter cr)
 {
-    Messaging::Say(cr, TextPackName::Dialogs, DLGSTR(cr.DialogId, STR_NEXT));
+    Messaging::Say(cr, TextPackKey(TextPackName::Dialogs, "" + (DLGSTR(cr.DialogId, STR_NEXT))));
     hstring proto = cr.GetMap().ProtoId;
     // Todo: Game.AddTextListener(SAY_NORM, KEYWORD2, proto.hash, listen_Next);
     // Todo: Game.AddTextListener(SAY_NORM, KEYWORD3, proto.hash, listen_End);
@@ -514,16 +540,18 @@ void cte_SayMsgFirstSaved(Critter cr)
     return;
 }
 
+[[TimeEvent]]
 void cte_SayMsgSaved(Critter cr)
 {
     hstring proto = cr.GetMap().ProtoId;
     // Todo: Game.RemoveTextListener(SAY_NORM, KEYWORD2, proto.hash);
     // Todo: Game.RemoveTextListener(SAY_NORM, KEYWORD3, proto.hash);
-    Messaging::SayOnHead(cr, TextPackName::Dialogs, DLGSTR(cr.DialogId, STR_FINISHED));
-    NpcPlanes::AddWalkPlane(cr, 0, cr.HomeHex, cr.HomeDir, false, 0);
+    Messaging::SayOnHead(cr, TextPackKey(TextPackName::Dialogs, "" + (DLGSTR(cr.DialogId, STR_FINISHED))));
+    NpcPlanes::AddWalkPlane(cr, 0, cr.HomeHex, hdir(cr.HomeDir), false, 0);
     return;
 }
 
+[[TimeEvent]]
 void cte_ClearVars(Critter cr)
 {
     ClearTempVariables(cr);
@@ -588,6 +616,7 @@ void GetMsg(Critter cr, int id)
     Messaging::Info(cr, "Idx" + Messenger.Messages[id].Idx + " " + Messenger.Messages[id].Message);
 }
 
+[[DialogResult]]
 void ResetBBMsgCount(Critter cr, Critter npc)
 {
     auto values = cr.BBMsgCount.clone();

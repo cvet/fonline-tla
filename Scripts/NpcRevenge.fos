@@ -203,7 +203,7 @@ class RevengeMapInfo
         save.Set(DeadsCounter);
         save.Set(MapMode);
         save.Set(LeaderRole);
-        save.Set(TextMsg);
+        save.Set(TextMsg.Name);
         save.Set(StrCall);
         save.Set(StrCallAnswer);
         save.Set(LeaderCalls);
@@ -229,7 +229,9 @@ class RevengeMapInfo
         load.Get(DeadsCounter);
         load.Get(MapMode);
         load.Get(LeaderRole);
-        load.Get(TextMsg);
+        hstring textMsgHstr;
+        load.Get(textMsgHstr);
+        TextMsg = TextPackName(textMsgHstr);
         load.Get(StrCall);
         load.Get(StrCallAnswer);
         load.Get(LeaderCalls);
@@ -262,6 +264,7 @@ class RevengeMapInfo
 };
 
 // События различных стадий
+[[Event]]
 void _MapInCritter(Map map, Critter cr)
 {
     if (cr.ControlledByPlayer) {
@@ -290,12 +293,13 @@ void _MapInCritter(Map map, Critter cr)
 
         if (idx > 0) {
             DL("npc talk");
-            Messaging::Say(critters[idx], rm.TextMsg, rm.StrHostileEnter);
+            Messaging::Say(critters[idx], TextPackKey(rm.TextMsg, "" + (rm.StrHostileEnter)));
         }
     }
 }
 
 // Если нпц загородили друг другу проход
+[[TimeEvent]]
 void _MapLoop_CheckGag(Map map)
 {
     DL("Checking gag");
@@ -323,6 +327,7 @@ void _MapLoop_CheckGag(Map map)
     }
 }
 
+[[TimeEvent]]
 void cte_CheckGag(Critter cr)
 {
     DL("Checking gag");
@@ -342,13 +347,14 @@ bool CritterGagHome(Critter cr, Map map)
 {
     NpcPlanes::NpcPlane[] planes = {};
     if (NpcPlanes::GetPlanes(cr, planes) == 1 && planes[0] != null && planes[0].Type == AI_PLANE_WALK && planes[0].Walk_Hex == cr.HomeHex &&
-        planes[0].Walk_Dir == int(cr.HomeDir) && map.GetPathLength(cr.Hex, cr.HomeHex, 0) == 0) {
+        planes[0].Walk_Dir == int(cr.HomeDir) && map.GetPathLength(cr.Hex, cr.HomeHex, 0, null) == 0) {
         return true;
     }
     DL("no gag!");
     return false;
 }
 
+[[TimeEvent]]
 void _MapLoop_Meeting(Map map)
 {
     RevengeMapInfo rm = RevengeFromMap(map);
@@ -365,7 +371,7 @@ void _MapLoop_Meeting(Map map)
     auto leaders = map.GetCritters(CritterProperty::NpcRole, rm.LeaderRole, CritterFindType::NonDeadNpc);
     if (!leaders.isEmpty() && rm.StrMeetingFirst + rm.StrMeetingCur < rm.StrMeetingLast) {
         Critter leader = leaders[0];
-        Messaging::SayShout(leader, rm.TextMsg, rm.StrMeetingFirst + rm.StrMeetingCur);
+        Messaging::SayShout(leader, TextPackKey(rm.TextMsg, "" + (rm.StrMeetingFirst + rm.StrMeetingCur)));
         rm.StrMeetingCur++;
         rm.Save();
         any[] values = {map.Id, leader.Hex.x, leader.Hex.y};
@@ -378,6 +384,7 @@ void _MapLoop_Meeting(Map map)
     rm.SetMode(MODE_HOSTILE);
 }
 
+[[TimeEvent]]
 void MeetingAnswer(any[] values)
 {
     ident mapId = values[0];
@@ -386,17 +393,18 @@ void MeetingAnswer(any[] values)
     Map map = Game.GetMap(mapId);
     RevengeMapInfo rm = RevengeFromMap(map);
     if (map != null && rm != null && rm.MapMode == MODE_MEETING && rm != null) {
-        Critter[] npc = map.GetCritters(mpos(hx, hy), LEADER_RADIUS, CritterFindType::NonDeadNpc);
+        Critter[] npc = map.GetCrittersInRadius(mpos(hx, hy), LEADER_RADIUS, CritterFindType::NonDeadNpc);
         if (!npc.isEmpty()) {
             int i = Game.Random(0, npc.length() - 1);
             Critter cr = npc[i];
             if (IsLocalNpc(cr, map) && int(cr.NpcRole) != rm.LeaderRole) {
-                Messaging::Say(cr, rm.TextMsg, rm.StrMeetingAnswer);
+                Messaging::Say(cr, TextPackKey(rm.TextMsg, "" + (rm.StrMeetingAnswer)));
             }
         }
     }
 }
 
+[[TimeEvent]]
 void _MapLoop_LeaderCalls(Map map)
 {
     RevengeMapInfo rm = RevengeFromMap(map);
@@ -417,14 +425,14 @@ void _MapLoop_LeaderCalls(Map map)
         if (rm.LeaderCalls < MAX_LEADER_CALLS) {
             rm.LeaderCalls++;
             rm.Save();
-            Messaging::SayShout(leader, rm.TextMsg, rm.StrCall); // Лидер кричит созывающую фразу
+            Messaging::SayShout(leader, TextPackKey(rm.TextMsg, "" + (rm.StrCall))); // Лидер кричит созывающую фразу
 
             Critter[] npc = map.GetCritters(CritterFindType::NonDeadNpc);
             for (int i = 0; i < npc.length(); i++) {
                 Critter cr = npc[i];
                 if (IsLocalNpc(cr, map) && NpcPlanes::IsNoPlanes(cr) && int(cr.NpcRole) != rm.LeaderRole) {
-                    if (cr.BodyType != BodyTypes::Children && Game.Random(0, 5) == 0) { // Детей из реплик исключаем
-                        Messaging::Say(cr, rm.TextMsg, rm.StrCallAnswer);               // Относительная частота произнесения
+                    if (cr.BodyType != BodyTypes::Children && Game.Random(0, 5) == 0) {       // Детей из реплик исключаем
+                        Messaging::Say(cr, TextPackKey(rm.TextMsg, "" + (rm.StrCallAnswer))); // Относительная частота произнесения
                     }
 
                     mpos hex = leader.Hex;
@@ -510,6 +518,7 @@ bool IsHostileMap(Map map)
     return rm != null && rm.MapMode == MODE_HOSTILE;
 }
 
+[[Event]]
 void _MapCritterDead(Map map, Critter cr, Critter killer)
 {
     DL("smbdy dead");
@@ -523,7 +532,7 @@ void _MapCritterDead(Map map, Critter cr, Critter killer)
     if (cr.ControlledByPlayer && IsLocalNpc(killer, map)) {
         rm.DeadsCounter--;
         if (rm.MapMode == MODE_HOSTILE) {
-            Messaging::Say(killer, rm.TextMsg, rm.StrHostileKill, "$pname" + PlayerRegistration::GetPlayerName(cr.Id));
+            Messaging::Say(killer, TextPackKey(rm.TextMsg, "" + (rm.StrHostileKill)), "$pname" + PlayerRegistration::GetPlayerName(cr.Id));
         }
     }
     rm.Save();

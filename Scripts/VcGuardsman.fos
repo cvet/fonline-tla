@@ -221,7 +221,7 @@ class MarchQueue
             return;
         }
         order.Hex = cr.Hex;
-        order.Dir = cr.Dir;
+        order.Dir = cr.Dir.hex.value;
         Save();
     }
 
@@ -262,7 +262,7 @@ class MarchQueue
                 return (cr.Hex == hex);
             }
         case ORDER_TYPE_DIR:
-            return (int(cr.Dir) == order.Dir);
+            return (cr.Dir.hex.value == order.Dir);
         case ORDER_TYPE_ARM:
             weapon = _CritGetItemHand(cr);
             if (weapon != null) {
@@ -318,12 +318,12 @@ class MarchQueue
                     return;
                 }
                 hex = orderPrev.Hex;
-                map.MoveHexByDir(hex, order.Dir, order.Steps);
-                NpcPlanes::AddWalkPlane(cr, 0, hex, order.Dir, order.Run, 0);
+                map.MoveHexByDir(hex, mdir(hdir(order.Dir)), order.Steps);
+                NpcPlanes::AddWalkPlane(cr, 0, hex, mdir(hdir(order.Dir)), order.Run, 0);
                 break;
             }
         case ORDER_TYPE_DIR:
-            cr.SetDir(order.Dir);
+            cr.SetDir(mdir(hdir(order.Dir)));
             break;
         case ORDER_TYPE_ARM:
             weapon = _CritGetItemHand(cr);
@@ -400,6 +400,7 @@ class MarchQueue
 // Проверяется, что план выполнен, у НПЦ нет других планов, если это верно, отдается следующий приказ
 // иначе делается MAX_EXECUTE_TRIES попыток выполнить приказ
 // если приказ не выполним, очередь приказов отменяется
+[[TimeEvent]]
 void DoNextOrder(any[] values)
 {
     DL("next order");
@@ -460,7 +461,7 @@ class SquadCommander
                 return false;
             }
             if (cr.ControlledByPlayer && !q.CheckOrderCompleted()) {
-                Messaging::Info(cr, TextPackName::Text, STR_LOOSE);
+                Messaging::Info(cr, TextPackKey(TextPackName::Text, "" + (STR_LOOSE)));
                 return false;
             }
         }
@@ -471,7 +472,7 @@ class SquadCommander
     {
         Critter cr = Game.GetCritter(CommanderId);
         if (cr != null && strNum >= 0) {
-            Messaging::SayShout(cr, TextPackName::Dialogs, DLGSTR(cr.DialogId, strNum));
+            Messaging::SayShout(cr, TextPackKey(TextPackName::Dialogs, "" + (DLGSTR(cr.DialogId, strNum))));
         }
         for (int i = 0, l = Squad.length(); i < l; i++) {
             MarchQueue q = MarchQueue(Squad[i]);
@@ -508,11 +509,12 @@ class SquadCommander
 // Квест "Самоделкин":
 //  Тренировка по надлежащему уходу за оружием
 //  Выдача двух сломанных Штурмовых винтовок
-void r_GiveWearItems(Critter player, Critter npc, int pidHash, int count, int deteriorationPercent)
+[[DialogResult]]
+void r_GiveWearItems(Critter player, Critter npc, any pidHash, any count, any deteriorationPercent)
 {
     Item item;
     for (int i = 0; i < count; i++) {
-        item = player.AddItem(hstring_fromHash(pidHash), 1);
+        item = player.AddItem(hstring(pidHash), 1);
         if (item == null) {
             continue;
         }
@@ -520,7 +522,8 @@ void r_GiveWearItems(Critter player, Critter npc, int pidHash, int count, int de
     }
 }
 
-bool d_CheckWear(Critter player, Critter npc, int pidHash, int count, int deteriorationPercent)
+[[DialogDemand]]
+bool d_CheckWear(Critter player, Critter npc, any pidHash, any count, any deteriorationPercent)
 {
     if (count == 0) {
         return false;
@@ -530,7 +533,7 @@ bool d_CheckWear(Critter player, Critter npc, int pidHash, int count, int deteri
     Item[] items = player.GetItems();
     for (int i = 0; i < items.length(); i++) {
         Item item = items[i];
-        if (item.ProtoId == hstring_fromHash(pidHash) && Repair::GetDeteriorationProcent(item) <= deteriorationPercent) {
+        if (item.ProtoId == hstring(pidHash) && Repair::GetDeteriorationProcent(item) <= deteriorationPercent) {
             num++;
         }
     }
@@ -553,7 +556,8 @@ bool d_CheckWear(Critter player, Critter npc, int pidHash, int count, int deteri
 
 // Обработка наступания игроком на триггер перед началом тренировки
 // Служит сигналом к началу
-void t_Enter(Critter player, StaticItem trigger, bool entered, uint8 dir)
+[[ItemTrigger]]
+void t_Enter(Critter player, StaticItem trigger, bool entered, mdir dir)
 {
     if (!player.ControlledByPlayer || !entered) {
         return;
@@ -562,7 +566,7 @@ void t_Enter(Critter player, StaticItem trigger, bool entered, uint8 dir)
         return;
     }
     CritterState::Wait(player, 0);
-    Messaging::Info(player, TextPackName::Text, STR_RIGHT_POSITION);
+    Messaging::Info(player, TextPackKey(TextPackName::Text, "" + (STR_RIGHT_POSITION)));
     Map map = player.GetMap();
     Critter cr = map.GetCritter(CritterProperty::NpcRole, ROLE_COMMANDER, CritterFindType::NonDeadNpc);
     if (cr == null || cr.VCGuardsmanTriggerPlayerId != ZERO_IDENT) {
@@ -576,7 +580,7 @@ void t_Enter(Critter player, StaticItem trigger, bool entered, uint8 dir)
 }
 
 // Контрольная очистка переменных через 15 реальных минут, если что-то пошло не так, и все данные не удалились
-void ResetCommander(any[] values)
+void ResetCommander_Impl(any[] values)
 {
     Critter cr = Game.GetCritter(values[0]);
     ident idPlayer = values[1];
@@ -590,17 +594,30 @@ void ResetCommander(any[] values)
         cmdr.Erase();
     }
 
-    ResetCommander(cr);
+    ResetCommander_Impl(cr);
 }
 
-// Сброс глобальной переменной и переменных командира
-void ResetCommander(Critter cr)
+[[TimeEvent]]
+void ResetCommander(any[] values)
+{
+    ResetCommander_Impl(values);
+}
+
+void ResetCommander_Impl(Critter cr)
 {
     cr.VCGuardsmanTriggerPlayerId = ZERO_IDENT;
     Game.VCHartmanMarchStatus = false;
 }
 
+// Сброс глобальной переменной и переменных командира
+[[TimeEvent]]
+void ResetCommander(Critter cr)
+{
+    ResetCommander_Impl(cr);
+}
+
 // Проверка, что игрок в нужной позиции и запуск очереди приказов
+[[TimeEvent]]
 void TimeToStart(any[] values)
 {
     Critter npc = Game.GetCritter(values[0]);
@@ -612,16 +629,16 @@ void TimeToStart(any[] values)
     {
         if (values[2] > 5) // Максимум 5 проверок, потом заново
         {
-            ResetCommander(npc);
+            ResetCommander_Impl(npc);
             return;
         }
         values[2] = int(values[2]) + 1;
-        Messaging::SayShoutOnHead(npc, TextPackName::Text, STR_WRONG_POSITION);
+        Messaging::SayShoutOnHead(npc, TextPackKey(TextPackName::Text, "" + (STR_WRONG_POSITION)));
         Game.StartTimeEvent(Time::Seconds(5), TimeToStart, values);
         return;
     }
     if (Game.VCHartmanMarchStatus) {
-        ResetCommander(npc);
+        ResetCommander_Impl(npc);
         return;
     }
     Game.VCHartmanMarchStatus = true;
@@ -661,6 +678,7 @@ void TimeToStart(any[] values)
 }
 
 // Время отдавать новый приказ
+[[TimeEvent]]
 void NextGuardOrder(any[] values)
 {
     Critter cr = Game.GetCritter(values[1]);
@@ -675,15 +693,15 @@ void NextGuardOrder(any[] values)
         values[0] = int(values[0]) + 1;
     }
     else {
-        Messaging::Say(cr, TextPackName::Dialogs, DLGSTR(cr.DialogId, STR_MARCH_FAILED));
-        ResetCommander(cr);
+        Messaging::Say(cr, TextPackKey(TextPackName::Dialogs, "" + (DLGSTR(cr.DialogId, STR_MARCH_FAILED))));
+        ResetCommander_Impl(cr);
         cmdr.Erase();
         return;
     }
 
     if (values[0] == LAST_ORDER) {
-        Messaging::Say(cr, TextPackName::Dialogs, DLGSTR(cr.DialogId, STR_MARCH_COMPLETED));
-        ResetCommander(cr);
+        Messaging::Say(cr, TextPackKey(TextPackName::Dialogs, "" + (DLGSTR(cr.DialogId, STR_MARCH_COMPLETED))));
+        ResetCommander_Impl(cr);
         cmdr.Erase();
         Critter player = Game.GetCritter(values[2]);
         if (player != null && player.VCHartmanMarch == 2) {
@@ -708,6 +726,7 @@ void NextGuardOrder(any[] values)
 #define RANK_LEUTENANT    (4)
 
 // Ежедневное жалование
+[[DialogResult]]
 void r_SetGuardSalary(Critter player, Critter npc)
 {
     player.StartTimeEvent(Time::GameDays(1), cte_GuardsmanSalary);
@@ -718,6 +737,7 @@ int GetRank(Critter cr)
     return cr.VCGuardRank;
 }
 
+[[TimeEvent]]
 void cte_GuardsmanSalary(Critter cr)
 {
     int rank = GetRank(cr);
@@ -779,6 +799,7 @@ void _MutantsCaveInit(Map map, bool firstTime)
     map.OnCritterIn.Subscribe(_CaveInCritter);
 }
 
+[[Event]]
 void _CaveInCritter(Map map, Critter cr)
 {
     Location loc = map.GetLocation();
@@ -806,6 +827,7 @@ void _MutantsOutGroundInit(Map map, bool firstTime)
     }
 }
 
+[[TimeEvent]]
 void DeleteQuestLocation(any value)
 {
     Location loc = Game.GetLocation(ident(value));
@@ -814,6 +836,7 @@ void DeleteQuestLocation(any value)
     }
 }
 
+[[Event]]
 void _OutGroundInCritter(Map map, Critter cr)
 {
     if (!cr.ControlledByPlayer) {
@@ -832,6 +855,7 @@ void _OutGroundInCritter(Map map, Critter cr)
 
 // Опасная Охота
 
+[[DialogResult]]
 void r_ShowCave(Critter player, Critter npc)
 {
     if (player.VCReconCaveId == ZERO_IDENT) {
@@ -847,20 +871,20 @@ void r_ShowCave(Critter player, Critter npc)
                                              npc,
                                              int(CritterProperty::VCHartmannClearCave),
                                              int(CritterProperty::VCDeadAllyCounter),
-                                             Content::Location::vc_recon.hash,
+                                             Content::Location::vc_recon,
                                              x,
                                              y);
     }
     else {
         int x = 1168;
         int y = 418;
-        HostileLocationQuest::r_ShowLocation2(player,
-                                              npc,
-                                              int(CritterProperty::VCHartmannClearCave),
-                                              int(CritterProperty::VCDeadAllyCounter),
-                                              Content::Location::vc_recon.hash,
-                                              x,
-                                              y);
+        HostileLocationQuest::r_ShowLocation2_Impl(player,
+                                                   npc,
+                                                   int(CritterProperty::VCHartmannClearCave),
+                                                   int(CritterProperty::VCDeadAllyCounter),
+                                                   Content::Location::vc_recon,
+                                                   x,
+                                                   y);
     }
 }
 

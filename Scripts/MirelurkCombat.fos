@@ -59,6 +59,7 @@ void _MirelurkInit(Critter cr, bool firstTime)
 // Основной скрипт болотника
 // В нем переключаются состояния, выбираются цели для атаки и разрушения баррикад
 // В нем же принимаются решения о том, что пора линять с карты
+[[TimeEvent]]
 void _MirelurkIdle(Critter cr)
 {
     // Обработчики срабатывают только, если на карте есть игроки
@@ -90,31 +91,32 @@ void _MirelurkIdle(Critter cr)
 
 // Завершение плана перемещения к мешкам, чтобы разрушить
 // Или перемещения к сетке выхода
-bool _MirelurkPlaneEnd(Critter cr, int planeId, int reason, Critter someCr, Item someItem)
+[[Event]]
+EventResult _MirelurkPlaneEnd(Critter cr, int planeId, int reason, Critter someCr, Item someItem)
 {
     NpcPlanes::NpcPlane plane = NpcPlanes::GetCritterPlane(cr, planeId);
 
     if (reason == REASON_GAG_ITEM) // Болотники должны ломать баррикады по-другому, не так, как обычные криттеры
     {
-        return false;
+        return EventResult::StopChain;
     }
     if (plane.Identifier == PLANE_ID_DESTROY && plane.Type == AI_PLANE_WALK) {
         if (reason == REASON_SUCCESS) {
             DestroyBarricade(cr, plane.IdentifierExt);
         }
         else {
-            return false;
+            return EventResult::StopChain;
         }
     }
     if (plane.Identifier == PLANE_ID_MOVEOUT) {
         if (reason == REASON_SUCCESS) {
             // Болотник добрался до точки выхода
             Game.DestroyCritter(cr);
-            return false;
+            return EventResult::StopChain;
         }
-        return true;
+        return EventResult::StopChain;
     }
-    return true;
+    return EventResult::StopChain;
 }
 
 // Изменение стадии поведения, если подошло время
@@ -124,7 +126,7 @@ void ChangeStageIfNeaded(Critter cr)
         if (Game.SynchronizedTime >= cr.MirelurkCombatTimeNextStage) {
             // Game.Log("Stage changed"+cr.MirelurkCombatCurStage);
             cr.MirelurkCombatCurStage += 1;
-            Messaging::SayEmote(cr, TextPackName::Text, STR_ALL2STAGE_2);
+            Messaging::SayEmote(cr, TextPackKey(TextPackName::Text, "" + (STR_ALL2STAGE_2)));
             cr.MirelurkCombatTimeNextStage = Game.SynchronizedTime + Time::GameMinutes(MINUTES_TO_NEXT_STAGE * cr.MirelurkCombatCurStage);
         }
     }
@@ -138,8 +140,8 @@ void TryFoundAccessibleTarget(Critter cr, Map map)
     mpos crhex = cr.Hex;
     // Первоочередная цель - игроки
     Critter[] crits = {};
-    crits.insertLast(map.GetCritters(crhex, radius, CritterFindType::NonDeadPlayers));
-    crits.insertLast(map.GetCritters(crhex, radius, CritterFindType::NonDeadNpc));
+    crits.insertLast(map.GetCrittersInRadius(crhex, radius, CritterFindType::NonDeadPlayers));
+    crits.insertLast(map.GetCrittersInRadius(crhex, radius, CritterFindType::NonDeadNpc));
     Critter target;
     for (int i = 0, l = crits.length(); i < l; i++) {
         target = crits[i];
@@ -151,7 +153,7 @@ void TryFoundAccessibleTarget(Critter cr, Map map)
         }
         // DL("CheckPathLen cr.Id"+target.Id+"crX:"+crhex.x+";crY:"+crhex.+"; target X:"+target.Hex.x+";Y:"+target.HexY+".
         // Distance:"+Game.GetDistance(cr,target));//TODO COMMENT
-        int len = map.GetPathLength(cr, target.Hex, 1 + cr.Multihex);
+        int len = map.GetPathLength(cr, target.Hex, 1 + cr.Multihex, null);
         DL("len=" + len);
         if (len > 0) {
             if (target.ControlledByPlayer || cr.TeamId != target.TeamId) {
@@ -214,12 +216,12 @@ void TryFoundAccessibleTarget(Critter cr, Map map)
 
             // НПЦ может дойти до мешка?
             DL("npc can reach sandbag?");
-            if (map.GetPathLength(cr, item.Hex, 1 + cr.Multihex) == 0) {
+            if (map.GetPathLength(cr, item.Hex, 1 + cr.Multihex, null) == 0) {
                 continue; // не пройдет
             }
 
             // От мешка можно дайти до игрока?
-            if (map.GetPathLength(target, item.Hex, 1 + cr.Multihex) == 0) {
+            if (map.GetPathLength(target, item.Hex, 1 + cr.Multihex, null) == 0) {
                 continue; // нет
             }
 
@@ -239,7 +241,7 @@ bool AddDestroyBarricadePlane(Critter cr, Map map, Item barricade)
     for (uint8 dir = 0; dir < 6; dir++) {
         // TODO: выбор кратчайшего маршрута из возможных
         map.MoveHexByDir(hex, dir, 1);
-        if (map.GetPathLength(cr, hex, 0 + cr.Multihex) > 0) {
+        if (map.GetPathLength(cr, hex, 0 + cr.Multihex, null) > 0) {
             return NpcPlanes::AddWalkPlane(cr, DESTROY_SANDBAG_PRIORITY, PLANE_ID_DESTROY, barricade.Id, hex, Game.GetDirection(hex, barrHex), false, 0);
             // Подходящий гекс найден
         }
@@ -263,7 +265,7 @@ void TryMoveOut(Map map, Critter cr)
     if (Entrance::GetNearEntry(map, ENTRY_EXIT_SF, hex)) {
         int tries = 0;
         while (!map.IsHexMovable(hex) && tries < 10) {
-            Messaging::SayEmote(cr, TextPackName::Text, STR_STAGE2_MSG_RECIEVED);
+            Messaging::SayEmote(cr, TextPackKey(TextPackName::Text, "" + (STR_STAGE2_MSG_RECIEVED)));
             if (Entrance::GetFreeHex(map, tries, hex)) {
                 pathFounded = true;
                 break;
@@ -271,7 +273,7 @@ void TryMoveOut(Map map, Critter cr)
             tries++;
         }
         if (pathFounded) {
-            NpcPlanes::AddWalkPlane(cr, MOVE_OUT_PRIORITY, PLANE_ID_MOVEOUT, 0, hex, Game.Random(0, 5), false, 0);
+            NpcPlanes::AddWalkPlane(cr, MOVE_OUT_PRIORITY, PLANE_ID_MOVEOUT, 0, hex, HDIR_Random, false, 0);
             return;
         }
     }
@@ -296,11 +298,11 @@ void DestroyBarricade(Critter cr, ident itemId)
     Item sandbag = Game.GetItem(itemId);
     if (sandbag != null) {
         if (Sandbag::IsSandBag(sandbag.ProtoId)) {
-            Messaging::SayEmote(cr, TextPackName::Text, STR_DESTROY_SANDBAGS);
+            Messaging::SayEmote(cr, TextPackKey(TextPackName::Text, "" + (STR_DESTROY_SANDBAGS)));
             cr.MirelurkCombatDestroyingItem = sandbag.Id;
             cr.SetDir(Game.GetDirection(cr.Hex, sandbag.Hex));
             _CritAnimateUse(cr);
-            Sandbag::_SandBagSkill(sandbag, cr, CritterProperty::SkillRepair);
+            Sandbag::_SandBagSkill_Impl(sandbag, cr, CritterProperty::SkillRepair);
         }
     }
 }

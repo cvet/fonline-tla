@@ -150,7 +150,7 @@ class SniperPattern : PatternCommon::CommonPattern
     void TryRunAway(Critter sniper)
     {
         mpos hex = sniper.Hex;
-        uint8 dir = sniper.Dir;
+        mdir dir = sniper.Dir;
         if (!_GetRunAwayPoint(sniper, hex, dir)) {
             return;
         }
@@ -266,7 +266,7 @@ class SniperPattern : PatternCommon::CommonPattern
             return false;
         }
 
-        return !map.GetCritters(sniper.Hex, ENEMY_SRCH_RADIUS, CritterFindType::NonDeadPlayers).isEmpty();
+        return !map.GetCrittersInRadius(sniper.Hex, ENEMY_SRCH_RADIUS, CritterFindType::NonDeadPlayers).isEmpty();
     }
     // end class
 }
@@ -319,53 +319,67 @@ void _SniperInit(Critter cr, bool firstTime)
     _CritterInit(cr, firstTime);
 }
 
-void _SniperDead(Critter cr, Critter killer)
+void _SniperDead_Impl(Critter cr, Critter killer)
 {
     pattern._Dead(cr, killer);
 }
 
+[[Event]]
+void _SniperDead(Critter cr, Critter killer)
+{
+    _SniperDead_Impl(cr, killer);
+}
+
+[[Event]]
 void _SniperShowCritter(Critter cr, Critter showCrit)
 {
     pattern._ShowCritter(cr, showCrit);
 }
 
 // Cнайпер начал некий план
-bool _SniperPlaneBegin(Critter cr, int planeId, int reason, Critter someCr, Item someItem)
+[[Event]]
+EventResult _SniperPlaneBegin(Critter cr, int planeId, int reason, Critter someCr, Item someItem)
 {
-    return pattern._PlaneBegin(cr, planeId, reason, someCr, someItem);
+    return (pattern._PlaneBegin(cr, planeId, reason, someCr, someItem)) ? EventResult::StopChain : EventResult::StopChain;
 }
 
 // Снайпер получил сообщение
+[[Event]]
 void _SniperMessage(Critter sniper, Critter fromCr, int message, any value)
 {
     pattern._Message(sniper, fromCr, message, value);
 }
 
 // Снайпер атакован
-bool _SniperAttacked(Critter sniper, Critter attacker)
+[[Event]]
+EventResult _SniperAttacked(Critter sniper, Critter attacker)
 {
-    return pattern._Attacked(sniper, attacker);
+    return (pattern._Attacked(sniper, attacker)) ? EventResult::StopChain : EventResult::StopChain;
 }
 
 // Атака снайпера
-bool _SniperAttack(Critter cr, Critter target, Item weapon, int weaponMode, ProtoItem ammo)
+[[Event]]
+EventResult _SniperAttack(Critter cr, Critter target, Item weapon, int weaponMode, ProtoItem ammo)
 {
-    return pattern._Attack(cr, target);
+    return (pattern._Attack(cr, target)) ? EventResult::StopChain : EventResult::StopChain;
 }
 
 // Простой снайпера
+[[TimeEvent]]
 void _SniperIdle(Critter sniper)
 {
     pattern._Idle(sniper);
 }
 
 // Завершение выполнения плана
-bool _SniperPlaneEnd(Critter sniper, int planeId, int reason, Critter someCr, Item someItem)
+[[Event]]
+EventResult _SniperPlaneEnd(Critter sniper, int planeId, int reason, Critter someCr, Item someItem)
 {
-    return pattern._PlaneEnd(sniper, planeId, reason, someCr, someItem);
+    return (pattern._PlaneEnd(sniper, planeId, reason, someCr, someItem)) ? EventResult::StopChain : EventResult::StopChain;
 }
 
 // Через 1 игровую минуту после выстрела Снайпер будет пытаться уйти из зоны видимости
+[[TimeEvent]]
 void OnAfterAttack(any[] values)
 {
     Critter sniper = Game.GetCritter(values[0]);
@@ -380,7 +394,7 @@ void OnAfterAttack(any[] values)
     }
 }
 
-bool _GetRunAwayPoint(Critter sniper, mpos hex, uint8 dir)
+bool _GetRunAwayPoint(Critter sniper, mpos hex, mdir dir)
 {
     // 1. поиск игроков во всех направлениях
     Map map = sniper.GetMap();
@@ -391,7 +405,7 @@ bool _GetRunAwayPoint(Critter sniper, mpos hex, uint8 dir)
     int[] enemies = array<int>(6);
     for (int i = 0; i < enemies.length(); i++) {
         hex = sniper.Hex;
-        map.MoveHexByDir(hex, i, RUN_AWAY_DISTANCE);
+        map.MoveHexByDir(hex, mdir(hdir(i)), RUN_AWAY_DISTANCE);
         auto foundedCritters = map.GetCrittersInPath(sniper.Hex, hex, 30, RUN_AWAY_DISTANCE, CritterFindType::NonDeadPlayers);
         enemies[i] = foundedCritters.length();
     }
@@ -414,7 +428,7 @@ bool _GetRunAwayPoint(Critter sniper, mpos hex, uint8 dir)
     int[] distances = array<int>(safeDirs.length());
     for (int i = 0; i < safeDirs.length(); i++) {
         hex = sniper.Hex;
-        map.MoveHexByDir(hex, safeDirs[i], RUN_AWAY_DISTANCE);
+        map.MoveHexByDir(hex, mdir(hdir(safeDirs[i])), RUN_AWAY_DISTANCE);
         distances[i] = Game.GetDistance(sniper.Hex, hex);
     }
 
@@ -423,7 +437,7 @@ bool _GetRunAwayPoint(Critter sniper, mpos hex, uint8 dir)
     }
 
     hex = sniper.Hex;
-    map.MoveHexByDir(hex, safeDirs[max], RUN_AWAY_DISTANCE);
+    map.MoveHexByDir(hex, mdir(hdir(safeDirs[max])), RUN_AWAY_DISTANCE);
     dir = Game.GetDirection(hex, sniper.Hex);
 
     return Entrance::GetFreeHex(map, 4, hex);

@@ -153,7 +153,7 @@ void TryGoHome(Critter npc)
     if (npc.MobFury < MAX_FURY && npc.IsAlive()) {
         if (npc.MapId == npc.HomeMapId && Game.GetDistance(npc.HomeHex, npc.Hex) > DISTANCE_GO_HOME) {
             NpcPlanes::DropPlanes(npc);
-            NpcPlanes::AddWalkPlane(npc, 0, 0, 0, npc.HomeHex, npc.HomeDir, false, 0, REASON_GO_HOME);
+            NpcPlanes::AddWalkPlane(npc, 0, 0, 0, npc.HomeHex, hdir(npc.HomeDir), false, 0, REASON_GO_HOME);
         }
     }
 }
@@ -171,7 +171,7 @@ void AddPlaneEscape(Critter npc, Critter fromRunning)
 int GetCrittersByTeam(Map map, int x, int y, int radius, int team)
 {
     int count = 0;
-    Critter[] critters = map.GetCritters(mpos(x, y), radius, CritterFindType::NonDeadNpc);
+    Critter[] critters = map.GetCrittersInRadius(mpos(x, y), radius, CritterFindType::NonDeadNpc);
     for (int i = 0; i < critters.length(); i++) {
         if (critters[i].TeamId == team) {
             count++;
@@ -187,7 +187,7 @@ int GetMyTeamCount(Critter npc)
 
 // CRITTER_EVENT_SMTH_DEAD
 // Когда криттер в области видимости умирает. См. CRITTER_EVENT_DEAD.
-void _Death(Critter npc, Critter fromCrit, Critter killer)
+void _Death_Impl(Critter npc, Critter fromCrit, Critter killer)
 {
     if (killer == null) {
         return;
@@ -212,13 +212,26 @@ void _Death(Critter npc, Critter fromCrit, Critter killer)
     }
 }
 
+[[Event]]
+void _Death(Critter npc, Critter fromCrit, Critter killer)
+{
+    _Death_Impl(npc, fromCrit, killer);
+}
+
 // CRITTER_EVENT_DEAD
-void _MyDeath(Critter npc, Critter killer)
+void _MyDeath_Impl(Critter npc, Critter killer)
 {
     EnemyStack::ClearEnemyStack(npc); // моб забывает своих обидчиков
 }
 
+[[Event]]
+void _MyDeath(Critter npc, Critter killer)
+{
+    _MyDeath_Impl(npc, killer);
+}
+
 // CRITTER_EVENT_RESPAWN
+[[Event]]
 void _Respawn(Critter npc)
 {
     ResetVars(npc);
@@ -226,7 +239,7 @@ void _Respawn(Critter npc)
 
 // CRITTER_EVENT_SHOW_CRITTER
 // Появился новый криттер в поле зрения.
-void _ShowPlayer(Critter npc, Critter player)
+void _ShowPlayer_Impl(Critter npc, Critter player)
 {
     if (not player.ControlledByPlayer) {
         return;
@@ -242,8 +255,15 @@ void _ShowPlayer(Critter npc, Critter player)
     }
 }
 
+[[Event]]
+void _ShowPlayer(Critter npc, Critter player)
+{
+    _ShowPlayer_Impl(npc, player);
+}
+
 // CRITTER_EVENT_HIDE_CRITTER
 // Пропал криттер с поля зрения.
+[[Event]]
 void _HidePlayer(Critter npc, Critter player)
 {
     if (not player.ControlledByPlayer) {
@@ -277,6 +297,7 @@ void _HidePlayerFastAttack(Critter npc, Critter player)
 
 // CRITTER_EVENT_MESSAGE
 // Пришло сообщение отправленное с помощью Critter::SendMessage.
+[[Event]]
 void _OnMessage(Critter npc, Critter fromCrit, int message, any value)
 {
     if (npc.ControlledByPlayer) {
@@ -311,8 +332,8 @@ void _OnMessage(Critter npc, Critter fromCrit, int message, any value)
 }
 
 // CRITTER_EVENT_IDLE
-// Простой, вызывается каждые Settings.CritterIdleTick секунд, для изменения времени вызывайте Critter::Wait в функции.
-void _Idle(Critter npc)
+// Простой, вызывается каждые Settings.Critter.CritterIdleTick секунд, для изменения времени вызывайте Critter::Wait в функции.
+void _Idle_Impl(Critter npc)
 {
     int rnd = Game.Random(1, 10);
     if (rnd <= 2) {
@@ -323,21 +344,28 @@ void _Idle(Critter npc)
     }
 }
 
+[[TimeEvent]]
+void _Idle(Critter npc)
+{
+    _Idle_Impl(npc);
+}
+
 // CRITTER_EVENT_PLANE_BEGIN
 // Когда движок создает план для Нпц. Вызывается и для потомков основного плана в том числе.
 // int reason указывает причину начала плана (см. Plane begin/wait/end reasons в _defines.fos).
-bool _PlaneBegin(Critter npc, int planeId, int reason, Critter someCr, Item someItem)
+[[Event]]
+EventResult _PlaneBegin(Critter npc, int planeId, int reason, Critter someCr, Item someItem)
 {
     NpcPlanes::NpcPlane plane = NpcPlanes::GetCritterPlane(npc, planeId);
 
     if (plane.Type == AI_PLANE_ATTACK) {
         Critter target = Game.GetCritter(plane.Attack_TargId);
         if (target == null) {
-            return true;
+            return EventResult::StopChain;
         }
 
         if (target.TeamId == npc.TeamId) {
-            return false; // не атакуем всех из своей команды
+            return EventResult::StopChain; // не атакуем всех из своей команды
         }
 
         if (reason == REASON_FOUND_IN_ENEMY_STACK) {
@@ -345,30 +373,31 @@ bool _PlaneBegin(Critter npc, int planeId, int reason, Critter someCr, Item some
             if (distantion <= DISTANCE_ATTACK) {
                 // если противник подошел достаточно близко, то разрешаем атаку
                 // анализ на дальность
-                int pathLength = npc.GetMap().GetPathLength(npc, target.Hex, 1);
+                int pathLength = npc.GetMap().GetPathLength(npc, target.Hex, 1, null);
                 // если пройти нельзя, то не идем
                 if (pathLength == 0) {
-                    return false;
+                    return EventResult::StopChain;
                 }
                 // если слишком далеко, то не идем
                 if (pathLength > distantion * 3) {
-                    return false;
+                    return EventResult::StopChain;
                 }
                 // зовем друзей
                 SendMessage::ToWhoSeesMe(npc, MSG_GROUP_ATTACK, target.Id);
-                return true;
+                return EventResult::StopChain;
             }
             else {
                 // иначе запрещаем атаку
-                return false;
+                return EventResult::StopChain;
             }
         }
     }
-    return true;
+    return EventResult::StopChain;
 }
 
 // CRITTER_EVENT_ATTACKED
-bool _Attacked(Critter npc, Critter attacker)
+[[Event]]
+EventResult _Attacked(Critter npc, Critter attacker)
 {
     npc.MobAttackedId = attacker.Id;
     npc.MobFury += 1; // злимся
@@ -384,7 +413,7 @@ bool _Attacked(Critter npc, Critter attacker)
         NpcPlanes::ErasePlane(npc, AI_PLANE_ATTACK, true);
         AddPlaneEscape(npc, attacker);
     }
-    return true; // Handle attacked processing
+    return EventResult::StopChain; // Handle attacked processing
 }
 
 #endif

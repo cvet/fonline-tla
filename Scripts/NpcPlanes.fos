@@ -69,12 +69,14 @@ void NL(Critter npc, string str)
 
 funcdef void NpcPlaneMiscFunc(Critter cr);
 
-void ModuleInit()
+[[ModuleInit]]
+void InitNpcPlanes()
 {
     Game.OnCritterInit.Subscribe(OnCritterInit);
     Game.OnMapCritterOut.Subscribe(OnMapCritterOut);
 }
 
+[[Event]]
 void OnCritterInit(Critter cr, bool firstTime)
 {
     if (!cr.ControlledByPlayer) {
@@ -82,6 +84,7 @@ void OnCritterInit(Critter cr, bool firstTime)
     }
 }
 
+[[TimeEvent]]
 void OnCritterIdle(Critter npc)
 {
     if (npc.ControlledByPlayer || CritterState::IsBusy(npc)) {
@@ -96,6 +99,7 @@ void OnCritterIdle(Critter npc)
     }
 }
 
+[[Event]]
 void OnMapCritterOut(Map map, Critter cr)
 {
     DropPlanes(cr);
@@ -164,16 +168,16 @@ int ProcessAi(Critter npc)
         // Go home
         if (!npc.IsNoHome && map.Id == npc.HomeMapId && (npc.Hex != npc.HomeHex)) {
             if (!npc.IsNoMove) {
-                AddWalkPlane(npc, 0, 0, 0, npc.HomeHex, npc.HomeDir == 0 ? 1 : 0, false, 0, REASON_GO_HOME);
+                AddWalkPlane(npc, 0, 0, 0, npc.HomeHex, mdir(hdir(npc.HomeDir == 0 ? 1 : 0)), false, 0, REASON_GO_HOME);
             }
             else if (map.IsHexesMovable(npc.HomeHex, npc.Multihex)) {
-                npc.TransferToMap(map, npc.HomeHex, npc.HomeDir);
+                npc.TransferToMap(map, npc.HomeHex, hdir(npc.HomeDir));
                 return 0;
             }
         }
         // Set home direction
         else if (!npc.IsNoHome && map.Id == npc.HomeMapId && npc.Dir != npc.HomeDir) {
-            npc.SetDir(npc.HomeDir);
+            npc.SetDir(mdir(hdir(npc.HomeDir)));
         }
         return 0;
     }
@@ -189,7 +193,7 @@ int ProcessAi(Critter npc)
             }
 
             // Check ap availability
-            int ap_move = (plane.Run ? Settings.RtApCostCritterRun : Settings.RtApCostCritterWalk);
+            int ap_move = (plane.Run ? Settings.Movement.RtApCostCritterRun : Settings.Movement.RtApCostCritterWalk);
 
             // TODO:tb
             /*
@@ -199,7 +203,7 @@ int ProcessAi(Critter npc)
             plane.IsMove = false;
             SavePlan(npc, plane);
             if (!CheckHasEnoughAP(npc, ap_move)) {
-                int wait = Settings.ApRegeneration / npc.ActionPoints * (ap_move - npc.CurrentAp) / AP_DIVIDER;
+                int wait = Settings.Combat.ApRegeneration / npc.ActionPoints * (ap_move - npc.CurrentAp) / AP_DIVIDER;
                 // npc->SetWait( GameOpt.ApRegeneration / npc->GetActionPoints() * ( (int) ( need_ap ) - npc->GetRealAp() ) / AP_DIVIDER );
                 return wait;
             }
@@ -209,7 +213,7 @@ int ProcessAi(Critter npc)
             MovingState state = npc.GetMovingState();
             if (state != MovingState::InProgress && state != MovingState::Success) {
                 ident gagId;
-                npc.GetMovingState(gagId);
+                npc.GetMovingState();
                 npc.StopMoving();
 
                 int reason = REASON_TRACE_FAIL;
@@ -224,7 +228,7 @@ int ProcessAi(Critter npc)
 
                 Critter gagCr = (gagId == ZERO_IDENT ? null : Game.GetCritter(gagId));
                 Item gagItem = (gagId == ZERO_IDENT ? null : Game.GetItem(gagId));
-                if (Game.OnNpcPlaneEnd.Fire(npc, plane.PlaneId, reason, gagCr, gagItem)) {
+                if ((Game.OnNpcPlaneEnd.Fire(npc, plane.PlaneId, reason, gagCr, gagItem) == EventResult::ContinueChain)) {
                     ErasePlane(npc, 0); // TODO: возможно, здесь нужночто-то другое, не удалять план
                 }
                 return 0;
@@ -284,7 +288,7 @@ int ProcessAi(Critter npc)
                     break;
                 }
 
-                bool attack_to_dead = (plane.Attack_MinHp <= Settings.DeadHitPoints);
+                bool attack_to_dead = (plane.Attack_MinHp <= Settings.Combat.DeadHitPoints);
                 if (!plane.Attack_IsGag && (!attack_to_dead && targ.CurrentHp <= plane.Attack_MinHp) || (attack_to_dead && targ.IsDead())) {
                     NextPlane(npc, REASON_SUCCESS);
                     break;
@@ -315,7 +319,7 @@ int ProcessAi(Critter npc)
                 any r0 = targ.Id;
                 any r1 = 0;
                 any r2 = 0;
-                if (!Game.OnNpcPlaneRun.Fire(npc, plane.PlaneId, REASON_ATTACK_WEAPON, r0, r1, r2)) {
+                if ((Game.OnNpcPlaneRun.Fire(npc, plane.PlaneId, REASON_ATTACK_WEAPON, r0, r1, r2) == EventResult::StopChain)) {
                     Game.Log("REASON_ATTACK_WEAPON fail. Skip attack.\n");
                     break;
                 }
@@ -332,7 +336,7 @@ int ProcessAi(Critter npc)
                         break;
                     }
 
-                    ProtoItem unarmed = Game.GetProtoItem(hstring_fromHash(r2));
+                    ProtoItem unarmed = Game.GetProtoItem(hstring(r2));
                     if (unarmed == null || !unarmed.Weapon_IsUnarmed) {
                         unarmed = Game.GetProtoItem("default_weapon".hstr());
                     }
@@ -404,7 +408,7 @@ int ProcessAi(Critter npc)
                 r0 = targ.Id;
                 r1 = 0;
                 r2 = 0;
-                if (!Game.OnNpcPlaneRun.Fire(npc, plane.PlaneId, REASON_ATTACK_DISTANTION, r0, r1, r2)) {
+                if ((Game.OnNpcPlaneRun.Fire(npc, plane.PlaneId, REASON_ATTACK_DISTANTION, r0, r1, r2) == EventResult::StopChain)) {
                     Game.Log("REASON_ATTACK_DISTANTION fail. Skip attack.\n");
                     break;
                 }
@@ -443,7 +447,7 @@ int ProcessAi(Critter npc)
                     if (!npc.IsNoMove) {
                         plane.IsMove = true;
                         SavePlan(npc, plane);
-                        npc.MoveToCritter(targ, bestDist, plane.Run && !npc.IsNoRun ? npc.WalkSpeed * 2 : npc.WalkSpeed);
+                        npc.MoveToHex(targ.Hex, bestDist, plane.Run && !npc.IsNoRun ? npc.WalkSpeed * 2 : npc.WalkSpeed, null);
                         break;
                     }
                     NextPlane(npc, REASON_CANT_WALK);
@@ -472,7 +476,7 @@ int ProcessAi(Critter npc)
                                 if (tracer.Success) {
                                     plane.IsMove = true;
                                     SavePlan(npc, plane);
-                                    npc.MoveToHex(thex, 0, plane.Run && !npc.IsNoRun ? npc.WalkSpeed * 2 : npc.WalkSpeed);
+                                    npc.MoveToHex(thex, 0, plane.Run && !npc.IsNoRun ? npc.WalkSpeed * 2 : npc.WalkSpeed, null);
                                     break;
                                 }
                             }
@@ -492,7 +496,7 @@ int ProcessAi(Critter npc)
                         else if (maxDist > 1 && bestDist == 1) {
                             plane.IsMove = true;
                             SavePlan(npc, plane);
-                            npc.MoveToCritter(targ, bestDist, plane.Run && !npc.IsNoRun ? npc.WalkSpeed * 2 : npc.WalkSpeed);
+                            npc.MoveToHex(targ.Hex, bestDist, plane.Run && !npc.IsNoRun ? npc.WalkSpeed * 2 : npc.WalkSpeed, null);
                         }
 
                         break;
@@ -506,7 +510,7 @@ int ProcessAi(Critter npc)
                 r0 = targ.Id;
                 r1 = 0;
                 r2 = 0;
-                if (!Game.OnNpcPlaneRun.Fire(npc, plane.PlaneId, REASON_ATTACK_USE_AIM, r0, r1, r2)) {
+                if ((Game.OnNpcPlaneRun.Fire(npc, plane.PlaneId, REASON_ATTACK_USE_AIM, r0, r1, r2) == EventResult::StopChain)) {
                     Game.Log("REASON_ATTACK_USE_AIM fail. Skip attack.\n");
                     break;
                 }
@@ -568,7 +572,7 @@ int ProcessAi(Critter npc)
 
             if (Game.GetDistance(npc.Hex, plane.Walk_Hex) <= plane.Walk_Cut) {
                 if (plane.Walk_Dir < 6) {
-                    npc.SetDir(plane.Walk_Dir);
+                    npc.SetDir(mdir(hdir(plane.Walk_Dir)));
                 }
                 else if (plane.Walk_Cut > 0) {
                     npc.SetDir(Game.GetDirection(npc.Hex, plane.Walk_Hex));
@@ -581,7 +585,7 @@ int ProcessAi(Critter npc)
                     NextPlane(npc, REASON_CANT_WALK);
                     break;
                 }
-                npc.MoveToHex(plane.Walk_Hex, plane.Walk_Cut, plane.Run && !npc.IsNoRun ? npc.WalkSpeed * 2 : npc.WalkSpeed);
+                npc.MoveToHex(plane.Walk_Hex, plane.Walk_Cut, plane.Run && !npc.IsNoRun ? npc.WalkSpeed * 2 : npc.WalkSpeed, null);
                 plane.IsMove = true;
                 SavePlan(npc, plane);
             }
@@ -620,7 +624,7 @@ int ProcessAi(Critter npc)
             }
 
             if (Game.GetDistance(npc.Hex, hex) > 1 + npc.Multihex) {
-                npc.MoveToHex(hex, 1 + npc.Multihex, is_run && !npc.IsNoRun ? npc.WalkSpeed * 2 : npc.WalkSpeed);
+                npc.MoveToHex(hex, 1 + npc.Multihex, is_run && !npc.IsNoRun ? npc.WalkSpeed * 2 : npc.WalkSpeed, null);
                 plane.IsMove = true;
                 SavePlan(npc, plane);
             }
@@ -681,7 +685,7 @@ class AttackCritterTracer : LineTracer::ITraceContext
             return true;
         }
 
-        Critter cr = map.GetCritter(hex);
+        Critter cr = map.GetCritterOnHex(hex);
         if (cr != null && cr.Condition != CritterCondition::Dead) {
             Success = (cr.Id == Target.Id);
             return true;
@@ -1062,7 +1066,8 @@ bool AddPlane(Critter cr, NpcPlane plane, int reason)
 
         Critter someCr = (plane.Attack_TargId == ZERO_IDENT ? null : Game.GetCritter(plane.Attack_TargId));
         Item someItem = (plane.Pick_UseItemId == ZERO_IDENT ? null : Game.GetItem(plane.Pick_UseItemId));
-        if (!Game.OnNpcPlaneBegin.Fire(cr, plane.PlaneId, reason, someCr, someItem) || !cr.OnNpcPlaneBegin.Fire(plane.PlaneId, reason, someCr, someItem)) {
+        if ((Game.OnNpcPlaneBegin.Fire(cr, plane.PlaneId, reason, someCr, someItem) == EventResult::StopChain) ||
+            (cr.OnNpcPlaneBegin.Fire(plane.PlaneId, reason, someCr, someItem) == EventResult::StopChain)) {
             ErasePlane(cr, index);
             return false;
         }
@@ -1078,7 +1083,7 @@ void NextPlane(Critter cr, int reason)
         // Remove first plane and notify about
         NpcPlane plane = planes[0];
         if (plane != null) {
-            if (Game.OnNpcPlaneEnd.Fire(cr, plane.PlaneId, reason, null, null)) {
+            if ((Game.OnNpcPlaneEnd.Fire(cr, plane.PlaneId, reason, null, null) == EventResult::ContinueChain)) {
                 planes.removeFirst();
                 if (plane.GetCurPlane().PlaneId == plane.PlaneId) {
                     //Нет дочерних планов.
@@ -1132,7 +1137,7 @@ bool AddWalkPlane(Critter npc, hstring entry, int cut, bool run)
     mpos hex;
     Map map = npc.GetMap();
     if (map != null && Entrance::MapGetEntryCoords(map, entry, 0, hex)) {
-        return AddWalkPlane(npc, 0, hex, 6, run, cut);
+        return AddWalkPlane(npc, 0, hex, mdir(hdir(6)), run, cut);
     }
     return false;
 }
@@ -1142,7 +1147,7 @@ bool AddWalkPlane(Critter npc, int entry, int cut, bool run)
     return AddWalkPlane(npc, ("" + entry).hstr(), cut, run);
 }
 
-bool AddWalkPlane(Critter npc, int priority, mpos hex, uint8 dir, bool run, int cut)
+bool AddWalkPlane(Critter npc, int priority, mpos hex, mdir dir, bool run, int cut)
 {
     if (npc.IsNoMove) {
         return false;
@@ -1152,18 +1157,18 @@ bool AddWalkPlane(Critter npc, int priority, mpos hex, uint8 dir, bool run, int 
     plane.Type = AI_PLANE_WALK;
     plane.Priority = (priority == 0 ? AI_PLANE_WALK_PRIORITY : priority);
     plane.Walk_Hex = hex;
-    plane.Walk_Dir = dir;
+    plane.Walk_Dir = dir.hex.value;
     plane.Run = run;
     plane.Walk_Cut = cut;
     return AddPlane(npc, plane);
 }
 
-bool AddWalkPlane(Critter npc, int priority, any identifier, any identifierExt, mpos hex, uint8 dir, bool run, int cut)
+bool AddWalkPlane(Critter npc, int priority, any identifier, any identifierExt, mpos hex, mdir dir, bool run, int cut)
 {
     return AddWalkPlane(npc, priority, identifier, identifierExt, hex, dir, run, REASON_FROM_SCRIPT);
 }
 
-bool AddWalkPlane(Critter npc, int priority, any identifier, any identifierExt, mpos hex, uint8 dir, bool run, int cut, int reason)
+bool AddWalkPlane(Critter npc, int priority, any identifier, any identifierExt, mpos hex, mdir dir, bool run, int cut, int reason)
 {
     if (npc.IsNoMove) {
         return false;
@@ -1175,7 +1180,7 @@ bool AddWalkPlane(Critter npc, int priority, any identifier, any identifierExt, 
     plane.Identifier = identifier;
     plane.IdentifierExt = identifierExt;
     plane.Walk_Hex = hex;
-    plane.Walk_Dir = dir;
+    plane.Walk_Dir = dir.hex.value;
     plane.Run = run;
     plane.Walk_Cut = cut;
     return AddPlane(npc, plane, reason);
@@ -1192,7 +1197,7 @@ bool AddAttackPlane(Critter npc, int priority, int reason, Critter target)
     plane.Type = AI_PLANE_ATTACK;
     plane.Priority = (priority == 0 ? AI_PLANE_ATTACK_PRIORITY : priority);
     plane.Attack_TargId = target.Id;
-    plane.Attack_MinHp = Settings.DeadHitPoints;
+    plane.Attack_MinHp = Settings.Combat.DeadHitPoints;
     plane.Attack_IsGag = false;
     plane.Attack_GagHex = mpos();
     plane.Attack_LastHex = mpos();
@@ -1212,7 +1217,7 @@ bool AddAttackPlane(Critter npc, int priority, ident critId)
     plane.Type = AI_PLANE_ATTACK;
     plane.Priority = (priority == 0 ? AI_PLANE_ATTACK_PRIORITY : priority);
     plane.Attack_TargId = target.Id;
-    plane.Attack_MinHp = Settings.DeadHitPoints;
+    plane.Attack_MinHp = Settings.Combat.DeadHitPoints;
     plane.Attack_IsGag = false;
     plane.Attack_GagHex = mpos();
     plane.Attack_LastHex = mpos();
@@ -1260,7 +1265,7 @@ bool AddAttackPlane(Critter npc, int priority, Critter target, bool run)
     plane.Type = AI_PLANE_ATTACK;
     plane.Priority = (priority == 0 ? AI_PLANE_ATTACK_PRIORITY : priority);
     plane.Attack_TargId = target.Id;
-    plane.Attack_MinHp = Settings.DeadHitPoints;
+    plane.Attack_MinHp = Settings.Combat.DeadHitPoints;
     plane.Attack_IsGag = false;
     plane.Attack_GagHex = mpos();
     plane.Attack_LastHex = mpos();
@@ -1280,7 +1285,7 @@ bool AddAttackPlane(Critter npc, int priority, ident critId, bool run)
     plane.Type = AI_PLANE_ATTACK;
     plane.Priority = (priority == 0 ? AI_PLANE_ATTACK_PRIORITY : priority);
     plane.Attack_TargId = target.Id;
-    plane.Attack_MinHp = Settings.DeadHitPoints;
+    plane.Attack_MinHp = Settings.Combat.DeadHitPoints;
     plane.Attack_IsGag = false;
     plane.Attack_GagHex = mpos();
     plane.Attack_LastHex = mpos();

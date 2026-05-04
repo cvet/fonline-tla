@@ -273,7 +273,7 @@ class CaravanLeaderInfo
         if (leader == null) {
             return false;
         }
-        leader.TransferToMap(map, (startPos ? StartPos.Hex : EndPos.Hex), Game.Random(0, 5));
+        leader.TransferToMap(map, (startPos ? StartPos.Hex : EndPos.Hex), HDIR_Random);
         return true;
     }
 
@@ -305,7 +305,7 @@ class CaravanLeaderInfo
                        BagId,
                        CritterProperty::Level,
                        Level};
-        Critter leader = map.AddCritter(NpcPid, hex, Game.Random(0, 5), Tla::GetCritPropsDict(props));
+        Critter leader = map.AddCritter(NpcPid, hex, HDIR_Random, Tla::GetCritPropsDict(props));
         if (leader == null) {
             return false;
         }
@@ -563,7 +563,7 @@ class CaravanGuardInfo
                        ReactionNum,
                        CritterProperty::CaravanNervosityLvl,
                        IsNervous};
-        Critter guard = map.AddCritter(Pid, hex, Game.Random(0, 5), Tla::GetCritPropsDict(props));
+        Critter guard = map.AddCritter(Pid, hex, HDIR_Random, Tla::GetCritPropsDict(props));
         guard.SetupScript(InitScript);
         if (guard == null) {
             return null;
@@ -601,7 +601,7 @@ class CaravanNpcFollowerInfo
         }
 
         int[] props = {CritterProperty::DialogId, DialogId.hash};
-        return map.AddCritter(Pid, hex, Game.Random(0, 5), Tla::GetCritPropsDict(props)) != null;
+        return map.AddCritter(Pid, hex, HDIR_Random, Tla::GetCritPropsDict(props)) != null;
     }
 
     // добавление нпц рядом с криттером
@@ -618,7 +618,7 @@ class CaravanNpcFollowerInfo
         }
 
         int[] props = {CritterProperty::DialogId, DialogId.hash};
-        return map.AddCritter(Pid, hex, Game.Random(0, 5), Tla::GetCritPropsDict(props));
+        return map.AddCritter(Pid, hex, HDIR_Random, Tla::GetCritPropsDict(props));
     }
 };
 
@@ -812,7 +812,7 @@ bool _SayNervous(Critter guard, int msgID, int boost)
 {
     DL2("try say nrv" + DLGSTR(guard.DialogId, msgID));
     if (Game.Random(guard.CaravanNervosityLvl + boost, 6) >= 5) {
-        Messaging::SayOnHead(guard, TextPackName::Dialogs, DLGSTR(guard.DialogId, msgID));
+        Messaging::SayOnHead(guard, TextPackKey(TextPackName::Dialogs, "" + (DLGSTR(guard.DialogId, msgID))));
         return true;
     }
     return false;
@@ -839,7 +839,7 @@ void _MoveToCaravanLeader(Critter guard, Critter leader, int radius)
 /*-------------------- -----обработка------   -------------------*/
 // Охранник на локации, и ничего особенного не делает _GuardIdle
 // иногда говорит случайную фразу из диалога
-void _GuardIdle(Critter guard)
+void _GuardIdle_Impl(Critter guard)
 {
     CaravanInfo ci = _GetCaravan(guard.CaravanCrvId);
     // Удаление охранника, если он непонятно где завис
@@ -873,7 +873,14 @@ void _GuardIdle(Critter guard)
     }
 }
 
+[[TimeEvent]]
+void _GuardIdle(Critter guard)
+{
+    _GuardIdle_Impl(guard);
+}
+
 // Пришло сообщение отправленное с помощью Critter::SendMessage.
+[[Event]]
 void _GuardOnMessage(Critter guard, Critter fromCr, int message, any value)
 {
     if (message == MESSAGE_CARAVANEER_GOTO_HOME) {
@@ -885,7 +892,8 @@ void _GuardOnMessage(Critter guard, Critter fromCr, int message, any value)
 }
 
 // завершение выполнения некоего плана охранником
-bool _GuardPlaneEnd(Critter guard, int planeId, int reason, Critter someCr, Item someItem)
+[[Event]]
+EventResult _GuardPlaneEnd(Critter guard, int planeId, int reason, Critter someCr, Item someItem)
 {
     NpcPlanes::NpcPlane plane = NpcPlanes::GetCritterPlane(guard, planeId);
 
@@ -904,10 +912,11 @@ bool _GuardPlaneEnd(Critter guard, int planeId, int reason, Critter someCr, Item
         }
     }
 
-    return true;
+    return EventResult::StopChain;
 }
 
 // убит ктото
+[[Event]]
 void _SomeCritterDead(Critter guard, Critter fromCrit, Critter killer)
 {
     if (killer == null) {
@@ -915,12 +924,13 @@ void _SomeCritterDead(Critter guard, Critter fromCrit, Critter killer)
     }
 
     if (killer.Id == guard.Id) {
-        Messaging::SayOnHead(guard, TextPackName::Dialogs, DLGSTR(guard.DialogId, PHRASE_KILL_SOMEONE));
+        Messaging::SayOnHead(guard, TextPackKey(TextPackName::Dialogs, "" + (DLGSTR(guard.DialogId, PHRASE_KILL_SOMEONE))));
     }
 }
 
 // атакован кем-то
-bool _GuardAttacked(Critter guard, Critter attacker)
+[[Event]]
+EventResult _GuardAttacked(Critter guard, Critter attacker)
 {
     if (guard.CurrentHp * 3 < guard.MaxLife) {
         _SayNervous(guard, PHRASE_LOW_HP, 3);
@@ -928,10 +938,11 @@ bool _GuardAttacked(Critter guard, Critter attacker)
     else {
         _SayNervous(guard, PHRASE_ATTACKED, 0);
     }
-    return false;
+    return EventResult::StopChain;
 }
 
 // охранник обворован
+[[Event]]
 void _GuardStealing(Critter cr, Critter thief, Item item, int count)
 {
     // if( success && thief.ControlledByPlayer )
@@ -944,6 +955,7 @@ void _GuardStealing(Critter cr, Critter thief, Item item, int count)
 }
 
 // убит патрульный ГУ
+[[Event]]
 void _VCPatrolDead(Critter cr, Critter killer)
 {
     CaravanInfo ci = _GetCaravan(cr.CaravanCrvId);
@@ -960,6 +972,7 @@ void _VCPatrolDead(Critter cr, Critter killer)
 
 /*-------------------------специфические обработки-------------------------*/
 // Находчивый Василий нервно шарится по округе гораздо чаще, чем остальные
+[[TimeEvent]]
 void e_VasyaIdle(Critter guard)
 {
     if (NpcPlanes::IsNoPlanes(guard)) {
@@ -968,7 +981,7 @@ void e_VasyaIdle(Critter guard)
         }
     }
 
-    _GuardIdle(guard);
+    _GuardIdle_Impl(guard);
 }
 
 /*-------------------------планы---------------------------------*/
@@ -1010,6 +1023,7 @@ void _DefaultGuardInit(Critter guard, bool firstTime)
     guard.ReplicationTime = -1;
 }
 
+[[Event]]
 void _GuardDead(Critter cr, Critter killer)
 {
     if (!cr.ControlledByPlayer) {
@@ -1017,6 +1031,7 @@ void _GuardDead(Critter cr, Critter killer)
     }
 }
 
+[[TimeEvent]]
 void cte_DeleteCaravanGuard(Critter cr)
 {
     if (!cr.ControlledByPlayer) {
@@ -1277,7 +1292,8 @@ void _SetEvents(Critter cr, int model)
     }
 }
 
-bool e_CowardAttacked(Critter cr, Critter attacker)
+[[Event]]
+EventResult e_CowardAttacked(Critter cr, Critter attacker)
 {
     // если здоровье нпц <95%
     // Messaging::SayOnHead(cr,"my health = "+ cr.CurrentHp + " max hp = "+cr.MaxLifeBase);
@@ -1292,9 +1308,9 @@ bool e_CowardAttacked(Critter cr, Critter attacker)
                                     Game.SynchronizedTime + Time::GameMinutes(Game.Random(0, 1)),
                                     Caravan::plane_MiscWaitInAttack);
         }
-        return true;
+        return EventResult::StopChain;
     }
-    return false;
+    return EventResult::StopChain;
 }
 
 // караванщик отбегает и ждет несколько минут
@@ -1409,16 +1425,24 @@ bool NeedResetCaravanStatus(int crvId, Critter player)
 }
 
 // Проверка, не исчерпал ли игрок число возможных отмывок провалов данного каравана
-bool d_CanResetCaravanStatus(Critter player, Critter npc, int crvId)
+bool d_CanResetCaravanStatus_Impl(Critter player, Critter npc, int crvId)
 {
     return CanResetCaravan(crvId, player);
 }
-bool d_CanNotResetCaravanStatus(Critter player, Critter npc, int crvId)
+
+[[DialogDemand]]
+bool d_CanResetCaravanStatus(Critter player, Critter npc, any crvId)
 {
-    return !d_CanResetCaravanStatus(player, npc, crvId);
+    return d_CanResetCaravanStatus_Impl(player, npc, crvId);
+}
+[[DialogDemand]]
+bool d_CanNotResetCaravanStatus(Critter player, Critter npc, any crvId)
+{
+    return !d_CanResetCaravanStatus_Impl(player, npc, crvId);
 }
 // Проверка в диалоге, нуждается ли данный караван в отмывке
-bool d_NeedResetCaravanStatus(Critter player, Critter npc, int crvId)
+[[DialogDemand]]
+bool d_NeedResetCaravanStatus(Critter player, Critter npc, any crvId)
 {
     return NeedResetCaravanStatus(crvId, player);
 }
@@ -1457,7 +1481,8 @@ void dlg_GenResetCaravanText(Critter player, Critter npc, string& lexems)
 // перед выбором каравана, за который игрок хочет внести выкуп, чтобы откупиться от провала квеста
 // необходимо сохранить ид каравана в уникальную переменную, чтобы потом использовать при генерации лексем
 // для этого используется LastSelectedCaravan
-void r_SetSelectedCaravan(Critter player, Critter npc, int crvId)
+[[DialogResult]]
+void r_SetSelectedCaravan(Critter player, Critter npc, any crvId)
 {
     if (npc == null) {
         return;
@@ -1468,7 +1493,8 @@ void r_SetSelectedCaravan(Critter player, Critter npc, int crvId)
     npc.LastSelectedCaravan = lastSelectedCaravan;
 }
 
-bool d_CheckHasEnoughMoney(Critter player, Critter npc, int crvId)
+[[DialogDemand]]
+bool d_CheckHasEnoughMoney(Critter player, Critter npc, any crvId)
 {
     int cost = GetCrvResetCost(crvId, player);
     if (cost == 0) {
@@ -1480,7 +1506,8 @@ bool d_CheckHasEnoughMoney(Critter player, Critter npc, int crvId)
 }
 
 // Снятия статуса провала с каравана, обновление числа отмывок каравана
-void r_ResetCaravanStatus(Critter player, Critter npc, int crvId)
+[[DialogResult]]
+void r_ResetCaravanStatus(Critter player, Critter npc, any crvId)
 {
     int cost = GetCrvResetCost(crvId, player);
     if (cost == 0) {
@@ -2827,6 +2854,7 @@ bool _SheduleCaravan(int idCaravan, int prepareDay, int prepareHour, int startDa
     return true;
 }
 
+[[TimeEvent]]
 void StartPrepareCaravan(any[] values)
 {
     if (values.length() == 0) {
@@ -2866,6 +2894,7 @@ void StartPrepareCaravan(any[] values)
     PrepareCaravan(idCaravan);
 }
 
+[[TimeEvent]]
 void BeginCaravan(any[] values)
 {
     if (values.length() < 5) {
@@ -2890,7 +2919,7 @@ void BeginCaravan(any[] values)
         return;
     }
 
-    StartCaravan(idCaravan);
+    StartCaravan_Impl(idCaravan);
     Game.StartTimeEvent((Tla::GetNearSynchronizedTime(0, 0, prepareDay, prepareHour, 0, 0) - Game.SynchronizedTime), StartPrepareCaravan, values);
 }
 
@@ -2923,7 +2952,8 @@ void _CaravanLeaderInit(Critter leader, bool firstTime)
     _SetEvents(leader, ci.Leader.Virtue);
 }
 
-bool _CaravanLeaderOnPlaneEnd(Critter cr, int planeId, int reason, Critter someCr, Item someItem)
+[[Event]]
+EventResult _CaravanLeaderOnPlaneEnd(Critter cr, int planeId, int reason, Critter someCr, Item someItem)
 {
     NpcPlanes::NpcPlane plane = NpcPlanes::GetCritterPlane(cr, planeId);
 
@@ -2935,7 +2965,7 @@ bool _CaravanLeaderOnPlaneEnd(Critter cr, int planeId, int reason, Critter someC
             }
         }
     }
-    return true;
+    return EventResult::StopChain;
 }
 
 // снятие обработчиков, если не известен караван
@@ -2951,6 +2981,7 @@ void _CancelEvents(Critter leader)
 }
 
 // при воровстве у караванщиков игрок становится врагом каравана
+[[Event]]
 void _CaravanLeaderOnSmthUseSkill(Critter cr, Critter thief, CritterProperty skill, Critter onCritter, Item onItem, StaticItem onScenery)
 {
     if (onCritter == null) {
@@ -3021,6 +3052,7 @@ void FindCabPlace(Map map, int maxCabs, mpos[] hexes)
 }
 
 // сообщение от нпц
+[[Event]]
 void _CaravanLeaderOnMessage(Critter leader, Critter fromCr, int message, any value)
 {
     if (message == MSG_WHERE_IS_DA_LEADER) {
@@ -3029,13 +3061,15 @@ void _CaravanLeaderOnMessage(Critter leader, Critter fromCr, int message, any va
 }
 
 // вход на энкаунтер
-bool _CaravanLeaderOnInvite(Critter leader, Item car, int encounterDescriptor, int combatMode, ident mapId, mpos hex, uint8 dir)
+[[Event]]
+EventResult _CaravanLeaderOnInvite(Critter leader, Item car, int encounterDescriptor, int combatMode, ident mapId, mpos hex, mdir dir)
 {
     Critter[] group = GlobalmapGroupExtended::GetGlobalGroup(leader);
-    Worldmap::InviteToEncounter(group, null, encounterDescriptor, combatMode, mapId, hex, dir);
+    uint8 dirByte = dir.hex.value;
+    Worldmap::InviteToEncounter(group, null, encounterDescriptor, combatMode, mapId, hex, dirByte);
     CaravanInfo ci = _GetCaravan(leader.CaravanCrvId);
     if (ci == null) {
-        return true;
+        return EventResult::StopChain;
     }
 
     if (!_CheckHasPlayerInGroup(group)) {
@@ -3045,13 +3079,13 @@ bool _CaravanLeaderOnInvite(Critter leader, Item car, int encounterDescriptor, i
             // Обязательно сохраняем эвент. Иначе можно оказаться с двумя начлаьниками караванов.
         }
         ci.TerminateCaravan();
-        return true;
+        return EventResult::StopChain;
     }
 
     Map map = Game.GetMap(mapId);
     if (map == null) {
         Game.Log("Invalid map");
-        return true;
+        return EventResult::StopChain;
     }
 
     ci.CaravanStatus = CRV_STATUS_ON_ENCOUNTER;
@@ -3100,25 +3134,27 @@ bool _CaravanLeaderOnInvite(Critter leader, Item car, int encounterDescriptor, i
             }
         }
     }
-    return true;
+    return EventResult::StopChain;
 }
 
-bool _OnTryOpenCabs(Item item, Critter cr, CritterProperty skill)
+[[Event]]
+EventResult _OnTryOpenCabs(Item item, Critter cr, CritterProperty skill)
 {
     // залезть в контейнер можно только, если проводник мертв
     Critter leader = Game.GetCritter(item.CaravanCabLeaderId);
     if (leader != null) {
         if (!leader.IsAlive()) {
-            return true;
+            return EventResult::StopChain;
         }
 
-        Messaging::SayShoutOnHead(leader, TextPackName::Text, STR_DONT_TOUCH);
-        return false;
+        Messaging::SayShoutOnHead(leader, TextPackKey(TextPackName::Text, "" + (STR_DONT_TOUCH)));
+        return EventResult::StopChain;
     }
-    return true;
+    return EventResult::StopChain;
 }
 
 // при долгом простое, проводник перемещается к одной из повозок
+[[TimeEvent]]
 void _CaravanLeaderIdleOnEncounter(Critter leader)
 {
     DL("leader enc iddle fired/ Geck" + leader.IsGeck);
@@ -3134,7 +3170,7 @@ void _CaravanLeaderIdleOnEncounter(Critter leader)
             int idx = Game.Random(0, cabs.length() - 1);
             mpos hex = cabs[idx].Hex;
             if (Entrance::GetFreeHex(map, 4, hex)) {
-                NpcPlanes::AddWalkPlane(leader, AI_PLANE_WALK_PRIORITY, hex, Game.Random(0, 5), (Game.Random(0, 5) == 1 ? true : false), 1);
+                NpcPlanes::AddWalkPlane(leader, AI_PLANE_WALK_PRIORITY, hex, HDIR_Random, (Game.Random(0, 5) == 1 ? true : false), 1);
             }
         }
     }
@@ -3144,6 +3180,7 @@ void _CaravanLeaderIdleOnEncounter(Critter leader)
 }
 
 // смерть игрока = провал квеста для этого игрока
+[[Event]]
 void _CaravanLeaderOnSeeSmthDead(Critter leader, Critter fromCrit, Critter killer)
 {
     DL("_CaravanLeaderOnSeeSmthDead");
@@ -3177,6 +3214,7 @@ void _CaravanLeaderOnSeeSmthDead(Critter leader, Critter fromCrit, Critter kille
 }
 
 // смерть проводника = провал квеста всем игрокам
+[[Event]]
 void _CaravanLeaderOnDead(Critter leader, Critter killer)
 {
     CaravanInfo ci = _GetCaravan(leader.CaravanCrvId);
@@ -3206,8 +3244,9 @@ void _CaravanLeaderOnDead(Critter leader, Critter killer)
 }
 
 // глобальная карта
-bool _CaravanLeaderOnGlobal(Critter leader, int type, Item car, float x, float y, float toX, float toY, float speed, int encounterDescriptor,
-                            bool waitForAnswer)
+[[Event]]
+EventResult _CaravanLeaderOnGlobal(Critter leader, int type, Item car, float x, float y, float toX, float toY, float speed, int encounterDescriptor,
+                                   bool waitForAnswer)
 {
     Critter[] group = GlobalmapGroupExtended::GetGlobalGroup(leader);
     CaravanInfo ci = _GetCaravan(leader.CaravanCrvId);
@@ -3215,7 +3254,7 @@ bool _CaravanLeaderOnGlobal(Critter leader, int type, Item car, float x, float y
         // перестраховка
         _CancelEvents(leader);
         Game.Log("Caravan error; CaravanInfo not found");
-        return false;
+        return EventResult::StopChain;
     }
 
     if (type == Tla::GlobalProcessMove || type == Tla::GlobalProcessStopped) {
@@ -3223,7 +3262,7 @@ bool _CaravanLeaderOnGlobal(Critter leader, int type, Item car, float x, float y
         if (!_CheckHasPlayerInGroup(group)) {
             // Удаляем караван и лидера
             ci.TerminateCaravan();
-            return true;
+            return EventResult::StopChain;
         }
     }
     else {
@@ -3235,7 +3274,7 @@ bool _CaravanLeaderOnGlobal(Critter leader, int type, Item car, float x, float y
     }
 
     if (encounterDescriptor != 0) {
-        return false; // Энкаунтер
+        return EventResult::StopChain; // Энкаунтер
     }
 
     ci.CaravanRoute.SetRouteDir(int(x), int(y), toX, toY);
@@ -3250,13 +3289,13 @@ bool _CaravanLeaderOnGlobal(Critter leader, int type, Item car, float x, float y
             if ((endX == int(x)) and (endY == int(y))) {
                 // маршрут закончен
                 if (_EndCaravan(leader)) {
-                    return true;
+                    return EventResult::StopChain;
                 }
                 else {
                     // проблемы с завершением каравана
                     Worldmap::FindEncounter(group, null, int(x), int(y), encounterDescriptor, waitForAnswer, true);
                     Game.Log("Can not end caravan");
-                    return true;
+                    return EventResult::StopChain;
                 }
             }
             else {
@@ -3266,11 +3305,11 @@ bool _CaravanLeaderOnGlobal(Critter leader, int type, Item car, float x, float y
             }
         }
         speed = GLOBAL_MAP_BASE_SPEED * ci.GlobalSpeedMultiplayer;
-        return true;
+        return EventResult::StopChain;
     }
 
     waitForAnswer = false;
-    return false;
+    return EventResult::StopChain;
 }
 
 /* ********************************* Этап№1 сбор заявок от игроков ********************************** */
@@ -3320,7 +3359,7 @@ void PrepareCaravan(int CaravanId)
 }
 
 /* ********************************** Этап№2 отправление каравана *********************************** */
-void StartCaravan(any caravanId)
+void StartCaravan_Impl(any caravanId)
 {
     CaravanInfo ci = _GetCaravan(caravanId);
     if (ci == null) {
@@ -3406,6 +3445,12 @@ void StartCaravan(any caravanId)
     ci.CaravanStatus = CRV_STATUS_START_MOVE;
     // начало движения по глобальной карте
     leader.TransferToGlobal();
+}
+
+[[TimeEvent]]
+void StartCaravan(any caravanId)
+{
+    StartCaravan_Impl(caravanId);
 }
 
 /* **************************** Этап№3. Выход со случайного энкаунтера ****************************** */
@@ -3511,7 +3556,7 @@ bool _EndCaravan(Critter leader)
 
     leader.HomeMapId = map.Id;
     leader.HomeHex = hex;
-    leader.HomeDir = leader.Dir;
+    leader.HomeDir = leader.Dir.hex.value;
     ci.CaravanStatus = CRV_STATUS_END;
 
     // удаляем нпц-охранников
@@ -3544,6 +3589,7 @@ bool _EndCaravan(Critter leader)
     return true;
 }
 
+[[TimeEvent]]
 void DeleteLeader(any value)
 {
     DL("try delete leader");
@@ -3567,6 +3613,7 @@ void DeleteLeader(any value)
     DL("success");
 }
 
+[[TimeEvent]]
 void TransferToStartPos(any value)
 {
     Critter leader = Game.GetCritter(value);
@@ -3634,7 +3681,7 @@ void _SetQuestState(CritterProperty prop, int state, Critter cr)
 
 /* ******************************************** ДИАЛОГИ ********************************************* */
 // функция для использования в диалогах: признак = группа полная (максимум 5 игроков)
-bool d_IsFullParty(Critter player, Critter caravaneer)
+bool d_IsFullParty_Impl(Critter player, Critter caravaneer)
 {
     // получаем описание каравана
     CaravanInfo ci = _GetCaravan(caravaneer.CaravanCrvId);
@@ -3646,14 +3693,21 @@ bool d_IsFullParty(Critter player, Critter caravaneer)
     return (ci.PlayersRequested.length() > ci.MaxPlayers);
 }
 
+[[DialogDemand]]
+bool d_IsFullParty(Critter player, Critter caravaneer)
+{
+    return d_IsFullParty_Impl(player, caravaneer);
+}
+
 // функция для использования в диалогах: признак = еще не набрано 5 игроков
+[[DialogDemand]]
 bool d_NotIsFullParty(Critter player, Critter caravaneer)
 {
-    return not d_IsFullParty(player, caravaneer);
+    return not d_IsFullParty_Impl(player, caravaneer);
 }
 
 // функция для использования в диалогах: признак = заявка игрока уже принята
-bool d_HasPlayerRequest(Critter player, Critter caravaneer)
+bool d_HasPlayerRequest_Impl(Critter player, Critter caravaneer)
 {
     CaravanInfo crv = _GetCaravan(caravaneer.CaravanCrvId);
     if (crv == null) {
@@ -3668,13 +3722,21 @@ bool d_HasPlayerRequest(Critter player, Critter caravaneer)
     return false;
 }
 
+[[DialogDemand]]
+bool d_HasPlayerRequest(Critter player, Critter caravaneer)
+{
+    return d_HasPlayerRequest_Impl(player, caravaneer);
+}
+
 // функция для использования в диалогах: признак = заявка игрока еще не принята
+[[DialogDemand]]
 bool d_NotHasPlayerRequest(Critter player, Critter caravaneer)
 {
-    return not d_HasPlayerRequest(player, caravaneer);
+    return not d_HasPlayerRequest_Impl(player, caravaneer);
 }
 
 // признак - может идти в сопровождение
+[[DialogDemand]]
 bool d_CanJoin(Critter player, Critter caravaneer)
 {
     CaravanInfo crv = _GetCaravan(caravaneer.CaravanCrvId);
@@ -3686,19 +3748,26 @@ bool d_CanJoin(Critter player, Critter caravaneer)
 }
 
 // записывает игрока в список желающих
-void r_PutPlayerRequest2Info(Critter player, Critter caravaneer)
+void r_PutPlayerRequest2Info_Impl(Critter player, Critter caravaneer)
 {
     CaravanInfo crv = _GetCaravan(caravaneer.CaravanCrvId);
     if (crv == null) {
         Game.Log("Error: CaravanInfo not found. Id = " + caravaneer.CaravanCrvId);
         return;
     }
-    if (!d_HasPlayerRequest(player, caravaneer)) {
+    if (!d_HasPlayerRequest_Impl(player, caravaneer)) {
         crv.PlayersRequested.insertLast(player.Id);
     }
 }
 
+[[DialogResult]]
+void r_PutPlayerRequest2Info(Critter player, Critter caravaneer)
+{
+    r_PutPlayerRequest2Info_Impl(player, caravaneer);
+}
+
 // продолжение движения каравана
+[[DialogResult]]
 void r_ContinueCaravan(Critter player, Critter npc)
 {
     if (npc == null) {
@@ -3712,24 +3781,25 @@ void r_ContinueCaravan(Critter player, Critter npc)
     if (crv.CaravanStatus != CRV_STATUS_ON_ENCOUNTER) {
         return;
     }
-    if (d_HasPlayerRequest(player, npc)) {
+    if (d_HasPlayerRequest_Impl(player, npc)) {
         _ContinueCaravan(npc);
     }
 }
 
 // Мгновенно запускает караван, вне расписания
+[[DialogResult]]
 void r_StartCaravan(Critter player, Critter npc)
 {
     CaravanInfo ci = _GetCaravan(npc.CaravanCrvId);
     if (ci != null) {
-        r_PutPlayerRequest2Info(player, npc);
+        r_PutPlayerRequest2Info_Impl(player, npc);
         DL("time start");
-        StartCaravan(npc.CaravanCrvId);
+        StartCaravan_Impl(npc.CaravanCrvId);
     }
 }
 
 // проверка, в каком состоянии караван для нпц
-bool d_IsCaravanStatus(Critter player, Critter npc, int status)
+bool d_IsCaravanStatus_Impl(Critter player, Critter npc, int status)
 {
     CaravanInfo ci = _GetCaravan(npc.CaravanCrvId);
     if (ci == null) {
@@ -3742,12 +3812,20 @@ bool d_IsCaravanStatus(Critter player, Critter npc, int status)
     return (int(ci.CaravanStatus) == status);
 }
 
-bool d_NotIsCaravanStatus(Critter player, Critter npc, int status)
+[[DialogDemand]]
+bool d_IsCaravanStatus(Critter player, Critter npc, any status)
 {
-    return !d_IsCaravanStatus(player, npc, status);
+    return d_IsCaravanStatus_Impl(player, npc, status);
+}
+
+[[DialogDemand]]
+bool d_NotIsCaravanStatus(Critter player, Critter npc, any status)
+{
+    return !d_IsCaravanStatus_Impl(player, npc, status);
 }
 
 // признак, караван не начинался или закончен
+[[DialogDemand]]
 bool d_CaravanEndedOrNotStarted(Critter player, Critter npc)
 {
     CaravanInfo ci = _GetCaravan(npc.CaravanCrvId);
@@ -3760,6 +3838,7 @@ bool d_CaravanEndedOrNotStarted(Critter player, Critter npc)
 }
 
 // проверка, игрок ни разу не заваливал квест на сопровождение данного каравана
+[[DialogDemand]]
 bool d_PlayerHasNoCaravanFailures(Critter player, Critter npc)
 {
     CaravanInfo ci = _GetCaravan(npc.CaravanCrvId);
@@ -3771,7 +3850,7 @@ bool d_PlayerHasNoCaravanFailures(Critter player, Critter npc)
 }
 
 // проверка караван пойдет обратно или в начальном направлении
-bool d_IsCaravanReversed(Critter player, Critter npc)
+bool d_IsCaravanReversed_Impl(Critter player, Critter npc)
 {
     CaravanInfo ci = _GetCaravan(npc.CaravanCrvId);
     if (ci == null) {
@@ -3781,13 +3860,20 @@ bool d_IsCaravanReversed(Critter player, Critter npc)
     return (ci.IsReversed);
 }
 
+[[DialogDemand]]
+bool d_IsCaravanReversed(Critter player, Critter npc)
+{
+    return d_IsCaravanReversed_Impl(player, npc);
+}
+
+[[DialogDemand]]
 bool d_NotIsCaravanReversed(Critter player, Critter npc)
 {
-    return !d_IsCaravanReversed(player, npc);
+    return !d_IsCaravanReversed_Impl(player, npc);
 }
 
 // Обновленные функции
-bool d_PlayerHired(Critter player, Critter npc)
+bool d_PlayerHired_Impl(Critter player, Critter npc)
 {
     CaravanInfo ci = _GetCaravan(npc.CaravanCrvId);
     if (ci != null) {
@@ -3800,9 +3886,16 @@ bool d_PlayerHired(Critter player, Critter npc)
     return false;
 }
 
+[[DialogDemand]]
+bool d_PlayerHired(Critter player, Critter npc)
+{
+    return d_PlayerHired_Impl(player, npc);
+}
+
+[[DialogDemand]]
 bool d_NotPlayerHired(Critter player, Critter npc)
 {
-    return !d_PlayerHired(player, npc);
+    return !d_PlayerHired_Impl(player, npc);
 }
 
 bool d_HasFailures(Critter player, Critter npc)
@@ -3814,12 +3907,13 @@ bool d_HasFailures(Critter player, Critter npc)
     return false;
 }
 
+[[DialogDemand]]
 bool d_NotHasFailures(Critter player, Critter npc)
 {
     return !d_HasFailures(player, npc);
 }
 
-bool d_Status(Critter player, Critter npc, int status)
+bool d_Status_Impl(Critter player, Critter npc, int status)
 {
     CaravanInfo ci = _GetCaravan(npc.CaravanCrvId);
     if (ci != null) {
@@ -3828,12 +3922,20 @@ bool d_Status(Critter player, Critter npc, int status)
     return false;
 }
 
-bool d_NotStatus(Critter player, Critter npc, int status)
+[[DialogDemand]]
+bool d_Status(Critter player, Critter npc, any status)
 {
-    return !d_Status(player, npc, status);
+    return d_Status_Impl(player, npc, status);
 }
 
-void r_SaveCaravanId(Critter player, Critter npc, int caravanId)
+[[DialogDemand]]
+bool d_NotStatus(Critter player, Critter npc, any status)
+{
+    return !d_Status_Impl(player, npc, status);
+}
+
+[[DialogResult]]
+void r_SaveCaravanId(Critter player, Critter npc, any caravanId)
 {
     if (npc != null) {
         auto lastSelectCaravan = player.LastSelectedCaravan.clone();

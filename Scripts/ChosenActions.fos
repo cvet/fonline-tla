@@ -22,6 +22,9 @@ namespace ChosenActions
 
 any[] ChosenActions = {};
 
+mpos LastIssuedMoveHex = mpos();
+int LastIssuedMoveSpeed = 0;
+
 [[ModuleInit]]
 void InitChosenActions()
 {
@@ -103,7 +106,12 @@ void ChosenProcess()
         // CurMap.SetShootBorders(shootBorders, attackDist);
 
         if (chosen.IsMoving()) {
-            return;
+            // Allow a queued move action to retarget the current walk (e.g. fresh map click);
+            // anything else keeps the in-flight movement until it completes.
+            int pendingType = (ChosenActions.length() > 0 ? int(ChosenActions[0]) : 0);
+            if (pendingType != Tla::ChosenMove && pendingType != Tla::ChosenMoveToCrit) {
+                return;
+            }
         }
     }
 
@@ -218,7 +226,14 @@ void ChosenProcess()
                 CurMap.MoveHexByDir(hex, path[i], 1);
             }
 
-            chosen.MoveToHex(hex, ipos(0, 0), isRun ? chosen.WalkSpeed * 2 : chosen.WalkSpeed);
+            int speed = isRun ? chosen.WalkSpeed * 2 : chosen.WalkSpeed;
+            // Re-issue MoveToHex only when destination/speed changed or movement stopped — this is what
+            // makes a fresh click retarget the walk instead of waiting for it to finish.
+            if (!chosen.IsMoving() || hex != LastIssuedMoveHex || speed != LastIssuedMoveSpeed) {
+                chosen.MoveToHex(hex, ipos(0, 0), speed);
+                LastIssuedMoveHex = hex;
+                LastIssuedMoveSpeed = speed;
+            }
 
             // chosen.ApRegenerationTick = 0;
         }

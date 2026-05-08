@@ -107,16 +107,12 @@ CritterVisibilityMode FO_NAMESPACE CheckCritterVisibilityHook(const ServerEngine
         return GeometryHelper::GetDistance(cr->GetHex(), target->GetHex()) <= cr->GetLookDistance() ? CritterVisibilityMode::Full : CritterVisibilityMode::None;
     }
 
+    ignore_unused(map);
+
     const int32_t dist = GeometryHelper::GetDistance(cr->GetHex(), target->GetHex());
     int32_t look_dist = cr->GetLookDistance();
 
     if (dist > look_dist) {
-        return CritterVisibilityMode::None;
-    }
-
-    const auto trace_output = server->MapMngr.TracePath(map, cr->GetHex(), target->GetHex());
-
-    if (!trace_output.IsFullTrace) {
         return CritterVisibilityMode::None;
     }
 

@@ -518,7 +518,8 @@ CI jobs:
 | `windows-build` | Builds Windows client/server/editor/mapper/baker targets, including profiling variants. |
 | `linux-build` | Builds Linux client/server/editor/mapper, Android client variants, and Web client. |
 | `macos-build` | Builds macOS and iOS clients. |
-| `package` | Combines baked output and binaries into `TLA-Dev` and `TLA-Test`; tagged builds publish release zips. |
+| `package` | Combines baked output and binaries into `TLA-Dev`, `TLA-Test`, and the short-lived `TLA-Release` artifact. |
+| `release` | Runs after packaging on every workflow run. On `push` to `master` it publishes the GitHub release; otherwise it performs the same metadata/artifact preflight as a dry-run and writes the planned release to the log and job summary. |
 
 Package definitions live in [CMakeLists.txt](CMakeLists.txt):
 
@@ -528,7 +529,11 @@ Package definitions live in [CMakeLists.txt](CMakeLists.txt):
 | `Test` | Windows win64 profiling client and server for `LocalTest`. |
 | `LinuxTest` | Linux x64 client, server, editor, mapper for `LocalTest`. |
 
-Tagged GitHub builds publish:
+Successful `master` builds publish a versioned GitHub release from the repository `VERSION` file. The release job fails if `VERSION` is not `X.Y.Z` or if the matching `vX.Y.Z` tag already exists, so `VERSION` must be bumped before publishing another release.
+
+Non-release runs execute the release job in dry-run mode. Dry-run mode downloads the same `TLA-Release` artifact, validates `VERSION`, computes the release tag and previous tag, verifies the three zip assets, prints their sizes and SHA-256 hashes, and records the release plan in the workflow summary without creating a tag or GitHub release.
+
+Published release assets:
 
 - `TLA-Dev.zip`
 - `TLA-Server.zip`

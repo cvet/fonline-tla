@@ -1,0 +1,171 @@
+namespace ContourPipeline
+{
+
+///@ Property Critter Client ucolor Contour Mutable
+///@ Property Item Client ucolor Contour Mutable
+///@ Setting Client bool Render.ContoursEnabled
+///@ Setting Client string Render.ContourEffect
+///@ Setting Client int32 Render.ContourPadding
+
+#if CLIENT
+
+const int ContourEffectSubtype = 2;
+
+Critter[] HighlightedCritters = {};
+Item[] HighlightedItems = {};
+
+[[ModuleInit]]
+void ModuleInit()
+{
+    if (!Settings.Render.ContoursEnabled) {
+        return;
+    }
+
+    Assert(!Settings.Render.ContourEffect.isEmpty());
+    Assert(Settings.Render.ContourPadding >= 0);
+
+    Game.AddPropertyDeferredSetter(CritterProperty::Contour, OnCritterContourChanged);
+    Game.AddPropertyDeferredSetter(ItemProperty::Contour, OnItemContourChanged);
+
+    Game.OnStart.Subscribe(OnStart);
+    Game.OnCritterIn.Subscribe(OnCritterIn);
+    Game.OnCritterOut.Subscribe(OnCritterOut);
+    Game.OnItemMapIn.Subscribe(OnItemMapIn);
+    Game.OnItemMapOut.Subscribe(OnItemMapOut);
+    Game.OnRenderMapStage.Subscribe(OnRenderMapStage);
+}
+
+[[Event]]
+void OnStart()
+{
+    RegisterContourEffect();
+}
+
+[[Event]]
+void OnCritterIn(Critter cr)
+{
+    RefreshCritterContourCache(cr);
+}
+
+[[Event]]
+void OnCritterOut(Critter cr)
+{
+    RemoveHighlightedCritter(cr);
+}
+
+[[Event]]
+void OnItemMapIn(Item item)
+{
+    RefreshItemContourCache(item);
+}
+
+[[Event]]
+void OnItemMapOut(Item item)
+{
+    RemoveHighlightedItem(item);
+}
+
+[[PropertySetter]]
+void OnCritterContourChanged(Critter cr)
+{
+    RefreshCritterContourCache(cr);
+}
+
+[[PropertySetter]]
+void OnItemContourChanged(Item item)
+{
+    RefreshItemContourCache(item);
+}
+
+[[Event]]
+void OnRenderMapStage(Map map, MapRenderStage stage)
+{
+    if (stage != MapRenderStage::AfterSprites) {
+        return;
+    }
+    if (HighlightedItems.isEmpty() && HighlightedCritters.isEmpty()) {
+        return;
+    }
+
+    int padding = Settings.Render.ContourPadding;
+    RegisterContourEffect();
+
+    for (int i = HighlightedItems.length() - 1; i >= 0; i--) {
+        Item item = HighlightedItems[i];
+
+        if (item.IsDestroyed || item.Ownership != ItemOwnership::MapHex || item.Contour == ZERO_UCOLOR) {
+            HighlightedItems.removeAt(i);
+            continue;
+        }
+        if (item.MapId != map.Id) {
+            continue;
+        }
+
+        map.DrawEntitySprite(item, ContourEffectSubtype, item.Contour, padding);
+    }
+
+    for (int i = HighlightedCritters.length() - 1; i >= 0; i--) {
+        Critter cr = HighlightedCritters[i];
+
+        if (cr.IsDestroyed || cr.Contour == ZERO_UCOLOR) {
+            HighlightedCritters.removeAt(i);
+            continue;
+        }
+        if (cr.MapId != map.Id) {
+            continue;
+        }
+
+        map.DrawEntitySprite(cr, ContourEffectSubtype, cr.Contour, padding);
+    }
+}
+
+void RefreshCritterContourCache(Critter cr)
+{
+    if (cr.MapId == ZERO_IDENT || cr.Contour == ZERO_UCOLOR) {
+        RemoveHighlightedCritter(cr);
+    }
+    else if (HighlightedCritters.find(cr) == -1) {
+        HighlightedCritters.insertLast(cr);
+    }
+}
+
+void RefreshItemContourCache(Item item)
+{
+    if (item.Ownership != ItemOwnership::MapHex || item.MapId == ZERO_IDENT || item.Contour == ZERO_UCOLOR) {
+        RemoveHighlightedItem(item);
+    }
+    else if (HighlightedItems.find(item) == -1) {
+        HighlightedItems.insertLast(item);
+    }
+}
+
+void RemoveHighlightedCritter(Critter cr)
+{
+    int index = HighlightedCritters.find(cr);
+    if (index != -1) {
+        HighlightedCritters.removeAt(index);
+    }
+}
+
+void RemoveHighlightedItem(Item item)
+{
+    int index = HighlightedItems.find(item);
+    if (index != -1) {
+        HighlightedItems.removeAt(index);
+    }
+}
+
+void ClearHighlightedEntities()
+{
+    HighlightedCritters = {};
+    HighlightedItems = {};
+}
+
+void RegisterContourEffect()
+{
+    Game.SetEffect(EffectType::Offscreen, ContourEffectSubtype, Settings.Render.ContourEffect);
+}
+
+#endif
+
+}

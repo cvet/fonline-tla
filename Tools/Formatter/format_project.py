@@ -21,6 +21,133 @@ PROJECT_FORMAT_PATTERNS = [
 UTF8_BOM = b'\xef\xbb\xbf'
 CLANG_FORMAT_VERSION_RE = re.compile(r'clang-format version (\d+)(?:\.|\b)')
 
+# clang-format treats `?` as a binary operator and inserts whitespace around
+# it: `Critter? cr` becomes `Critter ? cr`. For AngelScript scripts we use
+# `T?` as a nullable type suffix and want to keep it attached to the type.
+# Only apply the fix outside function bodies, so ternary expressions inside
+# bodies (like `cond ? a : b`) are never rewritten.
+FOS_NULLABLE_SUFFIX_RE = re.compile(
+    r'(?<![.\w])([A-Z][\w:]*(?:\[\])?)\s+\?\s+([A-Za-z_]\w*)(\s*(?:[(,)=]|\[\]))'
+)
+
+
+def _split_outside_function_bodies(text: str) -> list[tuple[int, int, bool]]:
+    """Return list of (start, end, inside_body) spans covering the entire
+    text. A `{` is treated as a function-body brace when the previous
+    significant character is `)` or one of `else`/`do`/`try`/`catch`."""
+    n = len(text)
+    spans: list[tuple[int, int, bool]] = []
+    body_depth = 0
+    region_start = 0
+    i = 0
+    in_string = False
+    in_char = False
+    in_line_comment = False
+    in_block_comment = False
+    while i < n:
+        c = text[i]
+        nxt = text[i + 1] if i + 1 < n else ''
+        if in_line_comment:
+            if c == '\n':
+                in_line_comment = False
+            i += 1
+            continue
+        if in_block_comment:
+            if c == '*' and nxt == '/':
+                in_block_comment = False
+                i += 2
+                continue
+            i += 1
+            continue
+        if in_string:
+            if c == '\\':
+                i += 2
+                continue
+            if c == '"':
+                in_string = False
+            i += 1
+            continue
+        if in_char:
+            if c == '\\':
+                i += 2
+                continue
+            if c == "'":
+                in_char = False
+            i += 1
+            continue
+        if c == '/' and nxt == '/':
+            in_line_comment = True
+            i += 2
+            continue
+        if c == '/' and nxt == '*':
+            in_block_comment = True
+            i += 2
+            continue
+        if c == '"':
+            in_string = True
+            i += 1
+            continue
+        if c == "'":
+            in_char = True
+            i += 1
+            continue
+        if c == '{':
+            # Walk back skipping whitespace AND trailing method qualifier
+            # keywords (override, final, const, noexcept) so signatures like
+            # `string get_Text() override\n{` are recognized as bodies. Also
+            # recognize standalone `else`/`do`/`try`/`catch` followed by `{`.
+            is_body = False
+            j = i - 1
+            while True:
+                while j >= 0 and text[j] in ' \t\r\n':
+                    j -= 1
+                if j < 0:
+                    break
+                if text[j] == ')':
+                    is_body = True
+                    break
+                if not (text[j].isalnum() or text[j] == '_'):
+                    break
+                wend = j + 1
+                while j > 0 and (text[j - 1].isalnum() or text[j - 1] == '_'):
+                    j -= 1
+                word = text[j:wend]
+                if word in ('override', 'final', 'const', 'noexcept'):
+                    j -= 1
+                    continue
+                if word in ('else', 'do', 'try', 'catch'):
+                    is_body = True
+                break
+            if is_body:
+                if body_depth == 0:
+                    spans.append((region_start, i + 1, False))
+                    region_start = i + 1
+                body_depth += 1
+            i += 1
+            continue
+        if c == '}':
+            if body_depth > 0:
+                body_depth -= 1
+                if body_depth == 0:
+                    spans.append((region_start, i, True))
+                    region_start = i
+            i += 1
+            continue
+        i += 1
+    spans.append((region_start, n, body_depth > 0))
+    return spans
+
+
+def fix_fos_nullable_suffix(text: str) -> str:
+    spans = _split_outside_function_bodies(text)
+    out: list[str] = []
+    for start, end, inside_body in spans:
+        chunk = text[start:end]
+        if not inside_body:
+            chunk = FOS_NULLABLE_SUFFIX_RE.sub(r'\1? \2\3', chunk)
+        out.append(chunk)
+    return ''.join(out)
+
 
 class TerminalProgress:
     def __init__(self, prefix: str) -> None:
@@ -106,7 +233,7 @@ def strip_text_bom(content: str) -> str:
     return content[1:] if content.startswith('\ufeff') else content
 
 
-def format_files(clang_format: str, root: Path, patterns: Sequence[str]) -> int:
+def format_files(clang_format: str, root: Path, patterns: Sequence[str], check_only: bool = False) -> int:
     files: list[Path] = []
     for pattern in patterns:
         files.extend(sorted(root.glob(pattern)))
@@ -133,14 +260,18 @@ def format_files(clang_format: str, root: Path, patterns: Sequence[str]) -> int:
 
         original, has_bom = read_text_strip_bom(path)
         formatted = strip_text_bom(subprocess.check_output([clang_format, str(path)], text=True, encoding='utf-8'))
+        if path.suffix == '.fos':
+            formatted = fix_fos_nullable_suffix(formatted)
         formatted = ensure_trailing_newline(normalize_line_endings(formatted, detect_line_ending(original)), detect_line_ending(original))
         if not differs_beyond_line_endings(original, formatted) and not has_bom:
             continue
 
         changed += 1
-        write_text_utf8(path, formatted)
+        if not check_only:
+            write_text_utf8(path, formatted)
 
-    progress.finish(f'Completed, changed {changed} file(s)')
+    suffix = ' (check-only)' if check_only else ''
+    progress.finish(f'Completed, changed {changed} file(s){suffix}')
     return changed
 
 
@@ -161,9 +292,9 @@ def run_fomain_formatter(project_root: Path, target_path: str | None, check_only
     subprocess.check_call(command)
 
 
-def format_scripts(project_root: Path) -> None:
+def format_scripts(project_root: Path, check_only: bool = False) -> int:
     clang_format = discover_clang_format(project_root)
-    format_files(clang_format, project_root, PROJECT_FORMAT_PATTERNS)
+    return format_files(clang_format, project_root, PROJECT_FORMAT_PATTERNS, check_only=check_only)
 
 
 def format_prototypes(project_root: Path, paths: Sequence[str], check_only: bool) -> None:
@@ -174,10 +305,11 @@ def format_fomain(project_root: Path, target_path: str | None, check_only: bool)
     run_fomain_formatter(project_root, target_path, check_only)
 
 
-def format_all(project_root: Path) -> None:
-    format_scripts(project_root)
-    format_fomain(project_root, None, False)
-    format_prototypes(project_root, [], False)
+def format_all(project_root: Path, check_only: bool = False) -> int:
+    changed = format_scripts(project_root, check_only=check_only)
+    format_fomain(project_root, None, check_only)
+    format_prototypes(project_root, [], check_only)
+    return changed
 
 
 def create_parser() -> argparse.ArgumentParser:
@@ -185,7 +317,7 @@ def create_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest='command', required=True)
 
     scripts_parser = subparsers.add_parser('scripts', help='format project script, extension and gui files')
-    scripts_parser.set_defaults(no_args=True)
+    scripts_parser.add_argument('--check', action='store_true')
 
     protos_parser = subparsers.add_parser('prototypes', help='format project prototype files')
     protos_parser.add_argument('--check', action='store_true')
@@ -196,7 +328,7 @@ def create_parser() -> argparse.ArgumentParser:
     fomain_parser.add_argument('path', nargs='?')
 
     all_parser = subparsers.add_parser('all', help='format scripts, fomain, and prototypes')
-    all_parser.set_defaults(no_args=True)
+    all_parser.add_argument('--check', action='store_true')
 
     return parser
 
@@ -206,7 +338,9 @@ def main() -> None:
     project_root = Path(__file__).resolve().parents[2]
 
     if args.command == 'scripts':
-        format_scripts(project_root)
+        changed = format_scripts(project_root, check_only=args.check)
+        if args.check and changed > 0:
+            raise SystemExit(f'ERROR: {changed} script file(s) need formatting; run `py -3 Tools/Formatter/format_project.py scripts` and commit the result')
         return
     if args.command == 'prototypes':
         format_prototypes(project_root, args.paths, args.check)
@@ -215,7 +349,9 @@ def main() -> None:
         format_fomain(project_root, args.path, args.check)
         return
     if args.command == 'all':
-        format_all(project_root)
+        changed = format_all(project_root, check_only=args.check)
+        if args.check and changed > 0:
+            raise SystemExit(f'ERROR: {changed} file(s) need formatting; run `py -3 Tools/Formatter/format_project.py all` and commit the result')
         return
 
     raise SystemExit(f'Unsupported command: {args.command}')

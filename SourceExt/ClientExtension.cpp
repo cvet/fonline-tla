@@ -8,7 +8,7 @@ FO_BEGIN_NAMESPACE
 ///@ ExportMethod
 FO_SCRIPT_API string Client_Game_FormatTags(ClientEngine* client, string_view text, string_view lexems);
 ///@ ExportMethod
-FO_SCRIPT_API string Client_Game_FormatTags(ClientEngine* client, string_view text, string_view lexems, CritterView* talker);
+FO_SCRIPT_API string Client_Game_FormatTags(ClientEngine* client, string_view text, string_view lexems, FO_NULLABLE CritterView* talker);
 ///@ ExportMethod
 FO_SCRIPT_API bool Client_Critter_IsFree(CritterView* self);
 ///@ ExportMethod

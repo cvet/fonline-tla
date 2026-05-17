@@ -48,13 +48,13 @@ FO_SCRIPT_API isize32 Server_Game_LoadImage(ServerEngine* server, uint32_t image
 ///@ ExportMethod
 FO_SCRIPT_API ucolor Server_Game_GetImageColor(ServerEngine* server, uint32_t imageSlot, ipos32 pos);
 ///@ ExportMethod
-FO_SCRIPT_API DialogPack* Server_Game_GetDialogPack(ServerEngine* server, hstring packId);
+FO_SCRIPT_API FO_NULLABLE DialogPack* Server_Game_GetDialogPack(ServerEngine* server, hstring packId);
 ///@ ExportMethod
-FO_SCRIPT_API string Server_Game_RunSpeechScript(ServerEngine* server, DialogSpeech* speech, Critter* cr, Critter* talker);
+FO_SCRIPT_API string Server_Game_RunSpeechScript(ServerEngine* server, DialogSpeech* speech, Critter* cr, FO_NULLABLE Critter* talker);
 ///@ ExportMethod
-FO_SCRIPT_API bool Server_Game_DialogScriptDemand(ServerEngine* server, DialogAnswerReq* demand, Critter* master, Critter* slave);
+FO_SCRIPT_API bool Server_Game_DialogScriptDemand(ServerEngine* server, DialogAnswerReq* demand, Critter* master, FO_NULLABLE Critter* slave);
 ///@ ExportMethod
-FO_SCRIPT_API int32_t Server_Game_DialogScriptResult(ServerEngine* server, DialogAnswerReq* result, Critter* master, Critter* slave);
+FO_SCRIPT_API int32_t Server_Game_DialogScriptResult(ServerEngine* server, DialogAnswerReq* result, Critter* master, FO_NULLABLE Critter* slave);
 ///@ ExportMethod
 FO_SCRIPT_API bool Server_Critter_IsFree(Critter* server);
 ///@ ExportMethod
@@ -444,9 +444,6 @@ void FO_NAMESPACE Server_Critter_ViewMap(Critter* self, Map* map, int32_t look, 
 
     ignore_unused(look, dir);
 
-    if (map == nullptr) {
-        throw ScriptException("Map arg is null");
-    }
     if (!map->GetSize().is_valid_pos(hex)) {
         throw ScriptException("Invalid hexes args");
     }

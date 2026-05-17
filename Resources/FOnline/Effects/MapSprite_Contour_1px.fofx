@@ -1,0 +1,89 @@
+[Effect]
+
+[VertexShader]
+layout(binding = 0, std140) uniform ProjBuf { mat4 ProjectionMatrix; };
+
+layout(location = 0) in vec3 InPosition;
+layout(location = 1) in vec4 InColor;
+layout(location = 2) in vec2 InTexCoord;
+layout(location = 3) in vec2 InTexEggCoord;
+
+layout(location = 0) out vec4 Color;
+layout(location = 1) out vec2 TexCoord;
+
+void main(void)
+{
+    gl_Position = ProjectionMatrix * vec4(InPosition.xy, 0.0, 1.0);
+    Color = InColor;
+    TexCoord = InTexCoord;
+}
+
+[FragmentShader]
+layout(binding = 0) uniform sampler2D MainTex;
+layout(binding = 1, std140) uniform MainTexBuf { vec4 MainTexSize; };
+layout(binding = 2, std140) uniform SpriteBorderBuf { vec4 SpriteBorder; };
+layout(binding = 3, std140) uniform TimeBuf { vec4 FrameTime; vec4 GameTime; };
+
+layout(location = 0) in vec4 Color;
+layout(location = 1) in vec2 TexCoord;
+
+layout(location = 0) out vec4 FragColor;
+
+bool IsInsideSpriteBorder(vec2 texCoord, vec4 border)
+{
+    return texCoord.x >= border.x && texCoord.x <= border.z && texCoord.y >= border.y && texCoord.y <= border.w;
+}
+
+bool IsOpaqueSpritePixel(vec2 texCoord, vec4 border)
+{
+    return IsInsideSpriteBorder(texCoord, border) && texture(MainTex, texCoord).a > 0.5;
+}
+
+bool IsOpaqueSpritePixelAtOffset(vec2 texel, vec2 offset, vec4 border)
+{
+    return IsOpaqueSpritePixel(TexCoord + offset * texel, border);
+}
+
+bool HasOpaqueNeighbor(vec4 border)
+{
+    vec2 texel = vec2(MainTexSize.z, MainTexSize.w);
+
+    return IsOpaqueSpritePixelAtOffset(texel, vec2(-1.0, -1.0), border) ||
+        IsOpaqueSpritePixelAtOffset(texel, vec2(0.0, -1.0), border) ||
+        IsOpaqueSpritePixelAtOffset(texel, vec2(1.0, -1.0), border) ||
+        IsOpaqueSpritePixelAtOffset(texel, vec2(-1.0, 0.0), border) ||
+        IsOpaqueSpritePixelAtOffset(texel, vec2(1.0, 0.0), border) ||
+        IsOpaqueSpritePixelAtOffset(texel, vec2(-1.0, 1.0), border) ||
+        IsOpaqueSpritePixelAtOffset(texel, vec2(0.0, 1.0), border) ||
+        IsOpaqueSpritePixelAtOffset(texel, vec2(1.0, 1.0), border);
+}
+
+void main(void)
+{
+    vec4 border = SpriteBorder;
+    if (border.w < border.y) {
+        border.yw = border.wy;
+    }
+
+    if (IsOpaqueSpritePixel(TexCoord, border) || !HasOpaqueNeighbor(border)) {
+        discard;
+    }
+
+    FragColor = Color;
+
+    if (FragColor.a > 0.1) {
+        float v = (TexCoord.y - border.y) / (border.w - border.y);
+        v += 1.0 - mod(GameTime.x, 2.0);
+        if (v > 1.0) {
+            v = 2.0 - v;
+        }
+        else if (v < 0.0) {
+            v = -v;
+        }
+        FragColor.rgb += v * 0.60 - 0.30;
+        FragColor.rgb = clamp(FragColor.rgb, 0.0, 1.0);
+    }
+    else {
+        FragColor.a = 1.0;
+    }
+}

@@ -63,7 +63,7 @@ void _OliverInit(Critter cr, bool firstTime)
 [[TimeEvent]]
 void Kidnap(any value)
 {
-    Critter cr = Game.GetCritter(value);
+    Critter? cr = Game.GetCritter(value);
     if (cr == null) {
         return;
     }
@@ -84,7 +84,7 @@ bool KidnapLocationExist()
     if (KidnapLocationId == ZERO_IDENT) {
         return false;
     }
-    Location loc = Game.GetLocation(KidnapLocationId);
+    Location? loc = Game.GetLocation(KidnapLocationId);
     return loc != null;
 }
 
@@ -124,9 +124,6 @@ void _MapInCritter(Map map, Critter cr)
 {
     DL("Map in critter");
     Location loc = map.GetLocation();
-    if (loc == null) {
-        return;
-    }
 
     if (cr.NRWriKidnap == Q_QUEST_TAKEN) {
         if (loc.LocDefendersHostile) {
@@ -148,9 +145,7 @@ void _MapOutCritter(Map map, Critter cr)
 {
     UpdateQuestStatus(map, cr);
     Location loc = map.GetLocation();
-    if (loc != null) {
-        ResetHostileIfNoPlayers(loc);
-    }
+    ResetHostileIfNoPlayers(loc);
 }
 
 void ResetHostileIfNoPlayers(Location loc)
@@ -162,9 +157,7 @@ void ResetHostileIfNoPlayers(Location loc)
     Critter[] players = {};
     for (int i = 0; i < loc.GetMapCount(); i++) {
         Map map = loc.GetMapByIndex(i);
-        if (map != null) {
-            players.insertLast(map.GetCritters(CritterFindType::Players));
-        }
+        players.insertLast(map.GetCritters(CritterFindType::Players));
     }
 
     if (players.length() == 0) {
@@ -172,7 +165,7 @@ void ResetHostileIfNoPlayers(Location loc)
 
         // Если убит охранник, возрождаем его
         if (loc.NRWriGuardDead != ZERO_IDENT) {
-            Critter cr = Game.GetCritter(loc.NRWriGuardDead);
+            Critter? cr = Game.GetCritter(loc.NRWriGuardDead);
             if (cr != null && !cr.ControlledByPlayer && cr.IsDead()) {
                 loc.NRWriGuardDead = ZERO_IDENT;
                 CritterState::ToAlive(cr);
@@ -186,9 +179,7 @@ void ResetHostileIfNoPlayers(Location loc)
 void _MapCritterDead(Map map, Critter cr, Critter killer)
 {
     Location loc = map.GetLocation();
-    if (loc != null) {
-        ResetHostileIfNoPlayers(loc);
-    }
+    ResetHostileIfNoPlayers(loc);
     UpdateQuestStatus(map, null);
 }
 
@@ -197,9 +188,6 @@ void _MapCritterDead(Map map, Critter cr, Critter killer)
 bool IsHostile(Map map)
 {
     Location loc = map.GetLocation();
-    if (loc == null) {
-        return false;
-    }
 
     return loc.LocDefendersHostile;
 }
@@ -332,15 +320,12 @@ void _GuardInit(Critter cr, bool firstTime)
 [[Event]]
 void _GuardDead(Critter cr, Critter? killer)
 {
-    Map map = cr.GetMap();
+    Map? map = cr.GetMap();
     if (map == null) {
         return;
     }
 
     Location loc = map.GetLocation();
-    if (loc == null) {
-        return;
-    }
 
     loc.NRWriGuardDead = cr.Id;
     if (killer != null && !IsHostile(map)) {
@@ -353,15 +338,12 @@ void _GuardDead(Critter cr, Critter? killer)
 [[Event]]
 void _GuardRespawn(Critter cr)
 {
-    Map map = cr.GetMap();
+    Map? map = cr.GetMap();
     if (map == null) {
         return;
     }
 
     Location loc = map.GetLocation();
-    if (loc == null) {
-        return;
-    }
 
     if (loc.NRWriGuardDead == cr.Id) {
         loc.NRWriGuardDead = ZERO_IDENT;
@@ -371,12 +353,16 @@ void _GuardRespawn(Critter cr)
 [[Event]]
 EventResult _GuardAttacked(Critter cr, Critter attacker)
 {
-    Item wpn = _CritGetItemHand(attacker);
+    Item? wpn = _CritGetItemHand(attacker);
     if (wpn != null && wpn.Type == ItemType::Weapon && wpn.Weapon_Skill_1 != CritterProperty::SkillUnarmed &&
         wpn.Weapon_Skill_1 != CritterProperty::SkillMeleeWeapons) {
         // Атака не холодным оружием, остальные должны прибежать
-        if (!IsHostile(cr.GetMap())) {
-            SetHostile(cr.GetMap().GetLocation(), true);
+        Map? map = cr.GetMap();
+        if (map == null) {
+            return EventResult::StopChain;
+        }
+        if (!IsHostile(map)) {
+            SetHostile(map.GetLocation(), true);
             Messaging::SayShout(cr, TextPackKey(TextPackName::Text, "" + (STR_GUARD_SHOUT)));
         }
     }
@@ -386,17 +372,20 @@ EventResult _GuardAttacked(Critter cr, Critter attacker)
 [[ItemTrigger]]
 void t_Alarm(Critter player, StaticItem trigger, bool entered, mdir dir)
 {
-    Map map = player.GetMap();
-    Critter guard = map.GetCritter(CritterProperty::NpcRole, NPC_ROLE_GUARD, CritterFindType::Npc);
-    if (guard == null || guard.IsDead() || !entered || IsHostile(player.GetMap())) {
+    Map? map = player.GetMap();
+    if (map == null) {
+        return;
+    }
+    Critter? guard = map.GetCritter(CritterProperty::NpcRole, NPC_ROLE_GUARD, CritterFindType::Npc);
+    if (guard == null || guard.IsDead() || !entered || IsHostile(map)) {
         return;
     }
     if (player.ControlledByPlayer) {
         if (player.NRWriKidnap != 2 && player.NRWriKidnap != 4) {
             NpcPlanes::AddAttackPlane(guard, 0, player);
             Messaging::SayShout(guard, TextPackKey(TextPackName::Text, "" + (STR_GUARD_SHOUT)));
-            SetHostile(guard.GetMap().GetLocation(), true);
-            Critter npc = map.GetCritter(CritterProperty::NpcRole, NPC_ROLE_MARODEUR, CritterFindType::NonDeadNpc);
+            SetHostile(map.GetLocation(), true);
+            Critter? npc = map.GetCritter(CritterProperty::NpcRole, NPC_ROLE_MARODEUR, CritterFindType::NonDeadNpc);
             if (npc != null) {
                 NpcPlanes::AddAttackPlane(npc, 0, player);
             }
@@ -407,9 +396,12 @@ void t_Alarm(Critter player, StaticItem trigger, bool entered, mdir dir)
 [[ItemTrigger]]
 void t_CheckSneak(Critter player, StaticItem trigger, bool entered, mdir dir)
 {
-    Map map = player.GetMap();
-    Critter guard = map.GetCritter(CritterProperty::NpcRole, NPC_ROLE_GUARD, CritterFindType::Npc);
-    if (!player.ControlledByPlayer || guard == null || guard.IsDead() || !entered || IsHostile(player.GetMap())) {
+    Map? map = player.GetMap();
+    if (map == null) {
+        return;
+    }
+    Critter? guard = map.GetCritter(CritterProperty::NpcRole, NPC_ROLE_GUARD, CritterFindType::Npc);
+    if (!player.ControlledByPlayer || guard == null || guard.IsDead() || !entered || IsHostile(map)) {
         return;
     }
 
@@ -431,8 +423,8 @@ void t_CheckSneak(Critter player, StaticItem trigger, bool entered, mdir dir)
 
     NpcPlanes::AddAttackPlane(guard, 0, player);
     Messaging::SayShout(guard, TextPackKey(TextPackName::Text, "" + (STR_GUARD_SHOUT)));
-    SetHostile(guard.GetMap().GetLocation(), true);
-    Critter npc = map.GetCritter(CritterProperty::NpcRole, NPC_ROLE_MARODEUR, CritterFindType::NonDeadNpc);
+    SetHostile(map.GetLocation(), true);
+    Critter? npc = map.GetCritter(CritterProperty::NpcRole, NPC_ROLE_MARODEUR, CritterFindType::NonDeadNpc);
     if (npc != null) {
         NpcPlanes::AddAttackPlane(npc, 0, player);
     }
@@ -459,7 +451,7 @@ void _WrightDead(Critter cr, Critter? killer)
 [[DialogDemand]]
 bool d_WeaponHand(Critter player, Critter npc)
 {
-    Item item = _CritGetItemHand(player);
+    Item? item = _CritGetItemHand(player);
     if (item != null && item.Type == ItemType::Weapon) {
         return true;
     }
@@ -468,7 +460,7 @@ bool d_WeaponHand(Critter player, Critter npc)
 
 void dlg_WeaponHand(Critter player, Critter npc, string& lexems)
 {
-    Item item = _CritGetItemHand(player);
+    Item? item = _CritGetItemHand(player);
     if (item != null && item.Type == ItemType::Weapon) {
         lexems = "$weaponName@text Item" + STR_ITEM_NAME(item) + "@";
     }
@@ -477,7 +469,7 @@ void dlg_WeaponHand(Critter player, Critter npc, string& lexems)
 [[DialogResult]]
 void r_GiveWeaponHand(Critter player, Critter npc)
 {
-    Item item = _CritGetItemHand(player);
+    Item? item = _CritGetItemHand(player);
     if (item != null && item.Type == ItemType::Weapon) {
         npc.AddItem(item.ProtoId, 1);
         FavoriteItem::SetFavoriteItemPid(npc, CritterItemSlot::Main, item.ProtoId);
@@ -574,29 +566,28 @@ void UpdateQuestStatus(Map? map, Critter? cr)
 [[TimeEvent]]
 void DeleteQuestLocation(any value)
 {
-    Map map = Game.GetMap(ident(value));
+    Map? map = Game.GetMap(ident(value));
     if (map != null) {
         Location loc = map.GetLocation();
-        if (loc != null) {
-            loc.AutoGarbage = true;
-        }
+        loc.AutoGarbage = true;
     }
 }
 
 [[TimeEvent]]
 void cte_WrightAttack(Critter cr)
 {
-    Map map = cr.GetMap();
+    Map? map = cr.GetMap();
+    if (map == null) {
+        return;
+    }
     AcceptAttack(map);
 
     Critter[] marodeurs = map.GetCritters(CritterProperty::NpcRole, NPC_ROLE_MARODEUR, CritterFindType::NonDeadNpc);
     for (int i = 0; i < marodeurs.length(); i++) {
         Critter marodeur = marodeurs[i];
-        if (marodeur != null) {
-            EnemyStack::AddEnemyToStack(marodeur, cr.Id);
-            EnemyStack::AddEnemyToStack(cr, marodeur.Id);
-            NpcPlanes::AddAttackPlane(cr, 0, marodeur);
-        }
+        EnemyStack::AddEnemyToStack(marodeur, cr.Id);
+        EnemyStack::AddEnemyToStack(cr, marodeur.Id);
+        NpcPlanes::AddAttackPlane(cr, 0, marodeur);
     }
     return;
 }

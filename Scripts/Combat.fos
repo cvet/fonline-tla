@@ -1,8 +1,6 @@
 namespace Combat
 {
 
-///@ Enum DialogAnswerLink Attack = -3
-
 #if SERVER
 
 // WeaponSubtype
@@ -113,8 +111,8 @@ void runTree(CombatRes[] combatResults, int ptr)
 
 class AttackStruct
 {
-    Critter Attacker;
-    Item RealWeapon;
+    Critter? Attacker;
+    Item? RealWeapon;
     int Hx;
     int Hy;
     int Aim;
@@ -166,15 +164,16 @@ class AttackStruct
     }
 };
 
-void CombatAttack(Critter? cr, Critter target, AbstractItem weapon, int weaponMode, ProtoItem? ammo)
+void CombatAttack(Critter cr, Critter target, AbstractItem weapon, int weaponMode, ProtoItem? ammo)
 {
     if (!cr.IsAlive()) {
         return;
     }
     int use = _WeaponModeUse(weaponMode);
     int aim = _WeaponModeAim(weaponMode);
-    Item realWeapon = _CritGetItemHand(cr);
-    Map map = cr.GetMap();
+    Item? realWeapon = _CritGetItemHand(cr);
+    Map? map = cr.GetMap();
+    verify(map != null, "Combat attack requires the attacker to be on a map", cr);
     int wpnMaxDist = _WeaponMaxDist(weapon, use);
     CritterProperty skill = _WeaponSkill(weapon, use);
     if (skill == CritterProperty::SkillThrowing) {
@@ -217,7 +216,7 @@ void CombatAttack(Critter? cr, Critter target, AbstractItem weapon, int weaponMo
     bool isCritical = false;
     bool hitRandomly = false;
     int critfailFlags = 0;
-    Critter realTarget;
+    Critter? realTarget = null;
     bool isSneak = false;
     bool useNormal = false; // used to change target during RunFlyEffect
     bool useHex = false;    // used to change end hex of RunFlyEffect, i.e. for thrown weapons and rockets.
@@ -238,7 +237,7 @@ void CombatAttack(Critter? cr, Critter target, AbstractItem weapon, int weaponMo
     cr.SetDir(Game.GetDirection(critterHex, targetHex));
 
     // now we change aim:
-    if (aim == HitLocations::LocationEyes && cr != null && (cr.Dir.hex.value + 3) % 6 != target.Dir.hex.value) {
+    if (aim == HitLocations::LocationEyes && (cr.Dir.hex.value + 3) % 6 != target.Dir.hex.value) {
         aim = HitLocations::LocationHead;
     }
 
@@ -467,13 +466,13 @@ void CombatAttack(Critter? cr, Critter target, AbstractItem weapon, int weaponMo
     }
 
     if (hitRandomly) {
-        Critter randomTarget = ChooseRandomTarget(map, cr, target, wpnMaxDist);
+        Critter? randomTarget = ChooseRandomTarget(map, cr, target, wpnMaxDist);
         if (randomTarget != null) {
             realTarget = randomTarget;
-            targetHex = realTarget.Hex;
+            targetHex = randomTarget.Hex;
             attack.Aim = HitLocations::LocationUncalled;
-            realTarget.InSneakMode = false; // done here to allow combat notifications later
-            NotifyOops(cr, target, realTarget, results);
+            randomTarget.InSneakMode = false; // done here to allow combat notifications later
+            NotifyOops(cr, target, randomTarget, results);
         }
     }
     else {
@@ -484,13 +483,14 @@ void CombatAttack(Critter? cr, Critter target, AbstractItem weapon, int weaponMo
     cr.Action(CritterAction::UseWeapon, (((!isHit && isCritical && !hitRandomly) ? 1 : 0) << 8) | (aim << 4) | use, realWeapon);
 
     // animations are now played, and we're updating the hit randomly status now
-    bool changedTarget = (hitRandomly && (realTarget != null));
+    bool changedTarget = hitRandomly && realTarget != null;
 
     // commencing critical failures
     if (!isHit && isCritical && (!hitRandomly || realTarget == null)) {
         CriticalFailure(cr, weapon, use, ammo, critfailFlags, results);
         return;
     }
+    verify(realTarget != null, "Combat target must be resolved");
 
     // commencing attack, various instances
     bool criticalHit = isHit && isCritical;
@@ -1436,12 +1436,11 @@ void ApplyDamage(AttackStruct attack, Critter target, int rounds, bool isCritica
     int eff = 0;
     int msgEff = 0;
     ItemPerks weaponPerk = attack.WeaponPerk;
-    Critter attacker = attack.Attacker;
-    bool validAttacker = attacker != null;
-    Map map = target.GetMap();
+    Critter? attacker = attack.Attacker;
+    Map? map = target.GetMap();
     bool isBloodyMess = attack.BloodyMess;
     bool isCombatText = attack.CombatMessage;
-    Item realWeapon = attack.RealWeapon;
+    Item? realWeapon = attack.RealWeapon;
     int aim = attack.Aim;
     int extraMessage = 0;
     int extraMessageSelf = 0;
@@ -1453,7 +1452,7 @@ void ApplyDamage(AttackStruct attack, Critter target, int rounds, bool isCritica
         return;
     }
 
-    if (validAttacker && intentionally && target.Id != attack.TargetId) {
+    if (attacker != null && intentionally && target.Id != attack.TargetId) {
         Game.OnCritterAttacked.Fire(target, attacker);
     }
 
@@ -1463,15 +1462,13 @@ void ApplyDamage(AttackStruct attack, Critter target, int rounds, bool isCritica
     }
 
     // Check no PvP
-    if (targetIsPlayer && attackerIsPlayer && validAttacker && (attacker.IsNoPvp || target.IsNoPvp)) {
-        if (validAttacker) {
-            Messaging::Info(attacker, "No PvP.");
-        }
+    if (targetIsPlayer && attacker != null && attackerIsPlayer && (attacker.IsNoPvp || target.IsNoPvp)) {
+        Messaging::Info(attacker, "No PvP.");
         Messaging::Info(target, "No PvP.");
         return;
     }
     // Мины от игроков, ушедших на глобал
-    if (targetIsPlayer && !validAttacker && target.IsNoPvp) {
+    if (targetIsPlayer && attacker == null && target.IsNoPvp) {
         Messaging::Info(target, "No PvP.");
         return;
     }
@@ -1501,7 +1498,10 @@ void ApplyDamage(AttackStruct attack, Critter target, int rounds, bool isCritica
                 aim_ = HitLocations::LocationUncalled;
             }
             aim_--;
-            int roll = Game.Random(0, 100) + (validAttacker ? ((attacker.PerkBetterCriticals != 0 ? 20 : 0) + (attacker.IsTraitHeavyHanded ? -30 : 0)) : 0);
+            int roll = Game.Random(0, 100);
+            if (attacker != null) {
+                roll += (attacker.PerkBetterCriticals != 0 ? 20 : 0) + (attacker.IsTraitHeavyHanded ? -30 : 0);
+            }
             if (roll <= 20) {
                 roll = 0;
             }
@@ -1605,13 +1605,13 @@ void ApplyDamage(AttackStruct attack, Critter target, int rounds, bool isCritica
             UNSETFLAG(msgEff, HF_DROPPED_WEAPON);
         }
 
-        if (validAttacker && attackerIsPlayer) {
+        if (attacker != null && attackerIsPlayer) {
             Scores::AddScore(attacker, EScores::Sniper, 1);
         }
     } // end isCritical
 
     if (weaponPerk == ItemPerks::EnhancedKnockout) {
-        if (validAttacker) {
+        if (attacker != null) {
             if (Game.Random(1, 100) <= (attacker.Strength) - 8) {
                 SETFLAG(eff, HF_KNOCKOUT);
             }
@@ -1631,7 +1631,7 @@ void ApplyDamage(AttackStruct attack, Critter target, int rounds, bool isCritica
         targetDT /= 5;
     }
 
-    targetDR += (validAttacker ? (attacker.IsTraitFinesse ? 30 : 0) : 0);
+    targetDR += (attacker != null ? (attacker.IsTraitFinesse ? 30 : 0) : 0);
     targetDR += attack.DRMod; // always
     targetDR = CLAMP(targetDR, 0, 100);
     int dmgMin = attack.DmgMin + attack.BonusDmg;
@@ -1650,11 +1650,11 @@ void ApplyDamage(AttackStruct attack, Critter target, int rounds, bool isCritica
             totalDmg += rawDmg;
         }
     }
-    if (validAttacker) {
-        if (attack.Attacker.PerkLivingAnatomy != 0 && !(bt == BodyTypes::Alien || bt == BodyTypes::Robot)) {
+    if (attacker != null) {
+        if (attacker.PerkLivingAnatomy != 0 && !(bt == BodyTypes::Alien || bt == BodyTypes::Robot)) {
             totalDmg += 5; // yes, pulse grenade works
         }
-        if (attack.Attacker.PerkPyromaniac != 0 && dmgType == DamageTypes::Fire) {
+        if (attacker.PerkPyromaniac != 0 && dmgType == DamageTypes::Fire) {
             totalDmg += 5;
         }
     }
@@ -1675,7 +1675,7 @@ void ApplyDamage(AttackStruct attack, Critter target, int rounds, bool isCritica
     // code for dropping weapon, adapted from critical failures
 
     if (FLAG(eff, HF_DROPPED_WEAPON)) {
-        Item realWeaponTarget = _CritGetItemHand(target);
+        Item? realWeaponTarget = _CritGetItemHand(target);
         if (realWeaponTarget != null) {
             if (realWeaponTarget.Stackable) {
                 Item dropped = map.AddItem(target.Hex, realWeaponTarget.ProtoId, 1);
@@ -1807,7 +1807,7 @@ void ApplyDamage(AttackStruct attack, Critter target, int rounds, bool isCritica
             }
         }
         // Score
-        if (attack.scoreUnarmed && validAttacker && attackerIsPlayer) {
+        if (attack.scoreUnarmed && attacker != null && attackerIsPlayer) {
             Scores::AddScore(attacker, EScores::UnarmedDamage, totalDmg);
         }
     }
@@ -1820,7 +1820,7 @@ void ApplyDamage(AttackStruct attack, Critter target, int rounds, bool isCritica
     }
 
     int armorDr = target.DamageResistance[dmgType];
-    Item armor = _CritGetItemArmor(target);
+    Item? armor = _CritGetItemArmor(target);
     if (armor != null && targetIsPlayer) {
         Repair::DeteriorateItem(target, armor, ((100 - armorDr) * rounds + totalDmg) / 3);
     }
@@ -1896,7 +1896,7 @@ void ApplyDamage(AttackStruct attack, Critter target, int rounds, bool isCritica
             Scores::AddScore(target, EScores::Zomby, 1);
         }
 
-        if (validAttacker && attackerIsPlayer) {
+        if (attacker != null && attackerIsPlayer) {
             Scores::AddScore(attacker, EScores::Killer, 1);
             if (targetIsPlayer) {
                 Scores::AddScore(attacker, EScores::Maniac, 1);
@@ -1906,7 +1906,7 @@ void ApplyDamage(AttackStruct attack, Critter target, int rounds, bool isCritica
             }
         }
 
-        if (validAttacker && !attackerIsPlayer) {
+        if (attacker != null && !attackerIsPlayer) {
             EnemyStack::EraseEnemyFromStack(attacker, target.Id);
         }
 
@@ -2070,7 +2070,7 @@ void ApplyDamage(AttackStruct attack, Critter target, int rounds, bool isCritica
     AddEff(target, sendEff, results);
 
     // poisoning and irradiating:
-    if (validAttacker) {
+    if (attacker != null) {
         int poison = attacker.Toxic;
         int radiation = attacker.Radioactive;
         if (poison != 0 || radiation != 0) {
@@ -2113,7 +2113,7 @@ void ApplyDamage(AttackStruct attack, Critter target, int rounds, bool isCritica
     }
 }
 
-void CommenceExplosion(AttackStruct attack, Map map, mpos targetHex, Critter target, hstring weapPid, hstring ammoPid, bool isCritical, ident intentionallyId,
+void CommenceExplosion(AttackStruct attack, Map map, mpos targetHex, Critter? target, hstring weapPid, hstring ammoPid, bool isCritical, ident intentionallyId,
                        bool isRocket, CombatRes[] results)
 {
     if (ammoPid == Content::Item::emp_rocket) {
@@ -2128,6 +2128,9 @@ void CommenceExplosion(AttackStruct attack, Map map, mpos targetHex, Critter tar
 void CommenceExplosion(AttackStruct attack, Map map, mpos targetHex, Critter? target, hstring weapPid, bool isCritical, ident intentionallyId, bool isRocket,
                        CombatRes[] results)
 {
+    Critter? attacker = attack.Attacker;
+    ident attackerId = attacker != null ? attacker.Id : ZERO_IDENT;
+
     int radius = (isRocket ? 3 : 2);
     if (weapPid == Content::Item::molotov_cocktail) {
         Effects::RunEffect(map, Content::Item::explode_fire_big, targetHex, 2);
@@ -2142,10 +2145,10 @@ void CommenceExplosion(AttackStruct attack, Map map, mpos targetHex, Critter? ta
         Effects::RunEffect(map, Content::Item::explode_plasma, targetHex, 2);
     }
     else if (weapPid == Content::Item::smoke_grenade) {
-        SmokeGrenade::SmokeBlast(map, targetHex, Content::Item::smoke, (attack.Attacker != null ? attack.Attacker.Id : ZERO_IDENT));
+        SmokeGrenade::SmokeBlast(map, targetHex, Content::Item::smoke, attackerId);
     }
     else if (weapPid == Content::Item::mustard_gas_grenade) {
-        SmokeGrenade::SmokeBlast(map, targetHex, Content::Item::mustard_gas, (attack.Attacker != null ? attack.Attacker.Id : ZERO_IDENT));
+        SmokeGrenade::SmokeBlast(map, targetHex, Content::Item::mustard_gas, attackerId);
     }
     else if (weapPid == Content::Item::emp_rocket) {
         Effects::RunEffect(map, Content::Item::explode_emp, targetHex, 1);
@@ -2163,11 +2166,10 @@ void CommenceExplosion(AttackStruct attack, Map map, mpos targetHex, Critter? ta
 
     Effects::QuakeScreen(map);
     Critter[] critsHit = map.GetCrittersInRadius(targetHex, radius, CritterFindType::NonDead);
-    bool validTarget = target != null;
-    ident targetId = (validTarget ? target.Id : ZERO_IDENT);
-    bool intentionally = (attack.Attacker != null && attack.Attacker.ControlledByPlayer || targetId == intentionallyId);
+    ident targetId = (target != null ? target.Id : ZERO_IDENT);
+    bool intentionally = (attacker != null && attacker.ControlledByPlayer || targetId == intentionallyId);
 
-    if (validTarget) {
+    if (target != null) {
         ApplyDamage(attack, target, 1, isCritical, intentionally, results);
     }
 
@@ -2175,7 +2177,7 @@ void CommenceExplosion(AttackStruct attack, Map map, mpos targetHex, Critter? ta
     attack.Hy = targetHex.y;
 
     for (int i = 0; i < critsHit.length(); i++) {
-        if (!validTarget || targetId != critsHit[i].Id) {
+        if (target == null || targetId != critsHit[i].Id) {
             ApplyDamage(attack, critsHit[i], 1, false, intentionally, results);
         }
     }
@@ -2198,12 +2200,13 @@ void CriticalFailure(Critter cr, AbstractItem weap, int weaponUse, ProtoItem? am
     // 0x00800000 lost next turn OK
     // 0x02000000 knocked down OK
 
-    Item weapon = cast<Item>(weap);
+    AbstractItem weapon = weap;
     int totalDmg = 0;
     bool tookDamage = false;
-    Item realWeapon = _CritGetItemHand(cr);
-    bool wpnIsRemoved = (weapon != null) && _WeaponRemove(weapon, weaponUse);
-    Map map = cr.GetMap();
+    Item? realWeapon = _CritGetItemHand(cr);
+    bool wpnIsRemoved = _WeaponRemove(weapon, weaponUse);
+    Map? map = cr.GetMap();
+    verify(map != null, "Critical failure requires the attacker to be on a map", cr);
 
     if (cr.IsNoDrop) {
         UNSETFLAG(eff, MF_WEAPON_DROPPED);
@@ -2211,7 +2214,6 @@ void CriticalFailure(Critter cr, AbstractItem weap, int weaponUse, ProtoItem? am
 
     if (FLAG(eff, MF_HIT_SELF) || FLAG(eff, MF_WEAPON_EXPLODED)) // only one bullet because burst weapons do not have the ability
     {
-        bool validAmmo = ammo != null;
         DamageTypes dmgType = _WeaponDmgType(weapon, weaponUse);
         int targetDR = cr.DamageResistance[dmgType];
         int targetDT = cr.DamageThreshold[dmgType];
@@ -2221,12 +2223,12 @@ void CriticalFailure(Critter cr, AbstractItem weap, int weaponUse, ProtoItem? am
         }
 
         targetDR += (cr.IsTraitFinesse ? 30 : 0);
-        targetDR += (validAmmo ? ammo.Ammo_DrMod : 0);
+        targetDR += (ammo != null ? ammo.Ammo_DrMod : 0);
         targetDR = CLAMP(targetDR, 0, 100);
         int dmgMin = _WeaponDmgMin(weapon, weaponUse);
         int dmgMax = _WeaponDmgMax(weapon, weaponUse);
-        int dmgMul = (validAmmo ? ammo.Ammo_DmgMult : 1); // technically, should be *2
-        int dmgDiv = (validAmmo ? ammo.Ammo_DmgDiv : 1);  // technically, should be *2
+        int dmgMul = (ammo != null ? ammo.Ammo_DmgMult : 1); // technically, should be *2
+        int dmgDiv = (ammo != null ? ammo.Ammo_DmgDiv : 1);  // technically, should be *2
         totalDmg = Game.Random(dmgMin, dmgMax) + 2 * cr.PerkBonusRangedDamage;
         totalDmg *= dmgMul;
         totalDmg /= dmgDiv;
@@ -2413,7 +2415,7 @@ void CriticalFailure(Critter cr, AbstractItem weap, int weaponUse, ProtoItem? am
 
 void InjureCritter(Critter cr, int dmg, DamageTypes dmgType, mdir dir, ident attackerId)
 {
-    Critter attacker = null;
+    Critter? attacker = null;
     if (attackerId != ZERO_IDENT && cr.Id != attackerId) {
         attacker = Game.GetCritter(attackerId);
     }
@@ -2422,7 +2424,7 @@ void InjureCritter(Critter cr, int dmg, DamageTypes dmgType, mdir dir, ident att
     attack.Attacker = attacker;
 
     mpos hexA = cr.Hex;
-    Map map = cr.GetMap();
+    Map? map = cr.GetMap();
     if (map != null) {
         map.MoveHexByDir(hexA, mdir(hdir((dir.hex.value + 3) % 6)), 1);
     }
@@ -2459,7 +2461,7 @@ void InjureCritter(Critter cr, int dmg, DamageTypes dmgType, mdir dir, ident att
         return;
     }
 
-    Critter attacker = null;
+    Critter? attacker = null;
     if (attackerId != ZERO_IDENT && cr.Id != attackerId) {
         attacker = Game.GetCritter(attackerId);
     }
@@ -2468,7 +2470,7 @@ void InjureCritter(Critter cr, int dmg, DamageTypes dmgType, mdir dir, ident att
     attack.Attacker = attacker;
 
     mpos hexA = cr.Hex;
-    Map map = cr.GetMap();
+    Map? map = cr.GetMap();
     if (map != null) {
         map.MoveHexByDir(hexA, mdir(hdir((dir.hex.value + 3) % 6)), 1);
     }
@@ -2618,7 +2620,8 @@ int RawToHit(Critter cr, Critter target, Item? weapon, int weaponUse, ProtoItem?
 
         toHit += acc;
 
-        Map map = cr.GetMap();
+        Map? map = cr.GetMap();
+        verify(map != null, "To-hit calculation requires the attacker to be on a map", cr);
         // TODO: const question
         blockers = map.GetCrittersInPath(cr.Hex, target.Hex, 0.0f, dist, CritterFindType::NonDead).length();
         if (!target.IsKnockout()) {
@@ -2665,7 +2668,9 @@ int RawToHit(Critter cr, Critter target, Item? weapon, int weaponUse, ProtoItem?
         toHit += 15;
     }
     if (skill != CritterProperty::SkillUnarmed && skill != CritterProperty::SkillMeleeWeapons) {
-        toHit -= SmokeGrenade::GetSmokePenalty(cr.GetMap(), cr, target);
+        Map? map = cr.GetMap();
+        verify(map != null, "To-hit smoke penalty requires the attacker to be on a map", cr);
+        toHit -= SmokeGrenade::GetSmokePenalty(map, cr, target);
     }
 
     return toHit;
@@ -2729,9 +2734,6 @@ Critter? ChooseRandomTarget(Map map, Critter cr, Critter target, int wpnMaxDist)
     }
 
     for (int i = 0; i < start; i++) {
-        if (crits[i] == null) {
-            continue;
-        }
         if (crits[i].Id == cr.Id || crits[i].Id == target.Id) {
             continue;
         }

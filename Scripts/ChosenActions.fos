@@ -33,24 +33,20 @@ void InitChosenActions()
 
 int GetChosenActions(any[] & actions)
 {
-    if (actions != null) {
-        actions = ChosenActions.clone();
-    }
+    actions = ChosenActions.clone();
     return ChosenActions.length();
 }
 
 void SetChosenActions(any[] actions)
 {
     ChosenActions.resize(0);
-    if (actions != null) {
-        Assert(actions.length() % 7 == 0);
-        ChosenActions = actions.clone();
-    }
+    verify(actions.length() % 7 == 0, "Assertion failed");
+    ChosenActions = actions.clone();
 }
 
 void SetAction(any[] action, bool append, bool toBeginning)
 {
-    Assert(action.length() == 7);
+    verify(action.length() == 7, "Assertion failed");
 
     if (!append) {
         ChosenActions.resize(0);
@@ -88,12 +84,12 @@ void SetAction(any[] action, bool append, bool toBeginning)
 [[Event]]
 void ChosenProcess()
 {
-    Critter chosen = Chosen;
-    if (chosen == null) {
+    if (!HasChosen) {
         return;
     }
+    Critter chosen = Chosen;
 
-    if (CurMap != null) {
+    if (HasCurMap) {
         // Roof
         CurMap.SetHiddenRoof(chosen.Hex);
 
@@ -171,13 +167,13 @@ void ChosenProcess()
         bool isRun = (ChosenActions[3] != 0);
         int cut = ChosenActions[4];
 
-        if (CurMap == null) {
+        if (!HasCurMap) {
             break;
         }
 
         // Move to critter
         if (actionType == Tla::ChosenMoveToCrit) {
-            Critter cr = Game.GetCritter(ChosenActions[1]);
+            Critter? cr = Game.GetCritter(ChosenActions[1]);
             if (cr != null) {
                 hex = cr.Hex;
             }
@@ -244,7 +240,7 @@ void ChosenProcess()
     case Tla::ChosenDir: {
         bool cw = (ChosenActions[1] == 0);
 
-        if (CurMap == null) {
+        if (!HasCurMap) {
             break;
         }
 
@@ -292,19 +288,19 @@ void ChosenProcess()
         int aim = (rate >> 4);
 
         // Find item
-        AbstractItem item = (itemId != ZERO_IDENT ? cast<AbstractItem>(chosen.GetItem(itemId)) : CritterItem::GetSlotItemProto(chosen));
+        AbstractItem? item = (itemId != ZERO_IDENT ? cast<AbstractItem>(chosen.GetItem(itemId)) : CritterItem::GetSlotItemProto(chosen));
         if (item == null) {
             break;
         }
 
-        Item realItem = cast<Item>(item);
-        Item mainslotItem = chosen.GetItem(ItemProperty::CritterSlot, CritterItemSlot::Main);
+        Item? realItem = cast<Item>(item);
+        Item? mainslotItem = chosen.GetItem(ItemProperty::CritterSlot, CritterItemSlot::Main);
         bool isMainItem = (realItem == null || (mainslotItem != null && realItem.Id == mainslotItem.Id));
 
         // Find target
-        Critter targetCr;
-        Item targetItem;
-        Item targetSelfItem;
+        Critter? targetCr;
+        Item? targetItem;
+        Item? targetSelfItem;
         if (targetType == TARGET_SELF) {
             targetCr = chosen;
         }
@@ -352,7 +348,7 @@ void ChosenProcess()
         if (isAttack) {
             // ChosenActions::SetChosenActions({Tla::ChosenUseItem, useItem.Id, 0, TARGET_CRITTER, cr.Id, isAttack ? mode : USE_USE, 0});
 
-            if (CurMap == null) {
+            if (!HasCurMap) {
                 break;
             }
             if (isSelf) {
@@ -361,7 +357,9 @@ void ChosenProcess()
             if (item.Type != ItemType::Weapon) {
                 break;
             }
-            if (targetCr.IsDead()) {
+            verify(targetCr != null, "Attack action requires a target critter");
+            Critter attackTarget = targetCr;
+            if (attackTarget.IsDead()) {
                 break;
             }
             if (!chosen.IsUnlimitedAmmo && item.Weapon_MaxAmmoCount > 0 && item.AmmoCount == 0) {
@@ -392,7 +390,7 @@ void ChosenProcess()
                 Parameters::SetWeaponMode(item, USE_PRIMARY);
             }
 
-            Gui::Screen screen = Gui::GetActiveScreen();
+            Gui::Screen? screen = Gui::GetActiveScreen();
             if (screen == null || screen.Num == GuiScreen::None || screen.Num == GuiScreen::Game) {
                 Gui::Cursor = CursorType::UseWeapon;
             }
@@ -407,7 +405,7 @@ void ChosenProcess()
                 }
                 if (item.Weapon_Caliber != 0) {
                     hstring ammoPid = item.AmmoPid != EMPTY_HSTRING ? item.AmmoPid : item.Weapon_DefaultAmmoPid;
-                    Item ammoCaliber;
+                    Item? ammoCaliber;
                     Item[] items = chosen.GetItems(ItemProperty::Type, ItemType::Ammo);
                     for (int i = 0; i < items.length(); i++) {
                         if (items[i].ProtoId == ammoPid) {
@@ -427,6 +425,7 @@ void ChosenProcess()
                             break;
                         }
                     }
+                    verify(targetSelfItem != null, "Reload action requires ammo item");
                     targetId = targetSelfItem.Id;
                 }
                 /*if( item.Weapon_Caliber )
@@ -447,6 +446,9 @@ void ChosenProcess()
                 }
             }
 
+            if (realItem == null) {
+                break;
+            }
             CurPlayer.ServerCall.ReloadWeapon(realItem.Id, targetId);
             chosen.CurrentAp -= apCost * AP_DIVIDER;
         }
@@ -458,15 +460,17 @@ void ChosenProcess()
         }
 
         // Find Target
-        if (!isSelf && CurMap != null) {
+        if (!isSelf && HasCurMap) {
             int hx, hy;
             if (targetCr != null) {
                 hx = targetCr.Hex.x;
                 hy = targetCr.Hex.y;
             }
             else {
-                hx = targetItem.Hex.x;
-                hy = targetItem.Hex.y;
+                verify(targetItem != null, "Use action requires a target item");
+                Item resolvedTargetItem = targetItem;
+                hx = resolvedTargetItem.Hex.x;
+                hy = resolvedTargetItem.Hex.y;
             }
 
             int maxDist = 0;
@@ -534,8 +538,10 @@ void ChosenProcess()
                     targetItem = targetSelfItem;
                 }
 
-                if (targetItem.IsScenery) {
-                    CurPlayer.ServerCall.UseItemOn(itemId, ZERO_IDENT, ZERO_IDENT, targetItem.ProtoId, targetItem.Hex, param);
+                verify(targetItem != null, "Use action requires a target item");
+                Item resolvedTargetItem = targetItem;
+                if (resolvedTargetItem.IsScenery) {
+                    CurPlayer.ServerCall.UseItemOn(itemId, ZERO_IDENT, ZERO_IDENT, resolvedTargetItem.ProtoId, resolvedTargetItem.Hex, param);
                 }
                 else {
                     CurPlayer.ServerCall.UseItemOn(itemId, ZERO_IDENT, targetId, EMPTY_HSTRING, ZERO_MPOS, param);
@@ -570,9 +576,9 @@ void ChosenProcess()
         CritterItemSlot toSlot = CritterItemSlot(int(ChosenActions[3]));
         bool isSecondTry = (ChosenActions[5] != 0);
 
-        Assert(itemCount > 0);
+        verify(itemCount > 0, "Assertion failed");
 
-        Item item = chosen.GetItem(itemId);
+        Item? item = chosen.GetItem(itemId);
         if (item == null) {
             break;
         }
@@ -588,7 +594,7 @@ void ChosenProcess()
             }
         }
 
-        Item itemSwap = null;
+        Item? itemSwap = null;
         if (toSlot != CritterItemSlot::Inventory && toSlot != CritterItemSlot::Outside) {
             itemSwap = chosen.GetItem(ItemProperty::CritterSlot, toSlot);
         }
@@ -641,22 +647,25 @@ void ChosenProcess()
         int itemCont = ChosenActions[2];
         int count = ChosenActions[3];
 
-        Assert(itemCont == ITEMS_PICKUP || itemCont == ITEMS_PICKUP_FROM);
-        Assert(count > 0);
+        verify(itemCont == ITEMS_PICKUP || itemCont == ITEMS_PICKUP_FROM, "Assertion failed");
+        verify(count > 0, "Assertion failed");
 
         Item[] cont = ClientItems::RefreshItemsCollection(itemCont);
-        Item item;
+        Item? item;
         for (int i = 0; i < cont.length() && item == null; i++) {
             if (cont[i].Id == itemId) {
                 item = cont[i];
             }
+        }
+        if (item == null) {
+            break;
         }
 
         if (count > item.Count) {
             break;
         }
 
-        Entity contEntity;
+        Entity? contEntity;
         TransferTypes transferType = chosen.TransferType;
         ident transferContainerId = chosen.TransferContainerId;
         if (transferContainerId != ZERO_IDENT) {
@@ -672,6 +681,9 @@ void ChosenProcess()
             // Container disappeared
             break;
         }
+        if (contEntity == null) {
+            break;
+        }
 
         auto colType = ClientItems::GetCollectionFromType(itemCont);
         bool take = (colType == ClientItems::Collection::Loot);
@@ -684,8 +696,12 @@ void ChosenProcess()
         int apCost = Settings.Movement.RtApCostMoveItemContainer;
         CHECK_NEED_AP(apCost);
 
-        if (take || cast<Critter>(to) != null) {
-            Critter toCr = take ? chosen : cast<Critter>(to);
+        Critter? toCritter = cast<Critter?>(to);
+        if (take || toCritter != null) {
+            Critter? toCr = take ? chosen : toCritter;
+            if (toCr == null) {
+                break;
+            }
             if (int(toCr.ItemsWeight) + item.Weight * count > toCr.CarryWeight) {
                 Messaging::Info(TextPackKey(TextPackName::Game, "" + ((take ? MsgStr::StrOverweight : MsgStr::StrOvervolume))));
                 break;
@@ -747,10 +763,10 @@ void ChosenProcess()
         ident itemId = ChosenActions[2];
         bool isInv = (ChosenActions[3] > 0);
 
-        Item itemAction = null;
+        Item? itemAction = null;
 
         if (isInv) {
-            Item item = chosen.GetItem(itemId);
+            Item? item = chosen.GetItem(itemId);
             if (item == null) {
                 break;
             }
@@ -759,18 +775,18 @@ void ChosenProcess()
                 // TODO: запись и чтение голодисков. см CHOSEN_USE_SKL_ON_ITEM cr.cpp
                 break;
             }
-            CurPlayer.ServerCall.UseSkill(skill, ZERO_IDENT, itemAction.Id, EMPTY_HSTRING, ZERO_MPOS);
+            CurPlayer.ServerCall.UseSkill(skill, ZERO_IDENT, item.Id, EMPTY_HSTRING, ZERO_MPOS);
         }
         else {
-            Item item = Game.GetItem(itemId);
+            Item? item = Game.GetItem(itemId);
             if (item == null) {
                 break;
             }
             itemAction = item;
 
-            if (CurMap != null) {
-                int hx = itemAction.Hex.x;
-                int hy = itemAction.Hex.y;
+            if (HasCurMap) {
+                int hx = item.Hex.x;
+                int hy = item.Hex.y;
                 int dist = Game.GetDistance(chosen.Hex, mpos(hx, hy));
                 int useDist = 1 + chosen.Multihex;
                 if (dist > useDist) {
@@ -785,7 +801,7 @@ void ChosenProcess()
             }
             int apCost = Settings.Movement.RtApCostUseSkill;
             CHECK_NEED_AP(apCost);
-            CurPlayer.ServerCall.UseSkill(skill, ZERO_IDENT, itemAction.Id, EMPTY_HSTRING, ZERO_MPOS);
+            CurPlayer.ServerCall.UseSkill(skill, ZERO_IDENT, item.Id, EMPTY_HSTRING, ZERO_MPOS);
         }
     } break;
     case Tla::ChosenUseSklOnScen: {
@@ -802,10 +818,13 @@ void ChosenProcess()
         CritterProperty skill = CritterProperty(int(ChosenActions[1]));
         ident crId = ChosenActions[2];
 
-        Critter cr = (crId != ZERO_IDENT ? Game.GetCritter(crId) : chosen);
+        Critter? cr = (crId != ZERO_IDENT ? Game.GetCritter(crId) : chosen);
+        if (cr == null) {
+            break;
+        }
 
         if (cr.Id != chosen.Id) {
-            if (CurMap == null) {
+            if (!HasCurMap) {
                 break;
             }
 
@@ -840,7 +859,7 @@ void ChosenProcess()
     case Tla::ChosenTalkNpc: {
         ident crId = ChosenActions[1];
 
-        Critter cr = Game.GetCritter(crId);
+        Critter? cr = Game.GetCritter(crId);
         if (cr == null) {
             break;
         }
@@ -882,7 +901,7 @@ void ChosenProcess()
         int hy = ChosenActions[3];
         ident itemId = ChosenActions[4];
 
-        if (CurMap == null) {
+        if (!HasCurMap) {
             break;
         }
 
@@ -911,7 +930,7 @@ void ChosenProcess()
         CurPlayer.ServerCall.PickItem(mpos(hx, hy), pid);
 
         if (itemId != ZERO_IDENT) {
-            Item item = Game.GetItem(itemId);
+            Item? item = Game.GetItem(itemId);
             if (item != null) {
                 (Game.OnCritterActionEx.Fire(true, chosen, CritterAction::PickItem, 0, item) == EventResult::ContinueChain);
             }
@@ -921,11 +940,11 @@ void ChosenProcess()
         ident crId = ChosenActions[1];
         bool isLoot = (ChosenActions[2] == 0);
 
-        if (CurMap == null) {
+        if (!HasCurMap) {
             break;
         }
 
-        Critter cr = Game.GetCritter(crId);
+        Critter? cr = Game.GetCritter(crId);
         if (cr == null) {
             break;
         }
@@ -970,9 +989,9 @@ void ChosenProcess()
     }
 }
 
-bool UseSkillOnScenerySuccess(CritterProperty skill, Critter? chosen, hstring sceneryProto, int hx, int hy)
+bool UseSkillOnScenerySuccess(CritterProperty skill, Critter chosen, hstring sceneryProto, int hx, int hy)
 {
-    if (CurMap != null && chosen != null) {
+    if (HasCurMap) {
         int dist = Game.GetDistance(chosen.Hex, mpos(hx, hy));
         int useDist = 1 + chosen.Multihex;
         if (dist > useDist) {
@@ -1000,9 +1019,9 @@ bool UseSkillOnScenerySuccess(CritterProperty skill, Critter? chosen, hstring sc
         return;
 
     if( !cr.IsAlive() )
-        ThrowException( "Client is not alive", client );
+        throw( "Client is not alive", client );
     if( enable && Time::IsTimeoutActive( cr.TimeoutSneak ) )
-        ThrowException( "Sneak timeout", client );
+        throw( "Sneak timeout", client );
 
     if( enable )
         cr.TimeoutSneak = SNEAK_TIMEOUT( client );

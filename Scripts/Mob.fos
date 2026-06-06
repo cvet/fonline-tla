@@ -94,7 +94,12 @@ void _MobInit(Critter npc, bool firstTime)
 {
     npc.IsNoHome = true;
 
-    hstring locPid = npc.GetMap().GetLocation().ProtoId;
+    Map? map = npc.GetMap();
+    if (map == null) {
+        return;
+    }
+
+    hstring locPid = map.GetLocation().ProtoId;
     if (!LOCATION_IS_CITY(locPid)) {
         npc.ReplicationTime = -1; // Newer
     }
@@ -317,7 +322,7 @@ void _OnMessage(Critter npc, Critter fromCrit, int message, any value)
     }
 
     if (message == MSG_GROUP_ATTACK) {
-        Critter target = Game.GetCritter(value);
+        Critter? target = Game.GetCritter(value);
         if (target == null) {
             return;
         }
@@ -344,9 +349,13 @@ void _Idle_Impl(Critter npc)
     }
 }
 
-[[TimeEvent]]
+[[TimeEvent]] [[Async]]
 void _Idle(Critter npc)
 {
+    if (!Sync::LockCritterWithMap(npc)) {
+        return;
+    }
+
     _Idle_Impl(npc);
 }
 
@@ -356,10 +365,13 @@ void _Idle(Critter npc)
 [[Event]]
 EventResult _PlaneBegin(Critter npc, int planeId, int reason, Critter someCr, Item someItem)
 {
-    NpcPlanes::NpcPlane plane = NpcPlanes::GetCritterPlane(npc, planeId);
+    NpcPlanes::NpcPlane? plane = NpcPlanes::GetCritterPlane(npc, planeId);
+    if (plane == null) {
+        return EventResult::StopChain;
+    }
 
     if (plane.Type == AI_PLANE_ATTACK) {
-        Critter target = Game.GetCritter(plane.Attack_TargId);
+        Critter? target = Game.GetCritter(plane.Attack_TargId);
         if (target == null) {
             return EventResult::StopChain;
         }
@@ -373,7 +385,12 @@ EventResult _PlaneBegin(Critter npc, int planeId, int reason, Critter someCr, It
             if (distantion <= DISTANCE_ATTACK) {
                 // если противник подошел достаточно близко, то разрешаем атаку
                 // анализ на дальность
-                int pathLength = npc.GetMap().GetPathLength(npc, target.Hex, 1, null);
+                Map? map = npc.GetMap();
+                if (map == null) {
+                    return EventResult::StopChain;
+                }
+
+                int pathLength = map.GetPathLength(npc, target.Hex, 1, null);
                 // если пройти нельзя, то не идем
                 if (pathLength == 0) {
                     return EventResult::StopChain;

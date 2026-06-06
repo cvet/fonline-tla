@@ -44,10 +44,18 @@ namespace HostileLocationQuest // Sort 2
 #define _SetPlayerId           #(map, crId)(map.HostileLQPlayerId = crId)
 #define _SetVarNum             #(map, varNum)(map.HostileLQVarNum = varNum)
 #define _InfoFromMap           #(map)(HostileLocationInfo(_GetPlayerId(map), _GetVarNum(map)))
-#define _InfoFromCr            #(cr)(cr.GetMap() != null ? HostileLocationInfo(_GetPlayerId(cr.GetMap()), _GetVarNum(cr.GetMap())) : null)
 
 // #define DL #(s) (Game.Log(s))
 #define DL #(s)
+
+HostileLocationInfo? InfoFromCritter(Critter cr)
+{
+    Map? map = cr.GetMap();
+    if (map == null) {
+        return null;
+    }
+    return HostileLocationInfo(_GetPlayerId(map), _GetVarNum(map));
+}
 
 class HostileLocationInfo
 {
@@ -75,11 +83,17 @@ class HostileLocationInfo
 
     bool Serialized()
     {
-        return Game.GetCritter(PlayerId).HostileLQData.exists(QVarNum);
+        Critter? player = Game.GetCritter(PlayerId);
+        return player != null && player.HostileLQData.exists(QVarNum);
     }
 
     void Save()
     {
+        Critter? player = Game.GetCritter(PlayerId);
+        if (player == null) {
+            return;
+        }
+
         auto save = Serializator::Serializator();
         save.Set(PlayerId);
         save.Set(QVarNum);
@@ -90,15 +104,20 @@ class HostileLocationInfo
         save.Set(LocY);
         save.Set(CoordDelta);
         save.Set(LocCreated);
-        auto hostileLQData = Game.GetCritter(PlayerId).HostileLQData.clone();
+        auto hostileLQData = player.HostileLQData.clone();
         hostileLQData[QVarNum] = save.GetData();
-        Game.GetCritter(PlayerId).HostileLQData = hostileLQData;
+        player.HostileLQData = hostileLQData;
     }
 
     void Load()
     {
+        Critter? player = Game.GetCritter(PlayerId);
+        if (player == null) {
+            return;
+        }
+
         auto load = Serializator::Serializator();
-        if (load.SetData(Game.GetCritter(PlayerId).HostileLQData.get(QVarNum, array<uint8>())) == 0) {
+        if (load.SetData(player.HostileLQData.get(QVarNum, array<uint8>())) == 0) {
             return;
         }
         load.Get(PlayerId);
@@ -114,9 +133,14 @@ class HostileLocationInfo
 
     void Erase()
     {
-        auto hostileLQData = Game.GetCritter(PlayerId).HostileLQData.clone();
+        Critter? player = Game.GetCritter(PlayerId);
+        if (player == null) {
+            return;
+        }
+
+        auto hostileLQData = player.HostileLQData.clone();
         hostileLQData.remove(QVarNum);
-        Game.GetCritter(PlayerId).HostileLQData = hostileLQData;
+        player.HostileLQData = hostileLQData;
     }
 
     bool CreateHostileLocation()
@@ -125,7 +149,7 @@ class HostileLocationInfo
             return false; // Игрок неизвестен или локация создана ранее, или код прототипа неизвестен
         }
 
-        Critter player = Game.GetCritter(PlayerId);
+        Critter? player = Game.GetCritter(PlayerId);
         if (player == null) {
             return false; // Не найден игрок
         }
@@ -134,9 +158,6 @@ class HostileLocationInfo
             Location::CreateLocation(LocPid,
                                      ipos(LocX + Game.Random(-1 * int(CoordDelta), CoordDelta), LocY + Game.Random(-1 * int(CoordDelta), CoordDelta)),
                                      null);
-        if (loc == null) {
-            return false; // Ошибка при создании локации
-        }
 
         LocId = loc.Id;
         DL("Location created ok. LocId = " + LocId);
@@ -173,7 +194,7 @@ class HostileLocationInfo
         }
 
         DL("Locvald? LocId" + LocId);
-        Location loc = Game.GetLocation(LocId);
+        Location? loc = Game.GetLocation(LocId);
         if (loc == null) {
             return 0;
         }
@@ -203,7 +224,7 @@ class HostileLocationInfo
 
     void ResetQuest()
     {
-        Critter player = Game.GetCritter(PlayerId);
+        Critter? player = Game.GetCritter(PlayerId);
         if (player != null) {
             player.SetAsInt(CritterProperty(QVarNum), QUEST_FAIL_LOC_DELETED);
 
@@ -211,7 +232,7 @@ class HostileLocationInfo
                 player.SetAsInt(CritterProperty(CVarNum), 0);
             }
         }
-        Location loc = Game.GetLocation(LocId);
+        Location? loc = Game.GetLocation(LocId);
         if (loc != null) {
             loc.AutoGarbage = true;
         }
@@ -221,7 +242,7 @@ class HostileLocationInfo
     void CompleteQuest()
     {
         DL("complete quest called");
-        Critter player = Game.GetCritter(PlayerId);
+        Critter? player = Game.GetCritter(PlayerId);
         if (player != null) {
             player.SetAsInt(CritterProperty(QVarNum), QUEST_COMPLETE);
             DL("counter quest called");
@@ -232,7 +253,7 @@ class HostileLocationInfo
                 player.SetAsInt(CritterProperty(CVarNum), count);
             }
         }
-        Location loc = Game.GetLocation(LocId);
+        Location? loc = Game.GetLocation(LocId);
         if (loc != null) {
             loc.AutoGarbage = true;
         }
@@ -250,7 +271,7 @@ class HostileLocationInfo
 void ResetHostileLoc(any[] values) // Очистка
 {
     HostileLocationInfo info = HostileLocationInfo(values[0], values[1]);
-    if (info != null && info.Serialized()) {
+    if (info.Serialized()) {
         info.Load();
         info.ResetQuest();
     }
@@ -262,7 +283,7 @@ void _HostileMapInit(Map map, bool firstTime)
     map.OnCritterDead.Subscribe(_HostileMapCritterDead);
     map.OnCritterIn.Subscribe(_HostileMapInCritter);
     HostileLocationInfo info = _InfoFromMap(map);
-    if (info == null || !info.Serialized()) {
+    if (!info.Serialized()) {
         return;
     }
     info.Load();
@@ -290,7 +311,7 @@ void _HostileMapInCritter(Map map, Critter cr)
 void _HostileMapCritterDead(Map map, Critter cr, Critter killer)
 {
     HostileLocationInfo info = _InfoFromMap(map);
-    if (info == null || !info.Serialized()) {
+    if (!info.Serialized()) {
         return;
     }
     info.Load();
@@ -312,9 +333,7 @@ void _HostileMapCritterDead(Map map, Critter cr, Critter killer)
         Critter[] allies = {};
         if (info.CollectCritters(allies, true, CritterFindType::NonDeadNpc) > 0) {
             for (int i = 0, l = allies.length(); i < l; i++) {
-                if (allies[i] != null) {
-                    SendAllyHome(allies[i]);
-                }
+                SendAllyHome(allies[i]);
             }
         }
     }
@@ -334,30 +353,31 @@ void _AllyInit(Critter cr, bool firstTime)
 [[TimeEvent]]
 void _AllyIdle(Critter cr)
 {
-    if (cr.HostileLQIsStoped || cr.GetMap() == null) {
+    Map? crMap = cr.GetMap();
+    if (cr.HostileLQIsStoped || crMap == null) {
         return;
     }
-    HostileLocationInfo info = _InfoFromCr(cr);
+    HostileLocationInfo? info = InfoFromCritter(cr);
     if (info == null || !info.Serialized()) {
         return;
     }
     info.Load();
-    Critter player = Game.GetCritter(info.PlayerId);
+    Critter? player = Game.GetCritter(info.PlayerId);
     if (player == null) {
         SendAllyHome(cr);
         return;
     }
-    Map map = player.GetMap();
+    Map? map = player.GetMap();
     if (map == null) {
         SendAllyHome(cr);
         return;
     }
     Location loc = map.GetLocation();
-    if (loc == null || loc.Id != info.LocId) {
+    if (loc.Id != info.LocId) {
         SendAllyHome(cr);
         return;
     }
-    if (map.Id == cr.GetMap().Id) {
+    if (map.Id == crMap.Id) {
         if (Game.GetDistance(cr, player) > 20) {
             NpcPlanes::AddWalkPlane(cr, 0, player.Hex, HDIR_Random, true, 3);
         }
@@ -393,8 +413,8 @@ void _AllySmthAttacked(Critter cr, Critter fromCr, Critter attacker)
 void _AllyShowCritter(Critter cr, Critter showCrit)
 {
     DL("Show critter");
-    HostileLocationInfo info = _InfoFromCr(cr);
-    if (info == null && !info.Serialized()) {
+    HostileLocationInfo? info = InfoFromCritter(cr);
+    if (info == null || !info.Serialized()) {
         return;
     }
     info.Load();
@@ -461,7 +481,7 @@ EventResult _HostileAttacked(Critter cr, Critter attacker)
 void _HostileDead(Critter cr, Critter? killer)
 {
     bool toAll = false;
-    HostileLocationInfo info = _InfoFromCr(cr);
+    HostileLocationInfo? info = InfoFromCritter(cr);
     if (info != null && info.Serialized()) {
         info.Load();
         if (info.DeadPercent(false) > 20) {
@@ -482,9 +502,6 @@ void _HostileDead(Critter cr, Critter? killer)
 void r_ShowLocation(Critter player, Critter npc, int qVar, int counterVar, hstring locPidHash, int locX, int locY)
 {
     HostileLocationInfo info = HostileLocationInfo(player.Id, qVar);
-    if (info == null) {
-        return;
-    }
 
     info.CVarNum = counterVar;
     info.LocPid = locPidHash;
@@ -499,9 +516,6 @@ void r_ShowLocation(Critter player, Critter npc, int qVar, int counterVar, hstri
 void r_ShowLocation2_Impl(Critter player, Critter npc, int qVar, int counterVar, hstring locPidHash, int locX, int locY)
 {
     HostileLocationInfo info = HostileLocationInfo(player.Id, qVar);
-    if (info == null) {
-        return;
-    }
 
     info.CVarNum = counterVar;
     info.LocPid = locPidHash;

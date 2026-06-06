@@ -48,12 +48,12 @@ void InitParameters()
 #if SERVER
     Game.SetPropertyGetter(CritterProperty::BarterCoefficient, CritterGetBarterCoefficient);
     Game.AddPropertySetter(CritterProperty::Experience, CritterSetExperience);
-    Game.AddPropertyDeferredSetter(CritterProperty::InSneakMode, CritterSetHide);
-    Game.AddPropertyDeferredSetter(CritterProperty::IsTraitFastShot, CritterSetFastShot);
+    Game.AddPropertySetter(CritterProperty::InSneakMode, CritterSetHide);
+    Game.AddPropertySetter(CritterProperty::IsTraitFastShot, CritterSetFastShot);
     for (int i = 0; i < CritterPropertyGroup::Perks.length(); i++) {
         Game.AddPropertySetter(CritterPropertyGroup::Perks[i], CritterSetPerks);
     }
-    Game.AddPropertyDeferredSetter(CritterProperty::KnownLocations, CritterSetKnownLocations);
+    Game.AddPropertySetter(CritterProperty::KnownLocations, CritterSetKnownLocations);
 #endif
 
 #if CLIENT
@@ -73,7 +73,10 @@ void ProcessSkillsUp(Player player, any[] params)
         Game.Log("Wrong ProcessSkillsUp params length: " + params.length());
         return;
     }
-    Critter cr = player.GetControlledCritter();
+    Critter? cr = player.GetControlledCritter();
+    if (cr == null) {
+        return;
+    }
     for (int i = 0; i < params.length(); i += 2) {
         CritterProperty skill = CritterProperty(int(params[i]));
         int skillPoints = params[i + 1];
@@ -123,7 +126,10 @@ bool IsTagSkill(Critter cr, CritterProperty prop)
 [[ServerRemoteCall]]
 void ProcessPerkUp(Player player, int perkIndex)
 {
-    Critter cr = player.GetControlledCritter();
+    Critter? cr = player.GetControlledCritter();
+    if (cr == null) {
+        return;
+    }
     if (cr.UnspentPerks > 0) {
         CritterProperty perk = CritterProperty(perkIndex);
         if (Perks::PerkCheck(cr, perk)) {
@@ -156,7 +162,7 @@ void CritterSetExperience(Critter cr, CritterProperty prop, int& newValue)
 [[TimeEvent]]
 void UpdateExperienceLevel(any crId)
 {
-    Critter cr = Game.GetCritter(crId);
+    Critter? cr = Game.GetCritter(crId);
     if (cr == null) {
         return;
     }
@@ -203,7 +209,7 @@ void CritterSetPerks(Critter cr, CritterProperty perk, uint8& newValue)
 
 void DoPerkUpDown(any[] values)
 {
-    Critter cr = Game.GetCritter(values[0]);
+    Critter? cr = Game.GetCritter(values[0]);
     if (cr == null) {
         return;
     }
@@ -239,7 +245,7 @@ void CritterSetKnownLocations(Critter cr)
     ident[] knownLoc = cr.KnownLocations.clone();
     hstring[] knownLocPid = {};
     for (int i = 0; i < knownLoc.length(); i++) {
-        Location loc = Game.GetLocation(knownLoc[i]);
+        Location? loc = Game.GetLocation(knownLoc[i]);
         if (loc != null) {
             knownLocPid.insertLast(loc.ProtoId);
         }
@@ -673,25 +679,22 @@ void SwitchUnarmedWeapon(Critter cr, bool next)
 
 void UseMainItem()
 {
-    if (Chosen == null) {
+    if (!HasChosen) {
         return;
     }
+    Critter chosen = Chosen;
 
     if (Gui::Cursor == CursorType::UseWeapon) {
         Gui::Cursor = CursorType::Default;
         return;
     }
 
-    AbstractItem item = CritterItem::GetActive(Chosen);
-    if (item == null) {
-        Gui::Cursor = CursorType::UseWeapon;
-        return;
-    }
-
+    AbstractItem item = CritterItem::GetActive(chosen);
     int mode = item.Mode;
     int use = _WeaponModeUse(mode);
     int aim = _WeaponModeAim(mode);
-    ident itemId = cast<Item>(item) != null ? cast<Item>(item).Id : ZERO_IDENT;
+    Item? realItem = cast<Item?>(item);
+    ident itemId = realItem != null ? realItem.Id : ZERO_IDENT;
     if (mode == USE_RELOAD) {
         ChosenActions::SetChosenActions({Tla::ChosenUseItem, itemId, 0, TARGET_SELF_ITEM, 0, USE_RELOAD, 0});
     }
@@ -711,13 +714,13 @@ void UseMainItem()
 
 void SwitchMainItemMode(bool next)
 {
-    Critter chosen = Chosen;
-    if (chosen == null) {
+    if (!HasChosen) {
         return;
     }
+    Critter chosen = Chosen;
 
     AbstractItem item = CritterItem::GetActive(chosen);
-    if (item == null || item.ProtoId == "default_weapon".hstr() || item.ProtoId == "") {
+    if (item.ProtoId == "default_weapon".hstr() || item.ProtoId == "") {
         SwitchUnarmedWeapon(chosen, next);
     }
     else {
@@ -1142,7 +1145,7 @@ int CritterGetArmorClass(Critter cr)
     int val = cr.ArmorClassBase + CritterGetAgility_Impl(cr);
     val += Drugs::GetDrugEffect(cr, CritterProperty::ArmorClassBase);
     AbstractItem armor = CritterItem::GetActive(cr, CritterItemSlot::Armor);
-    if (armor != null && armor.Type == ItemType::Armor) {
+    if (armor.Type == ItemType::Armor) {
         val += armor.Armor_AC * (100 - GetDeteriorationProc(armor)) / 100;
     }
     return CLAMP(val, 0, 90);
@@ -1152,7 +1155,8 @@ int[] CritterGetDamageResistance_Impl(Critter cr)
 {
     AbstractItem armor = CritterItem::GetActive(cr, CritterItemSlot::Armor);
     int dp = 0;
-    if (cast<Item>(armor) != null && armor.Type == ItemType::Armor) {
+    Item? realArmor = cast<Item?>(armor);
+    if (realArmor != null && armor.Type == ItemType::Armor) {
         dp = 100 - GetDeteriorationProc(armor);
     }
 
@@ -1225,7 +1229,8 @@ int[] CritterGetDamageThreshold(Critter cr)
 {
     AbstractItem armor = CritterItem::GetActive(cr, CritterItemSlot::Armor);
     int dp = 0;
-    if (cast<Item>(armor) != null && armor.Type == ItemType::Armor) {
+    Item? realArmor = cast<Item?>(armor);
+    if (realArmor != null && armor.Type == ItemType::Armor) {
         dp = 100 - GetDeteriorationProc(armor);
     }
 
@@ -1409,21 +1414,13 @@ int GetItemAttackDistance(Critter cr, AbstractItem? item, int mode)
 int GetActiveItemAttackDistance(Critter cr)
 {
     AbstractItem item = CritterItem::GetActive(cr);
-    if (item != null) {
-        return GetItemAttackDistance(cr, item, item.Mode);
-    }
-    return 1;
+    return GetItemAttackDistance(cr, item, item.Mode);
 }
 
-int GetCritterAttackDistance(Critter? cr, AbstractItem? item, int mode)
+int GetCritterAttackDistance(Critter cr, AbstractItem? item, int mode)
 {
     if (item == null) {
         return 0;
-    }
-
-    if (item == null && cr != null) {
-        item = CritterItem::GetActive(cr);
-        mode = item.Mode;
     }
 
     return GetItemAttackDistance(cr, item, mode);

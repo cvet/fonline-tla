@@ -350,7 +350,7 @@ class CEncounterObject
     int ObjectType;
     hstring Pid; // Proto id
     hstring DialogId;
-    callback_void_Critter_bool ScriptName;
+    callback_void_Critter_bool? ScriptName;
     int DistanceLength;             // Distance from players
     CEncounterObject[] Childs = {}; // Items in inventory or container
     CCheck[] Checks = {};
@@ -631,7 +631,11 @@ void TestEncounter(Critter cr, int strNum)
                 int zx = cr.WorldPos.x / ZONE_LENGTH;
                 int zy = cr.WorldPos.y / ZONE_LENGTH;
                 CZone zone = WorldmapGround[zy * ZONE_COUNT_X + zx];
-                auto foundedEnc = CreateFoundedEncounter(false, cr.WorldPos.x, cr.WorldPos.y, enc, zone.Table.LocationPids, cr.Id, false);
+                CEncounterTable? table = zone.Table;
+                if (table == null) {
+                    return;
+                }
+                auto foundedEnc = CreateFoundedEncounter(false, cr.WorldPos.x, cr.WorldPos.y, enc, table.LocationPids, cr.Id, false);
                 Critter[] group = {cr};
                 ident mapId;
                 mpos hex;
@@ -651,7 +655,7 @@ class CZone
     int MorningChance;
     int AfternoonChance;
     int NightChance;
-    CEncounterTable Table;
+    CEncounterTable? Table;
 
     CZone()
     {
@@ -837,7 +841,7 @@ class CFoundedEncounter
 {
     int Index;
     hstring[] LocationPids = {};
-    CEncounter Encounter;
+    CEncounter? Encounter;
     bool IsGenerated;
     synctime ServerTime;
     int PositionX;
@@ -867,16 +871,19 @@ class CFoundedEncounter
     }
 }
 
-CFoundedEncounter[] FoundedEncounters = array<CFoundedEncounter>(1000);
+CFoundedEncounter?[] FoundedEncounters = array<CFoundedEncounter?>(1000);
 int FoundedEncountersLastIndex = 0;
 
-CFoundedEncounter CreateFoundedEncounter(bool isWater, int x, int y, CEncounter encounter, hstring[] locationPids, ident ownerId, bool ownerGroup)
+CFoundedEncounter CreateFoundedEncounter(bool isWater, int x, int y, CEncounter? encounter, hstring[] locationPids, ident ownerId, bool ownerGroup)
 {
     for (int i = 0, j = FoundedEncounters.length(); i < j; i++) {
-        if (FoundedEncounters[i] == null) {
-            FoundedEncounters[i] = CFoundedEncounter();
+        CFoundedEncounter? geHandle = FoundedEncounters[i];
+        if (geHandle == null) {
+            geHandle = CFoundedEncounter();
+            FoundedEncounters[i] = geHandle;
         }
-        CFoundedEncounter ge = FoundedEncounters[i];
+        verify(geHandle != null, "Founded encounter slot must be initialized");
+        CFoundedEncounter ge = geHandle;
         if (ge.Index == 0 || Game.SynchronizedTime - ge.ServerTime >= FOUNDED_ENCOUNTER_LIVE_TIME + Time::Minutes(1)) {
             FoundedEncountersLastIndex++;
             ge.Index = FoundedEncountersLastIndex;
@@ -905,7 +912,7 @@ CFoundedEncounter CreateFoundedEncounter(bool isWater, int x, int y, CEncounter 
 CFoundedEncounter? GetFoundedEncounter(int index)
 {
     for (int i = 0, j = FoundedEncounters.length(); i < j; i++) {
-        CFoundedEncounter ge = FoundedEncounters[i];
+        CFoundedEncounter? ge = FoundedEncounters[i];
         if (ge != null && ge.Index == index) {
             return ge;
         }
@@ -916,10 +923,13 @@ CFoundedEncounter? GetFoundedEncounter(int index)
 CFoundedEncounter? GetNearFoundedEncounter(bool isWater, Critter[] group, int x, int y, int radius)
 {
     for (int i = 0, j = FoundedEncounters.length(); i < j; i++) {
-        if (FoundedEncounters[i] == null) {
-            FoundedEncounters[i] = CFoundedEncounter();
+        CFoundedEncounter? geHandle = FoundedEncounters[i];
+        if (geHandle == null) {
+            geHandle = CFoundedEncounter();
+            FoundedEncounters[i] = geHandle;
         }
-        CFoundedEncounter ge = FoundedEncounters[i];
+        verify(geHandle != null, "Founded encounter slot must be initialized");
+        CFoundedEncounter ge = geHandle;
 
         if (ge.Index == 0) {
             continue;
@@ -933,7 +943,8 @@ CFoundedEncounter? GetNearFoundedEncounter(bool isWater, Critter[] group, int x,
         if (not ge.IsGenerated) {
             continue;
         }
-        if (ge.Encounter != null && ge.Encounter.IsSpecial && not CheckChecks(ge.Encounter.Checks, group)) {
+        CEncounter? encounter = ge.Encounter;
+        if (encounter != null && encounter.IsSpecial && not CheckChecks(encounter.Checks, group)) {
             continue;
         }
         if (int(math::sqrt(float(POW2(ge.PositionX - x) + POW2(ge.PositionY - y)))) > radius) {
@@ -1022,9 +1033,6 @@ void ParseEncounterObject(CEncounterObject obj, Map map, mpos hex, int reversDir
         if (obj.ScriptName != null) {
             npc.SetupScript(obj.ScriptName);
         }
-        if (npc == null) {
-            return;
-        }
 
         for (int i = 0, j = obj.Childs.length(); i < j; i++) {
             CEncounterObject child = obj.Childs[i];
@@ -1046,9 +1054,6 @@ void ParseEncounterObject(CEncounterObject obj, Map map, mpos hex, int reversDir
     }
     else if (obj.ObjectType == ENCOUNTER_OBJECT_ITEM) {
         Item item = map.AddItem(hex, obj.Pid, 1);
-        if (item == null) {
-            return;
-        }
 
         if (obj.Childs.length() > 0 && item.Type == ItemType::Container) {
             for (int i = 0, j = obj.Childs.length(); i < j; i++) {
@@ -1088,7 +1093,7 @@ void ActionFighting(Critter[] npcL, Critter[] npcR)
 
 Map? GenerateEncounter(CFoundedEncounter fe, Critter[] critters)
 {
-    CEncounter encounter = fe.Encounter;
+    CEncounter? encounter = fe.Encounter;
     hstring locPid = (encounter != null ? encounter.LocPid : EMPTY_HSTRING);
     if (locPid == EMPTY_HSTRING) {
         locPid = fe.LocationPids[Game.Random(0, fe.LocationPids.length() - 1)];
@@ -1100,7 +1105,7 @@ Map? GenerateEncounter(CFoundedEncounter fe, Critter[] critters)
         return null;
     }
 
-    Location location = Game.GetLocation(fe.LocationId);
+    Location? location = Game.GetLocation(fe.LocationId);
     if (location == null) {
         Game.Log("GetLocation fail.");
         return null;
@@ -1110,19 +1115,13 @@ Map? GenerateEncounter(CFoundedEncounter fe, Critter[] critters)
     // Генерация итемов на всех картах энкаунтера
     for (int i = 0, l = location.GetMapCount(); i < l; i++) {
         Map m = location.GetMapByIndex(i);
-        if (m != null) {
-            EncounterItems::GenerateItems(m, critters);
-            if (i > 0) {
-                CaveMobs::GenerateCavernEncounter(m, critters);
-            }
+        EncounterItems::GenerateItems(m, critters);
+        if (i > 0) {
+            CaveMobs::GenerateCavernEncounter(m, critters);
         }
     }
 
     Map map = location.GetMapByIndex(0);
-    if (map == null) {
-        Game.Log("GetMapByIndex fail.");
-        return null;
-    }
 
     mpos hexStart;
     if (not Entrance::MapGetEntryCoords(map, 0, 0, hexStart)) {
@@ -1235,9 +1234,6 @@ Map? GenerateEncounter(CFoundedEncounter fe, Critter[] critters)
 
                 map.GetHexInPath(hexOldPos, hexPos, 0.0f, 0); // Check for barrier
                 hexOldPos = hexPos;
-                if (crittersGrouops[i] == null) {
-                    crittersGrouops[i] = array<Critter>();
-                }
                 ParseEncounterObject(obj, map, hexPos, reversDir, crittersGrouops[i], teamId);
             }
         }
@@ -1310,18 +1306,16 @@ void FindEncounter(Critter[] group, Item? car, int x, int y, int& encounterDescr
     }
 
     CZone zone = (isWater ? WorldmapWater[zy * ZONE_COUNT_X + zx] : WorldmapGround[zy * ZONE_COUNT_X + zx]);
-    if (zone == null) {
-        Game.Log("bad zone");
+    CEncounterTable? table = zone.Table;
+    if (table == null) {
+        Game.Log("bad zone table");
         return;
     }
     Critter leader = group[0];
 
     // Create empty map
     if (empty) {
-        CFoundedEncounter fe = CreateFoundedEncounter(isWater, x, y, null, zone.Table.LocationPids, leader.Id, group.length() > 1);
-        if (fe == null) {
-            return;
-        }
+        CFoundedEncounter fe = CreateFoundedEncounter(isWater, x, y, null, table.LocationPids, leader.Id, group.length() > 1);
         waitForAnswer = false;
         encounterDescriptor = fe.Index;
         return;
@@ -1342,7 +1336,7 @@ void FindEncounter(Critter[] group, Item? car, int x, int y, int& encounterDescr
     }
 
     // Try find already founded encounter
-    CFoundedEncounter feAlready = GetNearFoundedEncounter(isWater, group, x, y, ZONE_LENGTH / 2);
+    CFoundedEncounter? feAlready = GetNearFoundedEncounter(isWater, group, x, y, ZONE_LENGTH / 2);
     if (feAlready != null) {
         int outdoorsman = leader.SkillOutdoorsman + zone.Difficulty;
         outdoorsman = CLAMP(outdoorsman, 6, 95);
@@ -1390,8 +1384,8 @@ void FindEncounter(Critter[] group, Item? car, int x, int y, int& encounterDescr
     }
     int maxRoll = 0;
 
-    CEncounter[] encounters = zone.Table.Encounters;
-    CEncounter[] encountersThru = array<CEncounter>(encounters.length());
+    CEncounter[] encounters = table.Encounters;
+    CEncounter?[] encountersThru = array<CEncounter?>(encounters.length());
     for (int i = 0, j = encounters.length(); i < j; i++) {
         CEncounter enc = encounters[i];
         if (CheckChecks(enc.Checks, group)) {
@@ -1405,7 +1399,7 @@ void FindEncounter(Critter[] group, Item? car, int x, int y, int& encounterDescr
 
     roll = roll * maxRoll / 100;
     for (int i = 0; i < encountersThru.length(); i++) {
-        CEncounter enc = encountersThru[i];
+        CEncounter? enc = encountersThru[i];
 
         if (enc == null) {
             continue;
@@ -1415,10 +1409,7 @@ void FindEncounter(Critter[] group, Item? car, int x, int y, int& encounterDescr
             continue;
         }
 
-        CFoundedEncounter fe = CreateFoundedEncounter(isWater, x, y, enc, zone.Table.LocationPids, leader.Id, group.length() > 1);
-        if (fe == null) {
-            return;
-        }
+        CFoundedEncounter fe = CreateFoundedEncounter(isWater, x, y, enc, table.LocationPids, leader.Id, group.length() > 1);
 
         int outdoorsman = leader.SkillOutdoorsman + zone.Difficulty;
         outdoorsman = CLAMP(outdoorsman, 6, 95);
@@ -1446,16 +1437,16 @@ void InviteToEncounter(Critter[] group, Item? car, int encounterDescriptor, int 
 {
     mapId = ZERO_IDENT;
 
-    CFoundedEncounter fe = GetFoundedEncounter(encounterDescriptor);
+    CFoundedEncounter? fe = GetFoundedEncounter(encounterDescriptor);
     if (fe == null) {
         Game.Log("GetFoundedEncounter fail.");
         return;
     }
 
     bool isGenerated = fe.IsGenerated;
-    Map map = null;
+    Map? map = null;
     if (isGenerated) {
-        Location location = Game.GetLocation(fe.LocationId);
+        Location? location = Game.GetLocation(fe.LocationId);
         if (location == null) {
             // Game.Log("Location not found.");
             return;
@@ -1500,16 +1491,20 @@ void InviteToEncounter(Critter[] group, Item? car, int encounterDescriptor, int 
         dir = Game.Random(0, 5);
     }
 
-    if (isGenerated || fe.Encounter != null) {
+    CEncounter? encounter = fe.Encounter;
+    if (isGenerated || encounter != null) {
         for (int i = 0, j = group.length(); i < j; i++) {
             Critter cr = group[i];
             if (not isGenerated) {
-                Messaging::Info(cr, TextPackKey(TextPackName::GlobalMap, "" + (STR_VIEW)), "$who @text GlobalMap " + fe.Encounter.StrNum + "@");
+                if (encounter == null) {
+                    continue;
+                }
+                Messaging::Info(cr, TextPackKey(TextPackName::GlobalMap, "" + (STR_VIEW)), "$who @text GlobalMap " + encounter.StrNum + "@");
             }
-            else if (fe.Encounter != null) {
+            else if (encounter != null) {
                 Messaging::Info(cr,
                                 TextPackKey(TextPackName::GlobalMap, "" + (fe.OwnerGroup ? STR_VIEW_WITH_PLAYERS : STR_VIEW_WITH_PLAYER)),
-                                "$who @text GlobalMap " + fe.Encounter.StrNum + "@$player" + PlayerRegistration::GetPlayerName(fe.OwnerId));
+                                "$who @text GlobalMap " + encounter.StrNum + "@$player" + PlayerRegistration::GetPlayerName(fe.OwnerId));
             }
             else {
                 Messaging::Info(cr,
@@ -1518,8 +1513,8 @@ void InviteToEncounter(Critter[] group, Item? car, int encounterDescriptor, int 
             }
         }
     }
-    if (fe.Encounter != null) {
-        AssignChecks(fe.Encounter.Checks, group);
+    if (encounter != null) {
+        AssignChecks(encounter.Checks, group);
     }
 }
 

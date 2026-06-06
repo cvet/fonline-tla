@@ -35,9 +35,9 @@ void KillerInit(Critter cr, bool firstTime)
 void _KillerDead(Critter cr, Critter killer)
 {
     PatternSniper::_SniperDead_Impl(cr, killer);
-    Map map = cr.GetMap();
+    Map? map = cr.GetMap();
     if (map != null) {
-        MapText::AddText(map, cr.Hex, COLOR_BLUE, TextPackKey(TextPackName::Text, "" + (STR_KILLER_DEAD)));
+        MapText::AddText(map, cr.Hex, Color::Blue, TextPackKey(TextPackName::Text, "" + (STR_KILLER_DEAD)));
     }
 }
 
@@ -81,16 +81,13 @@ Critter? GetPrisoner(Location loc, hstring dialog)
 [[DialogResult]]
 int r_TrySelectPrisoner(Critter player, Critter npc)
 {
-    Map map = player.GetMap();
+    Map? map = player.GetMap();
     if (map == null) {
         return FORCE_DIALOG_NOT_FOUND;
     }
     Location loc = map.GetLocation();
-    if (loc == null) {
-        return FORCE_DIALOG_NOT_FOUND;
-    }
     player.VCLynettPrisonerId = ZERO_IDENT;
-    Critter cr;
+    Critter? cr;
     int tries = 10;
     while (tries > 0 and cr == null && prisonerDialogs.length() > 0) {
         cr = GetPrisoner(loc, prisonerDialogs[Game.Random(0, prisonerDialogs.length() - 1)]);
@@ -113,7 +110,7 @@ void dlg_PrisonerName(Critter player, Critter npc, string& lexems)
     if (player.VCLynettPrisonerId == ZERO_IDENT) {
         return;
     }
-    Critter prisoner = Game.GetCritter(player.VCLynettPrisonerId);
+    Critter? prisoner = Game.GetCritter(player.VCLynettPrisonerId);
     if (prisoner == null) {
         return;
     }
@@ -158,11 +155,16 @@ EventResult _PrisonerTalk(Critter cr, Critter player, bool attach, int talkCount
 void t_Arest(Critter cr, StaticItem trigger, bool entered, mdir dir)
 {
     if (!cr.ControlledByPlayer && Merc::IsMerc(cr) && !entered) {
-        Critter player = Merc::GetMaster(cr);
+        Critter? player = Merc::GetMaster(cr);
         if (player == null) {
             return;
         }
-        if (cr.Id == player.VCLynettPrisonerId && player.VCLynettArest == 3 && Entrance::IsCritterInDeadZone(player, cr.GetMap(), 0, HEX_FIRST, HEX_LAST)) {
+        Map? crMap = cr.GetMap();
+        if (crMap == null) {
+            return;
+        }
+
+        if (cr.Id == player.VCLynettPrisonerId && player.VCLynettArest == 3 && Entrance::IsCritterInDeadZone(player, crMap, 0, HEX_FIRST, HEX_LAST)) {
             CritterState::Wait(player, 0);
             NpcPlanes::DropPlanes(cr);
             CritterState::Wait(cr, 0);
@@ -170,7 +172,7 @@ void t_Arest(Critter cr, StaticItem trigger, bool entered, mdir dir)
             Effects::FadeScreen(player, false, Time::Milliseconds(2000));
             player.VCLynettArest = 4;
             Merc::CancelMerc(cr);
-            Entrance::CritterTransferToMapEntry(cr, cr.GetMap().Id, HEX_PRISON);
+            Entrance::CritterTransferToMapEntry(cr, crMap.Id, HEX_PRISON);
             any[] values = {cr.Id};
             Game.StartTimeEvent(Tla::GameSeconds(1), PrisonerTalk, values);
         }
@@ -180,7 +182,7 @@ void t_Arest(Critter cr, StaticItem trigger, bool entered, mdir dir)
 [[TimeEvent]]
 void PrisonerTalk(any[] values)
 {
-    Critter cr = Game.GetCritter(values[0]);
+    Critter? cr = Game.GetCritter(values[0]);
     if (cr != null) {
         Messaging::Say(cr, TextPackKey(TextPackName::Dialogs, "" + (DLGSTR(Content::Dialog::vc_telman, STR_PRISONER_SHOUT))));
     }
@@ -205,9 +207,7 @@ void PrisonerTalk(any[] values)
 void r_AddDocs(Critter player, Critter npc)
 {
     Item item = player.AddItem(Content::Item::fake_letter, 1);
-    if (item != null) {
-        item.SetupScript(_LynDocsInit);
-    }
+    item.SetupScript(_LynDocsInit);
 }
 
 // При выкладывании предмета в ящик проверяется, находится ли персонаж в снике, если нет и рядом стоит МакКлюр, подлог не удается
@@ -222,12 +222,12 @@ void _LynDocsInit(Item item, bool firstTime)
 [[Event]]
 EventResult _LynDocsPutCont(Item item, Critter cr, CritterProperty skill)
 {
-    Map map = cr.GetMap();
-    Critter npc = map.GetCritter(CritterProperty::NpcRole, ROLE_MACLUR, CritterFindType::NonDeadNpc);
-
+    Map? map = cr.GetMap();
     if (map == null || map.ProtoId != Content::Map::vcity || !cr.ControlledByPlayer) {
         return EventResult::StopChain;
     }
+
+    Critter? npc = map.GetCritter(CritterProperty::NpcRole, ROLE_MACLUR, CritterFindType::NonDeadNpc);
     if (skill == SKILL_PUT_CONT) {
         if ((cr.VCLynettForgery == 1 || cr.VCLynettForgery == 3) && Entrance::IsCritterInDeadZone(cr, map, 0, HEX_FORG_FIRST, HEX_FORG_LAST)) {
             if (cr.InSneakMode && cr.SkillSneak > 50) {
@@ -258,7 +258,7 @@ EventResult _LynDocsPutCont(Item item, Critter cr, CritterProperty skill)
                 }
             }
             if (values.length() > 1) {
-                if (npc != null || npc.IsAlive()) {
+                if (npc != null && npc.IsAlive()) {
                     values.insertFirst(npc.Id);
                 }
                 Game.StartTimeEvent(Tla::GameSeconds(3), Answer, values); //SavedDeferredCall
@@ -277,9 +277,9 @@ EventResult _LynDocsPutCont(Item item, Critter cr, CritterProperty skill)
 void Answer(any[] values)
 {
     if (values.length() > 2) {
-        Critter mcClure = Game.GetCritter(values[0]);
+        Critter? mcClure = Game.GetCritter(values[0]);
         for (int i = 2, l = values.length(); i < l; i++) {
-            Critter guard = Game.GetCritter(values[i]);
+            Critter? guard = Game.GetCritter(values[i]);
             if (guard != null) {
                 Messaging::Say(guard, TextPackKey(TextPackName::Text, "" + (STR_GUARDS)));
             }
@@ -287,7 +287,7 @@ void Answer(any[] values)
         if (mcClure != null) {
             Messaging::Say(mcClure, TextPackKey(TextPackName::Text, "" + (STR_MCCLURE)));
         }
-        Critter player = Game.GetCritter(values[1]);
+        Critter? player = Game.GetCritter(values[1]);
         if (player != null && player.VCLynettForgery == 4) {
             player.VCLynettForgery = 5;
             player.Experience += 2500;
@@ -298,7 +298,7 @@ void Answer(any[] values)
 [[DialogResult]]
 void r_AddGuards(Critter cr, Critter npc)
 {
-    Map map = cr.GetMap();
+    Map? map = cr.GetMap();
     if (map == null) {
         return;
     }
@@ -322,9 +322,7 @@ void r_AddGuards(Critter cr, Critter npc)
                    20};
     for (int i = 0; i < entries.length(); i++) {
         Critter guard = map.AddCritter(Content::Critter::VCGuardsman, entries[i].Hex, 3, Tla::GetCritPropsDict(props));
-        if (guard != null) {
-            guard.StartTimeEvent(Time::GameDays(1), cte_DeleteGuard);
-        }
+        guard.StartTimeEvent(Time::GameDays(1), cte_DeleteGuard);
     }
 }
 
@@ -339,7 +337,7 @@ void cte_DeleteGuard(Critter cr)
 [[DialogResult]]
 void r_MoveInto(Critter cr, Critter npc)
 {
-    Map map = cr.GetMap();
+    Map? map = cr.GetMap();
     if (map == null) {
         return;
     }

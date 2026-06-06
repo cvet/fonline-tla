@@ -21,12 +21,13 @@ Project front door for AI maintainers working on **FOnline: The Life After** (TL
 - `Scripts/Content.fos` - generated/baked content declarations. Do not hand-edit.
 - `Scripts/GuiScreens.fos` - generated screen bindings. Source of truth: `Gui/*.fogui` plus `Tools/InterfaceEditor/generate_gui_screens.py`. Do not hand-edit unless you also update the owning `.fogui` code as described below.
 - `Scripts/GuiScreensExt.fos` - hand-written companion to `GuiScreens.fos`; non-generated GUI logic lives here.
+- `Scripts/Sync.fos` - script-side helpers around the engine `Game.Sync(...)` lock primitive for async worker code.
 - `Gui/*.fogui` - GUI definitions and embedded screen script code.
 - `SourceExt/CommonExtension.cpp` - SHA helpers shared by client/server.
 - `SourceExt/ServerExtension.cpp` - server image checks, dialog plumbing, visibility hooks, critter busy/free stubs.
 - `SourceExt/ClientExtension.cpp` - `Game.FormatTags` and client critter busy/free stubs.
 - `SourceExt/BakerExtension.cpp`, `SourceExt/DialogBaker.*`, `SourceExt/Dialogs.*` - dialog bake/runtime support.
-- `SourceExt/ContentMigration.cpp` - TLA-specific content/data migrations. This is not present in `lf-7`.
+- `SourceExt/ContentMigration.cpp` - TLA-specific content/data migrations.
 - `SourceExt/SHA/` - bundled SHA implementation wrapped as a static library.
 - `Tools/Formatter/format_project.py` and `FormatSource.bat` - formatting entry points. VS Code tasks use the Python formatter.
 - `Tools/InterfaceEditor/generate_gui_screens.py` - supported GUI screen generator.
@@ -76,7 +77,7 @@ The engine moves frequently. Handle submodule bumps deliberately:
 1. Inspect `Engine` status and recent upstream commits first.
 2. Prefer fast-forwarding `Engine` at coherent upstream boundaries instead of a large blind jump.
 3. After each bump: `Bake Resources` -> build affected targets -> fix script/config/native fallout.
-4. Cross-check `H:/lf-7` when upstream renames or signatures shift. It runs on the same engine and often has the migration pattern already.
+4. Cross-check `H:/lf-30` when upstream renames or signatures shift. It is the nearest migration reference and often has the pattern already.
 5. Do not commit, stage, or push unless the user explicitly asks. The user reviews and commits changes themselves.
 
 Typical breakage points after a bump:
@@ -84,6 +85,8 @@ Typical breakage points after a bump:
 - New engine settings required in `TLA.fomain`.
 - `///@ EngineHook` rename or signature change in `SourceExt/*Extension.cpp`.
 - AngelScript core type/API changes (`hstring`, `any`, `ident_t`, `mpos`/`mdir`, collection APIs).
+- Stricter AngelScript nullability and component access (`T?`, `Has<Component>`, no component `== null` probes).
+- Async worker sync requirements around entity and map access (`[[Async]]`, `Sync::Lock...`, `Game.Sync(...)` lock cover).
 - Logging or stack-trace API changes.
 - New init-path guards such as `if (IsTestingInProgress) return;`.
 - Baker/CMake API changes around `AddEngineSources(...)`, `AddDirSource(...)`, or generated metadata.
@@ -126,13 +129,19 @@ Native C++ conventions:
 - Use `#if SERVER`, `#if CLIENT`, and `#if MAPPER` carefully. Side-specific bugs are often missing or stray guards.
 - Keep authoritative gameplay state changes on the server. Client scripts should focus on UI, input, presentation, and client-only probes.
 - Mark startup functions with `[[ModuleInit]]`; subscribe to events from `ModuleInit()`. Attribute-marked functions are called by their attribute system; move reusable logic into plain helpers instead of calling attribute entrypoints directly.
+- Mark worker-run callbacks `[[Async]]` before they call async helpers such as `Sync::Lock...`. Time events and remote calls that touch map-visible critter state usually need `Sync::LockCritterWithMap(cr)` first.
+- `Game.Sync(...)` replaces the whole held lock set. If a callback needs several entities at once, lock the full cover in one call/helper instead of assuming an earlier lock remains held.
 - Event handlers return `void` for implicit continue or `EventResult` for explicit `ContinueChain` / `StopChain`.
 - Do not pass inputs by `const &`. Use plain `&` only for genuine out/inout value-type parameters.
+- Treat `?` as the source contract for nullable handles. If a dictionary lookup or engine call can return `null`, bind it to a nullable local (`T?`) before narrowing it.
+- The AngelScript compiler enforces nullability at compile time ("strong nullable"): it warns on redundant null comparisons, dereference of an un-narrowed `T?`, and a redundant `?` on a non-null initializer. Fix these — narrow `T?` locals with `if (x == null) return;` / `if (x != null)` / ternary / `&&`-`||` short-circuits, use `cast<T?>(x)` (not `cast<T>(x)`) when a downcast may fail and you test for `null`, and guard the throwing `Game.Chosen` accessor with `HasChosen` rather than `Chosen == null`. See [Nullability.md](Nullability.md) for the full rules.
+- Component properties are guarded by generated `Has<Component>` flags. Check `item.HasRadio`, `cr.HasDialogContext`, etc. before using the component accessor; do not compare the component accessor itself with `null`.
 - Use explicit time helpers (`Time::Milliseconds`, `Time::Seconds`, `Time::Asap`) for game timing where available.
 - Prefer engine/game geometry helpers such as `Game.GetDistance()`, `Game.GetDirection()`, pathing, and tracing APIs instead of inventing rectangular-grid math. TLA uses hex-grid assumptions.
 - Do not mask invariant failures with broad defensive fallbacks. Assert or fail loudly when an expected value is absent.
 - Add server-side `Game.Log(...)` lines only when they materially help diagnose positive and negative flows.
 - Script changes often affect authored assets: dialogs, text packs, item/critter/map prototypes, GUI callbacks. Check references when changing public symbols or behavior.
+- Special dialog answer links such as `Answer Barter` / `Answer Attack` must have globally visible `///@ Enum DialogAnswerLink ...` metadata, typically near the dialog contract in `Scripts/Dialogs.fos`, so the dialog baker can resolve them.
 - Keep edited `.fos` files ending with exactly one trailing blank line.
 
 ## Content Pipeline
@@ -192,7 +201,7 @@ Pick the boundary before reaching for a heavy interactive session:
 | Native compile/link error | Build the narrowest `TLA_*` target and inspect the first compiler error. |
 | Server startup/runtime issue | `Build :: TLA_ServerHeadless` or `Launch :: TLA_Server [windows]`, then inspect `TLA_ServerHeadless.log` / `TLA_Server.log`. |
 | Client presentation/input issue | `Build :: TLA_Client`, run the client/server pair, then inspect `TLA_Client.log`. |
-| Engine regression | Check `Engine` upstream commits, compare `H:/lf-7`, then run/build `TLA_UnitTests` when applicable. |
+| Engine regression | Check `Engine` upstream commits, compare `H:/lf-30`, then run/build `TLA_UnitTests` when applicable. |
 
 ## Commit Policy
 
@@ -209,4 +218,4 @@ Pick the boundary before reaching for a heavy interactive session:
 - `.vscode/launch.json` - debugger launch profiles when present.
 - `CMakeLists.txt` - target wiring and native extension roles.
 - `.github/workflows/` - CI definitions.
-- `H:/lf-7/AGENTS.md` - reference project on the same engine; copy only generic, non-project-specific practices.
+- `H:/lf-30/AGENTS.md` - reference project on the same engine; copy only generic, non-project-specific practices.

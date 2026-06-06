@@ -58,7 +58,7 @@ LetterInfo? GetRandomLetterInfo(hstring startLoc)
         }
     }
 
-    Location loc = Game.GetLocation(locPid);
+    Location? loc = Game.GetLocation(locPid);
     if (loc == null || loc.GetMapCount() == 0) {
         return null;
     }
@@ -107,7 +107,7 @@ LetterInfo? GetNewLetterInfo(hstring locPid, ident playerId)
     int numTry;
     numTry = 10; // максимально число попыток составить описание нового письма
     for (int i = 0; i < numTry; i++) {
-        LetterInfo li = GetRandomLetterInfo(locPid);
+        LetterInfo? li = GetRandomLetterInfo(locPid);
         if (li != null) {
             li.PlayerID = playerId;
             li.LocPidStart = locPid;
@@ -166,7 +166,7 @@ class LetterInfo
         item.NCRPostmanMapPidRec = MapPidRec;
         item.NCRPostmanNpcDidRec = NpcDidRec;
         item.NCRPostmanPlayerID = PlayerID;
-        item.Lexems = GetLetterLexems();
+        item.TextArgs = GetLetterLexems();
     }
 
     // лексемы для адреса/получателя письма
@@ -211,8 +211,8 @@ class LetterInfo
 // вспомогательная функция - измеряет расстояние между двумя локациями с указанием прототипов локаций
 float MeasureDist(hstring pidLocFrom, hstring pidLocTo)
 {
-    Location fromLoc = Game.GetLocation(pidLocFrom);
-    Location toLoc = Game.GetLocation(pidLocTo);
+    Location? fromLoc = Game.GetLocation(pidLocFrom);
+    Location? toLoc = Game.GetLocation(pidLocTo);
     if (toLoc == null || fromLoc == null) {
         return 0;
     }
@@ -227,16 +227,12 @@ EventResult _OnMailUseOnCritter(Item item, Critter cr, Critter? onCritter, Item 
         return EventResult::StopChain;
     }
     LetterInfo li = LetterInfo(item);
-    Map map = onCritter.GetMap();
+    Map? map = onCritter.GetMap();
     if (map == null) {
         return EventResult::StopChain;
     }
     Location loc = map.GetLocation();
-    if (loc == null) {
-        return EventResult::StopChain;
-    }
-    if (li == null || onCritter.DialogId != li.NpcDidRec || !cr.ControlledByPlayer || EnemyStack::CheckEnemyInStack(onCritter, cr.Id) ||
-        li.LocPidRec != loc.ProtoId) {
+    if (onCritter.DialogId != li.NpcDidRec || !cr.ControlledByPlayer || EnemyStack::CheckEnemyInStack(onCritter, cr.Id) || li.LocPidRec != loc.ProtoId) {
         return EventResult::StopChain;
     }
     // if (cr.Id != li.PlayerID){return EventResult::StopChain;} сдать письмо может любой
@@ -282,18 +278,35 @@ void dlg_GenLetter2Postman(Critter player, Critter postman, string& lexems)
     postman.IsNoSteal = true;
     postman.IsNoBarter = true;
     postman.IsNoDrop = true;
-    Item item;
-    LetterInfo li;
+    Item? item;
+    LetterInfo? li;
     if (postman.CountItem(Content::Item::postman_letter) == 0) {
+        Map? postmanMap = postman.GetMap();
+        if (postmanMap == null) {
+            return;
+        }
+
         item = postman.AddItem(Content::Item::postman_letter, 1);
-        li = GetNewLetterInfo(postman.GetMap().GetLocation().ProtoId, player.Id);
+        li = GetNewLetterInfo(postmanMap.GetLocation().ProtoId, player.Id);
+        if (item == null || li == null) {
+            return;
+        }
+
         li.SetItemLetterInfo(item);
         item.SetupScript(_LetterInit);
     }
     else {
         item = postman.GetItem(Content::Item::postman_letter);
+        if (item == null) {
+            return;
+        }
+
         li = LetterInfo(item);
     }
+    if (li == null) {
+        return;
+    }
+
     lexems = li.GetLetterLexems();
 }
 
@@ -302,7 +315,7 @@ void dlg_GenLetter2Postman(Critter player, Critter postman, string& lexems)
 [[DialogResult]]
 void r_GiveLetter(Critter player, Critter postman)
 {
-    Item letter = postman.GetItem(Content::Item::postman_letter);
+    Item? letter = postman.GetItem(Content::Item::postman_letter);
     if (letter == null) {
         return;
     }
@@ -318,7 +331,7 @@ void r_GrantPlayer(Critter player, Critter npc_null, any needMoney)
         return;
     }
 
-    Critter npc = Game.GetCritter(player.NcrMailRecieverId);
+    Critter? npc = Game.GetCritter(player.NcrMailRecieverId);
     player.NcrMailRecieverId = ZERO_IDENT;
     if (npc == null || !npc.IsAlive() || player.CountItem(Content::Item::postman_letter) == 0) {
         return;
@@ -328,16 +341,8 @@ void r_GrantPlayer(Critter player, Critter npc_null, any needMoney)
     Item[] items = player.GetItems();
     for (int i = 0; i < items.length(); i++) {
         Item letter = items[i];
-        if (letter == null) {
-            continue;
-        }
-
         if (letter.ProtoId == Content::Item::postman_letter) {
             LetterInfo li = LetterInfo(letter);
-            if (li == null) {
-                continue;
-            }
-
             if (li.NpcDidRec == npc.DialogId) {
                 // получатель правильный - письмо можно удалять
                 Game.DestroyItem(letter);

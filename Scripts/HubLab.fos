@@ -37,7 +37,11 @@ namespace HubLab
 // Квест "Секретная лаборатория хабологов".
 bool d_IsHonomerNear_Impl(Critter player, Critter npc)
 {
-    Map map = player.GetMap();
+    Map? map = player.GetMap();
+    if (map == null) {
+        return false;
+    }
+
     Critter[] critters = map.GetCritters(Content::Critter::ElronologistFemale, CritterFindType::NonDeadNpc);
     for (int i = 0; i < critters.length(); i++) {
         if (critters[i].DialogId == Content::Dialog::sf_honomer) {
@@ -62,7 +66,7 @@ bool d_NoHonomerNear(Critter player, Critter npc)
 // Добавление проводника на карту sf_hubb.
 void AddNewHonomer()
 {
-    Map map = Game.GetMap(Content::Map::sf_hubb);
+    Map? map = Game.GetMap(Content::Map::sf_hubb);
     mpos hex;
     if (map != null && Entrance::GetNearEntry(map, ENTRY_HONOMER, hex)) {
         Critter[] critters = map.GetCritters(Content::Critter::ElronologistFemale, CritterFindType::Npc);
@@ -98,17 +102,17 @@ void _HonomerMessage(Critter cr, Critter fromCr, int message, any value)
 [[Event]]
 EventResult _HonomerPlaneEnd(Critter cr, int planeId, int reason, Critter someCr, Item someItem)
 {
-    NpcPlanes::NpcPlane plane = NpcPlanes::GetCritterPlane(cr, planeId);
+    NpcPlanes::NpcPlane? plane = NpcPlanes::GetCritterPlane(cr, planeId);
 
     if (NpcPlanes::IsNoPlanes(cr) && d_HonomerInLab_Impl(cr, cr)) {
         mpos hex;
-        Map map = cr.GetMap();
+        Map? map = cr.GetMap();
         if (map != null && Entrance::MapGetEntryCoords(map, ENTRY_DOOR_NEAR, 0, hex)) {
             if (hex == cr.Hex) {
                 // Хономер стоит перед дверью
                 // Открываем дверь и даем план на продвижение к компу
                 Entrance::MapGetEntryCoords(map, ENTRY_DOOR, 0, hex);
-                Item door = map.GetItemOnHex(hex, Content::Item::door_2019);
+                Item? door = map.GetItemOnHex(hex, Content::Item::door_2019);
                 if (door != null) {
                     Lockers::SwitchLocker(door, true);
                     Game.StartTimeEvent(Time::Seconds(1), Item::AutoCloseDoor, door.Id); //SavedDeferredCall
@@ -122,7 +126,7 @@ EventResult _HonomerPlaneEnd(Critter cr, int planeId, int reason, Critter someCr
             }
         }
         if (map != null && Entrance::MapGetEntryCoords(map, ENTRY_REPAIR, 0, hex)) {
-            if (plane.Type != AI_PLANE_MISC) {
+            if (plane == null || plane.Type != AI_PLANE_MISC) {
                 if (hex == cr.Hex) {
                     NpcDialog::BeginDialog(cr, 4);
                 }
@@ -151,7 +155,7 @@ EventResult _HonomerGlobalProcess(Critter cr, int type, Item car, float x, float
         bool ok = false;
         Critter[] group = GlobalmapGroupExtended::GetGlobalGroup(cr);
         // Проверка что игрок в группе с нпц
-        Critter player = Game.GetCritter(cr.SFHonomerPlayerId);
+        Critter? player = Game.GetCritter(cr.SFHonomerPlayerId);
         if (player != null) {
             for (int i = 0, l = group.length(); i < l; i++) {
                 if (group[i].Id == player.Id) {
@@ -170,7 +174,7 @@ EventResult _HonomerGlobalProcess(Critter cr, int type, Item car, float x, float
 
     if (type != Tla::GlobalProcessMove) {
         if (cr.SFEscortLocation != ZERO_IDENT) {
-            Location loc = Game.GetLocation(cr.SFEscortLocation);
+            Location? loc = Game.GetLocation(cr.SFEscortLocation);
             if (loc != null) {
                 if (loc.WorldPos.x == int(x) && loc.WorldPos.y == int(y)) {
                     Map map = loc.GetMapByIndex(1);
@@ -178,7 +182,7 @@ EventResult _HonomerGlobalProcess(Critter cr, int type, Item car, float x, float
                     loc.AutoGarbage = true;
                     cr.StartTimeEvent(Time::Asap(), Time::Seconds(1), _HonomerIdle);
                     if (cr.SFHonomerPlayerId != ZERO_IDENT) {
-                        Critter player = Game.GetCritter(cr.SFHonomerPlayerId);
+                        Critter? player = Game.GetCritter(cr.SFHonomerPlayerId);
                         if (player != null && player.SFAhs7Escort == 2) {
                             player.SFAhs7Escort = 3;
                             player.Experience += 1000;
@@ -204,19 +208,19 @@ EventResult _HonomerGlobalProcess(Critter cr, int type, Item car, float x, float
 
 void _HonomerIdle_Impl(Critter cr)
 {
-    if (cr.GetMap() != null && cr.GetMap().Id != cr.HomeMapId) {
-        cr.HomeMapId = cr.GetMap().Id;
+    Map? map = cr.GetMap();
+    if (map != null && map.Id != cr.HomeMapId) {
+        cr.HomeMapId = map.Id;
         cr.HomeHex = cr.Hex;
         cr.HomeDir = 0;
     }
-
-    Game.StopCurrentTimeEvent();
 }
 
 [[TimeEvent]]
-void _HonomerIdle(Critter cr)
+void _HonomerIdle(Critter cr, TimeEventContext event)
 {
     _HonomerIdle_Impl(cr);
+    event.Stop();
 }
 
 [[Event]]
@@ -227,7 +231,7 @@ void _HonomerFinish(Critter cr)
 
 bool d_HonomerInLab_Impl(Critter player, Critter npc)
 {
-    Map map = npc.GetMap();
+    Map? map = npc.GetMap();
     return (map != null && (map.GetLocation().ProtoId == Content::Location::hubologists_lab));
 }
 
@@ -285,21 +289,24 @@ void cte_ClearFollower(Critter cr, any rate)
 [[DialogResult]]
 void r_Travel(Critter player, Critter npc)
 {
-    Location loc;
+    Location? locHandle;
     if (player.SFEscortLocation != ZERO_IDENT) {
-        loc = Game.GetLocation(player.SFEscortLocation);
+        locHandle = Game.GetLocation(player.SFEscortLocation);
     }
 
-    if (loc == null) {
-        loc = Location::CreateLocation(Content::Location::hubologists_lab, ipos(LAB_WORLD_X, LAB_WORLD_Y), null);
-        if (loc == null) {
-            return;
-        }
+    if (locHandle == null) {
+        Location loc = Location::CreateLocation(Content::Location::hubologists_lab, ipos(LAB_WORLD_X, LAB_WORLD_Y), null);
 
         loc.Hidden = true;
         loc.AutoGarbage = false;
+        locHandle = loc;
     }
 
+    if (locHandle == null) {
+        return;
+    }
+
+    Location loc = locHandle;
     npc.SFEscortLocation = loc.Id;
     player.SFEscortLocation = loc.Id;
 
@@ -311,7 +318,7 @@ void r_Travel(Critter player, Critter npc)
 
 void AttackPlayer(Critter target)
 {
-    Map map = target.GetMap();
+    Map? map = target.GetMap();
     if (map == null) {
         return;
     }
@@ -319,11 +326,11 @@ void AttackPlayer(Critter target)
     Location loc = map.GetLocation();
     int maps = loc.GetMapCount();
     for (int i = 0; i < maps; i++) {
-        map = loc.GetMapByIndex(i);
-        Critter[] critters = map.GetCritters(CritterFindType::Npc);
+        Map currentMap = loc.GetMapByIndex(i);
+        Critter[] critters = currentMap.GetCritters(CritterFindType::Npc);
         for (int j = 0; j < critters.length(); j++) {
             Critter cr = critters[j];
-            if (NpcRevenge::IsLocalNpc(cr, map) && !EnemyStack::CheckEnemyInStack(cr, target.Id)) {
+            if (NpcRevenge::IsLocalNpc(cr, currentMap) && !EnemyStack::CheckEnemyInStack(cr, target.Id)) {
                 EnemyStack::AddEnemyToStack(cr, target.Id);
                 NpcPlanes::AddAttackPlane(cr, 0, target);
             }
@@ -397,8 +404,12 @@ void _HubMessage(Critter cr, Critter fromCr, int message, any value)
 [[ItemTrigger]]
 void t_NpcDialog(Critter player, StaticItem trigger, bool entered, mdir dir)
 {
-    Map map = player.GetMap();
-    Critter cr = player.GetMap().GetCritter(CritterProperty::NpcRole, ROLE_START_DIALOG, CritterFindType::NonDeadNpc);
+    Map? map = player.GetMap();
+    if (map == null) {
+        return;
+    }
+
+    Critter? cr = map.GetCritter(CritterProperty::NpcRole, ROLE_START_DIALOG, CritterFindType::NonDeadNpc);
     if (cr != null && not cr.QHubLabIsDialogRun && NpcPlanes::IsNoPlanes(cr)) {
         cr.QHubLabIsDialogRun = true;
         NpcDialog::BeginDialog(cr, 3);
@@ -410,12 +421,16 @@ void t_NpcDialog(Critter player, StaticItem trigger, bool entered, mdir dir)
 void t_CloseDoor(Critter cr, StaticItem trigger, bool entered, mdir dir)
 {
     if (!cr.ControlledByPlayer && cr.DialogId == Content::Dialog::sf_honomer) {
-        Map map = cr.GetMap();
+        Map? map = cr.GetMap();
+        if (map == null) {
+            return;
+        }
+
         if (!map.SFLabHonomerInside) {
             map.SFLabHonomerInside = true;
             mpos hex;
             if (Entrance::MapGetEntryCoords(map, ENTRY_DOOR, 0, hex)) {
-                Item door = map.GetItemOnHex(hex, Content::Item::door_2019);
+                Item? door = map.GetItemOnHex(hex, Content::Item::door_2019);
                 if (door != null) {
                     Lockers::SwitchLocker(door, false);
                 }
@@ -434,13 +449,13 @@ void t_Attack(Critter cr, StaticItem trigger, bool entered, mdir dir)
     }
 
     hstring pid;
-    Item item = _CritGetItemArmor(cr);
+    Item? item = _CritGetItemArmor(cr);
     if (item != null) {
         pid = item.ProtoId;
     }
 
     if (cr.ControlledByPlayer && pid != Content::Item::purple_robe && pid != Content::Item::keepbrige_robe && pid != Content::Item::black_robe) {
-        Map map = cr.GetMap();
+        Map? map = cr.GetMap();
         if (map != null && cr.SFLabFailed == 0) {
             AttackPlayer(cr);
             Critter[] critters = map.GetCrittersInRadius(trigger.Hex, map.Size.width, CritterFindType::NonDeadNpc);
@@ -454,7 +469,7 @@ void t_Attack(Critter cr, StaticItem trigger, bool entered, mdir dir)
 bool d_InRobe_Impl(Critter cr, Critter npc)
 {
     hstring pid;
-    Item item = _CritGetItemArmor(cr);
+    Item? item = _CritGetItemArmor(cr);
     if (item != null) {
         pid = item.ProtoId;
     }
@@ -476,7 +491,7 @@ bool d_NotRobe(Critter player, Critter npc)
 [[DialogResult]]
 void r_ShowHell(Critter player, Critter npc)
 {
-    Map map = Game.GetMap(Content::Map::repl_hell);
+    Map? map = Game.GetMap(Content::Map::repl_hell);
     if (map != null) {
         mpos hex;
         if (Entrance::MapGetEntryCoords(map, ENTRY_HELL, 0, hex)) {

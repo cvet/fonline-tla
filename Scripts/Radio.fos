@@ -40,7 +40,7 @@ void InitRadio()
 [[Event]]
 void OnItemInit(Item item, bool firstTime)
 {
-    if (item.Radio != null) {
+    if (item.HasRadio) {
         RadioItems.insertLast(item);
     }
 }
@@ -48,7 +48,7 @@ void OnItemInit(Item item, bool firstTime)
 [[Event]]
 void OnItemFinish(Item item)
 {
-    if (item.Radio != null) {
+    if (item.HasRadio) {
         //RadioItems.remove(item);
         for (int i = 0; i < RadioItems.length(); i++) {
             if (RadioItems[i].Id == item.Id) {
@@ -66,7 +66,7 @@ void EditRadioSettings(Critter cr, Item item)
 // [[Event]]
 void OnCritterUseItem(Critter cr, Item item)
 {
-    if (item.Radio != null) {
+    if (item.HasRadio) {
         cr.PlayerClientCall.ShowEditScreen(item.Id);
     }
 }
@@ -74,21 +74,25 @@ void OnCritterUseItem(Critter cr, Item item)
 [[ServerRemoteCall]]
 void SendRadioMessage(Player player, string text)
 {
-    Critter cr = player.GetControlledCritter();
+    Critter? cr = player.GetControlledCritter();
+    if (cr == null) {
+        return;
+    }
+
     Item[] items = cr.GetItems();
     bool hasActiveRadio = false;
 
     for (int i = 0; i < items.length(); i++) {
-        if (items[i].Radio != null && !items[i].Radio.DisableSend) {
+        if (items[i].HasRadio && !items[i].Radio.DisableSend) {
             hasActiveRadio = true;
             break;
         }
     }
 
-    Assert(hasActiveRadio);
+    verify(hasActiveRadio, "Assertion failed");
 
     text = text.trim();
-    Assert(!text.isEmpty());
+    verify(!text.isEmpty(), "Assertion failed");
 
     SendRadioMessage(cr, text);
 }
@@ -96,11 +100,15 @@ void SendRadioMessage(Player player, string text)
 [[ServerRemoteCall]]
 void ChangeActivity(Player player, ident radioId, bool isSend, bool disable)
 {
-    Critter cr = player.GetControlledCritter();
-    Item item = cr.GetItem(radioId);
+    Critter? cr = player.GetControlledCritter();
+    if (cr == null) {
+        return;
+    }
 
-    Assert(item != null);
-    Assert(item.Radio != null);
+    Item? item = cr.GetItem(radioId);
+
+    verify(item != null, "Assertion failed");
+    verify(item.HasRadio, "Assertion failed");
 
     if (isSend) {
         item.Radio.DisableSend = disable;
@@ -113,13 +121,17 @@ void ChangeActivity(Player player, ident radioId, bool isSend, bool disable)
 [[ServerRemoteCall]]
 void ChangeChannel(Player player, ident radioId, int radioChannel)
 {
-    Critter cr = player.GetControlledCritter();
-    Item item = cr.GetItem(radioId);
+    Critter? cr = player.GetControlledCritter();
+    if (cr == null) {
+        return;
+    }
 
-    Assert(item != null);
-    Assert(item.Radio != null);
-    Assert(!item.Radio.FixedChannel);
-    Assert(radioChannel >= 0 && radioChannel <= 0xFFFF);
+    Item? item = cr.GetItem(radioId);
+
+    verify(item != null, "Assertion failed");
+    verify(item.HasRadio, "Assertion failed");
+    verify(!item.Radio.FixedChannel, "Assertion failed");
+    verify(radioChannel >= 0 && radioChannel <= 0xFFFF, "Assertion failed");
 
     item.Radio.Channel = radioChannel;
 }
@@ -127,12 +139,16 @@ void ChangeChannel(Player player, ident radioId, int radioChannel)
 [[ServerRemoteCall]]
 void ChangeBroadcast(Player player, ident radioId, RadioBroadcastType broadcast, int broadcastZones)
 {
-    Critter cr = player.GetControlledCritter();
-    Item item = cr.GetItem(radioId);
+    Critter? cr = player.GetControlledCritter();
+    if (cr == null) {
+        return;
+    }
 
-    Assert(item != null);
-    Assert(item.Radio != null);
-    Assert(!item.Radio.FixedBroadcast);
+    Item? item = cr.GetItem(radioId);
+
+    verify(item != null, "Assertion failed");
+    verify(item.HasRadio, "Assertion failed");
+    verify(!item.Radio.FixedBroadcast, "Assertion failed");
 
     item.Radio.Broadcast = broadcast;
     item.Radio.BroadcastZones = broadcastZones == 1 ? Settings.Radio.RadioBroadcastZones1 : Settings.Radio.RadioBroadcastZones2;
@@ -147,7 +163,7 @@ void SendRadioMessage(Critter cr, string text)
     for (int i = 0; i < items.length(); i++) {
         Item sendItem = items[i];
 
-        if (sendItem.Radio != null && !sendItem.Radio.DisableSend) {
+        if (sendItem.HasRadio && !sendItem.Radio.DisableSend) {
             SendRadioMessage(sendItem, text);
         }
     }
@@ -155,9 +171,20 @@ void SendRadioMessage(Critter cr, string text)
 
 void SendRadioMessage(Item sendItem, string text)
 {
-    Map sendMap = sendItem.GetMap();
-    Critter sendCr = sendItem.GetCritter();
-    ipos sendWorldPos = sendCr != null ? sendCr.WorldPos : sendMap.GetLocation().WorldPos;
+    Map? sendMap = sendItem.GetMap();
+    Critter? sendCr = sendItem.GetCritter();
+    ipos sendWorldPos;
+    if (sendCr != null) {
+        sendWorldPos = sendCr.WorldPos;
+    }
+    else {
+        if (sendMap == null) {
+            return;
+        }
+
+        sendWorldPos = sendMap.GetLocation().WorldPos;
+    }
+
     RadioBroadcastType sendBroadcast = sendItem.Radio.Broadcast;
 
     for (int i = 0; i < RadioItems.length(); i++) {
@@ -191,9 +218,19 @@ void SendRadioMessage(Item sendItem, string text)
         }
 
         mpos hex;
-        Map recvMap = recvItem.GetMapPosition(hex);
-        Critter recvCr = recvItem.GetCritter();
-        ipos recvWorldPos = recvCr != null ? recvCr.WorldPos : recvMap.GetLocation().WorldPos;
+        Map? recvMap = recvItem.GetMapPosition(hex);
+        Critter? recvCr = recvItem.GetCritter();
+        ipos recvWorldPos;
+        if (recvCr != null) {
+            recvWorldPos = recvCr.WorldPos;
+        }
+        else {
+            if (recvMap == null) {
+                continue;
+            }
+
+            recvWorldPos = recvMap.GetLocation().WorldPos;
+        }
 
         if (broadcast == RadioBroadcastType::Zone) {
             if (Math::Distance(sendWorldPos, recvWorldPos) > broadcastZones * Settings.GlobalMap.GlobalMapZoneLength) {
@@ -215,7 +252,7 @@ void SendRadioMessage(Item sendItem, string text)
             Messaging::Info(recvCr, TextPackKey(TextPackName::Game, "" + (MsgStr::STR_MBRADIO)), "$channel" + recvItem.Radio.Channel + "$text" + text);
         }
         else {
-            MapText::AddText(recvMap, hex, COLOR_WHITE, text);
+            MapText::AddText(recvMap, hex, Color::White, text);
         }
     }
 }
@@ -232,15 +269,15 @@ void SendChannelRadioMessage(int channel, string text)
             continue;
         }
 
-        Critter recvCr = recvItem.GetCritter();
+        Critter? recvCr = recvItem.GetCritter();
 
         if (recvCr != null) {
             Messaging::Info(recvCr, TextPackKey(TextPackName::Game, "" + (MsgStr::STR_MBRADIO)), "$channel" + channel + "$text" + text);
         }
         else {
             mpos hex;
-            Map recvMap = recvItem.GetMapPosition(hex);
-            MapText::AddText(recvMap, hex, COLOR_WHITE, text);
+            Map? recvMap = recvItem.GetMapPosition(hex);
+            MapText::AddText(recvMap, hex, Color::White, text);
         }
     }
 }
@@ -257,15 +294,19 @@ void SendChannelRadioMessage(int channel, TextPackKey textKey, string lexems = "
             continue;
         }
 
-        Critter recvCr = recvItem.GetCritter();
+        Critter? recvCr = recvItem.GetCritter();
 
         if (recvCr != null) {
-            MapText::AddText(recvCr, COLOR_WHITE, textKey);
+            MapText::AddText(recvCr, Color::White, textKey);
         }
         else {
             mpos hex;
-            Map recvMap = recvItem.GetMapPosition(hex);
-            MapText::AddText(recvMap, hex, COLOR_WHITE, textKey, lexems);
+            Map? recvMap = recvItem.GetMapPosition(hex);
+            if (recvMap == null) {
+                continue;
+            }
+
+            MapText::AddText(recvMap, hex, Color::White, textKey, lexems);
         }
     }
 }
@@ -276,15 +317,11 @@ void SendChannelRadioMessage(int channel, TextPackKey textKey, string lexems = "
 
 void SendRadioMessage(string text)
 {
-    if (Chosen == null) {
-        return;
-    }
-
     bool hasActiveRadio = false;
     Item[] items = Chosen.GetItems();
 
     for (int i = 0; i < items.length(); i++) {
-        if (items[i].Radio != null && !items[i].Radio.DisableSend) {
+        if (items[i].HasRadio && !items[i].Radio.DisableSend) {
             hasActiveRadio = true;
             break;
         }
@@ -300,13 +337,12 @@ void SendRadioMessage(string text)
 
 Item? GetItemRadio(ident radioId)
 {
-    if (Chosen == null) {
-        return null;
-    }
-
-    Item item = Chosen.GetItem(radioId);
+    Item? item = Chosen.GetItem(radioId);
 
     if (item == null) {
+        return null;
+    }
+    if (!item.HasRadio) {
         return null;
     }
 
@@ -315,14 +351,20 @@ Item? GetItemRadio(ident radioId)
 
 bool GetRadioActivity(ident radioId, bool isSend)
 {
-    Item item = GetItemRadio(radioId);
+    Item? item = GetItemRadio(radioId);
+    if (item == null) {
+        return false;
+    }
     bool disableFlag = isSend ? item.Radio.DisableSend : item.Radio.DisableRecv;
     return disableFlag;
 }
 
 bool ChangeRadioActivity(ident radioId, bool isSend)
 {
-    Item item = GetItemRadio(radioId);
+    Item? item = GetItemRadio(radioId);
+    if (item == null) {
+        return false;
+    }
     bool disableFlag = isSend ? item.Radio.DisableSend : item.Radio.DisableRecv;
     int beginStr = isSend ? MsgStr::Get("RadioBroadcastSendBegin") : MsgStr::Get("RadioBroadcastRecvBegin");
     int endStr = isSend ? MsgStr::Get("RadioBroadcastSendEnd") : MsgStr::Get("RadioBroadcastRecvEnd");
@@ -342,8 +384,11 @@ bool ChangeRadioActivity(ident radioId, bool isSend)
 
 void ChangeRadioChannel(ident radioId, int channel)
 {
-    Item item = GetItemRadio(radioId);
-    Assert(!item.Radio.FixedChannel);
+    Item? item = GetItemRadio(radioId);
+    if (item == null) {
+        return;
+    }
+    verify(!item.Radio.FixedChannel, "Assertion failed");
 
     if (int(item.Radio.Channel) == channel) {
         return;
@@ -355,7 +400,10 @@ void ChangeRadioChannel(ident radioId, int channel)
 
 void ChangeRadioBroadcastType(ident radioId, int type)
 {
-    Item item = GetItemRadio(radioId);
+    Item? item = GetItemRadio(radioId);
+    if (item == null) {
+        return;
+    }
 
     if (item.Radio.FixedBroadcast) {
         Messaging::Info(TextPackKey(TextPackName::Game, "" + (MsgStr::Get("RadioCantShiftBcSend"))));
@@ -398,11 +446,7 @@ void ChangeRadioBroadcastType(ident radioId, int type)
 [[ClientRemoteCall]]
 void ShowEditScreen(ident itemId)
 {
-    if (Chosen == null) {
-        return;
-    }
-
-    Item item = Chosen.GetItem(itemId);
+    Item? item = Chosen.GetItem(itemId);
 
     if (item != null) {
         dict<string, any> params = {{"ItemId", item.Id}};

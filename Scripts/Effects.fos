@@ -163,30 +163,118 @@ void Animate(Critter cr, CritterStateAnim state, CritterActionAnim action)
 
 #if CLIENT
 
+class FadeEffect
+{
+    nanotime BeginTime;
+    timespan Duration;
+    ucolor StartColor;
+    ucolor EndColor;
+}
+
+FadeEffect[] FadeEffects = {};
+
+bool QuakeActive = false;
+bool QuakeOffsetApplied = false;
+float QuakeOffsetX = 0.0f;
+float QuakeOffsetY = 0.0f;
+float QuakeStep = 0.0f;
+nanotime QuakeNextTime = ZERO_NANOTIME;
+
+[[ModuleInit]]
+void InitEffects()
+{
+    Game.OnLoop.Subscribe(OnLoop);
+    Game.OnRenderIface.Subscribe(OnRenderIface, EventPriority::Low);
+    Game.OnMapUnload.Subscribe(OnMapUnload);
+}
+
+void FadeScreen(ucolor fromColor, ucolor toColor, timespan time, bool appendEffect = false)
+{
+    PruneFadeEffects();
+
+    nanotime beginTime = Game.FrameTime;
+
+    if (appendEffect && !FadeEffects.isEmpty()) {
+        for (int i = 0; i < int(FadeEffects.length()); i++) {
+            nanotime endTime = FadeEffects[i].BeginTime + FadeEffects[i].Duration;
+
+            if (endTime > beginTime) {
+                beginTime = endTime;
+            }
+        }
+    }
+
+    FadeEffect effect = FadeEffect();
+    effect.BeginTime = beginTime;
+    effect.Duration = time;
+    effect.StartColor = fromColor;
+    effect.EndColor = toColor;
+    FadeEffects.insertLast(effect);
+}
+
+void QuakeScreen(int noise, timespan time)
+{
+    if (noise == 0 || time.milliseconds <= 0) {
+        ResetQuake();
+        return;
+    }
+
+    float amplitude = float(Math::Abs(noise));
+    QuakeOffsetX = Game.Random(0, 1) != 0 ? amplitude : -amplitude;
+    QuakeOffsetY = Game.Random(0, 1) != 0 ? amplitude : -amplitude;
+    QuakeStep = amplitude / Math::MaxF(float(time.milliseconds) / 30.0f, 1.0f);
+    QuakeNextTime = Game.FrameTime + Time::Milliseconds(30);
+    QuakeActive = true;
+
+    ApplyQuakeOffset();
+}
+
+[[Event]]
+void OnLoop()
+{
+    ProcessQuake();
+}
+
+[[Event]]
+void OnRenderIface()
+{
+    DrawFadeEffects();
+}
+
+[[Event]]
+void OnMapUnload()
+{
+    ResetQuake();
+}
+
 [[ClientRemoteCall]]
 void DoFadeScreen(ucolor fromColor, ucolor toColor, timespan time)
 {
-    Game.FadeScreen(fromColor, toColor, time, true);
+    FadeScreen(fromColor, toColor, time, true);
 }
 
 [[ClientRemoteCall]]
 void DoQuakeScreen(int noise, timespan time)
 {
-    Game.QuakeScreen(noise, time);
+    QuakeScreen(noise, time);
 }
 
 [[ClientRemoteCall]]
 void DoRunEffect(hstring effectPid, mpos hex, int radius)
 {
+    if (!HasCurMap) {
+        return;
+    }
+
     Item effect = CurMap.CreateLocalItem(effectPid, hex);
     effect.PlayAnim(EMPTY_HSTRING, false, false);
     effect.StartTimeEvent(Time::Milliseconds(100), Time::Milliseconds(100), EffectDeferredDestroy);
 
     for (int i = 0; i < radius; i++) {
-        for (uint8 dir = 0; dir < 6; dir++) {
+        for (int dir = 0; dir < 6; dir++) {
             mpos hex2 = hex;
 
-            if (CurMap.MoveHexByDir(hex2, dir, i + 1) != i + 1) {
+            if (CurMap.MoveHexByDir(hex2, hdir(dir), i + 1) != i + 1) {
                 break;
             }
 
@@ -195,7 +283,7 @@ void DoRunEffect(hstring effectPid, mpos hex, int radius)
                 effect.PlayAnim(EMPTY_HSTRING, false, false);
                 effect.StartTimeEvent(Time::Milliseconds(100), Time::Milliseconds(100), EffectDeferredDestroy);
 
-                if (!CurMap.MoveHexByDir(hex2, (dir + 2) % 6)) {
+                if (!CurMap.MoveHexByDir(hex2, hdir((dir + 2) % 6))) {
                     break;
                 }
             }
@@ -204,19 +292,23 @@ void DoRunEffect(hstring effectPid, mpos hex, int radius)
 }
 
 [[TimeEvent]]
-void EffectDeferredDestroy(Item item)
+void EffectDeferredDestroy(Item item, TimeEventContext event)
 {
     if (!item.IsAnimPlaying()) {
         item.Finish();
-        Game.StopCurrentTimeEvent();
+        event.Stop();
     }
 }
 
 [[ClientRemoteCall]]
 void DoRunFlyEffect(hstring effectPid, ident crId, ident targetId, mpos hex, mpos targetHex)
 {
-    Critter cr = Game.GetCritter(crId);
-    Critter target = Game.GetCritter(targetId);
+    if (!HasCurMap) {
+        return;
+    }
+
+    Critter? cr = Game.GetCritter(crId);
+    Critter? target = Game.GetCritter(targetId);
 
     hex = cr != null ? cr.Hex : hex;
     targetHex = target != null ? target.Hex : targetHex;
@@ -228,12 +320,144 @@ void DoRunFlyEffect(hstring effectPid, ident crId, ident targetId, mpos hex, mpo
 }
 
 [[TimeEvent]]
-void FlyEffectDeferredDestroy(Item item)
+void FlyEffectDeferredDestroy(Item item, TimeEventContext event)
 {
     if (!item.IsMoving()) {
         item.Finish();
-        Game.StopCurrentTimeEvent();
+        event.Stop();
     }
+}
+
+void ProcessQuake()
+{
+    if (!QuakeActive) {
+        return;
+    }
+
+    if (!HasCurMap) {
+        ResetQuake();
+        return;
+    }
+
+    if (Game.FrameTime < QuakeNextTime) {
+        return;
+    }
+
+    QuakeOffsetX = DecayQuakeAxis(QuakeOffsetX);
+    QuakeOffsetY = DecayQuakeAxis(QuakeOffsetY);
+
+    if (QuakeOffsetX == 0.0f && QuakeOffsetY == 0.0f) {
+        ResetQuake();
+        return;
+    }
+
+    ApplyQuakeOffset();
+    QuakeNextTime = Game.FrameTime + Time::Milliseconds(30);
+}
+
+float DecayQuakeAxis(float value)
+{
+    float magnitude = Math::MaxF(Math::AbsF(value) - QuakeStep, 0.0f);
+
+    if (magnitude == 0.0f) {
+        return 0.0f;
+    }
+
+    return value < 0.0f ? magnitude : -magnitude;
+}
+
+void ApplyQuakeOffset()
+{
+    if (!HasCurMap) {
+        return;
+    }
+
+    CurMap.SetExtraScrollOffset(fpos(QuakeOffsetX, QuakeOffsetY));
+    QuakeOffsetApplied = true;
+}
+
+void ResetQuake()
+{
+    if (QuakeOffsetApplied && HasCurMap) {
+        CurMap.SetExtraScrollOffset(fpos(0.0f, 0.0f));
+    }
+
+    QuakeActive = false;
+    QuakeOffsetApplied = false;
+    QuakeOffsetX = 0.0f;
+    QuakeOffsetY = 0.0f;
+    QuakeStep = 0.0f;
+    QuakeNextTime = ZERO_NANOTIME;
+}
+
+void PruneFadeEffects()
+{
+    for (int i = 0; i < int(FadeEffects.length()); i++) {
+        if (Game.FrameTime >= FadeEffects[i].BeginTime + FadeEffects[i].Duration) {
+            FadeEffects.removeAt(i--);
+        }
+    }
+}
+
+void DrawFadeEffects()
+{
+    for (int i = 0; i < int(FadeEffects.length()); i++) {
+        FadeEffect effect = FadeEffects[i];
+
+        if (Game.FrameTime >= effect.BeginTime + effect.Duration) {
+            FadeEffects.removeAt(i--);
+            continue;
+        }
+
+        if (Game.FrameTime < effect.BeginTime) {
+            continue;
+        }
+
+        int durationMs = effect.Duration.milliseconds;
+        int elapsedMs = (Game.FrameTime - effect.BeginTime).milliseconds;
+        float t = durationMs <= 0 ? 1.0f : Math::ClampF(float(elapsedMs) / float(durationMs), 0.0f, 1.0f);
+
+        DrawFullscreenOverlay(LerpColor(effect.StartColor, effect.EndColor, t));
+    }
+}
+
+ucolor LerpColor(ucolor fromColor, ucolor toColor, float t)
+{
+    return ucolor(Math::Lerp(int(fromColor.red), int(toColor.red), t),
+                  Math::Lerp(int(fromColor.green), int(toColor.green), t),
+                  Math::Lerp(int(fromColor.blue), int(toColor.blue), t),
+                  Math::Lerp(int(fromColor.alpha), int(toColor.alpha), t));
+}
+
+void DrawFullscreenOverlay(ucolor color)
+{
+    if (color.alpha == 0) {
+        return;
+    }
+
+    int packedColor = int(color.value);
+    int screenWidth = Settings.View.ScreenWidth;
+    int screenHeight = Settings.View.ScreenHeight;
+    int[] data = {0,
+                  0,
+                  packedColor,
+                  0,
+                  screenHeight,
+                  packedColor,
+                  screenWidth,
+                  screenHeight,
+                  packedColor,
+                  screenWidth,
+                  screenHeight,
+                  packedColor,
+                  screenWidth,
+                  0,
+                  packedColor,
+                  0,
+                  0,
+                  packedColor};
+
+    Game.DrawPrimitive(RenderPrimitiveType::TriangleList, data);
 }
 
 [[ClientRemoteCall]]
@@ -245,7 +469,7 @@ void DoPlaySound(hstring soundName)
 [[ClientRemoteCall]]
 void DoAnimate(ident crId, CritterStateAnim state, CritterActionAnim action)
 {
-    Critter cr = Game.GetCritter(crId);
+    Critter? cr = Game.GetCritter(crId);
 
     if (cr != null) {
         cr.Animate(state, action);

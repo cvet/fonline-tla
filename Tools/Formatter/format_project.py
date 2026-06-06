@@ -21,132 +21,55 @@ PROJECT_FORMAT_PATTERNS = [
 UTF8_BOM = b'\xef\xbb\xbf'
 CLANG_FORMAT_VERSION_RE = re.compile(r'clang-format version (\d+)(?:\.|\b)')
 
-# clang-format treats `?` as a binary operator and inserts whitespace around
-# it: `Critter? cr` becomes `Critter ? cr`. For AngelScript scripts we use
-# `T?` as a nullable type suffix and want to keep it attached to the type.
-# Only apply the fix outside function bodies, so ternary expressions inside
-# bodies (like `cond ? a : b`) are never rewritten.
-FOS_NULLABLE_SUFFIX_RE = re.compile(
-    r'(?<![.\w])([A-Z][\w:]*(?:\[\])?)\s+\?\s+([A-Za-z_]\w*)(\s*(?:[(,)=]|\[\]))'
+# clang-format treats `?` as the conditional operator and inserts/aligns
+# whitespace around it, mangling the AngelScript nullable type suffix `T?` and
+# `cast<T?>`: `Item? item` -> `Item ? item`, aligned `Item      ? item`, and
+# `cast<Item?>(x)` -> `cast < Item ? > (x)`. The patterns below repair those
+# without ever rewriting a real ternary `cond ? a : b`, whose true-branch is
+# always followed by `:` (so it never reaches a `=`/`;`/`,`/`)` declaration
+# boundary right after the `? identifier`). Safe to apply globally, including
+# inside function bodies.
+
+# Nullable generic argument in a call: `name<T?>(...)` — covers `cast<T?>(x)`,
+# `array<T?>(n)`, etc. The `<...?>` with nothing between `?` and `>` plus the
+# trailing `(` is unambiguous against comparison/ternary chains.
+NULLABLE_GENERIC_RE = re.compile(
+    r'([A-Za-z_]\w*)\s*<\s*([A-Za-z_][\w:]*(?:\[\])?)\s*\?\s*>\s*\('
+)
+
+# Nullable element array type `T?[] name`, which clang-format mangles to
+# `T ? [] name` and may even break across lines. Requiring the trailing
+# identifier keeps it distinct from an array-literal ternary branch (`c ? [] : x`).
+NULLABLE_ARRAY_RE = re.compile(
+    r'(?<![.\w])([A-Za-z_][\w:]*)\s*\?\s*\[\](\s+[A-Za-z_])'
+)
+
+# Nullable local/field/parameter declaration: `T ? name` immediately followed by
+# a declaration boundary. A ternary can never present `T ? name <=;,)>` because
+# its true-branch is terminated by `:` first, so the boundary set makes this
+# unambiguous and the type may start lowercase (e.g. funcdef `callback_*` types).
+NULLABLE_DECL_RE = re.compile(
+    r'(?<![.\w])([A-Za-z_][\w:]*(?:\[\])?) +\? +([A-Za-z_]\w*)( *[=;,)])'
+)
+
+# Nullable return type on a method signature alone on its line, e.g.
+# `    Item ? GetTargetItem()`. Anchored to the line and terminated by the
+# closing `)` (no `:`/`;` in the parameter list), which a mid-line ternary
+# never is.
+NULLABLE_RETURN_RE = re.compile(
+    r'(?m)^( *)([A-Z][\w:]*(?:\[\])?) +\? +([A-Za-z_]\w*)\(([^:;]*)\)( *)(?=\r?$)'
 )
 
 
-def _split_outside_function_bodies(text: str) -> list[tuple[int, int, bool]]:
-    """Return list of (start, end, inside_body) spans covering the entire
-    text. A `{` is treated as a function-body brace when the previous
-    significant character is `)` or one of `else`/`do`/`try`/`catch`."""
-    n = len(text)
-    spans: list[tuple[int, int, bool]] = []
-    body_depth = 0
-    region_start = 0
-    i = 0
-    in_string = False
-    in_char = False
-    in_line_comment = False
-    in_block_comment = False
-    while i < n:
-        c = text[i]
-        nxt = text[i + 1] if i + 1 < n else ''
-        if in_line_comment:
-            if c == '\n':
-                in_line_comment = False
-            i += 1
-            continue
-        if in_block_comment:
-            if c == '*' and nxt == '/':
-                in_block_comment = False
-                i += 2
-                continue
-            i += 1
-            continue
-        if in_string:
-            if c == '\\':
-                i += 2
-                continue
-            if c == '"':
-                in_string = False
-            i += 1
-            continue
-        if in_char:
-            if c == '\\':
-                i += 2
-                continue
-            if c == "'":
-                in_char = False
-            i += 1
-            continue
-        if c == '/' and nxt == '/':
-            in_line_comment = True
-            i += 2
-            continue
-        if c == '/' and nxt == '*':
-            in_block_comment = True
-            i += 2
-            continue
-        if c == '"':
-            in_string = True
-            i += 1
-            continue
-        if c == "'":
-            in_char = True
-            i += 1
-            continue
-        if c == '{':
-            # Walk back skipping whitespace AND trailing method qualifier
-            # keywords (override, final, const, noexcept) so signatures like
-            # `string get_Text() override\n{` are recognized as bodies. Also
-            # recognize standalone `else`/`do`/`try`/`catch` followed by `{`.
-            is_body = False
-            j = i - 1
-            while True:
-                while j >= 0 and text[j] in ' \t\r\n':
-                    j -= 1
-                if j < 0:
-                    break
-                if text[j] == ')':
-                    is_body = True
-                    break
-                if not (text[j].isalnum() or text[j] == '_'):
-                    break
-                wend = j + 1
-                while j > 0 and (text[j - 1].isalnum() or text[j - 1] == '_'):
-                    j -= 1
-                word = text[j:wend]
-                if word in ('override', 'final', 'const', 'noexcept'):
-                    j -= 1
-                    continue
-                if word in ('else', 'do', 'try', 'catch'):
-                    is_body = True
-                break
-            if is_body:
-                if body_depth == 0:
-                    spans.append((region_start, i + 1, False))
-                    region_start = i + 1
-                body_depth += 1
-            i += 1
-            continue
-        if c == '}':
-            if body_depth > 0:
-                body_depth -= 1
-                if body_depth == 0:
-                    spans.append((region_start, i, True))
-                    region_start = i
-            i += 1
-            continue
-        i += 1
-    spans.append((region_start, n, body_depth > 0))
-    return spans
-
-
 def fix_fos_nullable_suffix(text: str) -> str:
-    spans = _split_outside_function_bodies(text)
-    out: list[str] = []
-    for start, end, inside_body in spans:
-        chunk = text[start:end]
-        if not inside_body:
-            chunk = FOS_NULLABLE_SUFFIX_RE.sub(r'\1? \2\3', chunk)
-        out.append(chunk)
-    return ''.join(out)
+    """Repair the AngelScript nullable suffix `T?` / `cast<T?>` / `T?[]` after
+    clang-format spaced it out. Every pattern is ternary-safe (see the regex
+    comments), so no function-body / ternary detection is required."""
+    text = NULLABLE_GENERIC_RE.sub(r'\1<\2?>(', text)
+    text = NULLABLE_ARRAY_RE.sub(r'\1?[]\2', text)
+    text = NULLABLE_DECL_RE.sub(r'\1? \2\3', text)
+    text = NULLABLE_RETURN_RE.sub(r'\1\2? \3(\4)\5', text)
+    return text
 
 
 class TerminalProgress:
@@ -260,7 +183,7 @@ def format_files(clang_format: str, root: Path, patterns: Sequence[str], check_o
 
         original, has_bom = read_text_strip_bom(path)
         formatted = strip_text_bom(subprocess.check_output([clang_format, str(path)], text=True, encoding='utf-8'))
-        if path.suffix == '.fos':
+        if path.suffix in ('.fos', '.fogui'):
             formatted = fix_fos_nullable_suffix(formatted)
         formatted = ensure_trailing_newline(normalize_line_endings(formatted, detect_line_ending(original)), detect_line_ending(original))
         if not differs_beyond_line_endings(original, formatted) and not has_bom:

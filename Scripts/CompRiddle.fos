@@ -37,8 +37,8 @@ ComputerRiddleInfo? GetRiddleInfo(Critter player)
     ident mapId = player.CompRiddleMapId;
     int hexX = player.CompRiddleHexX;
     int hexY = player.CompRiddleHexY;
-    if (mapId == ZERO_IDENT || player.GetMap() == null || mapId != player.GetMap().Id || hexY == 0 || hexY == 0 ||
-        Game.GetDistance(player.Hex, mpos(hexX, hexY)) > 3) {
+    Map? map = player.GetMap();
+    if (mapId == ZERO_IDENT || map == null || mapId != map.Id || hexY == 0 || hexY == 0 || Game.GetDistance(player.Hex, mpos(hexX, hexY)) > 3) {
         return null;
     }
     return GetRiddleInfo(mapId, hexX, hexY);
@@ -47,7 +47,11 @@ ComputerRiddleInfo? GetRiddleInfo(Critter player)
 ComputerRiddleInfo? GetRiddleInfo(ident mapId, int hexX, int hexY)
 {
     int key = MakeDataKey(hexX, hexY);
-    uint8[] data = Game.GetMap(mapId).CompRiddleData.get(key, array<uint8>());
+    Map? map = Game.GetMap(mapId);
+    if (map == null) {
+        return null;
+    }
+    uint8[] data = map.CompRiddleData.get(key, array<uint8>());
     if (data.length() > 0) {
         return ComputerRiddleInfo(mapId, hexX, hexY);
     }
@@ -97,7 +101,10 @@ class ComputerRiddleInfo
         save.Set(Code);
         save.Set(TriesLeft);
         int key = MakeDataKey(HexX, HexY);
-        Map map = Game.GetMap(MapId);
+        Map? map = Game.GetMap(MapId);
+        if (map == null) {
+            return;
+        }
         dict<int, uint8[]> compRiddleData = map.CompRiddleData.clone();
         compRiddleData[key] = save.GetData();
         map.CompRiddleData = compRiddleData;
@@ -107,7 +114,8 @@ class ComputerRiddleInfo
     {
         auto load = Serializator::Serializator();
         int key = MakeDataKey(HexX, HexY);
-        if (load.SetData(Game.GetMap(MapId).CompRiddleData.get(key, array<uint8>())) > 0) {
+        Map? map = Game.GetMap(MapId);
+        if (map != null && load.SetData(map.CompRiddleData.get(key, array<uint8>())) > 0) {
             load.Get(MapId);
             load.Get(HexX);
             load.Get(HexY);
@@ -125,7 +133,10 @@ class ComputerRiddleInfo
     void Erase()
     {
         int key = MakeDataKey(HexX, HexY);
-        Map map = Game.GetMap(MapId);
+        Map? map = Game.GetMap(MapId);
+        if (map == null) {
+            return;
+        }
         dict<int, uint8[]> compRiddleData = map.CompRiddleData.clone();
         compRiddleData.remove(key);
         map.CompRiddleData = compRiddleData;
@@ -196,7 +207,7 @@ class ComputerRiddleInfo
 [[TimeEvent]]
 void ResetRiddle(any[] values)
 {
-    ComputerRiddleInfo riddle = GetRiddleInfo(values[0], values[1], values[2]);
+    ComputerRiddleInfo? riddle = GetRiddleInfo(values[0], values[1], values[2]);
     if (riddle != null) {
         if (Game.GetMap(ident(values[0])) != null) {
             riddle.GenerateCode();
@@ -215,10 +226,11 @@ bool s_Use(Critter player, StaticItem scenery, Item? item, any skill)
     if (skill == int(CritterProperty::SkillScience) && item == null) {
         CritterState::Wait(player, 1000);
 
-        ComputerRiddleInfo info = ComputerRiddleInfo(player.GetMap(), scenery);
-        if (info == null) {
+        Map? map = player.GetMap();
+        if (map == null) {
             return false;
         }
+        ComputerRiddleInfo info = ComputerRiddleInfo(map, scenery);
 
         if (info.TriesLeft == 0) {
             Messaging::Info(player, TextPackKey(TextPackName::Text, "" + (STR_BLOCKED)));
@@ -226,7 +238,7 @@ bool s_Use(Critter player, StaticItem scenery, Item? item, any skill)
         }
         Messaging::Info(player, TextPackKey(TextPackName::Text, "" + (STR_INFO)), "$num" + info.TriesLeft);
 
-        player.CompRiddleMapId = player.GetMap().Id;
+        player.CompRiddleMapId = map.Id;
         player.CompRiddleHexX = scenery.Hex.x;
         player.CompRiddleHexY = scenery.Hex.y;
         player.OnPlayerSaidTextFromScenery.Unsubscribe(AnswerTrySolveRiddle);
@@ -248,7 +260,7 @@ void AnswerTrySolveRiddle(Critter player, hstring sceneryPid, mpos hex, string t
 {
     player.OnPlayerSaidTextFromScenery.Unsubscribe(AnswerTrySolveRiddle);
     player.CanSendSay = false;
-    ComputerRiddleInfo info = GetRiddleInfo(player);
+    ComputerRiddleInfo? info = GetRiddleInfo(player);
     if (info != null) {
         string code = "";
         bool solved = info.TrySolveRiddle(player, text, code);
@@ -265,21 +277,17 @@ void AnswerTrySolveRiddle(Critter player, hstring sceneryPid, mpos hex, string t
 [[TimeEvent]]
 void ShowCamera(any value)
 {
-    Critter cr = Game.GetCritter(value);
+    Critter? cr = Game.GetCritter(value);
     if (cr != null) {
         Location[] locations = Location::GetLocationsInRadius(ipos(cr.WorldPos.x, cr.WorldPos.y), 300);
         if (locations.length() > 0) {
             Location loc = locations[Game.Random(0, locations.length() - 1)];
-            if (loc != null) {
-                Map map = loc.GetMapByIndex(0);
-                Game.Log("ViewMap");
-                if (map != null) {
-                    mpos hex;
-                    if (Entrance::MapGetEntryCoords(map, 0, 0, hex)) {
-                        Game.Log("Entry founded");
-                        cr.ViewMap(map, 50, hex, 5);
-                    }
-                }
+            Map map = loc.GetMapByIndex(0);
+            Game.Log("ViewMap");
+            mpos hex;
+            if (Entrance::MapGetEntryCoords(map, 0, 0, hex)) {
+                Game.Log("Entry founded");
+                cr.ViewMap(map, 50, hex, 5);
             }
         }
     }

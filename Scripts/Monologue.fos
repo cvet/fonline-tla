@@ -20,9 +20,7 @@ bool MonologueRunning(Critter cr)
 void SetMonologue(Critter cr, int firstStr, int lastStr, timespan nextMsg, timespan nextDialog, SayType say)
 {
     Monologue m = Monologue(firstStr, lastStr, nextMsg, nextDialog, say, cr.Id);
-    if (m != null) {
-        m.ScheduleMonologue();
-    }
+    m.ScheduleMonologue();
 }
 
 Monologue? GetMonologue(Critter? cr)
@@ -31,7 +29,7 @@ Monologue? GetMonologue(Critter? cr)
         return null;
     }
     Monologue m = Monologue(cr.Id);
-    if (m == null || !m.Exist()) {
+    if (!m.Exist()) {
         return null;
     }
     m.Load();
@@ -67,12 +65,18 @@ class Monologue
 
     bool Exist()
     {
-        return Game.GetCritter(CritterId).MonologueData.length() > 0;
+        Critter? cr = Game.GetCritter(CritterId);
+        return cr != null && cr.MonologueData.length() > 0;
     }
 
     // Сериализация
     void Save()
     {
+        Critter? cr = Game.GetCritter(CritterId);
+        if (cr == null) {
+            return;
+        }
+
         auto save = Serializator::Serializator();
         save.Set(FirstString);
         save.Set(LastString);
@@ -81,13 +85,18 @@ class Monologue
         save.Set(NextDialogue);
         save.Set(int(Say));
         save.Set(CritterId);
-        Game.GetCritter(CritterId).MonologueData = save.GetData();
+        cr.MonologueData = save.GetData();
     }
 
     void Load()
     {
+        Critter? cr = Game.GetCritter(CritterId);
+        if (cr == null) {
+            return;
+        }
+
         auto load = Serializator::Serializator();
-        if (load.SetData(Game.GetCritter(CritterId).MonologueData) == 0) {
+        if (load.SetData(cr.MonologueData) == 0) {
             return;
         }
         load.Get(FirstString);
@@ -103,12 +112,15 @@ class Monologue
 
     void Erase()
     {
-        Game.GetCritter(CritterId).MonologueData = array<uint8>();
+        Critter? cr = Game.GetCritter(CritterId);
+        if (cr != null) {
+            cr.MonologueData = array<uint8>();
+        }
     }
 
     void ScheduleMonologue()
     {
-        Critter cr = Game.GetCritter(CritterId);
+        Critter? cr = Game.GetCritter(CritterId);
         if (cr == null) {
             return;
         }
@@ -120,7 +132,7 @@ class Monologue
 
     void ScheduleMessage()
     {
-        Critter cr = Game.GetCritter(CritterId);
+        Critter? cr = Game.GetCritter(CritterId);
         if (cr == null) {
             return;
         }
@@ -133,23 +145,23 @@ class Monologue
 
 // Начало диалога
 [[TimeEvent]]
-void cte_RunMonologue(Critter cr)
+void cte_RunMonologue(Critter cr, TimeEventContext event)
 {
-    Monologue m = GetMonologue(cr);
+    Monologue? m = GetMonologue(cr);
     if (m != null) {
         m.CurrentString = m.FirstString;
         m.Save();
         m.ScheduleMessage();
         if (m.NextDialogue != ZERO_TIMESPAN) {
-            Game.RepeatCurrentTimeEvent(m.NextDialogue);
+            event.Repeat(m.NextDialogue);
         }
     }
 }
 
 [[TimeEvent]]
-void cte_NextMessage(Critter cr)
+void cte_NextMessage(Critter cr, TimeEventContext event)
 {
-    Monologue m = GetMonologue(cr);
+    Monologue? m = GetMonologue(cr);
     if (m != null) {
         if (m.CurrentString > m.LastString) {
             if (m.NextDialogue == ZERO_TIMESPAN) { // Диалог одноразовый
@@ -161,7 +173,7 @@ void cte_NextMessage(Critter cr)
         m.CurrentString++;
         m.Save();
         if (m.NextMessage != ZERO_TIMESPAN) {
-            Game.RepeatCurrentTimeEvent(m.NextMessage);
+            event.Repeat(m.NextMessage);
         }
     }
 }

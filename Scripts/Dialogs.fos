@@ -31,7 +31,7 @@ namespace Dialogs
 ///@ Enum DialogAnswerLink Attack = -3
 
 ///@ RemoteCall Server SpeechAnswer(int32 answerIndex)
-///@ RemoteCall Client ReceiveDialogContext(hstring dialogId, ident talkerId, hstring textId, hstring[] answerTextIds, string lexems, timespan duration)
+///@ RemoteCall Client ReceiveDialogContext(hstring dialogId, ident talkerId, hstring textId, hstring[] answerTextIds, string textArgs, timespan duration)
 
 [[ModuleInit]]
 void InitDialogs()
@@ -112,9 +112,9 @@ void RunDialog(Critter cr, hstring dialogId, Critter? talker, bool ignoreDistanc
         return;
     }
 
-    string lexems = Game.RunSpeechScript(firstSpeech, cr, talker);
+    string textArgs = Game.RunSpeechScript(firstSpeech, cr, talker);
 
-    if (lexems == "!") {
+    if (textArgs == "!") {
         throw("Speech script error", cr, dialogId, firstSpeech.Id);
     }
 
@@ -135,7 +135,7 @@ void RunDialog(Critter cr, hstring dialogId, Critter? talker, bool ignoreDistanc
     cr.DialogContext.PrevSpeech = -1;
     cr.DialogContext.CurSpeech = firstSpeechIndex;
     cr.DialogContext.SpeechAnswers = firstAnswerIndices;
-    cr.DialogContext.TextArgs = lexems;
+    cr.DialogContext.TextArgs = textArgs;
 
     cr.StartTimeEvent(Time::Milliseconds(1000), Time::Milliseconds(1000), ProcessDialog);
     SendDialogContext(cr);
@@ -252,9 +252,9 @@ void SpeechAnswer(Player player, int answerIndex)
     int[] nextAnswerIndices = GetSpeechAnswers(cr, talker, dialogPack, nextSpeechIndex);
 
     DialogSpeech nextSpeech = dialogPack.GetSpeech(nextSpeechIndex);
-    string lexems = Game.RunSpeechScript(nextSpeech, cr, talker);
+    string textArgs = Game.RunSpeechScript(nextSpeech, cr, talker);
 
-    if (lexems == "!") {
+    if (textArgs == "!") {
         CloseDialog(cr);
         throw("Speech script error", cr, dialogId, nextSpeech.Id);
     }
@@ -268,7 +268,7 @@ void SpeechAnswer(Player player, int answerIndex)
     cr.DialogContext.PrevSpeech = cr.DialogContext.CurSpeech;
     cr.DialogContext.CurSpeech = nextSpeechIndex;
     cr.DialogContext.SpeechAnswers = nextAnswerIndices;
-    cr.DialogContext.TextArgs = lexems;
+    cr.DialogContext.TextArgs = textArgs;
 
     SendDialogContext(cr);
 }
@@ -420,10 +420,10 @@ void SendDialogContext(Critter cr)
         }
 
         ident talkerId = cr.DialogContext.TalkerId;
-        string lexems = cr.DialogContext.TextArgs;
+        string textArgs = cr.DialogContext.TextArgs;
         timespan duration = Time::Milliseconds(Settings.Dialog.TalkMaxTime) - (Game.FrameTime - cr.DialogContext.StartTime);
 
-        cr.PlayerClientCall.ReceiveDialogContext(dialogId, talkerId, textId, answerTextIds, lexems, duration);
+        cr.PlayerClientCall.ReceiveDialogContext(dialogId, talkerId, textId, answerTextIds, textArgs, duration);
     }
     else {
         cr.PlayerClientCall.ReceiveDialogContext(EMPTY_HSTRING, ZERO_IDENT, EMPTY_HSTRING, {}, "", timespan());
@@ -837,18 +837,18 @@ int FindSpeech(DialogPack dialogPack, int speechId)
 #if CLIENT
 
 [[ClientRemoteCall]]
-void ReceiveDialogContext(hstring dialogId, ident talkerId, hstring textId, hstring[] answerTextIds, string lexems, timespan duration)
+void ReceiveDialogContext(hstring dialogId, ident talkerId, hstring textId, hstring[] answerTextIds, string textArgs, timespan duration)
 {
     if (dialogId != EMPTY_HSTRING) {
         string text = Game.GetText(TextPackKey(TextPackName::Dialogs, "" + (textId)));
         Critter? talker = talkerId != ZERO_IDENT ? Game.GetCritter(talkerId) : null;
-        text = Game.FormatTags(text, lexems, talker);
+        text = Game.FormatTags(text, textArgs, talker);
 
         string answersOneLine;
 
         for (int i = 0; i < answerTextIds.length(); i++) {
             string answerText = Game.GetText(TextPackKey(TextPackName::Dialogs, "" + (answerTextIds[i])));
-            answerText = Game.FormatTags(answerText, lexems, talker);
+            answerText = Game.FormatTags(answerText, textArgs, talker);
 
             answersOneLine += answerText;
             answersOneLine += i < answerTextIds.length() - 1 ? "\n" : "";

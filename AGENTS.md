@@ -40,6 +40,8 @@ Adding or removing a native extension file requires updating the relevant `AddEn
 
 VS Code tasks in `.vscode/tasks.json` are the authoritative workflow. The same commands can be run directly from the terminal.
 
+Warnings are treated as failures. Keep script compilation, resource baking, native builds, tests, and smoke runs at zero warnings; fix new or existing warnings instead of hand-waving them in the handoff.
+
 | Task | When to use |
 | ---- | ----------- |
 | `Bake Resources` | After edits in `Scripts/`, `Dialogs/`, `Maps/`, `Items/`, `Critters/`, `Texts/`, `Gui/`, or `TLA.fomain`. |

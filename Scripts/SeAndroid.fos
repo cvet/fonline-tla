@@ -35,11 +35,13 @@ const hstring[] Pids = {Content::Item::human_brain, Content::Item::gold_tooth, C
 
 // Группа "Браво", ответьте. Группа "Браво", ответьте. Докладываю. Склад высокотехнологичного вооружения расконсервирован. Нам потребуются еще люди,
 // чтобы забрать все. Также нам потребуется еще один грузовик. Повторяю наши координаты: Долина Смерти, зона.. *помехи* ...
-#define STR_RADIO_MESSAGE (70070)
+const int STR_RADIO_MESSAGE = 70070;
 
 // debug log
-// #define DL #(s) (Game.Log("android: " + s))
-#define DL #(s)
+// #define DebugLog #(s) (Game.Log("android: " + s))
+void DebugLog(string s)
+{
+}
 
 void _DeadInit(Critter cr, bool firstTime)
 {
@@ -58,10 +60,10 @@ void _DeadInit(Critter cr, bool firstTime)
 
 void _RadioInit(Item item, bool firstTime)
 {
-    DL("RadioInit");
+    DebugLog("RadioInit");
     if (firstTime) {
         item.Radio.Channel = Game.Random(1000, 9999);
-        DL("Channel: " + item.Radio.Channel);
+        DebugLog("Channel: " + item.Radio.Channel);
     }
 
     item.OnCritterUseSkill.Subscribe(_RadioSkill);
@@ -70,7 +72,7 @@ void _RadioInit(Item item, bool firstTime)
 [[Event]]
 EventResult _RadioSkill(Item item, Critter cr, CritterProperty skill)
 {
-    DL("Radio skill " + skill);
+    DebugLog("Radio skill " + skill);
     if (skill == CritterProperty::SpecialSkillPickOnGround) {
         if (!item.SeAndroidRadioListened) {
             any[] values = {item.Id, 0, cr.Id, item.Radio.Channel};
@@ -85,13 +87,13 @@ EventResult _RadioSkill(Item item, Critter cr, CritterProperty skill)
 [[TimeEvent]]
 void AndroidRadio(any[] values)
 {
-    DL("AndroidRadio. ItemId:" + values[0] + "; MsgCount:" + values[1] + "; " + "radioChannel: " + values[2]);
+    DebugLog("AndroidRadio. ItemId:" + values[0] + "; MsgCount:" + values[1] + "; " + "radioChannel: " + values[2]);
     Item? item = Game.GetItem(values[0]);
     if (item != null) {
         if (item.SeAndroidRadioListened) {
             Radio::SendChannelRadioMessage(values[3], TextPackKey(TextPackName::Text, "" + (STR_RADIO_MESSAGE)));
             values[1] = values[1] + 1;
-            DL("count radio messages:" + values[1]);
+            DebugLog("count radio messages:" + values[1]);
             Critter? cr = Game.GetCritter(item.CritterId);
             if (cr == null) {
                 return;
@@ -101,7 +103,7 @@ void AndroidRadio(any[] values)
                 cr.SpecialAndroid = 2;
             }
 
-            DL("seAndroidValue: " + cr.SpecialAndroid);
+            DebugLog("seAndroidValue: " + cr.SpecialAndroid);
             if (values[1] < 5) { // Максимум 5 повторов раз в 20 секунд на нужной радиоволне
                 Game.StartTimeEvent(Tla::GameSeconds(20), AndroidRadio, values);
             }
@@ -110,12 +112,12 @@ void AndroidRadio(any[] values)
 }
 
 // Локация с лабораторией
-#define ENTRY_DOOR_GROUND  (17)    // Номер гекса, на котором стоит дверь
-#define ENTRY_CONTAINER    (25)    // Номер гекса, на котором стоит ящик для вещей игрока
-#define ENTRY_KNOCKOUT     (26)    // Гекс, на котором будет лежать игрок после того, как попадет в лабораторию
-#define CTE_CHECK_KNOCKOUT (128)   // Номер события проверки, вышел ли игрок из нокаута.
-#define STR_LIFT_BROKEN    (70072) // Лифт не функционирует. Видимо, заблокирован откуда-то снизу.
-#define KEY_DOOR_ID        (16643) // Код ключа к двери
+const int ENTRY_DOOR_GROUND = 17;   // Номер гекса, на котором стоит дверь
+const int ENTRY_CONTAINER = 25;     // Номер гекса, на котором стоит ящик для вещей игрока
+const int ENTRY_KNOCKOUT = 26;      // Гекс, на котором будет лежать игрок после того, как попадет в лабораторию
+const int CTE_CHECK_KNOCKOUT = 128; // Номер события проверки, вышел ли игрок из нокаута.
+const int STR_LIFT_BROKEN = 70072;  // Лифт не функционирует. Видимо, заблокирован откуда-то снизу.
+const int KEY_DOOR_ID = 16643;      // Код ключа к двери
 
 // Скрипт двери. Пока не вошел ни один игрок она и открывается и закрывается.
 void _GroundDoorInit(Item item, bool firstTime)
@@ -160,15 +162,20 @@ void t_TransitPlayer(Critter player, StaticItem trigger, bool entered, mdir dir)
         Effects::FadeScreen(player, Color::Black, Color::Black, Time::Milliseconds(1000));
         loc.SeAndroidPlayerId = player.Id;
         player.StartTimeEvent(Time::Minutes(30), cte_CheckPlayerKnockOut); // Подстраховка
-        CritterState::ToKnockout(player, KNOCKOUT_ACTION_ANIM_DEFAULT(true), 100000, player.Hex);
+        CritterState::ToKnockout(player,
+                                 Tla::KnockoutActionAnimDefaultBegin(true),
+                                 Tla::KnockoutActionAnimDefaultIdle(true),
+                                 Tla::KnockoutActionAnimDefaultEnd(true),
+                                 100000,
+                                 player.Hex);
         // Все вещи игрока перекладываем в разные ящики
         Item[] items = player.GetItems();
         if (!items.isEmpty()) {
             if (Entrance::MapGetEntryCoords(basement, ENTRY_CONTAINER, 0, hex)) {
                 Item? cont = basement.GetItemOnHex(hex, Content::Item::locker_rusty_right);
                 if (cont != null) {
-                    ItemMovement::MoveItems(items, cont, ROOT_CONTAINER_STACK);
-                    items = cont.GetItems(ROOT_CONTAINER_STACK);
+                    ItemMovement::MoveItems(items, cont, Tla::RootContainerStack());
+                    items = cont.GetItems(Tla::RootContainerStack());
                     for (int i = 0; i < items.length(); i++) {
                         auto pid = items[i].ProtoId;
                         if (Pids.exists(pid) || pid == Content::Item::pot) {
@@ -176,7 +183,7 @@ void t_TransitPlayer(Critter player, StaticItem trigger, bool entered, mdir dir)
                         }
                     }
 
-                    Item item = cont.AddItem(Content::Item::pot, 1, ROOT_CONTAINER_STACK);
+                    Item item = cont.AddItem(Content::Item::pot, 1, Tla::RootContainerStack());
                     item.TextArgs = TextFormatting::TextArg("text", PlayerRegistration::GetPlayerName(player.Id));
                 }
             }
@@ -202,7 +209,7 @@ void t_TransitPlayer(Critter player, StaticItem trigger, bool entered, mdir dir)
 [[TimeEvent]]
 void cte_CheckPlayerKnockOut(Critter cr)
 {
-    DL("CheckKnockout");
+    DebugLog("CheckKnockout");
 
     if (cr.IsKnockout()) {
         Map? map = cr.GetMap();
@@ -219,13 +226,12 @@ void cte_CheckPlayerKnockOut(Critter cr)
 }
 
 // Внешний уровень
-#define STR_MAP_IN \
-    (70071) // Похоже, вы наткнулись на тот самый "военный склад", о котором услышали по рации. Однако, этот небольшой бункер выглядит необычно для склада. \
-            // Очень необычно.
+const int STR_MAP_IN =
+    70071; // Похоже, вы наткнулись на тот самый "военный склад", о котором услышали по рации. Однако, этот небольшой бункер выглядит необычно для склада.  // Очень необычно.
 
 void _GroundInit(Map map, bool firstTime)
 {
-    DL("Groun map Init");
+    DebugLog("Groun map Init");
     map.OnCritterIn.Subscribe(_GroundInCritter);
 }
 
@@ -236,11 +242,11 @@ void _GroundInCritter(Map map, Critter cr)
 }
 
 // Монолог хирурга
-#define ROLE_DOCTOR (17)
+const int ROLE_DOCTOR = 17;
 
 void _DoctorInit(Critter cr, bool firstTime)
 {
-    DL("Doctor init");
+    DebugLog("Doctor init");
     cr.StartTimeEvent(Time::Asap(), Time::Seconds(1), _DoctorIdle);
     if (firstTime) {
         Item key = cr.AddItem(Content::Item::nuke_key, 1);
@@ -253,7 +259,7 @@ void _DoctorIdle(Critter cr)
 {
     if (not cr.SEAndroidMonologEnd) {
         if (!Monologue::MonologueRunning(cr)) {
-            DL("Second stage begin");
+            DebugLog("Second stage begin");
             cr.SEAndroidMonologEnd = true;
             Map? map = cr.GetMap();
             if (map == null) {
@@ -283,21 +289,21 @@ void RunDoctorMonologue(Map map)
 }
 
 // Перенос в камеру
-#define ENTRY_DOC_POS    (27)    // dir = 0 Положение доктора после того, как игрок уже превращен в андроида
-#define ENTRY_PLAYER_POS (28)    // dir = 3 Положение персонажа после превращения (в камере)
-#define ENTRY_DOC_HOME   (29)    // dir = 3 Домашняя позиция доктора после диалога
-#define STR_AWAKE        (70091) // Реплика при пробуждении
+const int ENTRY_DOC_POS = 27;    // dir = 0 Положение доктора после того, как игрок уже превращен в андроида
+const int ENTRY_PLAYER_POS = 28; // dir = 3 Положение персонажа после превращения (в камере)
+const int ENTRY_DOC_HOME = 29;   // dir = 3 Домашняя позиция доктора после диалога
+const int STR_AWAKE = 70091;     // Реплика при пробуждении
 
 void TransformPlayer(Map map, Critter player, Critter doctor)
 {
-    DL("TRANSFORM");
+    DebugLog("TRANSFORM");
     Effects::FadeScreen(player, Color::Black, Color::Black, Time::Milliseconds(5000));
     if (player.NextCrType == EMPTY_HSTRING) {
         player.NextCrType = player.ModelName;
     }
 
     // player.ChangeCrType( CRTYPE_TACTICS_RHUMANOID );
-    player.ModelNameBase = CRTYPE_TACTICS_RHUMANOID;
+    player.ModelNameBase = Tla::CRTYPE_TACTICS_RHUMANOID;
     mpos hex;
     uint8 dir = 0;
     if (!Entrance::MapGetEntryCoords(map, ENTRY_DOC_POS, 0, hex)) {
@@ -334,7 +340,7 @@ void AwakePlayer(any[] values)
 [[DialogResult]]
 void r_SendDoctorHome(Critter player, Critter? npc)
 {
-    DL("Sending home");
+    DebugLog("Sending home");
     if (npc == null) {
         return;
     }
@@ -349,8 +355,8 @@ void r_SendDoctorHome(Critter player, Critter? npc)
 }
 
 // Взрывы на выходе из лаборатории
-#define ENTRY_EXPLODE (30)    // Номера гексов, на которых будут взрывы
-#define STR_OUT       (70095) // Вам чудом удалось пройти мимо ловушек безумца. Но сейчас нужно делать ноги.
+const int ENTRY_EXPLODE = 30; // Номера гексов, на которых будут взрывы
+const int STR_OUT = 70095;    // Вам чудом удалось пройти мимо ловушек безумца. Но сейчас нужно делать ноги.
 
 [[ItemTrigger]]
 void t_Warn(Critter player, StaticItem trigger, bool entered, mdir dir)
@@ -378,7 +384,7 @@ void DeferredExplode(any value)
         return;
     }
 
-    DL("DeferredExplode called");
+    DebugLog("DeferredExplode called");
     Entrance::Entry[] entries = Entrance::ParseEntries(map, ENTRY_EXPLODE);
     if (entries.length() > 0) {
         for (int i = 0; i < 3; i++) {
@@ -400,10 +406,10 @@ void DeferredDestroyMap(any value)
 }
 
 // Части тела в банках с биогелем
-#define STR_EMPTY    (70092) // Больше в этих коробках ничего нет.Эти ящики пусты.
-#define STR_OPEN_POT (70096) // Строка при открытии банки
-#define STR_FOUND    (70093) // В одном из ящиков вы обнаружили странную стеклянную банку с формалином.
-#define STR_UNLUCK   (70094) // Вы не нашли ничего интересного в этих старых коробках.Удача вам не улыбнулось. Вы ничего не нашли в ящиках.
+const int STR_EMPTY = 70092;    // Больше в этих коробках ничего нет.Эти ящики пусты.
+const int STR_OPEN_POT = 70096; // Строка при открытии банки
+const int STR_FOUND = 70093;    // В одном из ящиков вы обнаружили странную стеклянную банку с формалином.
+const int STR_UNLUCK = 70094;   // Вы не нашли ничего интересного в этих старых коробках.Удача вам не улыбнулось. Вы ничего не нашли в ящиках.
 
 void _PotInit(Item item, bool firstTime)
 {
@@ -494,7 +500,7 @@ bool s_Boxes(Critter player, StaticItem scenery, Item itemUse, any skill)
         return true;
     }
 
-    DL("VarNum =" + varNum);
+    DebugLog("VarNum =" + varNum);
     loc.SetAsInt(varNum, id);
     Item item = player.AddItem(Content::Item::pot, 1);
     item.SeAndroidVarNum = varNum;

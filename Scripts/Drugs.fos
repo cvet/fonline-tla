@@ -7,7 +7,10 @@ namespace Drugs
 ///@ Property Critter Common CritterProperty=>int32 DrugEffects Mutable OwnerSync Persistent
 ///@ Property Critter Common uint8 DoughnutsCounter Mutable OwnerSync Persistent Max = 20
 
-#define LBS_TO_GRAMM #(lbs)((lbs) * 453)
+int PoundsToGrams(int lbs)
+{
+    return (lbs) * 453;
+}
 
 #if SERVER
 
@@ -17,13 +20,22 @@ namespace Drugs
 // Chem Resistant
 // benefit: 50% less addiction chance
 // penalty: 50% less duration for Chem effects
-#define DRUG_EFFECT_DIV2_WITHDRAWAL (1)
-#define DRUG_EFFECT_MUL2_ADDICTION  (2)
-#define DRUG_EFFECT_DIV2_ADDICTION  (4)
-#define DRUG_EFFECT_DIV2_DURATION   (8)
-#define RATE_TO_STAGE               #(rate)((rate) & 0xFFFFFF)
-#define RATE_TO_FLAGS               #(rate)((rate) >> 24)
-#define FORM_RATE                   #(stage, flags)((((flags) & 0xFF) << 24) | ((stage) & 0xFFFFFF))
+const int DRUG_EFFECT_DIV2_WITHDRAWAL = 1;
+const int DRUG_EFFECT_MUL2_ADDICTION = 2;
+const int DRUG_EFFECT_DIV2_ADDICTION = 4;
+const int DRUG_EFFECT_DIV2_DURATION = 8;
+int RateToStage(int rate)
+{
+    return (rate) & 0xFFFFFF;
+}
+int RateToFlags(int rate)
+{
+    return (rate) >> 24;
+}
+int BuildRate(int stage, int flags)
+{
+    return (((flags) & 0xFF) << 24) | ((stage) & 0xFFFFFF);
+}
 
 const hstring[] DrugsIdentifiers = {Content::Item::stimpak,
                                     Content::Item::radaway,
@@ -312,11 +324,20 @@ int CreateActiveDrugEffect(Critter cr, hstring protoId, int flags)
 }
 
 // Table offsets
-#define TABLE_DRUG_ADDICT (0)
-#define TABLE_DRUG_PROC   (1)
-#define TABLE_DURATION    #(stage)(2 + (stage))
-#define TABLE_STAT        #(stat)(6 + (stat) * 6)
-#define TABLE_AMOUNT      #(stat, stage)(7 + (stage) + (stat) * 6)
+const int TABLE_DRUG_ADDICT = 0;
+const int TABLE_DRUG_PROC = 1;
+int DrugTableDuration(int stage)
+{
+    return 2 + (stage);
+}
+int DrugTableStat(int stat)
+{
+    return 6 + (stat) * 6;
+}
+int DrugTableAmount(int stat, int stage)
+{
+    return 7 + (stage) + (stat) * 6;
+}
 
 void UseDrug(Critter cr, Item drug)
 {
@@ -342,7 +363,7 @@ void UseDrugOn(Critter cr, Critter onCr, Item drug)
 
     Game.DestroyItem(drug, 1);
     if (not isStimpak) {
-        cr.TimeoutSkFirstAid = FIRST_AID_TIMEOUT(cr);
+        cr.TimeoutSkFirstAid = Tla::FirstAidTimeout(cr);
     }
 }
 
@@ -354,7 +375,7 @@ void SetDrug(Critter cr, hstring drugPid)
             cr.DoughnutsCounter += 1;
             // Вы съели столько пончиков, что почуствовали себя немного сильнее. Переносимый вес увеличен на +1 пункт.
             Messaging::Info(cr, TextPackKey(TextPackName::Text, "" + (70061)));
-            cr.CarryWeightBase += LBS_TO_GRAMM(1);
+            cr.CarryWeightBase += PoundsToGrams(1);
         }
     }
     else if (drugPid == Content::Item::jet_antidote) {
@@ -412,11 +433,11 @@ void SetDrug(Critter cr, hstring drugPid)
         if (positive >= 2 - negative / 2) {
             int addict = DrugEffects[index + TABLE_DRUG_ADDICT];
             int addictProc = DrugEffects[index + TABLE_DRUG_PROC];
-            if (FLAG(flags, DRUG_EFFECT_MUL2_ADDICTION)) {
+            if (Tla::HasFlag(flags, DRUG_EFFECT_MUL2_ADDICTION)) {
                 addictProc *= 2;
             }
 
-            if (FLAG(flags, DRUG_EFFECT_DIV2_ADDICTION)) {
+            if (Tla::HasFlag(flags, DRUG_EFFECT_DIV2_ADDICTION)) {
                 addictProc /= 2;
             }
 
@@ -521,10 +542,10 @@ timespan ProcessDrug(Critter cr, int effectId)
         stage == 4)   // Addiction end
     {
         for (int i = 0; i < 4; i++) {
-            int propInd = DrugEffects[index + TABLE_STAT(i)];
-            int amount = DrugEffects[index + TABLE_AMOUNT(i, stage)];
-            if (i == 1 && DrugEffects[index + TABLE_STAT(0)] == -2) {
-                amount = Game.Random(DrugEffects[index + TABLE_AMOUNT(0, stage)], amount); // Take first
+            int propInd = DrugEffects[index + DrugTableStat(i)];
+            int amount = DrugEffects[index + DrugTableAmount(i, stage)];
+            if (i == 1 && DrugEffects[index + DrugTableStat(0)] == -2) {
+                amount = Game.Random(DrugEffects[index + DrugTableAmount(0, stage)], amount); // Take first
             }
 
             if (propInd < 0) {
@@ -534,7 +555,7 @@ timespan ProcessDrug(Critter cr, int effectId)
             CritterProperty prop = CritterProperty(propInd);
             int propVal = cr.GetAsInt(prop);
             if (prop == CritterProperty::CurrentHp) {
-                cr.CurrentHp = CLAMP(propVal + amount, -9999, cr.MaxLife);
+                cr.CurrentHp = Tla::Clamp(propVal + amount, -9999, cr.MaxLife);
                 if (amount < 0 && cr.CurrentHp < 0) {
                     CritterState::ToDead(cr, Game.Random(0, 1) == 0 ? CritterActionAnim::DeadFront : CritterActionAnim::DeadBack, null);
                 }
@@ -553,30 +574,30 @@ timespan ProcessDrug(Critter cr, int effectId)
             if (propVal > 0) {
                 Messaging::Info(cr,
                                 TextPackKey(TextPackName::Game, "" + (MsgStr::StrDrugStatGain)),
-                                "|name: @text Game " + STR_PARAM_NAME(prop) + "@|value:" + propVal);
+                                "|name: @text Game " + MsgStr::ParamNameTextId(prop) + "@|value:" + propVal);
             }
             else if (propVal < 0) {
                 Messaging::Info(cr,
                                 TextPackKey(TextPackName::Game, "" + (MsgStr::StrDrugStatLose)),
-                                "|name: @text Game " + STR_PARAM_NAME(prop) + "@|value:" + (-propVal));
+                                "|name: @text Game " + MsgStr::ParamNameTextId(prop) + "@|value:" + (-propVal));
             }
         }
 
         int addict = DrugEffects[index + TABLE_DRUG_ADDICT];
         if (stage == 0) // To withdrawal
         {
-            duration = DrugEffects[index + TABLE_DURATION(stage)];
-            if (FLAG(flags, DRUG_EFFECT_DIV2_DURATION)) {
+            duration = DrugEffects[index + DrugTableDuration(stage)];
+            if (Tla::HasFlag(flags, DRUG_EFFECT_DIV2_DURATION)) {
                 duration /= 2;
             }
 
             // Try set addiction perk
             int addictProc = DrugEffects[index + TABLE_DRUG_PROC];
-            if (FLAG(flags, DRUG_EFFECT_MUL2_ADDICTION)) {
+            if (Tla::HasFlag(flags, DRUG_EFFECT_MUL2_ADDICTION)) {
                 addictProc *= 2;
             }
 
-            if (FLAG(flags, DRUG_EFFECT_DIV2_ADDICTION)) {
+            if (Tla::HasFlag(flags, DRUG_EFFECT_DIV2_ADDICTION)) {
                 addictProc /= 2;
             }
 
@@ -588,8 +609,8 @@ timespan ProcessDrug(Critter cr, int effectId)
         }
         else if (stage == 1) // To normalize
         {
-            duration = DrugEffects[index + TABLE_DURATION(stage)];
-            if (FLAG(flags, DRUG_EFFECT_DIV2_DURATION)) {
+            duration = DrugEffects[index + DrugTableDuration(stage)];
+            if (Tla::HasFlag(flags, DRUG_EFFECT_DIV2_DURATION)) {
                 duration /= 2;
             }
         }
@@ -607,13 +628,13 @@ timespan ProcessDrug(Critter cr, int effectId)
             }
 
             if (not isPresent) {
-                duration = DrugEffects[index + TABLE_DURATION(stage)];
+                duration = DrugEffects[index + DrugTableDuration(stage)];
             }
         }
         else if (stage == 3) // To end of addiction
         {
-            duration = DrugEffects[index + TABLE_DURATION(stage)];
-            if (FLAG(flags, DRUG_EFFECT_DIV2_WITHDRAWAL)) {
+            duration = DrugEffects[index + DrugTableDuration(stage)];
+            if (Tla::HasFlag(flags, DRUG_EFFECT_DIV2_WITHDRAWAL)) {
                 duration /= 2;
             }
         }
@@ -646,8 +667,8 @@ void DropDrug(Critter cr, hstring drugPid, int& stage)
         stage == 4)   // Addiction already
     {
         for (int i = 0; i < 4; i++) {
-            int propInd = DrugEffects[index + TABLE_STAT(i)];
-            int amount = DrugEffects[index + TABLE_AMOUNT(i, stage + (stage == 1 ? -1 : 0))]; // Turn
+            int propInd = DrugEffects[index + DrugTableStat(i)];
+            int amount = DrugEffects[index + DrugTableAmount(i, stage + (stage == 1 ? -1 : 0))]; // Turn
             if (stage == 1) {
                 amount = -amount;
             }

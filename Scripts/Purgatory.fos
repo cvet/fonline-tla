@@ -551,12 +551,20 @@ void TeamCount(Critter player, Critter npc, string& textArgs)
     textArgs = textArgs + "|total:" + total;
 }
 
-[[TimeEvent]]
+[[TimeEvent]] [[Async]]
 void RemoveNpc(Critter cr)
 {
+    if (!Sync::LockCritterWithMap(cr)) {
+        return;
+    }
+
     if (!cr.ControlledByPlayer) {
         Map? map = Game.GetMap(cr.HomeMapId);
         if (cr.HomeMapId != ZERO_IDENT && map != null) {
+            if (!Sync::Lock(cr, map)) {
+                return;
+            }
+
             cr.TransferToMap(map, cr.HomeHex, hdir(cr.HomeDir));
             return;
         }
@@ -1296,9 +1304,13 @@ void PurgatoryMapOut(Map map, Critter cr)
     BattleMapCritterInImpl(map, cr);
 }
 
-[[TimeEvent]]
+[[TimeEvent]] [[Async]]
 void NoPvpOff(Critter cr, TimeEventContext event)
 {
+    if (!Sync::LockCritterWithMap(cr)) {
+        return;
+    }
+
     if (!cr.IsNoPvp) {
         return;
     }
@@ -1386,14 +1398,22 @@ void Team4(Critter player, Critter npc, string& textArgs)
 // Генерация итемов в ящиках
 // На третьей карте Чистилища стоят ящики с лутом
 // периодически совершается попытка переместить из одного из ящиков содержимое на территорию бг
-[[TimeEvent]]
+[[TimeEvent]] [[Async]]
 void PurgatoryLoop(Map map)
 {
     if (bInfo.Stage == STAGE_FIGHT) {
         Location loc = map.GetLocation();
+        if (!Sync::Lock(map, loc)) {
+            return;
+        }
+
         if (Game.SynchronizedTime >= loc.LastLootTransfer + Time::Minutes(1)) {
             loc.LastLootTransfer = Game.SynchronizedTime;
             Map mapFrom = loc.GetMapByIndex(2);
+            if (!Sync::Lock(map, loc, mapFrom)) {
+                return;
+            }
+
             Item[] containersTo = map.GetItems(ItemProperty::Type, ItemType::Container);
             Item[] containersFrom = mapFrom.GetItems(ItemProperty::Type, ItemType::Container);
             if (containersFrom.length() > 0 && containersTo.length() > 0) {

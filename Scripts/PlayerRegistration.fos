@@ -142,7 +142,7 @@ bool ValidateRegistrationProps(Player player, string name, dict<CritterProperty,
     return true;
 }
 
-[[ServerRemoteCall]]
+[[ServerRemoteCall]] [[Async]]
 void RegisterNewPlayer(Player player, string name, dict<CritterProperty, int> props)
 {
     if (!ValidateRegistrationProps(player, name, props)) {
@@ -161,8 +161,29 @@ void RegisterNewPlayer(Player player, string name, dict<CritterProperty, int> pr
         critterProps[props.getKey(i)] = any(props.getValue(i));
     }
 
+    Map? startMap = Replication::GetStartReplicatorMap();
+    if (startMap == null) {
+        Game.Log("Player registration rejected due to missing start replication map");
+        player.Disconnect();
+        return;
+    }
+
+    if (!Sync::Lock(player, startMap)) {
+        return;
+    }
+
+    Location startLocation = startMap.GetLocation();
+    if (!Sync::Lock(player, startMap, startLocation)) {
+        return;
+    }
+
     player.SetName(name);
     Critter cr = Game.CreateCritter(Content::Critter::Player, true, critterProps);
+
+    if (!Sync::Lock(array<Entity> = {player, cr, startMap, startLocation})) {
+        return;
+    }
+
     // MainCritterId must be set before LoginPlayerToNewRecord — the engine rejects an empty
     // player document on insert and only Persistent properties get serialized. As a side effect
     // the engine auto-attaches the critter during login, so no SwitchCritter call is needed.

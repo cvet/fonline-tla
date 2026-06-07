@@ -207,6 +207,7 @@ class Traveller
     }
 
     // Попытка найти новую точку перемещения
+    [[Async]]
     bool TryFoundNewLocation()
     {
         int tries = 20;
@@ -234,9 +235,18 @@ class Traveller
             if (locations.length() > 0) {
                 idx = Game.Random(0, locations.length() - 1);
                 Location loc = locations[idx];
+                if (!Sync::Lock(cr, loc)) {
+                    tries--;
+                    continue;
+                }
+
                 maps = loc.GetMapCount();
                 for (int i = 0; i < maps; i++) {
                     Map map = loc.GetMapByIndex(i);
+                    if (!Sync::Lock(cr, loc, map)) {
+                        continue;
+                    }
+
                     if ((Entrance::MapCountEntry(map, Tla::EntryHash(EntryTo)) > 0) && map.Id != mapId) {
                         DebugLog("Target point found. Id = " + map.Id + "; ProtoMap = " + map.ProtoId);
                         MapIdTo = map.Id;
@@ -253,6 +263,7 @@ class Traveller
         return false;
     }
 
+    [[Async]]
     bool TransferToLocation()
     {
         Critter? cr = GetTraveller();
@@ -261,7 +272,7 @@ class Traveller
         }
 
         Map? map = Game.GetMap(MapIdTo);
-        if (map == null || Entrance::MapCountEntry(map, Tla::EntryHash(EntryTo)) == 0) {
+        if (map == null || !Sync::Lock(cr, map) || Entrance::MapCountEntry(map, Tla::EntryHash(EntryTo)) == 0) {
             return false;
         }
 
@@ -357,10 +368,6 @@ class Traveller
             return false;
         }
 
-        Location loc = map.GetLocation();
-        worldX = loc.WorldPos.x;
-        ;
-        worldY = loc.WorldPos.y;
         return true;
     }
 
@@ -395,9 +402,13 @@ Traveller? TravellerFromCritter(ident crId)
 }
 
 // Начало путешествия. Либо телепорт, либо переход по глобалу
-[[TimeEvent]]
+[[TimeEvent]] [[Async]]
 void Travel(Critter cr, TimeEventContext event)
 {
+    if (!Sync::LockCritterWithMap(cr)) {
+        return;
+    }
+
     if (!NpcPlanes::IsNoPlanes(cr) || cr.GetMap() == null) {
         timespan delayTicks = NEXT_TRY;
         if (delayTicks != ZERO_TIMESPAN) {
@@ -443,12 +454,23 @@ void Travel(Critter cr, TimeEventContext event)
 
 // Проверка, достиг ли НПЦ последней точки назначения в отведенное время
 // если нет, переносится c  помощью TransferToMap
-[[TimeEvent]]
+[[TimeEvent]] [[Async]]
 void Check(Critter cr, TimeEventContext event)
 {
-    Map? map = cr.GetMap();
-    if (map != null && !map.GetLocation().AutoGarbage) {
+    if (!Sync::LockCritterWithMap(cr)) {
         return;
+    }
+
+    Map? map = cr.GetMap();
+    if (map != null) {
+        Location loc = map.GetLocation();
+        if (!Sync::Lock(cr, map, loc)) {
+            return;
+        }
+
+        if (!loc.AutoGarbage) {
+            return;
+        }
     }
 
     Traveller? t = TravellerFromCritter(cr.Id);
@@ -472,9 +494,13 @@ void Check(Critter cr, TimeEventContext event)
 }
 
 // Поиск новой точки маршрута нпц, производится при заходе в локацию
-[[TimeEvent]]
+[[TimeEvent]] [[Async]]
 void ChooseTravelPoint(Critter cr, TimeEventContext event)
 {
+    if (!Sync::LockCritterWithMap(cr)) {
+        return;
+    }
+
     DebugLog("Sheduled");
     Traveller? t = TravellerFromCritter(cr.Id);
     if (t != null) {
@@ -490,12 +516,20 @@ void ChooseTravelPoint(Critter cr, TimeEventContext event)
     return;
 }
 
-[[TimeEvent]]
+[[TimeEvent]] [[Async]]
 void ShowLoc(Critter cr, TimeEventContext event)
 {
+    if (!Sync::LockCritterWithMap(cr)) {
+        return;
+    }
+
     Map? map = cr.GetMap();
     if (map != null) {
         Location loc = map.GetLocation();
+        if (!Sync::Lock(cr, map, loc)) {
+            return;
+        }
+
         if (loc.Hidden) {
             loc.Hidden = false;
             return;

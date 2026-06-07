@@ -58,6 +58,112 @@ void OnItemFinish(Item item)
     }
 }
 
+void AddRadioSyncEntity(Entity[] & entities, Entity entity)
+{
+    if (entity.IsDestroyed) {
+        return;
+    }
+
+    for (int i = 0; i < entities.length(); i++) {
+        if (entities[i] is entity) {
+            return;
+        }
+    }
+
+    entities.insertLast(entity);
+}
+
+[[Async]]
+bool LockRadioMessageEntities(Entity[] baseEntities, Critter? sourceCr)
+{
+    Entity[] entities = {};
+    for (int i = 0; i < baseEntities.length(); i++) {
+        AddRadioSyncEntity(entities, baseEntities[i]);
+    }
+
+    if (sourceCr != null) {
+        AddRadioSyncEntity(entities, sourceCr);
+    }
+
+    for (int i = 0; i < RadioItems.length(); i++) {
+        AddRadioSyncEntity(entities, RadioItems[i]);
+    }
+
+    if (!Sync::Lock(entities)) {
+        return false;
+    }
+
+    if (sourceCr != null) {
+        Map? sourceMap = sourceCr.GetMap();
+        if (sourceMap != null) {
+            AddRadioSyncEntity(entities, sourceMap);
+        }
+    }
+
+    for (int i = 0; i < RadioItems.length(); i++) {
+        Item item = RadioItems[i];
+        if (item.IsDestroyed) {
+            continue;
+        }
+
+        Critter? itemCr = item.GetCritter();
+        if (itemCr != null) {
+            AddRadioSyncEntity(entities, itemCr);
+        }
+
+        Map? itemMap = item.GetMap();
+        if (itemMap != null) {
+            AddRadioSyncEntity(entities, itemMap);
+        }
+
+        mpos hex;
+        Map? posMap = item.GetMapPosition(hex);
+        if (posMap != null) {
+            AddRadioSyncEntity(entities, posMap);
+        }
+    }
+
+    if (!Sync::Lock(entities)) {
+        return false;
+    }
+
+    if (sourceCr != null) {
+        Map? sourceMap = sourceCr.GetMap();
+        if (sourceMap != null) {
+            AddRadioSyncEntity(entities, sourceMap.GetLocation());
+        }
+    }
+
+    for (int i = 0; i < RadioItems.length(); i++) {
+        Item item = RadioItems[i];
+        if (item.IsDestroyed) {
+            continue;
+        }
+
+        Critter? itemCr = item.GetCritter();
+        if (itemCr != null) {
+            Map? crMap = itemCr.GetMap();
+            if (crMap != null) {
+                AddRadioSyncEntity(entities, crMap);
+                AddRadioSyncEntity(entities, crMap.GetLocation());
+            }
+        }
+
+        Map? itemMap = item.GetMap();
+        if (itemMap != null) {
+            AddRadioSyncEntity(entities, itemMap.GetLocation());
+        }
+
+        mpos hex;
+        Map? posMap = item.GetMapPosition(hex);
+        if (posMap != null) {
+            AddRadioSyncEntity(entities, posMap.GetLocation());
+        }
+    }
+
+    return Sync::Lock(entities);
+}
+
 void EditRadioSettings(Critter cr, Item item)
 {
     cr.PlayerClientCall.ShowEditScreen(item.Id);
@@ -71,11 +177,15 @@ void OnCritterUseItem(Critter cr, Item item)
     }
 }
 
-[[ServerRemoteCall]]
+[[ServerRemoteCall]] [[Async]]
 void SendRadioMessage(Player player, string text)
 {
     Critter? cr = player.GetControlledCritter();
     if (cr == null) {
+        return;
+    }
+
+    if (!Sync::LockCritterWithMap(cr)) {
         return;
     }
 
@@ -154,8 +264,15 @@ void ChangeBroadcast(Player player, ident radioId, RadioBroadcastType broadcast,
     item.Radio.BroadcastZones = broadcastZones == 1 ? Settings.Radio.RadioBroadcastZones1 : Settings.Radio.RadioBroadcastZones2;
 }
 
+[[Async]]
 void SendRadioMessage(Critter cr, string text)
 {
+    Entity[] syncCover = Sync::Snapshot();
+    if (!LockRadioMessageEntities(syncCover, cr)) {
+        Sync::Restore(syncCover);
+        return;
+    }
+
     Messaging::SayWhisper(cr, text);
 
     Item[] items = cr.GetItems();
@@ -167,6 +284,8 @@ void SendRadioMessage(Critter cr, string text)
             SendRadioMessage(sendItem, text);
         }
     }
+
+    Sync::Restore(syncCover);
 }
 
 void SendRadioMessage(Item sendItem, string text)
@@ -261,6 +380,28 @@ void SendRadioMessage(Item sendItem, string text)
 
 void SendChannelRadioMessage(int channel, string text)
 {
+    any[] values = {channel, text};
+    Game.StartTimeEvent(Time::Asap(), SendChannelRadioMessageText, values);
+}
+
+[[TimeEvent]] [[Async]]
+void SendChannelRadioMessageText(any[] values)
+{
+    int channel = int(values[0]);
+    string text = string(values[1]);
+    Entity[] syncCover = Sync::Snapshot();
+    Critter? sourceCr = null;
+    if (!LockRadioMessageEntities(syncCover, sourceCr)) {
+        Sync::Restore(syncCover);
+        return;
+    }
+
+    SendChannelRadioMessageLocked(channel, text);
+    Sync::Restore(syncCover);
+}
+
+void SendChannelRadioMessageLocked(int channel, string text)
+{
     for (int i = 0; i < RadioItems.length(); i++) {
         Item recvItem = RadioItems[i];
 
@@ -286,6 +427,29 @@ void SendChannelRadioMessage(int channel, string text)
 }
 
 void SendChannelRadioMessage(int channel, TextPackKey textKey, string textArgs = "")
+{
+    any[] values = {channel, textKey, textArgs};
+    Game.StartTimeEvent(Time::Asap(), SendChannelRadioMessageTextKey, values);
+}
+
+[[TimeEvent]] [[Async]]
+void SendChannelRadioMessageTextKey(any[] values)
+{
+    int channel = int(values[0]);
+    TextPackKey textKey = TextPackKey(values[1]);
+    string textArgs = string(values[2]);
+    Entity[] syncCover = Sync::Snapshot();
+    Critter? sourceCr = null;
+    if (!LockRadioMessageEntities(syncCover, sourceCr)) {
+        Sync::Restore(syncCover);
+        return;
+    }
+
+    SendChannelRadioMessageLocked(channel, textKey, textArgs);
+    Sync::Restore(syncCover);
+}
+
+void SendChannelRadioMessageLocked(int channel, TextPackKey textKey, string textArgs = "")
 {
     for (int i = 0; i < RadioItems.length(); i++) {
         Item recvItem = RadioItems[i];

@@ -402,12 +402,20 @@ void MapLoop2(Map map)
 }
 
 // Перемещение мобов на следующий пункт сбора
-[[TimeEvent]]
+[[TimeEvent]] [[Async]]
 void MapLoopEx1(Map map)
 {
     mpos hex;
     Location loc = map.GetLocation();
+    if (!Sync::Lock(map, loc)) {
+        return;
+    }
+
     Map mapGround = loc.GetMapByIndex(0);
+    if (!Sync::Lock(map, loc, mapGround)) {
+        return;
+    }
+
     Critter[] zombies = map.GetCritters(Content::Critter::Zombie, CritterFindType::NonDeadNpc);
     for (int i = 0; i < zombies.length(); i++) {
         Critter cr = zombies[i];
@@ -553,9 +561,13 @@ EventResult OnZombieAttackedGround(Critter cr, Critter attacker)
     return EventResult::StopChain;
 }
 
-[[TimeEvent]]
+[[TimeEvent]] [[Async]]
 void OnZombieIdleGround(Critter cr)
 {
+    if (!Sync::LockCritterWithMap(cr)) {
+        return;
+    }
+
     if (!cr.IsAlive()) {
         return;
     }
@@ -629,9 +641,13 @@ EventResult OnZombiePlaneEnd(Critter cr, int planeId, int reason, Critter someCr
 
 const int STR_IDLE = 4002;
 const int RADIUS_ATTACK = 10;
-[[TimeEvent]]
+[[TimeEvent]] [[Async]]
 void OnZombieIdle(Critter cr)
 {
+    if (!Sync::LockCritterWithMap(cr)) {
+        return;
+    }
+
     if (cr.IsDead()) {
         return;
     }
@@ -697,15 +713,29 @@ void OnZombieDead(Critter cr, Critter? killer)
 }
 
 const int STR_RESPAWN = 4000;
-[[TimeEvent]]
+[[TimeEvent]] [[Async]]
 void RespawnZombie(Critter cr, any identifier)
 {
+    if (!Sync::LockCritterWithMap(cr)) {
+        return;
+    }
+
     DebugLog("respawn/ Anim:" + cr.DeadActionAnim);
     int qStatus = 0;
     Critter? killer;
+    Map? map = cr.GetMap();
     if (identifier != ZERO_IDENT) {
         killer = Game.GetCritter(identifier);
         if (killer != null) {
+            if (map != null) {
+                if (!Sync::Lock(array<Entity> = {cr, map, killer})) {
+                    return;
+                }
+            }
+            else if (!Sync::Lock(cr, killer)) {
+                return;
+            }
+
             qStatus = killer.GEReplNopasaran;
         }
     }

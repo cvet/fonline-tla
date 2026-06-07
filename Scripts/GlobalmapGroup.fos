@@ -183,12 +183,19 @@ void OnCritterInit(Critter cr, bool firstTime)
     cr.StartTimeEvent(Time::Milliseconds(0), Time::Milliseconds(1000), OnCritterIdle);
 }
 
-[[TimeEvent]]
+[[TimeEvent]] [[Async]]
 void OnCritterIdle(Critter cr)
 {
+    if (!Sync::LockCritterWithMap(cr)) {
+        return;
+    }
+
     // Global map
     if (cr.GetMap() == null) {
         auto group = GetGlobalMapGroup(cr);
+        if (!Sync::Lock(group.CritMove)) {
+            return;
+        }
 
         if (cr.Id == group.Rule.Id) {
             GroupMove(group);
@@ -1158,6 +1165,7 @@ bool GroupToMap(GlobalMapGroup group, Map? map, hstring entry, mpos hexMap, int 
     return true;
 }
 
+[[Async]]
 bool GroupToLoc(Critter rule, ident locId, int entrance, bool force = false) // 3 hits
 {
     if (rule.GetMap() != null) {
@@ -1189,6 +1197,10 @@ bool GroupToLoc(Critter rule, ident locId, int entrance, bool force = false) // 
         GlobalMapLocations::SetGlobalMapData(GM_INFO_LOCATIONS, rule);
         // rule->Send_GlobalInfo( GM_INFO_LOCATIONS );
         Messaging::Info(rule, TextPackKey(TextPackName::Game, "" + (MsgStr::STR_GLOBAL_LOCATION_NOT_FOUND)));
+        return false;
+    }
+
+    if (!Sync::Lock(loc, group.CritMove)) {
         return false;
     }
 
@@ -1241,6 +1253,10 @@ bool GroupToLoc(Critter rule, ident locId, int entrance, bool force = false) // 
         }
 
         Game.Log(" - Map " + mapProto + " not found in location " + locId);
+        return false;
+    }
+
+    if (!Sync::Lock(loc, map, group.CritMove)) {
         return false;
     }
 
@@ -1381,6 +1397,7 @@ bool CheckEntrance(Location loc, Critter[] arr, int entrance) // 5 hits
     return Game.OnGlobalMapCheckEntranceAllowed.Fire(loc, arr, entrance) == EventResult::ContinueChain;
 }
 
+[[Async]]
 void ProcessGlobalMapCommandImpl(Player player, int command, any param1, any param2)
 {
     Critter? cl = player.GetControlledCritter();
@@ -1399,6 +1416,10 @@ void ProcessGlobalMapCommandImpl(Player player, int command, any param1, any par
             break;
         }
 
+        if (!Sync::Lock(cl, cr)) {
+            break;
+        }
+
         if (cl.FollowLeaderId == cr.Id) {
             cl.FollowLeaderId = ZERO_IDENT; // unfollow
         }
@@ -1408,6 +1429,9 @@ void ProcessGlobalMapCommandImpl(Player player, int command, any param1, any par
     } break;
     case GM_CMD_SETMOVE: {
         auto group = GetGlobalMapGroup(cl);
+        if (!Sync::Lock(group.CritMove)) {
+            break;
+        }
 
         if (cl.Id != group.Rule.Id) {
             break;
@@ -1429,6 +1453,10 @@ void ProcessGlobalMapCommandImpl(Player player, int command, any param1, any par
         break;
     case GM_CMD_TOLOCAL: {
         auto group = GetGlobalMapGroup(cl);
+        if (!Sync::Lock(group.CritMove)) {
+            break;
+        }
+
         if (cl.Id != group.Rule.Id) {
             break;
         }
@@ -1457,6 +1485,10 @@ void ProcessGlobalMapCommandImpl(Player player, int command, any param1, any par
         return;
     case GM_CMD_ANSWER: {
         auto group = GetGlobalMapGroup(cl);
+        if (!Sync::Lock(group.CritMove)) {
+            break;
+        }
+
         if (cl.Id != group.Rule.Id) {
             break;
         }
@@ -1479,11 +1511,15 @@ void ProcessGlobalMapCommandImpl(Player player, int command, any param1, any par
     case GM_CMD_FOLLOW: {
         // Find rule
         Critter? rule = Game.GetCritter(param1);
-        if (rule == null || rule.GetMap() != null) {
+        if (rule == null || !Sync::Lock(cl, rule) || rule.GetMap() != null) {
             break;
         }
 
         auto group = GetGlobalMapGroup(rule);
+        if (!Sync::Lock(cl, group.CritMove)) {
+            break;
+        }
+
         if (rule.Id != group.Rule.Id) {
             break;
         }
@@ -1505,6 +1541,10 @@ void ProcessGlobalMapCommandImpl(Player player, int command, any param1, any par
         return;
     case GM_CMD_KICKCRIT: {
         auto group = GetGlobalMapGroup(cl);
+        if (!Sync::Lock(group.CritMove)) {
+            break;
+        }
+
         if (group.CritMove.length() < 2 || group.EncounterDescriptor > 0) {
             break;
         }
@@ -1539,6 +1579,10 @@ void ProcessGlobalMapCommandImpl(Player player, int command, any param1, any par
     } break;
     case GM_CMD_GIVE_RULE: {
         auto group = GetGlobalMapGroup(cl);
+        if (!Sync::Lock(group.CritMove)) {
+            break;
+        }
+
         // Check
         if (cl.Id == param1 || cl.Id != group.Rule.Id || group.EncounterDescriptor > 0) {
             break;
@@ -1554,6 +1598,10 @@ void ProcessGlobalMapCommandImpl(Player player, int command, any param1, any par
     } break;
     case GM_CMD_ENTRANCES: {
         auto group = GetGlobalMapGroup(cl);
+        if (!Sync::Lock(group.CritMove)) {
+            break;
+        }
+
         if (group.EncounterDescriptor > 0) {
             break;
         }
@@ -1564,7 +1612,7 @@ void ProcessGlobalMapCommandImpl(Player player, int command, any param1, any par
         }
 
         Location? loc = Game.GetLocation(locId);
-        if (loc == null || DistSqrt(int(group.CurX), int(group.CurY), loc.WorldPos.x, loc.WorldPos.y) > int(loc.Radius)) {
+        if (loc == null || !Sync::Lock(loc, group.CritMove) || DistSqrt(int(group.CurX), int(group.CurY), loc.WorldPos.x, loc.WorldPos.y) > int(loc.Radius)) {
             break;
         }
 
@@ -1594,6 +1642,9 @@ void ProcessGlobalMapCommandImpl(Player player, int command, any param1, any par
     } break;
     case GM_CMD_VIEW_MAP: {
         auto group = GetGlobalMapGroup(cl);
+        if (!Sync::Lock(group.CritMove)) {
+            break;
+        }
 
         if (group.EncounterDescriptor > 0) {
             break;
@@ -1605,7 +1656,7 @@ void ProcessGlobalMapCommandImpl(Player player, int command, any param1, any par
         }
 
         Location? loc = Game.GetLocation(locId);
-        if (loc == null || DistSqrt(int(group.CurX), int(group.CurY), loc.WorldPos.x, loc.WorldPos.y) > int(loc.Radius)) {
+        if (loc == null || !Sync::Lock(loc, group.CritMove) || DistSqrt(int(group.CurX), int(group.CurY), loc.WorldPos.x, loc.WorldPos.y) > int(loc.Radius)) {
             break;
         }
 
@@ -1623,6 +1674,10 @@ void ProcessGlobalMapCommandImpl(Player player, int command, any param1, any par
         hstring entry = loc.MapEntrances[entrance * 2 + 1];
         Map? map = loc.GetMap(mapProto);
         if (map == null) {
+            break;
+        }
+
+        if (!Sync::Lock(loc, map, group.CritMove)) {
             break;
         }
 
@@ -1647,7 +1702,7 @@ void ProcessGlobalMapCommandImpl(Player player, int command, any param1, any par
     CritterState::Wait(cl, Settings.Movement.Breaktime);
 }
 
-[[ServerRemoteCall]]
+[[ServerRemoteCall]] [[Async]]
 void ProcessGlobalMapCommand(Player player, int command, any param1, any param2) // Process_RuleGlobal
 {
     ProcessGlobalMapCommandImpl(player, command, param1, param2);

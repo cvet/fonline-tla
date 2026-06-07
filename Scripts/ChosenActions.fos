@@ -1198,58 +1198,242 @@ bool IsFree(Critter cr)
 
 #if SERVER
 
-[[ServerRemoteCall]]
+[[Async]]
+bool LockPickCritterAction(Critter cr, Critter target)
+{
+    return Sync::Lock(cr, target);
+}
+
+[[Async]]
+bool LockUseSkillAction(Critter cr, ident targetCrId, ident targetItemId, hstring sceneryPid)
+{
+    if (targetCrId != ZERO_IDENT && targetCrId != cr.Id) {
+        Critter? target = Game.GetCritter(targetCrId);
+        if (target != null) {
+            return Sync::Lock(cr, target);
+        }
+
+        return Sync::Lock(cr);
+    }
+
+    if (targetItemId != ZERO_IDENT || sceneryPid != EMPTY_HSTRING) {
+        return Sync::LockCritterWithMap(cr);
+    }
+
+    return Sync::Lock(cr);
+}
+
+[[Async]]
+bool LockOperateContainerAction(Critter cr)
+{
+    const ident containerId = cr.TransferContainerId;
+    if (containerId == ZERO_IDENT || containerId == cr.Id) {
+        return Sync::Lock(cr);
+    }
+
+    const TransferTypes transferType = cr.TransferType;
+    if (transferType == TransferTypes::HexContUp || transferType == TransferTypes::HexContDown || transferType == TransferTypes::FarCont) {
+        Item? itemCont = Game.GetItem(containerId);
+        if (itemCont == null) {
+            return Sync::Lock(cr);
+        }
+
+        return Sync::Lock(cr, itemCont);
+    }
+
+    if (transferType == TransferTypes::CritLoot || transferType == TransferTypes::CritSteal || transferType == TransferTypes::CritBarter ||
+        transferType == TransferTypes::FarCrit) {
+        Critter? crCont = Game.GetCritter(containerId);
+        if (crCont == null) {
+            return Sync::Lock(cr);
+        }
+
+        return Sync::Lock(cr, crCont);
+    }
+
+    return Sync::Lock(cr);
+}
+
+[[Async]]
+bool LockAttackAction(Critter cr, ident targetId)
+{
+    Map? map = cr.GetMap();
+    Critter? target = Game.GetCritter(targetId);
+
+    if (map != null && target != null) {
+        return Sync::Lock(array<Entity> = {cr, map, target});
+    }
+
+    if (map != null) {
+        return Sync::Lock(cr, map);
+    }
+
+    if (target != null) {
+        return Sync::Lock(cr, target);
+    }
+
+    return Sync::Lock(cr);
+}
+
+[[Async]]
+bool LockUseItemOnAction(Critter cr, ident usedItemId, ident targetCrId, ident targetItemId, hstring sceneryPid)
+{
+    Entity[] entities = {cr};
+
+    Item? usedItem = Game.GetItem(usedItemId);
+    if (usedItem != null) {
+        entities.insertLast(usedItem);
+    }
+
+    if (targetCrId != ZERO_IDENT && targetCrId != cr.Id) {
+        Critter? target = Game.GetCritter(targetCrId);
+        if (target != null) {
+            entities.insertLast(target);
+        }
+    }
+    else if (targetItemId != ZERO_IDENT || sceneryPid != EMPTY_HSTRING) {
+        Map? map = cr.GetMap();
+        if (map != null) {
+            entities.insertLast(map);
+        }
+
+        if (targetItemId != ZERO_IDENT) {
+            Item? targetItem = Game.GetItem(targetItemId);
+            if (targetItem != null) {
+                entities.insertLast(targetItem);
+            }
+        }
+    }
+
+    return Sync::Lock(entities);
+}
+
+[[ServerRemoteCall]] [[Async]]
 void PickCritter(Player player, ident crId)
 {
-    CritterActions::PickCritter(player.GetControlledCritter(), Game.GetCritter(crId));
+    Critter? cr = player.GetControlledCritter();
+    if (cr == null) {
+        return;
+    }
+
+    Critter? target = Game.GetCritter(crId);
+    if (target == null || !LockPickCritterAction(cr, target)) {
+        return;
+    }
+
+    CritterActions::PickCritter(cr, target);
 }
 
-[[ServerRemoteCall]]
+[[ServerRemoteCall]] [[Async]]
 void PickItem(Player player, mpos hex, hstring pid)
 {
-    CritterActions::PickItem(player.GetControlledCritter(), hex, pid);
+    Critter? cr = player.GetControlledCritter();
+    if (cr == null) {
+        return;
+    }
+
+    if (!Sync::LockCritterWithMap(cr)) {
+        return;
+    }
+
+    CritterActions::PickItem(cr, hex, pid);
 }
 
-[[ServerRemoteCall]]
+[[ServerRemoteCall]] [[Async]]
 void DropInvItem(Player player, ident itemId, int count)
 {
-    CritterActions::DropInvItem(player.GetControlledCritter(), itemId, count);
+    Critter? cr = player.GetControlledCritter();
+    if (cr == null) {
+        return;
+    }
+
+    if (!Sync::LockCritterWithMap(cr)) {
+        return;
+    }
+
+    CritterActions::DropInvItem(cr, itemId, count);
 }
 
-[[ServerRemoteCall]]
+[[ServerRemoteCall]] [[Async]]
 void UseSkill(Player player, CritterProperty skill, ident targetCrId, ident targetItemId, hstring sceneryPid, mpos hex)
 {
-    CritterActions::UseSkill(player.GetControlledCritter(), skill, targetCrId, targetItemId, sceneryPid, hex.x, hex.y);
+    Critter? cr = player.GetControlledCritter();
+    if (cr == null) {
+        return;
+    }
+
+    if (!LockUseSkillAction(cr, targetCrId, targetItemId, sceneryPid)) {
+        return;
+    }
+
+    CritterActions::UseSkill(cr, skill, targetCrId, targetItemId, sceneryPid, hex.x, hex.y);
 }
 
 [[ServerRemoteCall]]
 void MoveInvItem(Player player, ident itemId, CritterItemSlot slot)
 {
-    CritterActions::MoveInvItem(player.GetControlledCritter(), itemId, slot);
+    Critter? cr = player.GetControlledCritter();
+    if (cr == null) {
+        return;
+    }
+
+    CritterActions::MoveInvItem(cr, itemId, slot);
 }
 
-[[ServerRemoteCall]]
+[[ServerRemoteCall]] [[Async]]
 void OperateContainer(Player player, bool take, bool all, ident itemId, int itemCount)
 {
-    CritterActions::OperateContainer(player.GetControlledCritter(), take, all, itemId, itemCount);
+    Critter? cr = player.GetControlledCritter();
+    if (cr == null) {
+        return;
+    }
+
+    if (!LockOperateContainerAction(cr)) {
+        return;
+    }
+
+    CritterActions::OperateContainer(cr, take, all, itemId, itemCount);
 }
 
 [[ServerRemoteCall]]
 void ReloadWeapon(Player player, ident weaponId, ident ammoId)
 {
-    CritterActions::ReloadWeapon(player.GetControlledCritter(), weaponId, ammoId);
+    Critter? cr = player.GetControlledCritter();
+    if (cr == null) {
+        return;
+    }
+
+    CritterActions::ReloadWeapon(cr, weaponId, ammoId);
 }
 
-[[ServerRemoteCall]]
+[[ServerRemoteCall]] [[Async]]
 void Attack(Player player, ident targetId, int mode)
 {
-    CritterActions::Attack(player.GetControlledCritter(), targetId, mode);
+    Critter? cr = player.GetControlledCritter();
+    if (cr == null) {
+        return;
+    }
+
+    if (!LockAttackAction(cr, targetId)) {
+        return;
+    }
+
+    CritterActions::Attack(cr, targetId, mode);
 }
 
-[[ServerRemoteCall]]
+[[ServerRemoteCall]] [[Async]]
 void UseItemOn(Player player, ident usedItemId, ident targetCrId, ident targetItemId, hstring sceneryPid, mpos hex, int timer)
 {
-    CritterActions::UseItemOn(player.GetControlledCritter(), usedItemId, targetCrId, targetItemId, sceneryPid, hex.x, hex.y, timer);
+    Critter? cr = player.GetControlledCritter();
+    if (cr == null) {
+        return;
+    }
+
+    if (!LockUseItemOnAction(cr, usedItemId, targetCrId, targetItemId, sceneryPid)) {
+        return;
+    }
+
+    CritterActions::UseItemOn(cr, usedItemId, targetCrId, targetItemId, sceneryPid, hex.x, hex.y, timer);
 }
 
 #endif

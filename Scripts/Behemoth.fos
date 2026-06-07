@@ -368,9 +368,13 @@ EventResult BehemothOnGlobal(Critter cr, int type, Item car, float x, float y, f
     return EventResult::StopChain;
 }
 
-[[TimeEvent]]
+[[TimeEvent]] [[Async]]
 void BehemothIdle(Critter cr)
 {
+    if (!Sync::LockCritterWithMap(cr)) {
+        return;
+    }
+
     int orderCurrent = cr.BehemothOrderType;
     Map? map = cr.GetMap();
     Location? loc = null;
@@ -380,9 +384,27 @@ void BehemothIdle(Critter cr)
     case TYPE_ORDER_ROUTE:
         if (map != null) {
             loc = map.GetLocation();
+            if (!Sync::Lock(cr, map, loc)) {
+                return;
+            }
         }
 
         locTo = GetLocationTo(cr);
+        if (locTo != null) {
+            Entity[] entities = {cr, locTo};
+            if (map != null) {
+                entities.insertLast(map);
+            }
+
+            if (loc != null) {
+                entities.insertLast(loc);
+            }
+
+            if (!Sync::Lock(entities)) {
+                return;
+            }
+        }
+
         if (locTo != null && loc != null && locTo.Id != loc.Id) {
             Radio::SendChannelRadioMessage(cr.BehemothRadio, TextPackKey(TextPackName::Text, "" + (604)));
             RunOrderRoute(cr);

@@ -325,13 +325,14 @@ SCRIPT_REMOTECALL_DECL_RE = re.compile(
 )
 
 # `[[Event]] void OnXxx(args)` / `[[ServerRemoteCall]] void XxxName(args)` etc.
-# Capture the attribute, function name, and args span. The handler may carry
-# extra attributes between `[[ ]]` and the return type.
+# Capture all leading attributes, function name, and args span. The handler may
+# carry extra attributes before the return type, e.g. `[[ServerRemoteCall]] [[Async]]`.
 HANDLER_DECL_RE = re.compile(
-    r"^\[\[(Event|ServerRemoteCall|ClientRemoteCall|AdminRemoteCall)\]\]\s*\n"
+    r"^((?:\[\[\w+\]\]\s*)+)"
     r"\w[\w?:\s\[\]]*?\s+(\w+)\s*\(([^)]*)\)",
     re.MULTILINE,
 )
+HANDLER_ATTR_RE = re.compile(r"\[\[(Event|ServerRemoteCall|ClientRemoteCall|AdminRemoteCall)\]\]")
 
 
 def parse_decl_args(args_text: str) -> list[tuple[str, bool, str]]:
@@ -395,11 +396,14 @@ def validate_event_and_remotecall_signatures() -> list[str]:
             declarations.append((f, line, target + "RemoteCall", call_name, args))
 
         for m in HANDLER_DECL_RE.finditer(text):
-            attr = m.group(1)
+            attrs = HANDLER_ATTR_RE.findall(m.group(1))
+            if not attrs:
+                continue
             func_name = m.group(2)
             args = parse_decl_args(m.group(3))
             line = find_line_number(text, m.start())
-            handlers.setdefault((attr, func_name), []).append((f, line, args))
+            for attr in attrs:
+                handlers.setdefault((attr, func_name), []).append((f, line, args))
 
     for decl_file, decl_line, decl_attr, decl_name, decl_args in declarations:
         # Event handlers use the [[Event]] attribute; remote calls use

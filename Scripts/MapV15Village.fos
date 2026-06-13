@@ -8,29 +8,36 @@ namespace MapV15Village
 
 // Проваливай отсюда, извращенец.Посмотрите на эту мразь! Он набрался наглости вернуться сюда!таким как ты в польше химическую кастрацию делают, Иди \
 // в жопу извращенец!И откуда вы, мрази, беретесь.Охотники уже идут за тобой. Ты сдохнешь!
-#define STR_SAY     (5905)
+const int STR_SAY = 5905;
 
-#define DIST_FIND   (10)
+const int DIST_FIND = 10;
 
-#define _IsGumanoid #(npc)(npc.BodyType == BodyTypes::Men || npc.BodyType == BodyTypes::Women || npc.BodyType == BodyTypes::Children)
-
-void _MapInit(Map map, bool firstTime)
+bool IsHumanoid(Critter npc)
 {
-    map.OnCritterIn.Subscribe(_MapInCritter);
+    return npc.BodyType == BodyTypes::Men || npc.BodyType == BodyTypes::Women || npc.BodyType == BodyTypes::Children;
+}
+
+void MapInit(Map map, bool firstTime)
+{
+    map.OnCritterIn.Subscribe(MapInCritter);
 }
 
 [[Event]]
-void _MapInCritter(Map map, Critter cr)
+void MapInCritter(Map map, Critter cr)
 {
     if (cr.ControlledByPlayer && cr.KarmaPerkPedobear > 1) {
-        cr.StartTimeEvent(Time::Seconds(20), cte_NpcReact);
+        cr.StartTimeEvent(Time::Seconds(20), NpcReact);
     }
 }
 
-[[TimeEvent]]
-void cte_NpcReact(Critter cr)
+[[TimeEvent]] [[Async]]
+void NpcReact(Critter cr, TimeEventContext event)
 {
-    Map map = cr.GetMap();
+    if (!Sync::LockCritterWithMap(cr)) {
+        return;
+    }
+
+    Map? map = cr.GetMap();
     if (map == null || map.ProtoId != Content::Map::v15_village) {
         return;
     }
@@ -38,25 +45,26 @@ void cte_NpcReact(Critter cr)
     Critter[] critters = map.GetCrittersInRadius(cr.Hex, DIST_FIND, CritterFindType::NonDeadNpc);
     if (!critters.isEmpty()) {
         Critter npc = critters[0];
-        if (_IsGumanoid(npc)) {
+        if (IsHumanoid(npc)) {
             Messaging::Say(npc, TextPackKey(TextPackName::Text, "" + (STR_SAY)));
         }
     }
+
     timespan delayTicks = Time::Seconds(20);
     if (delayTicks != ZERO_TIMESPAN) {
-        Game.RepeatCurrentTimeEvent(delayTicks);
+        event.Repeat(delayTicks);
     }
 }
 
 // Карма "Педобир"=2 устанавливается в 2 через 8 реальных часов, чтобы игрок сначала успел довести девочку домой. После этого, за персонажем охотятся баунти
 [[DialogResult]]
-void r_DelayKarma(Critter player, Critter npc)
+void DelayKarma(Critter player, Critter npc)
 {
-    player.StartTimeEvent(Time::Hours(8), cte_IncKarma);
+    player.StartTimeEvent(Time::Hours(8), IncKarma);
 }
 
 [[TimeEvent]]
-void cte_IncKarma(Critter cr)
+void IncKarma(Critter cr)
 {
     cr.KarmaPerkPedobear = 2;
     return;

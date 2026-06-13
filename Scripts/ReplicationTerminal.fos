@@ -8,36 +8,21 @@ namespace ReplicationTerminal
 ///@ Property Critter Server ident TerminalPlayerId Mutable Persistent
 ///@ Property Critter Server int32 TerminalDialogId Mutable Persistent
 
-#define ANSWER_END                  (0xF1)
+const int ANSWER_END = 0xF1;
 
-#define FORCE_DIALOG_PAY_SELF       (3)
-#define FORCE_DIALOG_PAY_OTHER_NEXT (8)
+const int FORCE_DIALOG_PAY_SELF = 3;
+const int FORCE_DIALOG_PAY_OTHER_NEXT = 8;
 
-#define STR_GENERIC_ERROR           (DLGSTR(int(Content::Dialog::repl_terminal), 0)) // Критическая ошибка. Пожалуйста обратитесь в службу поддержки.
-#define STR_PLAYER_NOT_FOUND \
-    (DLGSTR(Content::Dialog::repl_terminal, 1)) // Данный клиент не найден. Возможно вы ошиблись в имени, либо клиент не в зоне доступа.
-#define STR_INVALID_MONEY_COUNT  (DLGSTR(Content::Dialog::repl_terminal, 2))
-#define STR_ZERO_MONEY_COUNT     (DLGSTR(Content::Dialog::repl_terminal, 3))
-#define STR_NEGATIVE_MONEY_COUNT (DLGSTR(Content::Dialog::repl_terminal, 4))
-#define STR_NOT_ENAUGTH_MONEY    (DLGSTR(Content::Dialog::repl_terminal, 5))
-#define STR_ZERO_BALANCE         (DLGSTR(Content::Dialog::repl_terminal, 6))
-#define STR_NEGATIVE_BALANCE     (DLGSTR(Content::Dialog::repl_terminal, 7))
-#define STR_OPERATION_SUCCESS    (DLGSTR(Content::Dialog::repl_terminal, 10))
-
-#define SEND_ERROR_RETURN \
-    #(cr, error) \
-    { \
-        Messaging::Info(cr, TextPackKey(TextPackName::Dialogs, "" + (error))); \
-        cr.PlayerClientCall.AddDialogStr(error, "", false); \
-        return; \
-    }
-#define SEND_ERROR_RETURN0 \
-    #(cr, error) \
-    { \
-        Messaging::Info(cr, TextPackKey(TextPackName::Dialogs, "" + (error))); \
-        cr.PlayerClientCall.AddDialogStr(error, "", false); \
-        return 0; \
-    }
+const int STR_GENERIC_ERROR = MsgStr::DialogTextId(Content::Dialog::repl_terminal, 0); // Критическая ошибка. Пожалуйста обратитесь в службу поддержки.
+const int STR_PLAYER_NOT_FOUND =
+    MsgStr::DialogTextId(Content::Dialog::repl_terminal, 1); // Данный клиент не найден. Возможно вы ошиблись в имени, либо клиент не в зоне доступа.
+const int STR_INVALID_MONEY_COUNT = MsgStr::DialogTextId(Content::Dialog::repl_terminal, 2);
+const int STR_ZERO_MONEY_COUNT = MsgStr::DialogTextId(Content::Dialog::repl_terminal, 3);
+const int STR_NEGATIVE_MONEY_COUNT = MsgStr::DialogTextId(Content::Dialog::repl_terminal, 4);
+const int STR_NOT_ENAUGTH_MONEY = MsgStr::DialogTextId(Content::Dialog::repl_terminal, 5);
+const int STR_ZERO_BALANCE = MsgStr::DialogTextId(Content::Dialog::repl_terminal, 6);
+const int STR_NEGATIVE_BALANCE = MsgStr::DialogTextId(Content::Dialog::repl_terminal, 7);
+const int STR_OPERATION_SUCCESS = MsgStr::DialogTextId(Content::Dialog::repl_terminal, 10);
 
 const int DialogNone = 0;
 const int DialogTransferReal = 3;
@@ -70,13 +55,23 @@ void OnPlayerSaidText(Critter? critter, string text, bool fromDialog, ident talk
             break;
         }
         case DialogSetTargetName: {
-            Player player = PlayerRegistration::GetPlayerByName(text);
-            // player.GetControlledCritter() == null - игрок оффлайн, свойства недоступны для изменения. В т.ч баланс лицевого счета.
-            if (player == null || player.GetControlledCritter() == null) {
-                critter.TerminalPlayerId = ZERO_IDENT;
-                SEND_ERROR_RETURN(critter, STR_PLAYER_NOT_FOUND);
+            Player? player = PlayerRegistration::GetPlayerByName(text);
+            Critter? playerCritter = null;
+            if (player != null) {
+                playerCritter = player.GetControlledCritter();
             }
-            critter.TerminalPlayerId = player.GetControlledCritter().Id;
+
+            // player.GetControlledCritter() == null - игрок оффлайн, свойства недоступны для изменения. В т.ч баланс лицевого счета.
+            if (playerCritter == null) {
+                critter.TerminalPlayerId = ZERO_IDENT;
+                {
+                    Messaging::Info(critter, TextPackKey(TextPackName::Dialogs, "" + (STR_PLAYER_NOT_FOUND)));
+                    critter.PlayerClientCall.AddDialogStr(STR_PLAYER_NOT_FOUND, "", false);
+                    return;
+                }
+            }
+
+            critter.TerminalPlayerId = playerCritter.Id;
             Game.Log("SET CR! player.TerminalPlayerId = " + critter.TerminalPlayerId + "; player.Id =" + critter.Id);
             critter.PlayerClientCall.ForceDialogResult(ZERO_IDENT, Content::Dialog::repl_terminal, isNpc, 1, true);
             break;
@@ -86,7 +81,7 @@ void OnPlayerSaidText(Critter? critter, string text, bool fromDialog, ident talk
 }
 
 [[ItemStatic]]
-bool s_Terminal(Critter player, StaticItem terminal, Item? item, any skill)
+bool Terminal(Critter player, StaticItem terminal, Item? item, any skill)
 {
     if (player.ControlledByPlayer && skill == CritterProperty::SpecialSkillPickOnGround && item == null) {
         Dialogs::RunDialog(player, Content::Dialog::repl_terminal, false);
@@ -96,31 +91,32 @@ bool s_Terminal(Critter player, StaticItem terminal, Item? item, any skill)
 }
 
 [[DialogResult]]
-void r_PaySelf(Critter player, Critter terminal)
+void PaySelf(Critter player, Critter terminal)
 {
     player.TerminalPlayerId = player.Id;
 }
 
 // Функция вызывается в момент загрузки диалога. Можно использовать ее для определения, какая именно ветка загрузилась )остальные аналогично)
-void dlg_Reset(Critter player, Critter terminal, string& lexems)
+void Reset(Critter player, Critter terminal, string& textArgs)
 {
     player.TerminalDialogId = DialogNone; // Сброс
     Game.Log("reset called");
     player.TerminalPlayerId = ZERO_IDENT;
     player.CanSendSay = false;
 
-    //if (lexems.isEmpty()) {
+    //if (textArgs.isEmpty()) {
     //    return;
     //}
 
-    if (!IS_DIALOG_GENERATED(lexems)) {
+    if (!Tla::IsDialogGenerated(textArgs)) {
         return;
     }
-    lexems = "$total" + player.ReplicationMoney;
+
+    textArgs = "|total:" + player.ReplicationMoney;
 }
 
 [[DialogResult]]
-int r_ChoosePlayerResult(Critter player, Critter terminal)
+int ChoosePlayerResult(Critter player, Critter terminal)
 {
     if (player.TerminalPlayerId == ZERO_IDENT) {
         return 0;
@@ -129,10 +125,11 @@ int r_ChoosePlayerResult(Critter player, Critter terminal)
     if (player.TerminalPlayerId == player.Id) {
         return FORCE_DIALOG_PAY_SELF;
     }
+
     return FORCE_DIALOG_PAY_OTHER_NEXT;
 }
 
-int dlg_ChoosePlayer(Critter player, Critter terminal, string& playerName)
+int ChoosePlayer(Critter player, Critter terminal, string& playerName)
 {
     player.TerminalDialogId = DialogSetTargetName;
     player.CanSendSay = true;
@@ -142,25 +139,26 @@ int dlg_ChoosePlayer(Critter player, Critter terminal, string& playerName)
         if (player.TerminalPlayerId == player.Id) {
             return FORCE_DIALOG_PAY_SELF;
         }
+
         return FORCE_DIALOG_PAY_OTHER_NEXT;
     }
 
     return 0;
 }
 
-void dlg_TransferReal(Critter player, Critter terminal, string& moneyCount)
+void TransferReal(Critter player, Critter terminal, string& moneyCount)
 {
     player.TerminalDialogId = DialogTransferReal;
     player.CanSendSay = true;
 }
 
-void dlg_TransferVirtual(Critter player, Critter terminal, string& moneyCount)
+void TransferVirtual(Critter player, Critter terminal, string& moneyCount)
 {
     player.TerminalDialogId = DialogTransferVirtual;
     player.CanSendSay = true;
 }
 
-void dlg_TakeMoney(Critter player, Critter terminal, string& moneyCount)
+void TakeMoney(Critter player, Critter terminal, string& moneyCount)
 {
     player.TerminalDialogId = DialogTakeMoney;
     player.CanSendSay = true;
@@ -169,24 +167,54 @@ void dlg_TakeMoney(Critter player, Critter terminal, string& moneyCount)
 void TakeMoney(Critter player, string moneyCount)
 {
     if (player.ReplicationMoney == 0) {
-        SEND_ERROR_RETURN(player, STR_ZERO_BALANCE);
+        {
+            Messaging::Info(player, TextPackKey(TextPackName::Dialogs, "" + (STR_ZERO_BALANCE)));
+            player.PlayerClientCall.AddDialogStr(STR_ZERO_BALANCE, "", false);
+            return;
+        }
     }
+
     if (player.ReplicationMoney < 0) {
-        SEND_ERROR_RETURN(player, STR_NEGATIVE_BALANCE);
+        {
+            Messaging::Info(player, TextPackKey(TextPackName::Dialogs, "" + (STR_NEGATIVE_BALANCE)));
+            player.PlayerClientCall.AddDialogStr(STR_NEGATIVE_BALANCE, "", false);
+            return;
+        }
     }
+
     int money = 0;
     if (!moneyCount.tryToInt(money)) {
-        SEND_ERROR_RETURN(player, STR_INVALID_MONEY_COUNT);
+        {
+            Messaging::Info(player, TextPackKey(TextPackName::Dialogs, "" + (STR_INVALID_MONEY_COUNT)));
+            player.PlayerClientCall.AddDialogStr(STR_INVALID_MONEY_COUNT, "", false);
+            return;
+        }
     }
+
     if (money == 0) {
-        SEND_ERROR_RETURN(player, STR_ZERO_MONEY_COUNT);
+        {
+            Messaging::Info(player, TextPackKey(TextPackName::Dialogs, "" + (STR_ZERO_MONEY_COUNT)));
+            player.PlayerClientCall.AddDialogStr(STR_ZERO_MONEY_COUNT, "", false);
+            return;
+        }
     }
+
     if (money < 0) {
-        SEND_ERROR_RETURN(player, STR_NEGATIVE_MONEY_COUNT);
+        {
+            Messaging::Info(player, TextPackKey(TextPackName::Dialogs, "" + (STR_NEGATIVE_MONEY_COUNT)));
+            player.PlayerClientCall.AddDialogStr(STR_NEGATIVE_MONEY_COUNT, "", false);
+            return;
+        }
     }
+
     if (money > player.ReplicationMoney) {
-        SEND_ERROR_RETURN(player, STR_NOT_ENAUGTH_MONEY);
+        {
+            Messaging::Info(player, TextPackKey(TextPackName::Dialogs, "" + (STR_NOT_ENAUGTH_MONEY)));
+            player.PlayerClientCall.AddDialogStr(STR_NOT_ENAUGTH_MONEY, "", false);
+            return;
+        }
     }
+
     player.ReplicationMoney -= money;
     player.AddItem(Content::Item::bottle_caps, money);
     Messaging::Info(player, TextPackKey(TextPackName::Dialogs, "" + (STR_OPERATION_SUCCESS)));
@@ -198,33 +226,61 @@ void TransferMoney(Critter player, string moneyCount, bool forReal)
     // Get money to transfer.
     int money = 0;
     if (!moneyCount.tryToInt(money)) {
-        SEND_ERROR_RETURN(player, STR_INVALID_MONEY_COUNT);
+        {
+            Messaging::Info(player, TextPackKey(TextPackName::Dialogs, "" + (STR_INVALID_MONEY_COUNT)));
+            player.PlayerClientCall.AddDialogStr(STR_INVALID_MONEY_COUNT, "", false);
+            return;
+        }
     }
+
     if (money == 0) {
-        SEND_ERROR_RETURN(player, STR_ZERO_MONEY_COUNT);
+        {
+            Messaging::Info(player, TextPackKey(TextPackName::Dialogs, "" + (STR_ZERO_MONEY_COUNT)));
+            player.PlayerClientCall.AddDialogStr(STR_ZERO_MONEY_COUNT, "", false);
+            return;
+        }
     }
+
     if (money < 0) {
-        SEND_ERROR_RETURN(player, STR_NEGATIVE_MONEY_COUNT);
+        {
+            Messaging::Info(player, TextPackKey(TextPackName::Dialogs, "" + (STR_NEGATIVE_MONEY_COUNT)));
+            player.PlayerClientCall.AddDialogStr(STR_NEGATIVE_MONEY_COUNT, "", false);
+            return;
+        }
     }
 
     // Get stored critter.
-    Critter cr = Game.GetCritter(player.TerminalPlayerId);
+    Critter? cr = Game.GetCritter(player.TerminalPlayerId);
     if (cr == null) {
         Game.Log("ERROR! player.TerminalPlayerId = " + player.TerminalPlayerId + "; player.Id =" + player.Id);
-        SEND_ERROR_RETURN(player, STR_PLAYER_NOT_FOUND);
+        {
+            Messaging::Info(player, TextPackKey(TextPackName::Dialogs, "" + (STR_PLAYER_NOT_FOUND)));
+            player.PlayerClientCall.AddDialogStr(STR_PLAYER_NOT_FOUND, "", false);
+            return;
+        }
     }
 
     // Transfer money.
     if (forReal) {
         if (int(money) > player.CountItem(Content::Item::bottle_caps)) {
-            SEND_ERROR_RETURN(player, STR_NOT_ENAUGTH_MONEY);
+            {
+                Messaging::Info(player, TextPackKey(TextPackName::Dialogs, "" + (STR_NOT_ENAUGTH_MONEY)));
+                player.PlayerClientCall.AddDialogStr(STR_NOT_ENAUGTH_MONEY, "", false);
+                return;
+            }
         }
+
         player.DestroyItem(Content::Item::bottle_caps, money);
     }
     else {
         if (money > player.ReplicationMoney) {
-            SEND_ERROR_RETURN(player, STR_NOT_ENAUGTH_MONEY);
+            {
+                Messaging::Info(player, TextPackKey(TextPackName::Dialogs, "" + (STR_NOT_ENAUGTH_MONEY)));
+                player.PlayerClientCall.AddDialogStr(STR_NOT_ENAUGTH_MONEY, "", false);
+                return;
+            }
         }
+
         player.ReplicationMoney -= money;
     }
 

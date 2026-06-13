@@ -12,7 +12,7 @@ void InitTrader()
 [[Event]]
 void init()
 {
-    Assert(Game.IsResourcePresent("TraderTable.json"));
+    verify(Game.IsResourcePresent("TraderTable.json"), "Assertion failed");
     Json::JSON tradersSettings = Json::JSONParse(Game.ReadResource("TraderTable.json"));
     tradersSettings.forEach(ReadTradeSettings);
     CurrentSettings = null;
@@ -33,24 +33,29 @@ void ReadTradeSettings(Json::JSON settingsInfo, int index)
 
 void ReadGoods(Json::JSON goodsInfo, int index)
 {
+    TradeSettings? currentSettings = CurrentSettings;
+    if (currentSettings == null) {
+        throw("Trader settings are not initialized");
+    }
+
     string name;
     int count = 0;
     goodsInfo["Proto"] >> name;
     goodsInfo["Count"] >> count;
 
-    CurrentSettings.Goods[name.hstr()] = count;
+    currentSettings.Goods[name.hstr()] = count;
 }
 
-TradeSettings CurrentSettings;
+TradeSettings? CurrentSettings;
 TradeSettings[] TradersSettings = {};
 
-void _CashTraderInit(Critter trader, bool firstTime)
+void CashTraderInit(Critter trader, bool firstTime)
 {
     trader.IsBarterOnlyCash = true;
-    _TraderInit(trader, firstTime);
+    TraderInit(trader, firstTime);
 }
 
-void _TraderInit(Critter trader, bool firstTime)
+void TraderInit(Critter trader, bool firstTime)
 {
     int traderIndex = GetTraderIndex(trader);
     if (traderIndex >= 0) {
@@ -66,27 +71,28 @@ void _TraderInit(Critter trader, bool firstTime)
         trader.IsNoLoot = true;
         trader.IsNoEnemyStack = true;
 
-        if (trader.CountTimeEvent(cte_UpdateItems) == 0) {
+        if (trader.CountTimeEvent(UpdateItems) == 0) {
             int nextCall = UpdateItems(trader);
             if (nextCall > 0) {
-                trader.StartTimeEvent(Tla::GameSeconds(nextCall), cte_UpdateItems);
+                trader.StartTimeEvent(Tla::GameSeconds(nextCall), UpdateItems);
             }
         }
     }
 }
 
 [[TimeEvent]]
-void cte_UpdateItems(Critter trader)
+void UpdateItems(Critter trader, TimeEventContext event)
 {
     if (trader.IsDead()) {
         timespan delayTicks = Time::IsTimeoutActive(trader.TimeoutReplication) ? trader.TimeoutReplication - Game.SynchronizedTime : Time::Minutes(1);
         if (delayTicks != ZERO_TIMESPAN) {
-            Game.RepeatCurrentTimeEvent(delayTicks);
+            event.Repeat(delayTicks);
         }
     }
+
     timespan delayTicks = Tla::GameSeconds(UpdateItems(trader));
     if (delayTicks != ZERO_TIMESPAN) {
-        Game.RepeatCurrentTimeEvent(delayTicks);
+        event.Repeat(delayTicks);
     }
 }
 
@@ -100,6 +106,7 @@ int GetTraderIndex(Critter trader)
             }
         }
     }
+
     return -1;
 }
 
@@ -124,16 +131,12 @@ int UpdateItems(Critter trader)
                 if (proto.Deteriorable) {
                     if (proto.Stackable) {
                         Item item = trader.AddItem(pid, needCount);
-                        if (item != null) {
-                            Repair::SetDeterioration(item, Game.Random(5, 25)); // 5%..25% procent of deteoration
-                        }
+                        Repair::SetDeterioration(item, Game.Random(5, 25)); // 5%..25% procent of deteoration
                     }
                     else {
                         while (needCount > 0) {
                             Item item = trader.AddItem(pid, 1);
-                            if (item != null) {
-                                Repair::SetDeterioration(item, Game.Random(5, 25)); // 5%..25% procent of deteoration
-                            }
+                            Repair::SetDeterioration(item, Game.Random(5, 25)); // 5%..25% procent of deteoration
                             needCount--;
                         }
                     }
@@ -150,6 +153,7 @@ int UpdateItems(Critter trader)
     if (hour <= 0) {
         return 0;
     }
+
     return (hour * 60 * 60) * Game.Random(50, 150) / 100; // +- 50%
 }
 

@@ -10,11 +10,11 @@ namespace MapSfTanker
 // кого то другого, тогда они стриают чистюлю из памяти и действуют по старой схеме чистюля может быть только один, если заходит второй - он стирается, его
 // атакуют и второго тоже в независимости взят квест или нет, поведение не меняется
 
-#define KILL_MEN     (260)
-#define KILL_WOMEN   (261)
-#define KILL_FLOATER (268)
-#define KILL_CENTAUR (269)
-#define KILL_ALIEN   (276)
+const int KILL_MEN = 260;
+const int KILL_WOMEN = 261;
+const int KILL_FLOATER = 268;
+const int KILL_CENTAUR = 269;
+const int KILL_ALIEN = 276;
 
 ///@ Property Critter Common uint8 SFRonKillBeasts Mutable OwnerSync Persistent Group = Quests Quest = 4416 Max = 4
 ///@ Property Critter Common uint8 SFRonFindbodies Mutable OwnerSync Persistent Group = Quests Quest = 4417 Max = 6
@@ -24,63 +24,65 @@ namespace MapSfTanker
 
 void TankerMapInit(Map map, bool firstTime)
 {
-    map.OnCritterIn.Subscribe(_TankerInCritter);
+    map.OnCritterIn.Subscribe(TankerInCritter);
 }
 
-void _TankerMobInit(Critter cr, bool firstTime)
+void TankerMobInit(Critter cr, bool firstTime)
 {
-    Mob::_MobInit(cr, firstTime);
-    cr.OnCritterAppearedDist1.Subscribe(_TankerShowCritter1);
-    cr.StartTimeEvent(Time::Asap(), Time::Seconds(1), _TankerIdle);
-    cr.OnDead.Subscribe(_TankerDead);
-    cr.OnSomeCritterDead.Subscribe(_TankerDeath);
+    Mob::MobInit(cr, firstTime);
+    cr.OnCritterAppearedDist1.Subscribe(TankerShowCritter1);
+    cr.StartTimeEvent(Time::Asap(), Time::Seconds(1), TankerIdle);
+    cr.OnDead.Subscribe(TankerDead);
+    cr.OnSomeCritterDead.Subscribe(TankerDeath);
     // Aтака, вне зависимости от того, чистюля персонаж или нет
     cr.ShowCritterDist2 = 1;
-    cr.OnCritterAppearedDist2.Subscribe(_TankerShowCritter2);
+    cr.OnCritterAppearedDist2.Subscribe(TankerShowCritter2);
 }
 
 [[Event]]
-void _TankerShowCritter2(Critter cr, Critter player)
+void TankerShowCritter2(Critter cr, Critter player)
 {
     if (not player.ControlledByPlayer) {
         return;
     }
+
     if (cr.MapSFTankerBicycleId == ZERO_IDENT) {
         return; // Это ловушка для чистюль исключительно
     }
 
-    NpcPlanes::AddAttackPlane(cr, AI_PLANE_ATTACK_PRIORITY + 1, player);
+    NpcPlanes::AddAttackPlane(cr, NpcPlanes::AI_PLANE_ATTACK_PRIORITY + 1, player);
 }
 
 [[Event]]
-void _TankerDeath(Critter cr, Critter fromCrit, Critter killer)
+void TankerDeath(Critter cr, Critter fromCrit, Critter killer)
 {
     cr.MapSFTankerBicycleId = ZERO_IDENT;
-    Mob::_Death_Impl(cr, fromCrit, killer);
+    Mob::DeathImpl(cr, fromCrit, killer);
 }
 
 [[Event]]
-void _TankerShowCritter1(Critter cr, Critter player)
+void TankerShowCritter1(Critter cr, Critter player)
 {
     if (!player.ControlledByPlayer) {
         return;
     }
+
     if (player.Id == cr.MapSFTankerBicycleId && IsCleanMan(player)) {
         return;
     }
 
-    Mob::_ShowPlayer_Impl(cr, player);
+    Mob::ShowPlayerImpl(cr, player);
 }
 
 [[Event]]
-void _TankerDead(Critter cr, Critter? killer)
+void TankerDead(Critter cr, Critter? killer)
 {
-    Mob::_MyDeath_Impl(cr, killer);
+    Mob::MyDeathImpl(cr, killer);
     if (killer != null && killer.ControlledByPlayer && killer.SFRonKillBeasts == 1) {
         killer.SFRonKillBeasts = 2;
     }
 
-    Map map = cr.GetMap();
+    Map? map = cr.GetMap();
     if (map == null) {
         return;
     }
@@ -95,21 +97,34 @@ void _TankerDead(Critter cr, Critter? killer)
     }
 }
 
-[[TimeEvent]]
-void _TankerIdle(Critter cr)
+[[TimeEvent]] [[Async]]
+void TankerIdle(Critter cr)
 {
+    if (!Sync::LockCritterWithMap(cr)) {
+        return;
+    }
+
     if (!cr.IsAlive()) {
         return;
     }
 
     if (cr.MapSFTankerBicycleId != ZERO_IDENT) {
         // Одновременно на танкере может быть только один чистюля
-        Critter player = Game.GetCritter(cr.MapSFTankerBicycleId);
+        Critter? player = Game.GetCritter(cr.MapSFTankerBicycleId);
         if (player != null) {
+            Map? map = cr.GetMap();
+            if (map != null) {
+                if (!Sync::Lock(cr, map, player)) {
+                    return;
+                }
+            }
+            else if (!Sync::Lock(cr, player)) {
+                return;
+            }
+
             // Проверка, что персонаж никого из своих не убил
             if (player.IsAlive() && IsCleanMan(player)) {
                 if (cr.IsSee(player) && Game.GetDistance(cr, player) < 8) {
-                    Map map = cr.GetMap();
                     if (map != null) {
                         mpos hex = player.Hex;
                         if (Entrance::GetFreeHex(map, 2, hex)) {
@@ -117,20 +132,23 @@ void _TankerIdle(Critter cr)
                         }
                     }
                 }
+
                 return; // Запоминание чистюли не сбито
             }
         }
     }
+
     cr.MapSFTankerBicycleId = ZERO_IDENT; // Либо чистюля ушел, либо что-то еще, сбиваем запоминание
-    Mob::_Idle_Impl(cr);
+    Mob::IdleImpl(cr);
 }
 
 [[Event]]
-void _TankerInCritter(Map map, Critter cr)
+void TankerInCritter(Map map, Critter cr)
 {
     if (!cr.ControlledByPlayer) {
         return;
     }
+
     if (!IsCleanMan(cr)) {
         return;
     }
@@ -155,7 +173,7 @@ bool IsCleanMan(Critter player)
 }
 
 // ДИАЛОГ: Динамическая награда, зависит от уровня игрока
-void r_GrantPlayer(Critter player, Critter npc)
+void GrantPlayer(Critter player, Critter npc)
 {
     int lvl = player.Level;
     int koef = lvl % 10 + 1;
@@ -163,17 +181,18 @@ void r_GrantPlayer(Critter player, Critter npc)
 }
 
 // Квестовые мертвые панки
-void _DeadsInit(Critter cr, bool firstTime)
+void DeadsInit(Critter cr, bool firstTime)
 {
     if (!cr.IsDead()) {
         CritterState::ToDead(cr, CritterActionAnim::DeadFront, null);
     }
+
     cr.ReplicationTime = -1;
-    cr.OnSomeCritterUseSkill.Subscribe(_SmthUseSkill);
+    cr.OnSomeCritterUseSkill.Subscribe(SmthUseSkill);
 }
 
 [[Event]]
-void _SmthUseSkill(Critter cr, Critter fromCr, CritterProperty skill, Critter? onCritter, Item onItem, StaticItem onScenery)
+void SmthUseSkill(Critter cr, Critter fromCr, CritterProperty skill, Critter? onCritter, Item onItem, StaticItem onScenery)
 {
     if (!fromCr.ControlledByPlayer || skill != CritterProperty::SkillScience || onCritter == null || onCritter.Id != cr.Id) {
         return;
@@ -189,6 +208,7 @@ void _SmthUseSkill(Critter cr, Critter fromCr, CritterProperty skill, Critter? o
             if (fromCr.SFTankerCentaurNoticed == 0 && Game.Random(1, 150) < fromCr.SkillScience) {
                 fromCr.SFTankerCentaurNoticed = 1;
             }
+
             if (fromCr.SFTankerFloaterNoticed == 0 && Game.Random(1, 150) < fromCr.SkillDoctor) {
                 fromCr.SFTankerFloaterNoticed = 1;
             }

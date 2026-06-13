@@ -6,26 +6,26 @@ namespace EncounterNpc
 // Generic encounter npc script
 // Author: cvet, rifleman17, Dagnir
 
-#define MESSAGE_COLLECT_NPC (30)
-#define MESSAGE_ATTACK_HIM  (31)
-#define MESSAGE_ATTACK_ME   (32)
-#define PLANE_LOOT          (30)
+const int MESSAGE_COLLECT_NPC = 30;
+const int MESSAGE_ATTACK_HIM = 31;
+const int MESSAGE_ATTACK_ME = 32;
+const int PLANE_LOOT = 30;
 
 ident LastDeadId;
 ident[] CollectedNpcIds = {};
 
-void _NpcInit(Critter npc, bool firstTime)
+void NpcInit(Critter npc, bool firstTime)
 {
     int bt = npc.BodyType;
     if (bt >= BodyTypes::Men && bt <= BodyTypes::Ghoul) {
-        npc.OnMessage.Subscribe(_NpcMessage);
-        npc.OnDead.Subscribe(_NpcDead);
-        npc.OnSomeCritterDead.Subscribe(_NpcSmthDead);
-        npc.OnSomeCritterUseSkill.Subscribe(_NpcSmthUseSkill);
-        npc.OnNpcPlaneEnd.Subscribe(_NpcPlaneEnd);
-        npc.OnStealing.Subscribe(_NpcStealing);
-        npc.OnSomeCritterUseItem.Subscribe(_NpcSmthUseItem);
-        npc.OnSomeCritterDropItem.Subscribe(_NpcSmthDropItem);
+        npc.OnMessage.Subscribe(NpcMessage);
+        npc.OnDead.Subscribe(NpcDead);
+        npc.OnSomeCritterDead.Subscribe(NpcSmthDead);
+        npc.OnSomeCritterUseSkill.Subscribe(NpcSmthUseSkill);
+        npc.OnNpcPlaneEnd.Subscribe(NpcPlaneEnd);
+        npc.OnStealing.Subscribe(NpcStealing);
+        npc.OnSomeCritterUseItem.Subscribe(NpcSmthUseItem);
+        npc.OnSomeCritterDropItem.Subscribe(NpcSmthDropItem);
 
         bool favrtAmmoSet = false;
         bool favrtWpnSet = false;
@@ -36,6 +36,7 @@ void _NpcInit(Critter npc, bool firstTime)
                 FavoriteItem::SetFavoriteItemPid(npc, CritterItemSlot::Main, items[i].ProtoId);
                 favrtWpnSet = true;
             }
+
             /*	if(items[i].Type == ItemType::Ammo && !favrtAmmoSet)
                     {
                             npc.SetFavoriteItem(CritterItemSlot::Secondary, items[i].ProtoId);
@@ -46,15 +47,15 @@ void _NpcInit(Critter npc, bool firstTime)
     }
 }
 
-Critter GetCritterForLooting(Critter lootCr)
+Critter? GetCritterForLooting(Critter lootCr)
 {
     // Collect npc
-    Critter result = null;
+    Critter? result = null;
     SendMessage::ToWhoSeesMe(lootCr, MESSAGE_COLLECT_NPC, 0);
     if (CollectedNpcIds.length() > 0) {
         // Find better looter
         for (int i = 0, j = CollectedNpcIds.length(); i < j; i++) {
-            Critter cr = Game.GetCritter(CollectedNpcIds[i]);
+            Critter? cr = Game.GetCritter(CollectedNpcIds[i]);
             if (NpcPlanes::GetPlanes(cr, PLANE_LOOT, null) == 0) {
                 result = cr;
                 break;
@@ -69,11 +70,12 @@ Critter GetCritterForLooting(Critter lootCr)
         // Free handles
         CollectedNpcIds.clear();
     }
+
     return result;
 }
 
 [[Event]]
-void _NpcSmthUseItem(Critter npc, Critter fromCr, Item item, Critter onCritter, Item onItem, StaticItem onScenery, int param)
+void NpcSmthUseItem(Critter npc, Critter fromCr, Item item, Critter onCritter, Item onItem, StaticItem onScenery, int param)
 {
     if (fromCr.ControlledByPlayer && npc.IsAlive()) {
         hstring pid = item.ProtoId;
@@ -85,7 +87,7 @@ void _NpcSmthUseItem(Critter npc, Critter fromCr, Item item, Critter onCritter, 
 }
 
 [[Event]]
-void _NpcSmthDropItem(Critter npc, Critter fromCr, Item item)
+void NpcSmthDropItem(Critter npc, Critter fromCr, Item item)
 {
     if (fromCr.ControlledByPlayer && npc.IsAlive()) {
         hstring pid = item.ProtoId;
@@ -96,7 +98,7 @@ void _NpcSmthDropItem(Critter npc, Critter fromCr, Item item)
     }
 }
 
-void _NpcMessage_Impl(Critter npc, Critter fromCr, int message, any value)
+void NpcMessageImpl(Critter npc, Critter fromCr, int message, any value)
 {
     if (message == MESSAGE_COLLECT_NPC) {
         if (!npc.IsDead()) {
@@ -105,14 +107,14 @@ void _NpcMessage_Impl(Critter npc, Critter fromCr, int message, any value)
     }
     else if (message == MESSAGE_ATTACK_HIM) {
         if (fromCr.TeamId == npc.TeamId && npc.IsAlive()) {
-            Critter target = Game.GetCritter(value);
+            Critter? target = Game.GetCritter(value);
             if (target != null) {
                 NpcPlanes::AddAttackPlane(npc, 0, target, Settings.Movement.RunOnCombat);
             }
         }
     }
     else if (message == MESSAGE_ATTACK_ME) {
-        Critter target = Game.GetCritter(value);
+        Critter? target = Game.GetCritter(value);
         if (target != null) {
             NpcPlanes::AddAttackPlane(npc, 0, target, Settings.Movement.RunOnCombat);
         }
@@ -120,17 +122,17 @@ void _NpcMessage_Impl(Critter npc, Critter fromCr, int message, any value)
 }
 
 [[Event]]
-void _NpcMessage(Critter npc, Critter fromCr, int message, any value)
+void NpcMessage(Critter npc, Critter fromCr, int message, any value)
 {
-    _NpcMessage_Impl(npc, fromCr, message, value);
+    NpcMessageImpl(npc, fromCr, message, value);
 }
 
-void _NpcDead_Impl(Critter npc, Critter? killer)
+void NpcDeadImpl(Critter npc, Critter? killer)
 {
     // Loot
     NpcPlanes::NpcPlane[] planes = {};
     if (NpcPlanes::GetPlanes(npc, PLANE_LOOT, planes) > 0) {
-        Critter cr = GetCritterForLooting(npc);
+        Critter? cr = GetCritterForLooting(npc);
         if (cr != null) {
             // Copy planes
             for (int i = 0, j = planes.length(); i < j; i++) {
@@ -193,9 +195,9 @@ void _NpcDead_Impl(Critter npc, Critter? killer)
 }
 
 [[Event]]
-void _NpcDead(Critter npc, Critter killer)
+void NpcDead(Critter npc, Critter killer)
 {
-    _NpcDead_Impl(npc, killer);
+    NpcDeadImpl(npc, killer);
 }
 
 int GetCritterItemsCount(Critter npc)
@@ -204,40 +206,49 @@ int GetCritterItemsCount(Critter npc)
 }
 
 [[Event]]
-void _NpcSmthDead(Critter npc, Critter fromCrit, Critter killer)
+void NpcSmthDead(Critter npc, Critter fromCrit, Critter killer)
 {
     if (fromCrit.Id != LastDeadId) {
-        if (GetCritterItemsCount(fromCrit) > 0 && _CritCanDropItemsOnDead(fromCrit)) {
-            Critter cr = GetCritterForLooting(fromCrit);
+        if (GetCritterItemsCount(fromCrit) > 0 && Tla::CanCritterDropItemsOnDead(fromCrit)) {
+            Critter? cr = GetCritterForLooting(fromCrit);
             if (cr != null) {
                 NpcPlanes::AddWalkPlane(cr, 0, PLANE_LOOT, fromCrit.Id, fromCrit.Hex, 6, false, 1);
             }
         }
+
         LastDeadId = fromCrit.Id;
     }
 }
 
 [[Event]]
-void _NpcSmthUseSkill(Critter npc, Critter fromCr, CritterProperty skill, Critter? onCritter, Item onItem, StaticItem onScenery)
+void NpcSmthUseSkill(Critter npc, Critter fromCr, CritterProperty skill, Critter? onCritter, Item onItem, StaticItem onScenery)
 {
     if ((skill == CritterProperty::SpecialSkillLootCritter || skill == CritterProperty::SkillSteal) && onCritter != null &&
         NpcPlanes::GetPlanes(npc, PLANE_LOOT, onCritter.Id, null) > 0) {
-        NpcPlanes::AddAttackPlane(npc, AI_PLANE_ATTACK_PRIORITY + 1, fromCr, Settings.Movement.RunOnCombat);
+        NpcPlanes::AddAttackPlane(npc, NpcPlanes::AI_PLANE_ATTACK_PRIORITY + 1, fromCr, Settings.Movement.RunOnCombat);
     }
 }
 
-bool _NpcPlaneEnd_Impl(Critter npc, int planeId, int reason, Critter someCr, Item someItem)
+bool NpcPlaneEndImpl(Critter npc, int planeId, int reason, Critter someCr, Item someItem)
 {
-    NpcPlanes::NpcPlane plane = NpcPlanes::GetCritterPlane(npc, planeId);
+    NpcPlanes::NpcPlane? plane = NpcPlanes::GetCritterPlane(npc, planeId);
+    if (plane == null) {
+        return false;
+    }
 
-    if (plane.Identifier == PLANE_LOOT && reason == REASON_SUCCESS) {
-        Critter cr = Game.GetCritter(plane.IdentifierExt);
+    if (plane.Identifier == PLANE_LOOT && reason == NpcPlanes::REASON_SUCCESS) {
+        Critter? cr = Game.GetCritter(plane.IdentifierExt);
         if (cr != null && cr.IsDead()) {
+            Map? map = npc.GetMap();
+            if (map == null) {
+                return true;
+            }
+
             Item[] items = {};
             items.insertLast(cr.GetItems(ItemProperty::CritterSlot, CritterItemSlot::Inventory));
             items.insertLast(cr.GetItems(ItemProperty::CritterSlot, CritterItemSlot::Main));
             items.insertLast(cr.GetItems(ItemProperty::CritterSlot, CritterItemSlot::Secondary));
-            items.insertLast(npc.GetMap().GetItemsOnHex(cr.Hex));
+            items.insertLast(map.GetItemsOnHex(cr.Hex));
 
             for (int i = 0; i < items.length(); i++) {
                 int type = items[i].Type;
@@ -248,22 +259,24 @@ bool _NpcPlaneEnd_Impl(Critter npc, int planeId, int reason, Critter someCr, Ite
 
             ItemMovement::MoveItems(items, npc);
             GameEventStorehouse::SaveLoot2Storehouse(npc.WorldPos.x, npc.WorldPos.y, items);
-            _CritAnimatePickUp(npc);
+            Tla::AnimateCritterPickUp(npc);
             CritterState::Wait(npc, Settings.Movement.Breaktime);
         }
+
         return false; // Skip global and end plane
     }
+
     return true; // Run global
 }
 
 [[Event]]
-EventResult _NpcPlaneEnd(Critter npc, int planeId, int reason, Critter someCr, Item someItem)
+EventResult NpcPlaneEnd(Critter npc, int planeId, int reason, Critter someCr, Item someItem)
 {
-    return (_NpcPlaneEnd_Impl(npc, planeId, reason, someCr, someItem)) ? EventResult::StopChain : EventResult::StopChain;
+    return (NpcPlaneEndImpl(npc, planeId, reason, someCr, someItem)) ? EventResult::StopChain : EventResult::StopChain;
 }
 
 [[Event]]
-void _NpcStealing(Critter npc, Critter thief, Item item, int count)
+void NpcStealing(Critter npc, Critter thief, Item item, int count)
 {
     bool success = false;
     if (!success) {

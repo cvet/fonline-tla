@@ -6,16 +6,19 @@ namespace Radiation
 // Author: cvet
 // Original Fallout2 system
 
-#define RADIATION_STAGES        (6)
-#define RADIATION_STATS         (8)
-#define RADIATION_DURATION      (10080)
-#define RADIATION_DAMAGE_VALUE  (66)
-#define RADIATION_HIGH_DOSE     (66)
-#define RADIATION_DEAD_DOSE     (1800)
+const int RADIATION_STAGES = 6;
+const int RADIATION_STATS = 8;
+const int RADIATION_DURATION = 10080;
+const int RADIATION_DAMAGE_VALUE = 66;
+const int RADIATION_HIGH_DOSE = 66;
+const int RADIATION_DEAD_DOSE = 1800;
 
-#define STR_RADIATION_STAGE     #(stage)(12799 + (stage))
-#define STR_RADIATION_DIE       (12806)
-#define STR_RADIATION_HIGH_DOSE (12807)
+int RadiationStageTextId(int stage)
+{
+    return 12799 + (stage);
+}
+const int STR_RADIATION_DIE = 12806;
+const int STR_RADIATION_HIGH_DOSE = 12807;
 
 // clang-format off
 
@@ -35,28 +38,42 @@ const int[] RadiationEffects =
 // clang-format on
 
 // Table offsets
-#define TABLE_STAGE_VALUE      #(stage)RadiationEffects[(stage) - 1]
-#define TABLE_STAT_INDEX_READ  #(stat)CritterProperty(RadiationEffects[6 + (stat) * 8])
-#define TABLE_STAT_INDEX_WRITE #(stat)CritterProperty(RadiationEffects[6 + (stat) * 8 + 1])
-#define TABLE_STAT_AMOUNT      #(stat, stage)RadiationEffects[6 + (stat) * 8 + (stage)]
+int RadiationStageValue(int stage)
+{
+    return RadiationEffects[(stage)-1];
+}
+CritterProperty RadiationStatReadIndex(int stat)
+{
+    return CritterProperty(RadiationEffects[6 + (stat) * 8]);
+}
+CritterProperty RadiationStatWriteIndex(int stat)
+{
+    return CritterProperty(RadiationEffects[6 + (stat) * 8 + 1]);
+}
+int RadiationStatAmount(int stat, int stage)
+{
+    return RadiationEffects[6 + (stat) * 8 + (stage)];
+}
 
 void AffectRadiation(Critter cr, int value)
 {
     if (cr.IsDead()) {
         return;
     }
+
     if (cr.BodyType == BodyTypes::Robot || cr.BodyType == BodyTypes::Alien) {
         return;
     }
 
-    bool isActive = cr.CountTimeEvent(cte_Radiation) != 0;
+    bool isActive = cr.CountTimeEvent(Radiation) != 0;
     int levelVal = cr.RadiationLevel;
     int resistVal = cr.DamageResistance[DamageTypes::Radiation];
 
     if (value >= 0) {
         value -= value * resistVal / 100;
     }
-    cr.RadiationLevel = CLAMP(levelVal + value, 0, 2000);
+
+    cr.RadiationLevel = Tla::Clamp(levelVal + value, 0, 2000);
     levelVal = cr.RadiationLevel;
 
     if (value > RADIATION_HIGH_DOSE) {
@@ -81,13 +98,13 @@ void AffectRadiation(Critter cr, int value)
         if (stage != newStage) {
             cr.ChangeTimeEvent(indexes[0], 0, stage);
         }*/
-        cr.SetTimeEventData(cte_Radiation, GetRadiationStage(levelVal));
+        cr.SetTimeEventData(Radiation, {GetRadiationStage(levelVal)});
     }
     else // Try start new event
     {
-        int stage1Val = TABLE_STAGE_VALUE(1);
+        int stage1Val = RadiationStageValue(1);
         if (levelVal >= stage1Val) {
-            cr.StartTimeEvent(ZERO_TIMESPAN, cte_Radiation, 1);
+            cr.StartTimeEvent(ZERO_TIMESPAN, Radiation, {1});
         }
     }
 
@@ -99,12 +116,13 @@ void AffectRadiation(Critter cr, int value)
 
 void DropRadiation(Critter cr)
 {
-    bool isActive = cr.CountTimeEvent(cte_Radiation) != 0;
+    bool isActive = cr.CountTimeEvent(Radiation) != 0;
     if (isActive) {
         int stage = GetRadiationStage(cr.RadiationLevel);
         ChangeStage(cr, stage, false);
-        cr.StopTimeEvent(cte_Radiation);
+        cr.StopTimeEvent(Radiation);
     }
+
     cr.RadiationLevel = 0;
     if (cr.IsRadiated) {
         cr.IsRadiated = false;
@@ -112,12 +130,13 @@ void DropRadiation(Critter cr)
 }
 
 [[TimeEvent]]
-void cte_Radiation(Critter cr, any rate)
+void Radiation(Critter cr, TimeEventContext event)
 {
+    any rate = event.GetData();
     if (cr.IsDead()) {
         timespan delayTicks = Time::Minutes(5);
         if (delayTicks != ZERO_TIMESPAN) {
-            Game.RepeatCurrentTimeEvent(delayTicks);
+            event.Repeat(delayTicks);
         }
     }
 
@@ -129,28 +148,30 @@ void cte_Radiation(Critter cr, any rate)
     {
         ChangeStage(cr, stage, false);
         ChangeStage(cr, newStage, true);
-        cr.SetTimeEventData(cte_Radiation, newStage);
+        cr.SetTimeEventData(Radiation, {newStage});
     }
     else // Erase effects
     {
         ChangeStage(cr, stage, false);
         duration = 0;
     }
+
     timespan delayTicks = Tla::GameSeconds(duration);
     if (delayTicks != ZERO_TIMESPAN) {
-        Game.RepeatCurrentTimeEvent(delayTicks);
+        event.Repeat(delayTicks);
     }
 }
 
 int GetRadiationStage(int level)
 {
     for (int i = 0, j = RADIATION_STAGES; i <= j; i++) {
-        int valMin = (i > 0 ? TABLE_STAGE_VALUE(i) : 0);
-        int valMax = (i < j ? TABLE_STAGE_VALUE(i + 1) : level + 1);
+        int valMin = (i > 0 ? RadiationStageValue(i) : 0);
+        int valMax = (i < j ? RadiationStageValue(i + 1) : level + 1);
         if (level >= valMin && level < valMax) {
             return i;
         }
     }
+
     return 0;
 }
 
@@ -159,14 +180,15 @@ void ChangeStage(Critter cr, int stage, bool gain)
     if (stage == 0) {
         return;
     }
+
     if (gain) {
-        Messaging::Info(cr, TextPackKey(TextPackName::Game, "" + (STR_RADIATION_STAGE(stage))));
+        Messaging::Info(cr, TextPackKey(TextPackName::Game, "" + (RadiationStageTextId(stage))));
     }
 
     for (int i = 0, j = RADIATION_STATS; i < j; i++) {
-        CritterProperty statPropRead = TABLE_STAT_INDEX_READ(i);
-        CritterProperty statPropWrite = TABLE_STAT_INDEX_WRITE(i);
-        int statAmount = TABLE_STAT_AMOUNT(i, stage);
+        CritterProperty statPropRead = RadiationStatReadIndex(i);
+        CritterProperty statPropWrite = RadiationStatWriteIndex(i);
+        int statAmount = RadiationStatAmount(i, stage);
 
         if (statAmount != 0) {
             int curVal = cr.GetAsInt(statPropRead);

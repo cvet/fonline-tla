@@ -1,7 +1,7 @@
 namespace Dialogbox
 {
 
-///@ RemoteCall Client ShowDialogBox (int32 dialogBoxType, int32 numAnswers, string lexems)
+///@ RemoteCall Client ShowDialogBox (int32 dialogBoxType, int32 numAnswers, string textArgs)
 ///@ RemoteCall Server AnswerDialogBox (int32 dialogBoxType, int32 answer)
 
 ///@ Property Critter Server nanotime LastDialogBoxShownTick Mutable Persistent
@@ -11,47 +11,51 @@ namespace Dialogbox
 ///@ Enum DialogBoxType NcrIllBrahmin = 2
 ///@ Enum DialogBoxType PurgatoryInvite = 3
 
-#define DIALOG_PERIOD    (Time::Seconds(30))
-#define NEXT_DIALOG_CALL (Time::Seconds(5))
+const timespan DIALOG_PERIOD = Time::Seconds(30);
+const timespan NEXT_DIALOG_CALL = Time::Seconds(5);
 
 #if SERVER
 
-[[ServerRemoteCall]]
+[[ServerRemoteCall]] [[Async]]
 void AnswerDialogBox(Player player, int dialogBoxType, int answer)
 {
-    Critter cr = player.GetControlledCritter();
+    Critter? cr = player.GetControlledCritter();
+    if (cr == null) {
+        return;
+    }
+
     auto type = DialogBoxType(dialogBoxType);
 
     nanotime tick = Game.FrameTime;
     if (tick < cr.LastDialogBoxShownTick + DIALOG_PERIOD) {
-        ThrowException("Too late for dialog answer", cr, dialogBoxType, answer);
+        throw("Too late for dialog answer", cr, dialogBoxType, answer);
     }
 
     if (type == DialogBoxType::AskFollowGlobalGroupRuler && answer == 0) {
-        GlobalmapGroup::ProcessGlobalMapCommand_Impl(player, 6 /*GM_CMD_FOLLOW*/, cr.FollowLeaderId, 0);
+        GlobalmapGroup::ProcessGlobalMapCommandImpl(player, 6 /*GM_CMD_FOLLOW*/, cr.FollowLeaderId, 0);
     }
 
     if (type == DialogBoxType::NcrIllBrahmin) {
-        NcrCommon::answer_CureBrahmin(cr, answer);
+        NcrCommon::CureBrahmin(cr, answer);
     }
 
     if (type == DialogBoxType::PurgatoryInvite) {
-        Purgatory::answer_BattleInvite(cr, answer);
+        Purgatory::BattleInvite(cr, answer);
     }
 }
 
-void RunDialogBox(Critter cr, DialogBoxType type, int numAnswers, string lexems)
+void RunDialogBox(Critter cr, DialogBoxType type, int numAnswers, string textArgs)
 {
     if (!cr.ControlledByPlayer || cr.IsDead()) {
-        ThrowException("Critter is npc or dead", cr);
+        throw("Critter is npc or dead", cr);
     }
 
     nanotime tick = Game.FrameTime;
     if (tick < cr.LastDialogBoxShownTick + NEXT_DIALOG_CALL) {
-        ThrowException("Too often dialog calls", cr, type);
+        throw("Too often dialog calls", cr, type);
     }
 
-    cr.PlayerClientCall.ShowDialogBox(type, numAnswers, lexems);
+    cr.PlayerClientCall.ShowDialogBox(type, numAnswers, textArgs);
 }
 
 #endif
@@ -65,9 +69,9 @@ int GetDialogTextStr(DialogBoxType dialogBoxType)
 }
 
 [[ClientRemoteCall]]
-void ShowDialogBox(int dialogBoxType, int numAnswers, string lexems)
+void ShowDialogBox(int dialogBoxType, int numAnswers, string textArgs)
 {
-    Gui::ShowScreen(GuiScreen::DialogBox, dict<string, any> = {{"DialogBoxType", dialogBoxType}, {"Answers", numAnswers}, {"Lexems", lexems}});
+    Gui::ShowScreen(GuiScreen::DialogBox, dict<string, any> = {{"DialogBoxType", dialogBoxType}, {"Answers", numAnswers}, {"Lexems", textArgs}});
 }
 
 void AnswerDialog(DialogBoxType dialogBoxType, int answer)

@@ -11,33 +11,35 @@ namespace RatGrenade // Sort 2
 
 ///@ Property Item Server int32 RatGrenadeInvokeId Mutable Persistent
 
-#define STR_AWAKE_GLOBAL (30) // Одна из ваших оглушенных крыс пришла в себя и удрала из рюкзака! Черт. Чем это так пахнет, и что это за жидкость?
-#define STR_AWAKE_MAP    (31) // Одна оглушенная крыса, по всей видимости очнулась, и выскочила из рюкзака. Прикончите эту тварь немедленно.
-#define STR_VENOMED      (32) // Вы вкололи супертоксин оглушенной крысе. Теперь с каждым укусом она может отравить жертву.
+const int STR_AWAKE_GLOBAL = 30; // Одна из ваших оглушенных крыс пришла в себя и удрала из рюкзака! Черт. Чем это так пахнет, и что это за жидкость?
+const int STR_AWAKE_MAP = 31;    // Одна оглушенная крыса, по всей видимости очнулась, и выскочила из рюкзака. Прикончите эту тварь немедленно.
+const int STR_VENOMED = 32;      // Вы вкололи супертоксин оглушенной крысе. Теперь с каждым укусом она может отравить жертву.
 
-// #define DL                     # (s) ( Game.Log( "RATS: " + s ) )
-#define DL #(s)
-
-void _RatGrenadeInit(Item item, bool firstTime)
+// #define DebugLog                     # (s) ( Game.Log( "RATS: " + s ) )
+void DebugLog(string s)
 {
-    DL("item init");
+}
+
+void RatGrenadeInit(Item item, bool firstTime)
+{
+    DebugLog("item init");
 
     if (firstTime) {
         // Есть шанс, что крыса очнется через пять реальных минут
         if (Game.Random(1, 4) < 2) {
-            DL("Awaking rat after 5 real minutes");
+            DebugLog("Awaking rat after 5 real minutes");
             item.RatGrenadeInvokeId = Game.StartTimeEvent(Time::GameMinutes(Game.Random(4, 5)), AwakeRat, item.Id);
-            DL("Awaking rat after 5 real minutes. EventId = " + item.RatGrenadeInvokeId);
+            DebugLog("Awaking rat after 5 real minutes. EventId = " + item.RatGrenadeInvokeId);
         }
     }
 
-    item.OnCritterAttack.Subscribe(_RatGrenadeAttack);
-    item.OnCritterUseOnSelf.Subscribe(_RatGrenadeUseOnMe);
-    item.OnFinish.Subscribe(_RatGrenadeFinish);
+    item.OnCritterAttack.Subscribe(RatGrenadeAttack);
+    item.OnCritterUseOnSelf.Subscribe(RatGrenadeUseOnMe);
+    item.OnFinish.Subscribe(RatGrenadeFinish);
 }
 
 [[Event]]
-EventResult _RatGrenadeUseOnMe(Item item, Critter cr, Item usedItem, int param)
+EventResult RatGrenadeUseOnMe(Item item, Critter cr, Item usedItem, int param)
 {
     hstring pid = item.ProtoId;
     if (pid == Content::Item::rat_grenade && usedItem.ProtoId == Content::Item::supertoxine) {
@@ -53,20 +55,21 @@ EventResult _RatGrenadeUseOnMe(Item item, Critter cr, Item usedItem, int param)
             }
         }
     }
+
     return EventResult::StopChain;
 }
 
 [[TimeEvent]]
 void AwakeRat(any value)
 {
-    DL("Rat awaken");
-    Item item = Game.GetItem(value);
+    DebugLog("Rat awaken");
+    Item? item = Game.GetItem(value);
     if (item != null) {
         item.RatGrenadeInvokeId = 0;
         if (item.CritterId != ZERO_IDENT) {
-            Critter cr = Game.GetCritter(item.CritterId);
+            Critter? cr = Game.GetCritter(item.CritterId);
             if (cr != null) {
-                Map map = cr.GetMap();
+                Map? map = cr.GetMap();
                 if (map != null) {
                     Messaging::Info(cr, TextPackKey(TextPackName::Text, "" + (STR_AWAKE_MAP)));
                     mpos hex = cr.Hex;
@@ -75,15 +78,14 @@ void AwakeRat(any value)
                         dict<CritterProperty, any> ratVars = {{CritterProperty::RatGrenadeProtoId, item.ProtoId},
                                                               {CritterProperty::RatGrenadeOwnerId, item.CritterId}};
                         Critter rat = map.AddCritter(Content::Critter::RegularRat, hex, dir, ratVars);
-                        rat.SetupScript(_RatInit);
-                        if (rat != null) {
-                            NpcPlanes::AddAttackPlane(rat, 0, cr);
-                        }
+                        rat.SetupScript(RatInit);
+                        NpcPlanes::AddAttackPlane(rat, 0, cr);
                     }
                 }
                 else {
                     Messaging::Info(cr, TextPackKey(TextPackName::Text, "" + (STR_AWAKE_GLOBAL)));
                 }
+
                 Game.DestroyItem(item);
             }
         }
@@ -91,13 +93,14 @@ void AwakeRat(any value)
 }
 
 [[Event]]
-EventResult _RatGrenadeAttack(Item item, Critter cr, Critter target, int weaponMode, ProtoItem ammo)
+EventResult RatGrenadeAttack(Item item, Critter cr, Critter target, int weaponMode, ProtoItem ammo)
 {
-    DL("Rat attack");
+    DebugLog("Rat attack");
     if (!target.IsNoPvp) {
         any[] values = {cr.Id, target.Id, item.Id, 1};
         Game.StartTimeEvent(Time::Seconds(1), RatAttack, values); //SavedDeferredCall
     }
+
     if (target.BodyType == BodyTypes::Floater) {
         switch (cr.ModLourenceFloater) {
         case 1:
@@ -108,35 +111,34 @@ EventResult _RatGrenadeAttack(Item item, Critter cr, Critter target, int weaponM
             break;
         }
     }
+
     return EventResult::StopChain;
 }
 
 [[TimeEvent]]
 void RatAttack(any[] values)
 {
-    Critter target = Game.GetCritter(values[1]);
-    Item item = Game.GetItem(values[2]);
+    Critter? target = Game.GetCritter(values[1]);
+    Item? item = Game.GetItem(values[2]);
     if (item != null && target != null) {
         mpos hex = target.Hex;
         if (item.MapId != ZERO_IDENT) {
-            Map map = item.GetMapPosition(hex);
+            Map? map = item.GetMapPosition(hex);
             if (map != null) {
                 if (Entrance::GetFreeHex(map, 2, hex)) {
                     mdir dir = Game.GetDirection(hex, target.Hex);
                     dict<CritterProperty, any> ratVars = {{CritterProperty::RatGrenadeProtoId, item.ProtoId},
                                                           {CritterProperty::RatGrenadeOwnerId, item.CritterId}};
                     Critter rat = map.AddCritter(Content::Critter::RegularRat, hex, dir, ratVars);
-                    rat.SetupScript(_RatInit);
-                    if (rat != null) {
-                        NpcPlanes::AddAttackPlane(rat, 0, target);
-                        Game.DestroyItem(item);
-                    }
+                    rat.SetupScript(RatInit);
+                    NpcPlanes::AddAttackPlane(rat, 0, target);
+                    Game.DestroyItem(item);
                 }
             }
         }
         else {
             if (values[3] < 2) {
-                DL("Rat in inventory");
+                DebugLog("Rat in inventory");
                 values[3] = 2;
                 Game.StartTimeEvent(Time::Seconds(2), RatAttack, values); //SavedDeferredCall
             }
@@ -145,60 +147,66 @@ void RatAttack(any[] values)
 }
 
 [[Event]]
-void _RatGrenadeFinish(Item item)
+void RatGrenadeFinish(Item item)
 {
-    DL("Rat grenade finish");
+    DebugLog("Rat grenade finish");
     if (item.RatGrenadeInvokeId != 0) {
         Game.StopTimeEvent(item.RatGrenadeInvokeId);
     }
 }
 
 // Скрипт крысы, вылезающей из гранаты, если она проснулась
-void _RatInit(Critter cr, bool firstTime)
+void RatInit(Critter cr, bool firstTime)
 {
-    Mob::_MobInit(cr, firstTime);
+    Mob::MobInit(cr, firstTime);
     cr.TeamId = Teams::Mob0;
     cr.ReplicationTime = -1;
-    cr.OnDead.Subscribe(_RatDead);
-    DL("v7 " + cr.RatGrenadeProtoId);
+    cr.OnDead.Subscribe(RatDead);
+    DebugLog("v7 " + cr.RatGrenadeProtoId);
     if (cr.RatGrenadeProtoId == Content::Item::rat_grenade_venom) {
         cr.Toxic = 120;
     }
     else if (cr.RatGrenadeProtoId == Content::Item::rat_grenade_tnt) {
-        cr.StartTimeEvent(Time::Seconds(Game.Random(5, 10)), cte_ExplodeRat);
+        cr.StartTimeEvent(Time::Seconds(Game.Random(5, 10)), ExplodeRat);
     }
 
-    cr.StartTimeEvent(Time::Minutes(Game.Random(5, 10)), cte_DeleteRat);
+    cr.StartTimeEvent(Time::Minutes(Game.Random(5, 10)), DeleteRat);
 }
 
-[[TimeEvent]]
-void cte_ExplodeRat(Critter cr)
+[[TimeEvent]] [[Async]]
+void ExplodeRat(Critter cr)
 {
-    DL("Exploded");
-    Map map = cr.GetMap();
+    if (!Sync::LockCritterWithMap(cr)) {
+        return;
+    }
+
+    DebugLog("Exploded");
+    Map? map = cr.GetMap();
     if (map != null) {
         Explode::Explode(cr.GetMap(), cr.Hex, null, Content::Item::active_dynamite, cr.RatGrenadeOwnerId, Game.Random(0, 50), Game.Random(0, 1));
     }
     else {
         Game.DestroyCritter(cr);
     }
+
     return;
 }
 
 [[Event]]
-void _RatDead(Critter cr, Critter killer)
+void RatDead(Critter cr, Critter killer)
 {
-    DL("Rat dead");
-    cr.StartTimeEvent(Time::Minutes(5), cte_DeleteRat);
+    DebugLog("Rat dead");
+    cr.StartTimeEvent(Time::Minutes(5), DeleteRat);
 }
 
 [[TimeEvent]]
-void cte_DeleteRat(Critter cr)
+void DeleteRat(Critter cr)
 {
-    DL("Delete Rat");
+    DebugLog("Delete Rat");
     if (!cr.ControlledByPlayer) {
         Game.DestroyCritter(cr);
     }
+
     return;
 }
 

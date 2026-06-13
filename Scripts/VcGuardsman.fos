@@ -9,16 +9,18 @@ namespace VcGuardsman // Sort 2
 ///@ Property Critter Server ident[] SquadMarchSquads Mutable Persistent
 ///@ Property Critter Server uint8[] SquadMarchQueue Mutable Persistent
 
-#define ORDER_TYPE_POS    (0)
-#define ORDER_TYPE_MOVE   (1)
-#define ORDER_TYPE_DIR    (2)
-#define ORDER_TYPE_ARM    (3)
-#define MAX_EXECUTE_TRIES (10)   // Максимальное число попыток выполнить приказ. Приказ не выполняется, если у нпц есть еще хоть какие-то планы
-#define RECHECK_TICKS     (5000) // Время последующей проверки при провале выполнения приказа.
+const int ORDER_TYPE_POS = 0;
+const int ORDER_TYPE_MOVE = 1;
+const int ORDER_TYPE_DIR = 2;
+const int ORDER_TYPE_ARM = 3;
+const int MAX_EXECUTE_TRIES = 10; // Максимальное число попыток выполнить приказ. Приказ не выполняется, если у нпц есть еще хоть какие-то планы
+const int RECHECK_TICKS = 5000;   // Время последующей проверки при провале выполнения приказа.
 
-// #define DL #(s) (Game.Log(s))
-#define DL        #(s)
-#define STR_LOOSE (5917) // Вы что-то сделали не так. Задание провалено.
+// #define DebugLog #(s) (Game.Log(s))
+void DebugLog(string s)
+{
+}
+const int STR_LOOSE = 5917; // Вы что-то сделали не так. Задание провалено.
 
 class MarchOrder // Вспомогательный класс. Приказ криттеру на выполнение некоторых действий
 {
@@ -162,9 +164,13 @@ class MarchQueue
             return;
         }
 
-        Critter cr = Game.GetCritter(CritterId);
+        Critter? cr = Game.GetCritter(CritterId);
+        if (cr == null) {
+            return;
+        }
+
         int orders = Orders.length();
-        DL("orders saved:" + orders);
+        DebugLog("orders saved:" + orders);
         auto save = Serializator::Serializator();
         save.Set(Auto);
         save.Set(CritterId);
@@ -173,16 +179,22 @@ class MarchQueue
         for (int i = 0; i < orders; i++) {
             Orders[i].Save(save);
         }
+
         cr.SquadMarchQueue = save.GetData();
     }
 
     void Load()
     {
-        Critter cr = Game.GetCritter(CritterId);
+        Critter? cr = Game.GetCritter(CritterId);
+        if (cr == null) {
+            return;
+        }
+
         auto load = Serializator::Serializator();
         if (load.SetData(cr.SquadMarchQueue) == 0) {
             return;
         }
+
         int orders = 0;
         load.Get(Auto);
         load.Get(CritterId);
@@ -198,7 +210,11 @@ class MarchQueue
 
     void Erase()
     {
-        Critter cr = Game.GetCritter(CritterId);
+        Critter? cr = Game.GetCritter(CritterId);
+        if (cr == null) {
+            return;
+        }
+
         cr.SquadMarchQueue = array<uint8>();
         if (!cr.ControlledByPlayer) {
             cr.IsNoHome = false;
@@ -212,14 +228,13 @@ class MarchQueue
         if (OrderCurrent < 0) {
             return;
         }
-        Critter cr = Game.GetCritter(CritterId);
+
+        Critter? cr = Game.GetCritter(CritterId);
         if (cr == null) {
             return;
         }
+
         MarchOrder order = Orders[OrderCurrent];
-        if (order == null) {
-            return;
-        }
         order.Hex = cr.Hex;
         order.Dir = cr.Dir.hex.value;
         Save();
@@ -231,15 +246,14 @@ class MarchQueue
         if (OrderCurrent < 0) {
             return true;
         }
-        Critter cr = Game.GetCritter(CritterId);
+
+        Critter? cr = Game.GetCritter(CritterId);
         if (cr == null) {
             return false;
         }
+
         MarchOrder order = Orders[OrderCurrent];
-        if (order == null) {
-            return false;
-        }
-        Item weapon;
+        Item? weapon;
         switch (order.Type) {
         case ORDER_TYPE_POS:
             return (cr.Hex == order.Hex);
@@ -250,21 +264,19 @@ class MarchQueue
             }
             else {
                 MarchOrder orderPrev = Orders[OrderCurrent - 1];
-                if (orderPrev == null) {
-                    return true;
-                }
                 mpos hex = orderPrev.Hex;
-                Map map = cr.GetMap();
+                Map? map = cr.GetMap();
                 if (map == null) {
                     return true;
                 }
+
                 map.MoveHexByDir(hex, order.Dir, order.Steps);
                 return (cr.Hex == hex);
             }
         case ORDER_TYPE_DIR:
             return (cr.Dir.hex.value == order.Dir);
         case ORDER_TYPE_ARM:
-            weapon = _CritGetItemHand(cr);
+            weapon = Tla::GetCritterHandItem(cr);
             if (weapon != null) {
                 if (order.Armed) {
                     return !weapon.Weapon_IsUnarmed;
@@ -273,32 +285,33 @@ class MarchQueue
                     return weapon.Weapon_IsUnarmed;
                 }
             }
+
             return !order.Armed;
         default:
             break;
         }
+
         return false;
     }
 
     void ExecuteOrder()
     {
-        Critter cr = Game.GetCritter(CritterId);
+        Critter? cr = Game.GetCritter(CritterId);
         if (cr == null || cr.ControlledByPlayer) {
             return; // Игроком выполнить приказ с помощью скрипта нельзя, разумеется
         }
+
         cr.IsNoHome = true;
         MarchOrder order = Orders[OrderCurrent];
-        if (order == null) {
-            return;
-        }
-        Map map = cr.GetMap();
+        Map? map = cr.GetMap();
         if (map == null) {
             return;
         }
-        DL(order.ToString());
 
-        Item weapon = null;
-        ProtoItem proto = null;
+        DebugLog(order.ToString());
+
+        Item? weapon = null;
+        ProtoItem? proto = null;
         mpos hex;
         hstring pid1;
         hstring pid2;
@@ -314,9 +327,6 @@ class MarchQueue
             }
             else {
                 MarchOrder orderPrev = Orders[OrderCurrent - 1];
-                if (orderPrev == null) {
-                    return;
-                }
                 hex = orderPrev.Hex;
                 map.MoveHexByDir(hex, mdir(hdir(order.Dir)), order.Steps);
                 NpcPlanes::AddWalkPlane(cr, 0, hex, mdir(hdir(order.Dir)), order.Run, 0);
@@ -326,11 +336,12 @@ class MarchQueue
             cr.SetDir(mdir(hdir(order.Dir)));
             break;
         case ORDER_TYPE_ARM:
-            weapon = _CritGetItemHand(cr);
+            weapon = Tla::GetCritterHandItem(cr);
             if (order.Armed) {
                 if (weapon != null && !weapon.Weapon_IsUnarmed) {
                     break; // В руках оружие
                 }
+
                 pid1 = FavoriteItem::GetFavoriteItemPid(cr, CritterItemSlot::Main);
                 // Проверяем, что у нпц в другом слоте
                 pid2 = FavoriteItem::GetFavoriteItemPid(cr, CritterItemSlot::Secondary);
@@ -343,6 +354,7 @@ class MarchQueue
                         }
                     }
                 }
+
                 FavoriteItem::SetFavoriteItemPid(cr, CritterItemSlot::Main, pid2);
                 FavoriteItem::SetFavoriteItemPid(cr, CritterItemSlot::Secondary, pid1);
             }
@@ -355,11 +367,13 @@ class MarchQueue
                     if (proto == null || proto.Type == ItemType::Weapon) {
                         pid2 = Content::Item::default_weapon; // Убирание оружия - имитируем с помощью выбора любимым оружием рукопашного удара
                     }
+
                     NpcPlanes::DropPlanes(cr);
                     FavoriteItem::SetFavoriteItemPid(cr, CritterItemSlot::Main, pid2);
                     FavoriteItem::SetFavoriteItemPid(cr, CritterItemSlot::Secondary, pid1);
                 }
             }
+
             break;
         default:
             break;
@@ -371,6 +385,7 @@ class MarchQueue
         if (Orders.length() == 0) {
             return;
         }
+
         int newIndex = OrderCurrent + 1;
         MarchOrder order;
         if (newIndex >= Orders.length()) {
@@ -383,15 +398,14 @@ class MarchQueue
                 newIndex = 0; // Повторяем заново
             }
         }
+
         OrderCurrent = newIndex;
         Save();
         if (Auto) {
             ExecuteOrder();
             order = Orders[OrderCurrent];
-            if (order != null) {
-                any[] values = {CritterId, 0};
-                Game.StartTimeEvent(Tla::GameSeconds(order.TimeNext), DoNextOrder, values);
-            }
+            any[] values = {CritterId, 0};
+            Game.StartTimeEvent(Tla::GameSeconds(order.TimeNext), DoNextOrder, values);
         }
     }
 };
@@ -403,15 +417,15 @@ class MarchQueue
 [[TimeEvent]]
 void DoNextOrder(any[] values)
 {
-    DL("next order");
-    Critter cr = Game.GetCritter(values[0]);
+    DebugLog("next order");
+    Critter? cr = Game.GetCritter(values[0]);
     if (cr == null || values[1] >= MAX_EXECUTE_TRIES || cr.ControlledByPlayer) {
         return;
     }
 
     MarchQueue march = MarchQueue(cr);
     values[1] = int(values[1]) + 1;
-    if (NpcPlanes::IsNoPlanes(cr) && march != null && march.CheckOrderCompleted()) {
+    if (NpcPlanes::IsNoPlanes(cr) && march.CheckOrderCompleted()) {
         march.ConfirmOrder();
         march.NextOrder();
         return;
@@ -432,12 +446,22 @@ class SquadCommander
 
     void Save()
     {
-        Game.GetCritter(CommanderId).SquadMarchSquads = Squad;
+        Critter? cr = Game.GetCritter(CommanderId);
+        if (cr == null) {
+            return;
+        }
+
+        cr.SquadMarchSquads = Squad;
     }
 
     void Load()
     {
-        Squad = Game.GetCritter(CommanderId).SquadMarchSquads.clone();
+        Critter? cr = Game.GetCritter(CommanderId);
+        if (cr == null) {
+            return;
+        }
+
+        Squad = cr.SquadMarchSquads.clone();
     }
 
     void Erase()
@@ -447,7 +471,12 @@ class SquadCommander
             q.Load();
             q.Erase();
         }
-        Critter cr = Game.GetCritter(CommanderId);
+
+        Critter? cr = Game.GetCritter(CommanderId);
+        if (cr == null) {
+            return;
+        }
+
         cr.SquadMarchSquads = array<ident>();
     }
 
@@ -456,40 +485,42 @@ class SquadCommander
         for (int i = 0, l = Squad.length(); i < l; i++) {
             MarchQueue q = MarchQueue(Squad[i]);
             q.Load();
-            Critter cr = Game.GetCritter(Squad[i]);
-            if (cr == null || q == null) {
+            Critter? cr = Game.GetCritter(Squad[i]);
+            if (cr == null) {
                 return false;
             }
+
             if (cr.ControlledByPlayer && !q.CheckOrderCompleted()) {
                 Messaging::Info(cr, TextPackKey(TextPackName::Text, "" + (STR_LOOSE)));
                 return false;
             }
         }
+
         return true;
     }
 
     void Command(int strNum) // strNum - номер строки из диалога
     {
-        Critter cr = Game.GetCritter(CommanderId);
+        Critter? cr = Game.GetCritter(CommanderId);
         if (cr != null && strNum >= 0) {
-            Messaging::SayShout(cr, TextPackKey(TextPackName::Dialogs, "" + (DLGSTR(cr.DialogId, strNum))));
+            Messaging::SayShout(cr, TextPackKey(TextPackName::Dialogs, "" + (MsgStr::DialogTextId(cr.DialogId, strNum))));
         }
+
         for (int i = 0, l = Squad.length(); i < l; i++) {
             MarchQueue q = MarchQueue(Squad[i]);
             q.Load();
-            if (q != null) {
-                q.ConfirmOrder();
-                q.Save();
-                DL("ci = " + q.OrderCurrent);
-                q.NextOrder();
-                q.Save();
-                Critter c = Game.GetCritter(q.CritterId);
-                if (c == null) {
-                    return;
-                }
-                if (!c.ControlledByPlayer) {
-                    q.ExecuteOrder();
-                }
+            q.ConfirmOrder();
+            q.Save();
+            DebugLog("ci = " + q.OrderCurrent);
+            q.NextOrder();
+            q.Save();
+            Critter? c = Game.GetCritter(q.CritterId);
+            if (c == null) {
+                return;
+            }
+
+            if (!c.ControlledByPlayer) {
+                q.ExecuteOrder();
             }
         }
     }
@@ -510,20 +541,16 @@ class SquadCommander
 //  Тренировка по надлежащему уходу за оружием
 //  Выдача двух сломанных Штурмовых винтовок
 [[DialogResult]]
-void r_GiveWearItems(Critter player, Critter npc, any pidHash, any count, any deteriorationPercent)
+void GiveWearItems(Critter player, Critter npc, any pidHash, any count, any deteriorationPercent)
 {
-    Item item;
     for (int i = 0; i < count; i++) {
-        item = player.AddItem(hstring(pidHash), 1);
-        if (item == null) {
-            continue;
-        }
+        Item item = player.AddItem(hstring(pidHash), 1);
         Repair::SetDeterioration(item, deteriorationPercent);
     }
 }
 
 [[DialogDemand]]
-bool d_CheckWear(Critter player, Critter npc, any pidHash, any count, any deteriorationPercent)
+bool CheckWear(Critter player, Critter npc, any pidHash, any count, any deteriorationPercent)
 {
     if (count == 0) {
         return false;
@@ -543,35 +570,41 @@ bool d_CheckWear(Critter player, Critter npc, any pidHash, any count, any deteri
 
 // Квест "Строевая подготовка":
 //  Персонаж должен встать в одну линию с НПЦ-гвардейцами и повторять их движения по команде капитана Хартманна
-#define ROLE_MARCH          (91)   // Номер роли НПЦ, которые принимают участие в марше
-#define ROLE_COMMANDER      (92)   // Хартманн
-#define STR_RIGHT_POSITION  (5915) // Вы в правильной позиции. Оставайтесь на месте до первой команды. Равнение на середину!
-#define STR_WRONG_POSITION  (5916) // Да сколько можно? Стать в строй, черт тебя дери! Иначе отправлю к мамочке!
-#define STR_MARCH_FAILED    (9)    // Это чучело безнадеждно. Я так и думал.
-#define STR_MARCH_COMPLETED (10)   // Неплохо... Неплохо. Не ожидал.
-#define STR_LOOSE           (5917) // Вы что-то сделали не так. Задание провалено.
-#define POS_X               (65)   // Позиция игрока в начале квеста
-#define POS_Y               (132)
-#define LAST_ORDER          (7) // Последний приказ
+const int ROLE_MARCH = 91;           // Номер роли НПЦ, которые принимают участие в марше
+const int ROLE_COMMANDER = 92;       // Хартманн
+const int STR_RIGHT_POSITION = 5915; // Вы в правильной позиции. Оставайтесь на месте до первой команды. Равнение на середину!
+const int STR_WRONG_POSITION = 5916; // Да сколько можно? Стать в строй, черт тебя дери! Иначе отправлю к мамочке!
+const int STR_MARCH_FAILED = 9;      // Это чучело безнадеждно. Я так и думал.
+const int STR_MARCH_COMPLETED = 10;  // Неплохо... Неплохо. Не ожидал.
+const int POS_X = 65;                // Позиция игрока в начале квеста
+const int POS_Y = 132;
+const int LAST_ORDER = 7; // Последний приказ
 
 // Обработка наступания игроком на триггер перед началом тренировки
 // Служит сигналом к началу
 [[ItemTrigger]]
-void t_Enter(Critter player, StaticItem trigger, bool entered, mdir dir)
+void Enter(Critter player, StaticItem trigger, bool entered, mdir dir)
 {
     if (!player.ControlledByPlayer || !entered) {
         return;
     }
+
     if (player.VCHartmanMarch != 1 || Game.VCHartmanMarchStatus) {
         return;
     }
+
     CritterState::Wait(player, 0);
     Messaging::Info(player, TextPackKey(TextPackName::Text, "" + (STR_RIGHT_POSITION)));
-    Map map = player.GetMap();
-    Critter cr = map.GetCritter(CritterProperty::NpcRole, ROLE_COMMANDER, CritterFindType::NonDeadNpc);
+    Map? map = player.GetMap();
+    if (map == null) {
+        return;
+    }
+
+    Critter? cr = map.GetCritter(CritterProperty::NpcRole, ROLE_COMMANDER, CritterFindType::NonDeadNpc);
     if (cr == null || cr.VCGuardsmanTriggerPlayerId != ZERO_IDENT) {
         return;
     }
+
     any[] values = {cr.Id, player.Id, 0};
     cr.VCGuardsmanTriggerPlayerId = player.Id; // Сохранение кода игрока, чтобы нпц не спамил свои реплики при многократных входах-выходах на гекс
     player.VCHartmanMarch = 2;
@@ -580,30 +613,28 @@ void t_Enter(Critter player, StaticItem trigger, bool entered, mdir dir)
 }
 
 // Контрольная очистка переменных через 15 реальных минут, если что-то пошло не так, и все данные не удалились
-void ResetCommander_Impl(any[] values)
+void ResetCommanderImpl(any[] values)
 {
-    Critter cr = Game.GetCritter(values[0]);
+    Critter? cr = Game.GetCritter(values[0]);
     ident idPlayer = values[1];
     if (cr == null || cr.VCGuardsmanTriggerPlayerId != idPlayer) {
         return; // Если уже другой персонаж занимается строевой подготовкой, для него будет персональный эвент
     }
 
     SquadCommander cmdr = SquadCommander(cr);
-    if (cmdr != null) {
-        cmdr.Load();
-        cmdr.Erase();
-    }
+    cmdr.Load();
+    cmdr.Erase();
 
-    ResetCommander_Impl(cr);
+    ResetCommanderImpl(cr);
 }
 
 [[TimeEvent]]
 void ResetCommander(any[] values)
 {
-    ResetCommander_Impl(values);
+    ResetCommanderImpl(values);
 }
 
-void ResetCommander_Impl(Critter cr)
+void ResetCommanderImpl(Critter cr)
 {
     cr.VCGuardsmanTriggerPlayerId = ZERO_IDENT;
     Game.VCHartmanMarchStatus = false;
@@ -613,36 +644,45 @@ void ResetCommander_Impl(Critter cr)
 [[TimeEvent]]
 void ResetCommander(Critter cr)
 {
-    ResetCommander_Impl(cr);
+    ResetCommanderImpl(cr);
 }
 
 // Проверка, что игрок в нужной позиции и запуск очереди приказов
 [[TimeEvent]]
 void TimeToStart(any[] values)
 {
-    Critter npc = Game.GetCritter(values[0]);
-    Critter player = Game.GetCritter(values[1]);
+    Critter? npc = Game.GetCritter(values[0]);
+    Critter? player = Game.GetCritter(values[1]);
     if (npc == null || player == null) {
         return;
     }
+
     if (player.Hex.x != POS_X || player.Hex.y != POS_Y) // Игрок не находится в нужной позиции
     {
         if (values[2] > 5) // Максимум 5 проверок, потом заново
         {
-            ResetCommander_Impl(npc);
+            ResetCommanderImpl(npc);
             return;
         }
+
         values[2] = int(values[2]) + 1;
         Messaging::SayShoutOnHead(npc, TextPackKey(TextPackName::Text, "" + (STR_WRONG_POSITION)));
         Game.StartTimeEvent(Time::Seconds(5), TimeToStart, values);
         return;
     }
+
     if (Game.VCHartmanMarchStatus) {
-        ResetCommander_Impl(npc);
+        ResetCommanderImpl(npc);
         return;
     }
+
     Game.VCHartmanMarchStatus = true;
-    Map map = npc.GetMap(); // Поиск нпц-гвардейцев
+    Map? map = npc.GetMap(); // Поиск нпц-гвардейцев
+    if (map == null) {
+        ResetCommanderImpl(npc);
+        return;
+    }
+
     Critter[] critters = map.GetCritters(CritterProperty::NpcRole, ROLE_MARCH, CritterFindType::NonDeadNpc);
     any[] valuesNew = {0, npc.Id, player.Id};
     SquadCommander cmdr = SquadCommander(npc);
@@ -662,6 +702,7 @@ void TimeToStart(any[] values)
         q.Save();
         cmdr.Squad.insertLast(cr.Id);
     }
+
     cmdr.Save();
     MarchQueue q = MarchQueue(player);
     q.Erase();
@@ -681,7 +722,7 @@ void TimeToStart(any[] values)
 [[TimeEvent]]
 void NextGuardOrder(any[] values)
 {
-    Critter cr = Game.GetCritter(values[1]);
+    Critter? cr = Game.GetCritter(values[1]);
     if (cr == null) {
         return;
     }
@@ -693,20 +734,21 @@ void NextGuardOrder(any[] values)
         values[0] = int(values[0]) + 1;
     }
     else {
-        Messaging::Say(cr, TextPackKey(TextPackName::Dialogs, "" + (DLGSTR(cr.DialogId, STR_MARCH_FAILED))));
-        ResetCommander_Impl(cr);
+        Messaging::Say(cr, TextPackKey(TextPackName::Dialogs, "" + (MsgStr::DialogTextId(cr.DialogId, STR_MARCH_FAILED))));
+        ResetCommanderImpl(cr);
         cmdr.Erase();
         return;
     }
 
     if (values[0] == LAST_ORDER) {
-        Messaging::Say(cr, TextPackKey(TextPackName::Dialogs, "" + (DLGSTR(cr.DialogId, STR_MARCH_COMPLETED))));
-        ResetCommander_Impl(cr);
+        Messaging::Say(cr, TextPackKey(TextPackName::Dialogs, "" + (MsgStr::DialogTextId(cr.DialogId, STR_MARCH_COMPLETED))));
+        ResetCommanderImpl(cr);
         cmdr.Erase();
-        Critter player = Game.GetCritter(values[2]);
+        Critter? player = Game.GetCritter(values[2]);
         if (player != null && player.VCHartmanMarch == 2) {
             player.VCHartmanMarch = 3;
         }
+
         return;
     }
 
@@ -714,22 +756,22 @@ void NextGuardOrder(any[] values)
 }
 
 // Бонусы Гвардии для игроков
-#define CTE_ID_SALARY     (224)
-#define PRIVATE_MONEY     (68)  // Жалование рядового
-#define JSERGEANT_MONEY   (98)  // Жалование младшего сержанта
-#define SSERGEANT_MONEY   (151) // Жалование старшего сержанта
-#define LEUTENANT_MONEY   (360) // Жалование лейтенанта
-#define RANK_NONE         (0)
-#define RANK_PRIVATE      (1)
-#define RANK_JUN_SERGEANT (2)
-#define RANK_SEN_SERGEANT (3)
-#define RANK_LEUTENANT    (4)
+const int CTE_ID_SALARY = 224;
+const int PRIVATE_MONEY = 68;    // Жалование рядового
+const int JSERGEANT_MONEY = 98;  // Жалование младшего сержанта
+const int SSERGEANT_MONEY = 151; // Жалование старшего сержанта
+const int LEUTENANT_MONEY = 360; // Жалование лейтенанта
+const int RANK_NONE = 0;
+const int RANK_PRIVATE = 1;
+const int RANK_JUN_SERGEANT = 2;
+const int RANK_SEN_SERGEANT = 3;
+const int RANK_LEUTENANT = 4;
 
 // Ежедневное жалование
 [[DialogResult]]
-void r_SetGuardSalary(Critter player, Critter npc)
+void SetGuardSalary(Critter player, Critter npc)
 {
-    player.StartTimeEvent(Time::GameDays(1), cte_GuardsmanSalary);
+    player.StartTimeEvent(Time::GameDays(1), GuardsmanSalary);
 }
 
 int GetRank(Critter cr)
@@ -737,9 +779,13 @@ int GetRank(Critter cr)
     return cr.VCGuardRank;
 }
 
-[[TimeEvent]]
-void cte_GuardsmanSalary(Critter cr)
+[[TimeEvent]] [[Async]]
+void GuardsmanSalary(Critter cr, TimeEventContext event)
 {
+    if (!Sync::LockCritterWithMap(cr)) {
+        return;
+    }
+
     int rank = GetRank(cr);
     int money = 0;
     switch (rank) {
@@ -778,34 +824,32 @@ void cte_GuardsmanSalary(Critter cr)
                          Content::Map::repl4a,
                          Content::Map::repl_ground4};
 
-    Map map = cr.GetMap();
+    Map? map = cr.GetMap();
     if (map != null && mapPids.find(map.ProtoId) != -1) {
         timespan delayTicks = Time::GameDays(5);
         if (delayTicks != ZERO_TIMESPAN) {
-            Game.RepeatCurrentTimeEvent(delayTicks);
+            event.Repeat(delayTicks);
         }
     }
 
     cr.ReplicationMoney += money;
     timespan delayTicks = Time::GameDays(1);
     if (delayTicks != ZERO_TIMESPAN) {
-        Game.RepeatCurrentTimeEvent(delayTicks);
+        event.Repeat(delayTicks);
     }
 }
 
 // Квест Пойди туда - не знаю куда
-void _MutantsCaveInit(Map map, bool firstTime)
+void MutantsCaveInit(Map map, bool firstTime)
 {
-    map.OnCritterIn.Subscribe(_CaveInCritter);
+    map.OnCritterIn.Subscribe(CaveInCritter);
 }
 
 [[Event]]
-void _CaveInCritter(Map map, Critter cr)
+void CaveInCritter(Map map, Critter cr)
 {
     Location loc = map.GetLocation();
-    if (loc != null) {
-        loc.AutoGarbage = true;
-    }
+    loc.AutoGarbage = true;
     Critter[] mutants = map.GetCritters(CritterFindType::NonDeadNpc);
     for (int i = 0; i < mutants.length(); i++) {
         Critter npc = mutants[i];
@@ -813,40 +857,41 @@ void _CaveInCritter(Map map, Critter cr)
             EnemyStack::AddEnemyToStack(npc, cr.Id);
         }
     }
+
     if (cr.VCHartmannRecon == 2) {
         cr.VCHartmannRecon = 3;
     }
 }
 
-void _MutantsOutGroundInit(Map map, bool firstTime)
+void MutantsOutGroundInit(Map map, bool firstTime)
 {
-    map.OnCritterIn.Subscribe(_OutGroundInCritter);
+    map.OnCritterIn.Subscribe(OutGroundInCritter);
     Location loc = map.GetLocation();
-    if (loc != null) {
-        Game.StartTimeEvent(Time::GameDays(3), DeleteQuestLocation, loc.Id); //SavedDeferredCall
-    }
+    Game.StartTimeEvent(Time::GameDays(3), DeleteQuestLocation, loc.Id); //SavedDeferredCall
 }
 
 [[TimeEvent]]
 void DeleteQuestLocation(any value)
 {
-    Location loc = Game.GetLocation(ident(value));
+    Location? loc = Game.GetLocation(ident(value));
     if (loc != null) {
         loc.AutoGarbage = true;
     }
 }
 
 [[Event]]
-void _OutGroundInCritter(Map map, Critter cr)
+void OutGroundInCritter(Map map, Critter cr)
 {
     if (!cr.ControlledByPlayer) {
         return;
     }
+
     if (cr.VCHartmannRecon != 2) {
         return;
     }
+
     Location loc = map.GetLocation();
-    if (loc != null && cr.VCReconCaveId == ZERO_IDENT) {
+    if (cr.VCReconCaveId == ZERO_IDENT) {
         cr.VCReconCaveId = loc.Id;
         loc.AutoGarbage = false;
         Location::SetKnownLoc(cr, loc);
@@ -856,41 +901,41 @@ void _OutGroundInCritter(Map map, Critter cr)
 // Опасная Охота
 
 [[DialogResult]]
-void r_ShowCave(Critter player, Critter npc)
+void ShowCave(Critter player, Critter npc)
 {
     if (player.VCReconCaveId == ZERO_IDENT) {
         return;
     }
 
-    Location loc = Game.GetLocation(player.VCReconCaveId);
+    Location? loc = Game.GetLocation(player.VCReconCaveId);
     if (loc != null && loc.ProtoId == Content::Location::vc_recon_mutants) {
         int x = loc.WorldPos.x;
         int y = loc.WorldPos.y;
         Game.DestroyLocation(loc.Id);
-        HostileLocationQuest::r_ShowLocation(player,
-                                             npc,
-                                             int(CritterProperty::VCHartmannClearCave),
-                                             int(CritterProperty::VCDeadAllyCounter),
-                                             Content::Location::vc_recon,
-                                             x,
-                                             y);
+        HostileLocationQuest::ShowLocation(player,
+                                           npc,
+                                           int(CritterProperty::VCHartmannClearCave),
+                                           int(CritterProperty::VCDeadAllyCounter),
+                                           Content::Location::vc_recon,
+                                           x,
+                                           y);
     }
     else {
         int x = 1168;
         int y = 418;
-        HostileLocationQuest::r_ShowLocation2_Impl(player,
-                                                   npc,
-                                                   int(CritterProperty::VCHartmannClearCave),
-                                                   int(CritterProperty::VCDeadAllyCounter),
-                                                   Content::Location::vc_recon,
-                                                   x,
-                                                   y);
+        HostileLocationQuest::ShowLocation2Impl(player,
+                                                npc,
+                                                int(CritterProperty::VCHartmannClearCave),
+                                                int(CritterProperty::VCDeadAllyCounter),
+                                                Content::Location::vc_recon,
+                                                x,
+                                                y);
     }
 }
 
 // Нанимаемый мутант
 
-void _CharleyInit(Critter cr, bool firstTime)
+void CharleyInit(Critter cr, bool firstTime)
 {
     cr.MaxLifeBase = 600;
     cr.CurrentHp = cr.MaxLife;

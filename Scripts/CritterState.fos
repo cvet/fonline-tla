@@ -24,12 +24,17 @@ void OnCritterInit(Critter cr, bool firstTime)
     if (firstTime) {
         cr.WaitEndTick = ZERO_NANOTIME;
     }
+
     cr.StartTimeEvent(Time::Milliseconds(Game.Random(0, 1000)), Time::Milliseconds(1000), OnCritterIdle);
 }
 
-[[TimeEvent]]
+[[TimeEvent]] [[Async]]
 void OnCritterIdle(Critter cr)
 {
+    if (!Sync::LockCritterWithMap(cr)) {
+        return;
+    }
+
     if (cr.IsKnockout()) {
         TryUpOnKnockout(cr);
     }
@@ -45,6 +50,7 @@ void ToDead(Critter cr, CritterActionAnim actionAnim, Critter? killer)
     if (cr.InSneakMode) {
         cr.InSneakMode = false;
     }
+
     if (cr.CurrentHp > 0) {
         cr.CurrentHp = 0;
     }
@@ -67,13 +73,13 @@ bool ToAlive(Critter cr)
     }
 
     if (cr.IsDead()) {
-        Map map = cr.GetMap();
+        Map? map = cr.GetMap();
         if (map == null) {
-            ThrowException("Critter on global map");
+            throw("Critter on global map");
         }
 
         if (!map.IsHexesMovable(cr.Hex, cr.Multihex)) {
-            ThrowException("Hexes is busy");
+            throw("Hexes is busy");
         }
 
         cr.SetCondition(CritterCondition::Alive, CritterActionAnim::None, null);
@@ -89,6 +95,7 @@ bool ToAlive(Critter cr)
         if (cr.CurrentHp <= 0) {
             cr.CurrentHp = 1;
         }
+
         if (cr.CurrentAp <= 0) {
             cr.CurrentAp = 1;
         }
@@ -148,16 +155,16 @@ void ToKnockout(Critter cr, CritterActionAnim actionAnimBegin, CritterActionAnim
     }
 
     if (cr.IsDead()) {
-        ThrowException("Critter is dead");
+        throw("Critter is dead");
     }
 
-    Map map = cr.GetMap();
+    Map? map = cr.GetMap();
     if (map == null) {
-        ThrowException("Critter on global map");
+        throw("Critter on global map");
     }
 
     if (knockHex.x >= map.Size.width || knockHex.y >= map.Size.height) {
-        ThrowException("Invalid hexes args");
+        throw("Invalid hexes args");
     }
 
     if (cr.InSneakMode) {
@@ -185,6 +192,7 @@ void TryUpOnKnockout(Critter cr)
     if (cr.CurrentHp <= 0) {
         return;
     }
+
     // Subtract knockout ap
     if (cr.KnockoutAp > 0) {
         int curAp = cr.CurrentAp;
@@ -192,7 +200,7 @@ void TryUpOnKnockout(Critter cr)
             return;
         }
 
-        int ap = MIN(int(cr.KnockoutAp), curAp);
+        int ap = Tla::Min(int(cr.KnockoutAp), curAp);
         cr.KnockoutAp -= ap;
         if (cr.KnockoutAp > 0) {
             return;
@@ -232,7 +240,7 @@ bool IsFree(Critter cr)
 [[ServerRemoteCall]]
 void Rpc_Wait(Player player, int ms)
 {
-    Critter cr = player.GetControlledCritter();
+    Critter? cr = player.GetControlledCritter();
     if (cr != null) {
         Wait(cr, ms);
     }

@@ -26,17 +26,25 @@ namespace Repairer
 ///@ Property Critter Server ident=>synctime RepairCompleteTime Mutable Persistent
 ///@ Property Critter Server ident=>hstring RepairItemPid Mutable Persistent
 
-#define BASE_REPAIR_TIME (3 * 60 * 60)
+const int BASE_REPAIR_TIME = 3 * 60 * 60;
 
-#define _RepairCost1 \
-    #(itemCost, itemDeterioration, playerBarter, npcBarter)( \
-        CLAMP(0.95 * itemCost * npcBarter * itemDeterioration / (playerBarter * 99), 0.05 * itemCost, 0.95 * itemCost))
-#define _RepairCost \
-    #(item, player, npc)(_RepairCost1((item.Cost == 0 ? item.Cost : item.Cost), Repair::GetDeteriorationProcent(item), player.SkillBarter, npc.SkillBarter))
-#define _RepairTime #(item, npc)(int((npc.SkillRepair * (-1 * BASE_REPAIR_TIME / 300) + BASE_REPAIR_TIME) * (Repair::GetDeteriorationProcent(item) / 99)))
+double CalcBaseRepairCost(double itemCost, double itemDeterioration, double playerBarter, double npcBarter)
+{
+    return Tla::Clamp(0.95 * itemCost * npcBarter * itemDeterioration / (playerBarter * 99), 0.05 * itemCost, 0.95 * itemCost);
+}
+double CalcRepairCost(Item item, Critter player, Critter npc)
+{
+    return CalcBaseRepairCost((item.Cost == 0 ? item.Cost : item.Cost), Repair::GetDeteriorationProcent(item), player.SkillBarter, npc.SkillBarter);
+}
+int CalcRepairTime(Item item, Critter npc)
+{
+    return int((npc.SkillRepair * (-1 * BASE_REPAIR_TIME / 300) + BASE_REPAIR_TIME) * (Repair::GetDeteriorationProcent(item) / 99));
+}
 
-// #define DL #(s) (Game.Log(s))
-#define DL #(s)
+// #define DebugLog #(s) (Game.Log(s))
+void DebugLog(string s)
+{
+}
 
 const hstring[] SpecialArmours = {Content::Item::keepbrige_robe,
                                   Content::Item::powered_armor,
@@ -65,6 +73,7 @@ bool CanRepair(Item? item, Critter? npc)
     if (item == null || npc == null) {
         return false;
     }
+
     int type = item.Type;
     hstring pid = item.ProtoId;
     switch (type) {
@@ -72,15 +81,18 @@ bool CanRepair(Item? item, Critter? npc)
         if (npc.GetAsInt(SpecialWeapons.exists(pid) ? CritterProperty::CanRepairArmorSpecial : CritterProperty::CanRepairArmor) == 1) {
             return true;
         }
+
         break;
     case ItemType::Weapon:
         if (npc.GetAsInt(SpecialWeapons.exists(pid) ? CritterProperty::CanRepairWeaponsSpecial : CritterProperty::CanRepairWeapons) == 1) {
             return true;
         }
+
         break;
     default:
         return false;
     }
+
     return false;
 }
 
@@ -92,7 +104,7 @@ void TakeItemToRepair(Critter? player, Critter? npc, Item? item)
 
     auto repairCompleteTime = player.RepairCompleteTime.clone();
     auto repairItemPid = player.RepairItemPid.clone();
-    repairCompleteTime[npc.Id] = Game.SynchronizedTime + Tla::GameSeconds(_RepairTime(item, npc));
+    repairCompleteTime[npc.Id] = Game.SynchronizedTime + Tla::GameSeconds(CalcRepairTime(item, npc));
     player.RepairCompleteTime = repairCompleteTime;
     repairItemPid[npc.Id] = item.ProtoId;
     player.RepairItemPid = repairItemPid;
@@ -105,9 +117,11 @@ bool SomeItemWasRepaired(Critter? player, Critter? npc)
     if (player == null || npc == null) {
         return false;
     }
+
     if (player.RepairItemPid.get(npc.Id, EMPTY_HSTRING) == EMPTY_HSTRING) {
         return false;
     }
+
     return Game.SynchronizedTime >= player.RepairCompleteTime.get(npc.Id, ZERO_SYNCTIME);
 }
 
@@ -116,6 +130,7 @@ bool HasSomeItemToRepair(Critter? player, Critter? npc)
     if (player == null || npc == null) {
         return false;
     }
+
     return player.RepairItemPid.get(npc.Id, EMPTY_HSTRING) != EMPTY_HSTRING;
 }
 
@@ -124,14 +139,17 @@ void GetItemFromRepair(Critter? player, Critter? npc)
     if (player == null || npc == null) {
         return;
     }
+
     auto repairItemPid = player.RepairItemPid.clone();
     if (repairItemPid.get(npc.Id, EMPTY_HSTRING) == EMPTY_HSTRING) {
         return;
     }
+
     Item item = player.AddItem(repairItemPid[npc.Id], 1);
-    if (item != null && item.Type == ItemType::Weapon) {
+    if (item.Type == ItemType::Weapon) {
         item.AmmoCount = 0;
     }
+
     repairItemPid[npc.Id] = EMPTY_HSTRING;
     player.RepairItemPid = repairItemPid;
 }
@@ -141,161 +159,170 @@ int GetRepairCost(Critter? player, Critter? npc, Item? item)
     if (player == null || npc == null || item == null) {
         return 0;
     }
-    // DL("Repair price:" + _RepairCost(item, player, npc) + "item cost: "+item.Cost + "; Proto cost = "+item.Cost);
-    return int(_RepairCost(item, player, npc));
+
+    // DebugLog("Repair price:" + CalcRepairCost(item, player, npc) + "item cost: "+item.Cost + "; Proto cost = "+item.Cost);
+    return int(CalcRepairCost(item, player, npc));
 }
 
 // Диалоги. Условия, результаты, генерация лексем
 
 // Условия
 [[DialogDemand]]
-bool d_IsItemInHand(Critter player, Critter npc)
+bool IsItemInHand(Critter player, Critter npc)
 {
-    return (_CritGetItemHand(player) != null);
+    return (Tla::GetCritterHandItem(player) != null);
 }
 
-bool d_CanRepair_Impl(Critter player, Critter npc)
+bool CanRepairImpl(Critter player, Critter npc)
 {
-    Item item = _CritGetItemHand(player);
+    Item? item = Tla::GetCritterHandItem(player);
     if (item == null) {
         return false;
     }
+
     return CanRepair(item, npc);
 }
 
 [[DialogDemand]]
-bool d_CanRepair(Critter player, Critter npc)
+bool CanRepair(Critter player, Critter npc)
 {
-    return d_CanRepair_Impl(player, npc);
+    return CanRepairImpl(player, npc);
 }
 
 [[DialogDemand]]
-bool d_CanNotRepair(Critter player, Critter npc)
+bool CanNotRepair(Critter player, Critter npc)
 {
-    return (!d_CanRepair_Impl(player, npc));
+    return (!CanRepairImpl(player, npc));
 }
 
-bool d_HasEnoughMoney_Impl(Critter player, Critter npc)
+bool HasEnoughMoneyImpl(Critter player, Critter npc)
 {
-    Item item = _CritGetItemHand(player);
+    Item? item = Tla::GetCritterHandItem(player);
     if (item == null || !CanRepair(item, npc)) {
         return false;
     }
+
     return (GetRepairCost(player, npc, item) <= player.CountItem(Content::Item::bottle_caps));
 }
 
 [[DialogDemand]]
-bool d_HasEnoughMoney(Critter player, Critter npc)
+bool HasEnoughMoney(Critter player, Critter npc)
 {
-    return d_HasEnoughMoney_Impl(player, npc);
+    return HasEnoughMoneyImpl(player, npc);
 }
 
-bool d_HasNotEnoughMoney(Critter player, Critter npc)
+bool HasNotEnoughMoney(Critter player, Critter npc)
 {
-    return (!d_HasEnoughMoney_Impl(player, npc));
+    return (!HasEnoughMoneyImpl(player, npc));
 }
 
-bool d_ItemWasRepaired_Impl(Critter player, Critter npc)
+bool ItemWasRepairedImpl(Critter player, Critter npc)
 {
     return SomeItemWasRepaired(player, npc);
 }
 
 [[DialogDemand]]
-bool d_ItemWasRepaired(Critter player, Critter npc)
+bool ItemWasRepaired(Critter player, Critter npc)
 {
-    return d_ItemWasRepaired_Impl(player, npc);
+    return ItemWasRepairedImpl(player, npc);
 }
 
 [[DialogDemand]]
-bool d_NoItemWasRepaired(Critter player, Critter npc)
+bool NoItemWasRepaired(Critter player, Critter npc)
 {
-    return (!d_ItemWasRepaired_Impl(player, npc));
+    return (!ItemWasRepairedImpl(player, npc));
 }
 
-bool d_SomeItemIsRepairing_Impl(Critter player, Critter npc)
+bool SomeItemIsRepairingImpl(Critter player, Critter npc)
 {
     return HasSomeItemToRepair(player, npc);
 }
 
 [[DialogDemand]]
-bool d_SomeItemIsRepairing(Critter player, Critter npc)
+bool SomeItemIsRepairing(Critter player, Critter npc)
 {
-    return d_SomeItemIsRepairing_Impl(player, npc);
+    return SomeItemIsRepairingImpl(player, npc);
 }
 
 [[DialogDemand]]
-bool d_NoItemIsRepairing(Critter player, Critter npc)
+bool NoItemIsRepairing(Critter player, Critter npc)
 {
-    return (!d_SomeItemIsRepairing_Impl(player, npc));
+    return (!SomeItemIsRepairingImpl(player, npc));
 }
 
 // Диалог
 // Имя предмета и цена, который игрок держит в руке будет отображено с помощью лексемы lex item_name lex price
 // Функция для сдачи предмета
-void dlg_CallItemBefore(Critter player, Critter npc, string& lexems)
+void CallItemBefore(Critter player, Critter npc, string& textArgs)
 {
-    if (!IS_DIALOG_GENERATED(lexems)) {
+    if (!Tla::IsDialogGenerated(textArgs)) {
         return;
     }
-    lexems = "$item_name _";
-    Item item = _CritGetItemHand(player);
+
+    textArgs = "|item_name: _";
+    Item? item = Tla::GetCritterHandItem(player);
     if (item == null) {
         return;
     }
-    lexems = "$item_name@text Item " + STR_ITEM_NAME(item) + "@$price" + GetRepairCost(player, npc, item);
+
+    textArgs = "|item_name:@text Item " + MsgStr::ItemNameTextId(item) + "@|price:" + GetRepairCost(player, npc, item);
 }
 
 // Функция для проверки, отремонтирован ли предмет
-void dlg_CallItemAfter(Critter player, Critter npc, string& lexems)
+void CallItemAfter(Critter player, Critter npc, string& textArgs)
 {
-    if (!IS_DIALOG_GENERATED(lexems)) {
+    if (!Tla::IsDialogGenerated(textArgs)) {
         return;
     }
-    lexems = "$item_name _";
+
+    textArgs = "|item_name: _";
     if (player.RepairItemPid.get(npc.Id, EMPTY_HSTRING) == EMPTY_HSTRING) {
         return;
     }
 
-    lexems = "$item_name@text Item " + STR_PROTO_ITEM_NAME(player.RepairItemPid[npc.Id]) + "@";
+    textArgs = "|item_name:@text Item " + MsgStr::ProtoItemNameTextId(player.RepairItemPid[npc.Id]) + "@";
 }
 
 // Время и дата, когда будет отремонтирован предмет для случая, когда предмет уже взят на ремонт
-// Время указывается в формате "@lex time@"
-void dlg_GetRepairTime(Critter player, Critter npc, string& lexems)
+// Время указывается в формате "@arg time@"
+void GetRepairTime(Critter player, Critter npc, string& textArgs)
 {
-    if (!IS_DIALOG_GENERATED(lexems)) {
+    if (!Tla::IsDialogGenerated(textArgs)) {
         return;
     }
+
     if (player.RepairCompleteTime.get(npc.Id, ZERO_SYNCTIME) == ZERO_SYNCTIME) {
         return;
     }
 
     int year = 0, month = 0, day = 0, hour = 0, minute = 0, second = 0, milisecond = 0;
     Game.UnpackSynchronizedTime(player.RepairCompleteTime[npc.Id], year, month, day, hour, minute, second, milisecond);
-    lexems = "$time" + (month > 9 ? ("" + month) : ("0" + month)) + "." + year + " " + (hour > 9 ? ("" + hour) : ("0" + hour)) + ":" +
-             (minute > 9 ? ("" + minute) : ("0" + minute));
+    textArgs = "|time:" + (month > 9 ? ("" + month) : ("0" + month)) + "." + year + " " + (hour > 9 ? ("" + hour) : ("0" + hour)) + ":" +
+               (minute > 9 ? ("" + minute) : ("0" + minute));
 }
 
 // Результаты
 // free - признак, что ремонт бесплатный
 // 0 - платный, остальное бесплатный
 [[DialogResult]]
-void r_TakeForRepair(Critter player, Critter npc, any free)
+void TakeForRepair(Critter player, Critter npc, any free)
 {
-    Item item = _CritGetItemHand(player);
+    Item? item = Tla::GetCritterHandItem(player);
     if (item == null) {
         return;
     }
+
     if (free == 0) {
         int money = GetRepairCost(player, npc, item);
         Game.DestroyItem(player.GetItem(Content::Item::bottle_caps), money);
     }
+
     TakeItemToRepair(player, npc, item);
 }
 
 // Получение отремонтированного предмета
 [[DialogResult]]
-void r_TakeItemFromRepair(Critter player, Critter npc)
+void TakeItemFromRepair(Critter player, Critter npc)
 {
     GetItemFromRepair(player, npc);
 }

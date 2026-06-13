@@ -14,12 +14,12 @@ namespace NcrPostman
 ///@ Property Item Server hstring NCRPostmanNpcDidRec Mutable Persistent
 ///@ Property Item Server ident NCRPostmanPlayerID Mutable Persistent
 
-#define BASE_LOC_PID1 (Content::Location::vault_15) // 9 - эталонная начальная точка маршрута - используется при расчете экспы
-#define BASE_LOC_PID2 (Content::Location::ncr)      // 10 - эталонная конечная точка маршрута - используется при расчете экспы
-#define BASE_XP_LVL1  (500)                         // эталонная экспа первого уровня
-#define BASE_XP_LVL2  (750)
-#define BASE_XP_LVL3  (950)
-#define BASE_XP_LVL4  (1200)
+const hstring BASE_LOC_PID1 = Content::Location::vault_15; // 9 - эталонная начальная точка маршрута - используется при расчете экспы
+const hstring BASE_LOC_PID2 = Content::Location::ncr;      // 10 - эталонная конечная точка маршрута - используется при расчете экспы
+const int BASE_XP_LVL1 = 500;                              // эталонная экспа первого уровня
+const int BASE_XP_LVL2 = 750;
+const int BASE_XP_LVL3 = 950;
+const int BASE_XP_LVL4 = 1200;
 
 hstring[] LetterLocPids = {Content::Location::den,
                            Content::Location::klamath,
@@ -44,7 +44,10 @@ hstring[] LetterLocPids = {Content::Location::den,
 // заработает +1 к карме на выдачу письма вешается таймаут. Величина таймаута зависит от навыка красноречия игрока. за базу был выбран коэффициент на основе
 // выражения:  0 красноречия = 10 дней, 300 красноречия = 2 днЯ
 
-#define TIME_Q #(speechLvl)((10 - (8 * speechLvl / 300)) * 60 * 24) // расчет таймаута в минутах в зависисмоти от навыка красноречия
+int QuestTime(int speechLvl)
+{
+    return (10 - (8 * speechLvl / 300)) * 60 * 24;
+}
 
 // случайное письмо
 // startLoc - код прототипа стартовой локации (чтобы не было доставления письма в ту же локацию, этот прототип исключается из возможных вариантов)
@@ -53,12 +56,12 @@ LetterInfo? GetRandomLetterInfo(hstring startLoc)
     hstring locPid = startLoc;
     while (locPid == startLoc) {
         locPid = LetterLocPids[Game.Random(0, LetterLocPids.length() - 1)];
-        if (!LOCATION_IS_CITY(locPid) || locPid == Content::Location::navarro || locPid == Content::Location::vault_15) {
+        if (!Maps::IsCityLocation(locPid) || locPid == Content::Location::navarro || locPid == Content::Location::vault_15) {
             locPid = startLoc;
         }
     }
 
-    Location loc = Game.GetLocation(locPid);
+    Location? loc = Game.GetLocation(locPid);
     if (loc == null || loc.GetMapCount() == 0) {
         return null;
     }
@@ -107,13 +110,14 @@ LetterInfo? GetNewLetterInfo(hstring locPid, ident playerId)
     int numTry;
     numTry = 10; // максимально число попыток составить описание нового письма
     for (int i = 0; i < numTry; i++) {
-        LetterInfo li = GetRandomLetterInfo(locPid);
+        LetterInfo? li = GetRandomLetterInfo(locPid);
         if (li != null) {
             li.PlayerID = playerId;
             li.LocPidStart = locPid;
             return li;
         }
     }
+
     return null;
 }
 
@@ -166,13 +170,13 @@ class LetterInfo
         item.NCRPostmanMapPidRec = MapPidRec;
         item.NCRPostmanNpcDidRec = NpcDidRec;
         item.NCRPostmanPlayerID = PlayerID;
-        item.Lexems = GetLetterLexems();
+        item.TextArgs = GetLetterLexems();
     }
 
     // лексемы для адреса/получателя письма
     string GetLetterLexems()
     {
-        return "$reciever@text Dialogs " + STR_NPC_NAME_DLG(NpcDidRec) + "@$location@text Locations " + STR_LOC_NAME(LocPidRec) + "@";
+        return "|reciever:@text Dialogs " + MsgStr::NpcNameDlgTextId(NpcDidRec) + "@|location:@text Locations " + MsgStr::LocNameTextId(LocPidRec) + "@";
     }
 
     // рассчитывает количество опыта за выполнение квеста, в зависимости от уровня персонажа
@@ -199,9 +203,11 @@ class LetterInfo
             baseXP = 0;
             break;
         }
+
         if (lvl > 29) {
             baseXP = BASE_XP_LVL4;
         }
+
         // за базовое расстояние взят маршрут НКР-Волт15
         // для него нет проверки деления на ноль
         return int((int(baseXP * MeasureDist(LocPidStart, LocPidRec) / MeasureDist(BASE_LOC_PID1, BASE_LOC_PID2)) / 100) * 100);
@@ -211,34 +217,34 @@ class LetterInfo
 // вспомогательная функция - измеряет расстояние между двумя локациями с указанием прототипов локаций
 float MeasureDist(hstring pidLocFrom, hstring pidLocTo)
 {
-    Location fromLoc = Game.GetLocation(pidLocFrom);
-    Location toLoc = Game.GetLocation(pidLocTo);
+    Location? fromLoc = Game.GetLocation(pidLocFrom);
+    Location? toLoc = Game.GetLocation(pidLocTo);
     if (toLoc == null || fromLoc == null) {
         return 0;
     }
-    return math::sqrt(POW2(toLoc.WorldPos.x - fromLoc.WorldPos.x) + POW2(toLoc.WorldPos.y - fromLoc.WorldPos.y));
+
+    return math::sqrt(Tla::Pow2(toLoc.WorldPos.x - fromLoc.WorldPos.x) + Tla::Pow2(toLoc.WorldPos.y - fromLoc.WorldPos.y));
 }
 
 // использование письма на криттера
 [[Event]]
-EventResult _OnMailUseOnCritter(Item item, Critter cr, Critter? onCritter, Item onItem, StaticItem onScenery, int param)
+EventResult OnMailUseOnCritter(Item item, Critter cr, Critter? onCritter, Item onItem, StaticItem onScenery, int param)
 {
     if (onCritter == null || onCritter.IsDead()) {
         return EventResult::StopChain;
     }
+
     LetterInfo li = LetterInfo(item);
-    Map map = onCritter.GetMap();
+    Map? map = onCritter.GetMap();
     if (map == null) {
         return EventResult::StopChain;
     }
+
     Location loc = map.GetLocation();
-    if (loc == null) {
+    if (onCritter.DialogId != li.NpcDidRec || !cr.ControlledByPlayer || EnemyStack::CheckEnemyInStack(onCritter, cr.Id) || li.LocPidRec != loc.ProtoId) {
         return EventResult::StopChain;
     }
-    if (li == null || onCritter.DialogId != li.NpcDidRec || !cr.ControlledByPlayer || EnemyStack::CheckEnemyInStack(onCritter, cr.Id) ||
-        li.LocPidRec != loc.ProtoId) {
-        return EventResult::StopChain;
-    }
+
     // if (cr.Id != li.PlayerID){return EventResult::StopChain;} сдать письмо может любой
     // нужный нам нпц - тот самый, что прописан в итеме. Нужно открывать диалог получателя письма.
     // но диалог, открытый RunDialog'ом не имеет ссылки на нпц, поэтому сохраняем Id криттера нпц в специальную переменную
@@ -249,13 +255,14 @@ EventResult _OnMailUseOnCritter(Item item, Critter cr, Critter? onCritter, Item 
 
 // выброшенное письмо. Отменено, выброшенные письма тоже можно сдать
 [[Event]]
-void _OnItemDrop(Item item, Critter cr)
+void OnItemDrop(Item item, Critter cr)
 {
     // если игрок выбрасывает письмо, переключаем квестовую переменную и стираем информацию о почтальоне
     // можно было бы и не стирать, но в этом случае игрок может накопить тонну конвертов и потом их сдавать оптом - мгновенная прокачка до космических высот
     if (cr.MailDelivery == 1) {
         cr.MailDelivery = 2;
     }
+
     LetterInfo li = LetterInfo(item);
     if (li.PlayerID == cr.Id) {
         li.PlayerID = ZERO_IDENT;
@@ -264,61 +271,81 @@ void _OnItemDrop(Item item, Critter cr)
 }
 
 // инициализация письма
-void _LetterInit(Item letter, bool firstTime)
+void LetterInit(Item letter, bool firstTime)
 {
     LetterInfo li = LetterInfo(letter);
-    letter.OnCritterDrop.Subscribe(_OnItemDrop);
-    letter.OnCritterUseOn.Subscribe(_OnMailUseOnCritter);
+    letter.OnCritterDrop.Subscribe(OnItemDrop);
+    letter.OnCritterUseOn.Subscribe(OnMailUseOnCritter);
 }
 
 // **************************************Диалоги*******************************************//
 // диалог с почтальоном, фраза в которой он называет адрес и получателя
-void dlg_GenLetter2Postman(Critter player, Critter postman, string& lexems)
+void GenLetter2Postman(Critter player, Critter postman, string& textArgs)
 {
-    if (IS_DIALOG_END(lexems) or IS_DIALOG_SAY_MODE(lexems)) {
+    if (Tla::IsDialogEnd(textArgs) or Tla::IsDialogSayMode(textArgs)) {
         return;
     }
+
     // устанавливаем почтальону запрет на воровство игроком, чтобы не крали письма в надежде сдать тучу сразу
     postman.IsNoSteal = true;
     postman.IsNoBarter = true;
     postman.IsNoDrop = true;
-    Item item;
-    LetterInfo li;
+    Item? item;
+    LetterInfo? li;
     if (postman.CountItem(Content::Item::postman_letter) == 0) {
+        Map? postmanMap = postman.GetMap();
+        if (postmanMap == null) {
+            return;
+        }
+
         item = postman.AddItem(Content::Item::postman_letter, 1);
-        li = GetNewLetterInfo(postman.GetMap().GetLocation().ProtoId, player.Id);
+        li = GetNewLetterInfo(postmanMap.GetLocation().ProtoId, player.Id);
+        if (item == null || li == null) {
+            return;
+        }
+
         li.SetItemLetterInfo(item);
-        item.SetupScript(_LetterInit);
+        item.SetupScript(LetterInit);
     }
     else {
         item = postman.GetItem(Content::Item::postman_letter);
+        if (item == null) {
+            return;
+        }
+
         li = LetterInfo(item);
     }
-    lexems = li.GetLetterLexems();
+
+    if (li == null) {
+        return;
+    }
+
+    textArgs = li.GetLetterLexems();
 }
 
 // функция для использования в диалоге
 // передача письма, которое уже есть в инвентаре почтальона игроку
 [[DialogResult]]
-void r_GiveLetter(Critter player, Critter postman)
+void GiveLetter(Critter player, Critter postman)
 {
-    Item letter = postman.GetItem(Content::Item::postman_letter);
+    Item? letter = postman.GetItem(Content::Item::postman_letter);
     if (letter == null) {
         return;
     }
+
     ItemMovement::MoveItem(letter, 1, player);
 }
 
 // награждение игрока
 [[DialogResult]]
-void r_GrantPlayer(Critter player, Critter npc_null, any needMoney)
+void GrantPlayer(Critter player, Critter npc_null, any needMoney)
 {
     // npc_null - null, поскольку диалог открыт скриптом без выбора нпц
     if (player.NcrMailRecieverId == ZERO_IDENT) {
         return;
     }
 
-    Critter npc = Game.GetCritter(player.NcrMailRecieverId);
+    Critter? npc = Game.GetCritter(player.NcrMailRecieverId);
     player.NcrMailRecieverId = ZERO_IDENT;
     if (npc == null || !npc.IsAlive() || player.CountItem(Content::Item::postman_letter) == 0) {
         return;
@@ -328,16 +355,8 @@ void r_GrantPlayer(Critter player, Critter npc_null, any needMoney)
     Item[] items = player.GetItems();
     for (int i = 0; i < items.length(); i++) {
         Item letter = items[i];
-        if (letter == null) {
-            continue;
-        }
-
         if (letter.ProtoId == Content::Item::postman_letter) {
             LetterInfo li = LetterInfo(letter);
-            if (li == null) {
-                continue;
-            }
-
             if (li.NpcDidRec == npc.DialogId) {
                 // получатель правильный - письмо можно удалять
                 Game.DestroyItem(letter);
@@ -354,7 +373,7 @@ void r_GrantPlayer(Critter player, Critter npc_null, any needMoney)
                 player.Experience += xp;
 
                 if (needMoney > 0) {
-                    player.AddItem(Content::Item::bottle_caps, xp != 0 ? CLAMP(int(xp / 2), 0, 2000) : 250);
+                    player.AddItem(Content::Item::bottle_caps, xp != 0 ? Tla::Clamp(int(xp / 2), 0, 2000) : 250);
                 }
 
                 // выход из цикла и метода
@@ -365,29 +384,29 @@ void r_GrantPlayer(Critter player, Critter npc_null, any needMoney)
 }
 
 // проверка: таймаут пустой или свободен
-bool d_QTimeOutOK_Impl(Critter player, Critter postman)
+bool QTimeOutOkImpl(Critter player, Critter postman)
 {
-    return NcrRatch::d_RatchTimeOutCheck_Impl(player, postman, CritterProperty::NcrMailTimeout);
+    return NcrRatch::RatchTimeOutCheckImpl(player, postman, CritterProperty::NcrMailTimeout);
 }
 
 [[DialogDemand]]
-bool d_QTimeOutOK(Critter player, Critter postman)
+bool QTimeOutOk(Critter player, Critter postman)
 {
-    return d_QTimeOutOK_Impl(player, postman);
+    return QTimeOutOkImpl(player, postman);
 }
 
 // таймаут занят
 [[DialogDemand]]
-bool d_NotQTimeOutOK(Critter player, Critter postman)
+bool NotQTimeOutOk(Critter player, Critter postman)
 {
-    return !d_QTimeOutOK_Impl(player, postman);
+    return !QTimeOutOkImpl(player, postman);
 }
 
 // установка таймаута
 [[DialogResult]]
-void r_SetQTimeOut(Critter player, Critter postman)
+void SetQTimeOut(Critter player, Critter postman)
 {
-    NcrRatch::r_RatchTimeOutSet_Impl(player, postman, CritterProperty::NcrMailTimeout, TIME_Q(player.SkillSpeech));
+    NcrRatch::RatchTimeOutSetImpl(player, postman, CritterProperty::NcrMailTimeout, QuestTime(player.SkillSpeech));
 }
 
 #endif

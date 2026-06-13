@@ -1,0 +1,376 @@
+namespace Sync
+{
+
+#if SERVER
+
+// Game.Sync(...) is the native lock primitive — it only acquires locks, replacing the SyncContext
+// lock set with exactly the listed entities. It has no return value: if a pending lock wait is
+// aborted by server shutdown (after the Server.ShutdownGraceMs drain window expires) it throws
+// EntityLockWaitAbortedException, which is not caught here — the exception unwinds the async job and
+// stops its work during teardown. These Sync::Lock(...) helpers add the liveness policy on top: they
+// check IsDestroyed before and after acquiring and return `false` so the caller can early-out without
+// touching dead handles. A destroyed entity is not always fatal — e.g. a critter's presumed map can
+// change and the old one be destroyed, in which case the caller re-reads the map and locks again
+// rather than treating `false` as a hard stop.
+//
+// Empty inputs are treated as "nothing to lock" and return `true`. All call sites can use a
+// uniform pattern:
+//
+//     if (!Sync::Lock(npc, map)) return;
+//     if (!Sync::Lock(npc, map, nearbyCritters)) return;
+
+[[Async]]
+bool Lock(Entity entity)
+{
+    if (entity.IsDestroyed) {
+        return false;
+    }
+
+    Game.Sync(entity);
+
+    return !entity.IsDestroyed;
+}
+
+[[Async]]
+bool Lock(Entity firstEntity, Entity secondEntity)
+{
+    if (firstEntity.IsDestroyed || secondEntity.IsDestroyed) {
+        return false;
+    }
+
+    Game.Sync(firstEntity, secondEntity);
+
+    return !firstEntity.IsDestroyed && !secondEntity.IsDestroyed;
+}
+
+[[Async]]
+bool Lock(Entity firstEntity, Entity secondEntity, Entity thirdEntity)
+{
+    if (firstEntity.IsDestroyed || secondEntity.IsDestroyed || thirdEntity.IsDestroyed) {
+        return false;
+    }
+
+    Game.Sync(firstEntity, secondEntity, thirdEntity);
+
+    return !firstEntity.IsDestroyed && !secondEntity.IsDestroyed && !thirdEntity.IsDestroyed;
+}
+
+[[Async]]
+bool Lock(Entity[] entities)
+{
+    if (entities.isEmpty()) {
+        return true;
+    }
+
+    for (int i = 0; i < entities.length(); i++) {
+        if (entities[i].IsDestroyed) {
+            return false;
+        }
+    }
+
+    Game.Sync(entities);
+
+    for (int i = 0; i < entities.length(); i++) {
+        if (entities[i].IsDestroyed) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+// Snapshot the current lock cover (the entities whose locks are held) so a caller can
+// run a helper that REPLACES the lock set (Modifiers::FireCritterEvent, async sub-helpers, …) and
+// then re-establish exactly the same cover with Restore(). This is the script-side equivalent of the
+// engine's per-callback nested SyncContext: it keeps a caller's downstream entity access valid across
+// re-entrant work that internally re-Sync's.
+Entity[] Snapshot()
+{
+    return Game.GetHeldSyncEntities();
+}
+
+[[Async]]
+bool Restore(Entity[] entities)
+{
+    // Best-effort: re-lock whatever of the snapshot cover still exists. The re-entrant work may have
+    // legitimately destroyed some covered entity (a consumed item, a killed NPC); skip those and
+    // restore the survivors so the caller keeps reading the entities that are still alive.
+    Entity[] survivors = {};
+
+    for (int i = 0; i < entities.length(); i++) {
+        if (!entities[i].IsDestroyed) {
+            survivors.insertLast(entities[i]);
+        }
+    }
+
+    if (survivors.isEmpty()) {
+        Release();
+        return true;
+    }
+
+    return Lock(survivors);
+}
+
+[[Async]]
+bool Lock(Critter[] critters)
+{
+    if (critters.isEmpty()) {
+        return true;
+    }
+
+    Entity[] entities = array<Entity>(critters.length());
+    for (int i = 0; i < critters.length(); i++) {
+        if (critters[i].IsDestroyed) {
+            return false;
+        }
+
+        entities[i] = critters[i];
+    }
+    return Lock(entities);
+}
+
+[[Async]]
+bool Lock(Item[] items)
+{
+    if (items.isEmpty()) {
+        return true;
+    }
+
+    Entity[] entities = array<Entity>(items.length());
+    for (int i = 0; i < items.length(); i++) {
+        if (items[i].IsDestroyed) {
+            return false;
+        }
+
+        entities[i] = items[i];
+    }
+    return Lock(entities);
+}
+
+[[Async]]
+bool Lock(Map[] maps)
+{
+    if (maps.isEmpty()) {
+        return true;
+    }
+
+    Entity[] entities = array<Entity>(maps.length());
+    for (int i = 0; i < maps.length(); i++) {
+        if (maps[i].IsDestroyed) {
+            return false;
+        }
+
+        entities[i] = maps[i];
+    }
+    return Lock(entities);
+}
+
+[[Async]]
+bool Lock(Location[] locations)
+{
+    if (locations.isEmpty()) {
+        return true;
+    }
+
+    Entity[] entities = array<Entity>(locations.length());
+    for (int i = 0; i < locations.length(); i++) {
+        if (locations[i].IsDestroyed) {
+            return false;
+        }
+
+        entities[i] = locations[i];
+    }
+    return Lock(entities);
+}
+
+// Each Game.Sync replaces the SyncContext lock set entirely, so a script that wants both fixed
+// entities (typically the [[TimeEvent]] owner and a related entity like a map) AND a list of
+// neighbours synced has to list everything in one call. These overloads bundle the fixed leading
+// entities with a typed array into a single Entity[] sync request and run the alive check across
+// the union.
+
+[[Async]]
+bool Lock(Entity entity, Critter[] critters)
+{
+    if (entity.IsDestroyed) {
+        return false;
+    }
+
+    Entity[] entities = array<Entity>(critters.length() + 1);
+    entities[0] = entity;
+    for (int i = 0; i < critters.length(); i++) {
+        if (critters[i].IsDestroyed) {
+            return false;
+        }
+
+        entities[i + 1] = critters[i];
+    }
+    return Lock(entities);
+}
+
+[[Async]]
+bool Lock(Entity firstEntity, Entity secondEntity, Critter[] critters)
+{
+    if (firstEntity.IsDestroyed || secondEntity.IsDestroyed) {
+        return false;
+    }
+
+    Entity[] entities = array<Entity>(critters.length() + 2);
+    entities[0] = firstEntity;
+    entities[1] = secondEntity;
+    for (int i = 0; i < critters.length(); i++) {
+        if (critters[i].IsDestroyed) {
+            return false;
+        }
+
+        entities[i + 2] = critters[i];
+    }
+    return Lock(entities);
+}
+
+[[Async]]
+bool Lock(Entity entity, Item[] items)
+{
+    if (entity.IsDestroyed) {
+        return false;
+    }
+
+    Entity[] entities = array<Entity>(items.length() + 1);
+    entities[0] = entity;
+    for (int i = 0; i < items.length(); i++) {
+        if (items[i].IsDestroyed) {
+            return false;
+        }
+
+        entities[i + 1] = items[i];
+    }
+    return Lock(entities);
+}
+
+[[Async]]
+bool Lock(Entity firstEntity, Entity secondEntity, Item[] items)
+{
+    if (firstEntity.IsDestroyed || secondEntity.IsDestroyed) {
+        return false;
+    }
+
+    Entity[] entities = array<Entity>(items.length() + 2);
+    entities[0] = firstEntity;
+    entities[1] = secondEntity;
+    for (int i = 0; i < items.length(); i++) {
+        if (items[i].IsDestroyed) {
+            return false;
+        }
+
+        entities[i + 2] = items[i];
+    }
+    return Lock(entities);
+}
+
+void Release()
+{
+    Game.SyncRelease();
+}
+
+[[Async]]
+bool LockCritterWithMap(Critter cr)
+{
+    while (true) {
+        if (cr.IsDestroyed) {
+            return false;
+        }
+
+        if (!Lock(cr)) {
+            return false;
+        }
+
+        Map? map = cr.GetMap();
+
+        if (map == null) {
+            return true;
+        }
+
+        if (map.IsDestroyed) {
+            return false;
+        }
+
+        ident mapId = map.Id;
+
+        if (!Lock(cr, map)) {
+            continue;
+        }
+
+        // Critter migrated to another map between read and lock; retry.
+        if (cr.MapId != mapId) {
+            continue;
+        }
+
+        return true;
+    }
+
+    return false;
+}
+
+[[Async]]
+bool LockCritterWithMapAndLocation(Critter cr)
+{
+    while (true) {
+        if (cr.IsDestroyed) {
+            return false;
+        }
+
+        if (!Lock(cr)) {
+            return false;
+        }
+
+        Map? map = cr.GetMap();
+
+        if (map == null) {
+            return true;
+        }
+
+        if (map.IsDestroyed) {
+            return false;
+        }
+
+        ident mapId = map.Id;
+
+        // cr + map must be held before map.GetLocation() can be read against the map's lock.
+        if (!Lock(cr, map)) {
+            continue;
+        }
+
+        if (cr.MapId != mapId) {
+            continue;
+        }
+
+        Location loc = map.GetLocation();
+        if (loc.IsDestroyed) {
+            return false;
+        }
+
+        ident locId = loc.Id;
+
+        // Escalate to cr + map + location so the location's own properties are accessible.
+        if (!Lock(cr, map, loc)) {
+            continue;
+        }
+
+        // Critter migrated while widening the lock set; retry.
+        if (cr.MapId != mapId) {
+            continue;
+        }
+
+        if (map.GetLocation().Id != locId) {
+            continue;
+        }
+
+        return true;
+    }
+
+    return false;
+}
+
+#endif
+
+}

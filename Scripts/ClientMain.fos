@@ -12,21 +12,21 @@ void InitClientMain()
     Game.OnStart.Subscribe(start);
     Game.OnFinish.Subscribe(finish);
     Game.OnLoop.Subscribe(loop);
-    Game.OnMouseMove.Subscribe(mouse_move);
-    Game.OnRenderIface.Subscribe(render_iface);
-    Game.OnCritterIn.Subscribe(critter_in);
-    Game.OnCritterOut.Subscribe(critter_out);
-    Game.OnItemMapIn.Subscribe(item_map_in);
+    Game.OnMouseMove.Subscribe(MouseMove);
+    Game.OnRenderIface.Subscribe(RenderIface);
+    Game.OnCritterIn.Subscribe(CritterIn);
+    Game.OnCritterOut.Subscribe(CritterOut);
+    Game.OnItemMapIn.Subscribe(ItemMapIn);
     // OnItemMapChanged removed
-    Game.OnItemMapOut.Subscribe(item_map_out);
-    Game.OnItemInvIn.Subscribe(item_inv_in);
+    Game.OnItemMapOut.Subscribe(ItemMapOut);
+    Game.OnItemInvIn.Subscribe(ItemInvIn);
     // OnItemInvChanged removed
-    Game.OnItemInvOut.Subscribe(item_inv_out);
-    Game.OnContainerChanged.Subscribe(container_changed);
-    Game.OnCritterAction.Subscribe(critter_action);
-    Game.OnCritterActionEx.Subscribe(critter_action);
-    Game.OnItemsCollection.Subscribe(items_collection);
-    Game.OnScreenSizeChanged.Subscribe(on_screen_size_changed);
+    Game.OnItemInvOut.Subscribe(ItemInvOut);
+    Game.OnContainerChanged.Subscribe(ContainerChanged);
+    Game.OnCritterAction.Subscribe(CritterAction);
+    Game.OnCritterActionEx.Subscribe(CritterAction);
+    Game.OnItemsCollection.Subscribe(ItemsCollection);
+    Game.OnScreenSizeChanged.Subscribe(OnScreenSizeChanged);
     Game.OnInfoMessage.Subscribe(OnInfoMessage);
 }
 
@@ -75,31 +75,32 @@ void loop()
     // Description under cursor
     if (Gui::Cursor == CursorType::Default && Game.FrameTime - Time::Milliseconds(1200) >= MouseStayTick && MouseStayTick != ZERO_NANOTIME) {
         MouseStayTick = ZERO_NANOTIME;
-        Gui::Screen screen = Gui::GetActiveScreen();
+        Gui::Screen? screen = Gui::GetActiveScreen();
         if (screen == null) {
             return;
         }
 
-        Item item;
-        Critter cr;
+        Item? item;
+        Critter? cr;
 
-        Gui::Object hoveredObj = screen.FindMouseHit();
+        Gui::Object? hoveredObj = screen.FindMouseHit();
         if (hoveredObj != null) {
-            if (hoveredObj.Grid != null && cast<Gui::ItemView>(hoveredObj.Grid) != null) {
-                item = cast<Gui::ItemView>(hoveredObj.Grid).GetItem(hoveredObj.CellIndex);
+            Gui::ItemView? itemView = hoveredObj.Grid != null ? cast<Gui::ItemView?>(hoveredObj.Grid) : null;
+            if (itemView != null) {
+                item = itemView.GetItem(hoveredObj.CellIndex);
             }
         }
-        else if (CurMap != null && !screen.IsModal) {
-            Entity entity = CurMap.GetEntityAtScreenPos(Game.MousePos);
+        else if (HasCurMap && !screen.IsModal) {
+            Entity? entity = CurMap.GetEntityAtScreenPos(Game.MousePos);
             item = cast<Item>(entity);
             cr = cast<Critter>(entity);
         }
 
         if (item != null) {
-            Messaging::Info(item_description(item, ItemLookTypes::OnlyName));
+            Messaging::Info(ItemDescription(item, ItemLookTypes::OnlyName));
         }
         else if (cr != null) {
-            Messaging::Info(critter_description(cr, CritterLookTypes::LookShort));
+            Messaging::Info(CritterDescription(cr, CritterLookTypes::LookShort));
         }
     }
 
@@ -107,7 +108,7 @@ void loop()
 }
 
 [[Event]]
-void mouse_move(ipos offset)
+void MouseMove(ipos offset)
 {
     if (Gui::Cursor == CursorType::Default) {
         MouseStayTick = Game.FrameTime;
@@ -130,23 +131,24 @@ void mouse_move(ipos offset)
 // Global map
 //    100 (over map), 101 (over all)
 [[Event]]
-void render_iface()
+void RenderIface()
 {
-    if (Gui::IsScreenActive(GuiScreen::Game) && CurMap != null) {
+    if (Gui::IsScreenActive(GuiScreen::Game) && HasCurMap) {
         CurMap.DrawMap();
     }
 
     Game.OnPreRenderIface.Fire();
     ChosenTabs::DrawChosenTabs();
-    if (CurMap != null) {
+    if (HasCurMap) {
         CritterIcons::DrawIcons();
     }
+
     Gui::EngineCallback_Draw();
 
     Game.OnPostRenderIface.Fire();
 
     string version = Settings.Common.GitBranch == "master" ? "v" + Settings.Common.GameVersion : "WIP " + Settings.Common.GitBranch;
-    Game.DrawText("FOnline TLA " + version, ipos(50, 10), isize(), COLOR_WHITE, TextFormat(FontType::Default, FontFlag(0), 0));
+    Game.DrawText("FOnline TLA " + version, ipos(50, 10), isize(), Color::White, TextFormat(FontType::Default, FontFlag(0), 0));
 
     // Help info
     if (Settings.Client.HelpInfo) {
@@ -159,10 +161,13 @@ void render_iface()
                            "\n" + "Sound: " + Settings.Audio.SoundVolume + "\n" + "Music: " + Settings.Audio.MusicVolume + "\n";
         if (Settings.Gui.DebugInfo) {
             Gui::Object[] focusedObjects = Gui::GetFocusedObjects();
+            Gui::Object? pressedObject = Gui::GetPressedObject();
+            Gui::Object? hoveredObject = Gui::GetHoveredObject();
             aboutText += "\n" + "Focused object: " + (!focusedObjects.isEmpty() ? focusedObjects.first().Name + " (" + focusedObjects.length() + ")" : "None") +
-                         "\n" + "Pressed object: " + (Gui::GetPressedObject() != null ? Gui::GetPressedObject().Name : "None") + "\n" +
-                         "Hovered object: " + (Gui::GetHoveredObject() != null ? Gui::GetHoveredObject().Name : "None");
+                         "\n" + "Pressed object: " + (pressedObject != null ? pressedObject.Name : "None") + "\n" +
+                         "Hovered object: " + (hoveredObject != null ? hoveredObject.Name : "None");
         }
+
         Game.DrawText(aboutText,
                       ipos(30, 30),
                       isize(Settings.View.ScreenWidth, Settings.View.ScreenHeight),
@@ -170,22 +175,22 @@ void render_iface()
                       TextFormat(FontType::Big, FontFlag(0), 0));
 
         // Help
-        Game.DrawText(MSG_GAME(MsgStr::StrGameHelp),
+        Game.DrawText(MsgStr::GetGameText(MsgStr::StrGameHelp),
                       ipos(0, 0),
                       isize(Settings.View.ScreenWidth, Settings.View.ScreenHeight),
-                      COLOR_WHITE,
+                      Color::White,
                       TextFormat(FontType::Default, FontFlag(int(FontFlag::CenterX) | int(FontFlag::CenterY)), 0));
     }
 
     // Zoom text
-    if (Settings.View.MapZoomEnabled && Settings.View.MapZoomInProgress && CurMap != null) {
-        string zoomText = MSG_GAME(MsgStr::StrZoom);
+    if (Settings.View.MapZoomEnabled && Settings.View.MapZoomInProgress && HasCurMap) {
+        string zoomText = MsgStr::GetGameText(MsgStr::StrZoom);
         zoomText = Game.ReplaceText(zoomText, "%d", "" + int(1.0 / CurMap.SpritesZoom * 100.0));
         zoomText = Game.ReplaceText(zoomText, "%%", "%");
         Game.DrawText(zoomText,
                       ipos(0, 0),
                       isize(Settings.View.ScreenWidth, Settings.View.ScreenHeight),
-                      COLOR_SAND,
+                      Color::Sand,
                       TextFormat(FontType::Big, FontFlag(int(FontFlag::CenterX) | int(FontFlag::CenterY)), 0));
     }
 
@@ -212,13 +217,13 @@ void render_iface()
 // //////////////////////////////////////////////////////////////////////////////////////////////////
 // Called on something critter in/out game.
 [[Event]]
-void critter_in(Critter cr)
+void CritterIn(Critter cr)
 {
     if (cr.ControlledByPlayer) {
         cr.SetName(cr.DisplayName);
     }
     else {
-        cr.SetName(critter_description(cr, CritterLookTypes::OnlyName));
+        cr.SetName(CritterDescription(cr, CritterLookTypes::OnlyName));
     }
 
     if (!cr.IsChosen) {
@@ -235,7 +240,7 @@ void critter_in(Critter cr)
 }
 
 [[Event]]
-void critter_out(Critter cr)
+void CritterOut(Critter cr)
 {
     //
 }
@@ -243,48 +248,53 @@ void critter_out(Critter cr)
 // //////////////////////////////////////////////////////////////////////////////////////////////////
 // Called on something item in/changed/out map.
 [[Event]]
-void item_map_in(Item item)
+void ItemMapIn(Item item)
 {
 }
 
 [[Event]]
-void item_map_changed(Item itemNow, Item itemBefore)
+void ItemMapChanged(Item itemNow, Item itemBefore)
 {
 }
 
 [[Event]]
-void item_map_out(Item item)
+void ItemMapOut(Item item)
 {
 }
 
 // //////////////////////////////////////////////////////////////////////////////////////////////////
 // Called on something critter in/out chosen inventory.
 [[Event]]
-void item_inv_in(Item item)
+void ItemInvIn(Item item)
 {
 }
 
 [[Event]]
-void item_inv_changed(Item itemNow, Item itemBefore)
+void ItemInvChanged(Item itemNow, Item itemBefore)
 {
 }
 
 [[Event]]
-void item_inv_out(Item item)
+void ItemInvOut(Item item)
 {
 }
 
 [[Event]]
-void container_changed()
+void ContainerChanged()
 {
 }
 
 // //////////////////////////////////////////////////////////////////////////////////////////////////
 // To-hit chance.
-int to_hit(Critter chosen, Critter target, ProtoItem? weapon, int weaponMode)
+int ToHit(Critter chosen, Critter target, ProtoItem? weapon, int weaponMode)
 {
-    int use = _WeaponModeUse(weaponMode);
-    int hitLocation = _WeaponModeAim(weaponMode);
+    ProtoItem resolvedWeapon = Game.GetProtoItem(Content::Item::default_weapon);
+    if (weapon != null) {
+        resolvedWeapon = weapon;
+    }
+
+    int use = Tla::WeaponModeUse(weaponMode);
+    int hitLocation = Tla::WeaponModeAim(weaponMode);
     if (use > 2) {
         return 0;
     }
@@ -292,21 +302,22 @@ int to_hit(Critter chosen, Critter target, ProtoItem? weapon, int weaponMode)
     if (target.IsDead()) {
         return 0;
     }
+
     if (!chosen.IsAlive()) {
         return 0;
     }
 
-    ProtoItem ammo = null;
+    ProtoItem? ammo = null;
 
-    if (weapon != null && _WeaponRound(weapon, use) > 0) {
-        ammo = Game.GetProtoItem(weapon.AmmoPid);
+    if (Tla::WeaponRounds(resolvedWeapon, use) > 0) {
+        ammo = Game.GetProtoItem(resolvedWeapon.AmmoPid);
     }
 
     CritterProperty skill = CritterProperty::SkillUnarmed;
-    skill = _WeaponSkill(weapon, use);
-    int wpnMaxDist = _WeaponMaxDist(weapon, use);
+    skill = Tla::WeaponSkill(resolvedWeapon, use);
+    int wpnMaxDist = Tla::WeaponMaxDistance(resolvedWeapon, use);
     if (skill == CritterProperty::SkillThrowing) {
-        wpnMaxDist = MIN(wpnMaxDist, 3 * MIN(int(10), chosen.Strength + 2 * chosen.PerkHeaveHo));
+        wpnMaxDist = Tla::Min(wpnMaxDist, 3 * Tla::Min(int(10), chosen.Strength + 2 * chosen.PerkHeaveHo));
     }
 
     int dist = Game.GetDistance(chosen, target);
@@ -315,7 +326,7 @@ int to_hit(Critter chosen, Critter target, ProtoItem? weapon, int weaponMode)
     }
 
     int toHit = int(chosen.GetAsInt(skill));
-    int weaponPerk = weapon.Weapon_Perk;
+    int weaponPerk = resolvedWeapon.Weapon_Perk;
     int blockers = 0;
 
     if (skill != CritterProperty::SkillUnarmed && skill != CritterProperty::SkillMeleeWeapons) {
@@ -365,55 +376,66 @@ int to_hit(Critter chosen, Critter target, ProtoItem? weapon, int weaponMode)
 
         toHit += acc;
 
+        verify(HasCurMap, "To-hit calculation requires an active map", chosen);
         blockers = CurMap.GetCrittersInPath(chosen.Hex, target.Hex, 0.0f, dist, CritterFindType::NonDead).length();
         if (!target.IsKnockout()) {
             blockers--;
         }
+
         toHit -= 10 * blockers;
     } // End range modifiers
 
-    if (!(weapon.Weapon_IsUnarmed) && chosen.IsTraitOneHander && weapon != null) {
-        toHit += (weapon.Weapon_IsTwoHanded ? -40 : 20);
+    if (!resolvedWeapon.Weapon_IsUnarmed && chosen.IsTraitOneHander) {
+        toHit += (resolvedWeapon.Weapon_IsTwoHanded ? -40 : 20);
     }
 
     int handlingStrength = chosen.Strength;
-    int reqStrength = weapon.Weapon_MinStrength;
+    int reqStrength = resolvedWeapon.Weapon_MinStrength;
     if (chosen.PerkWeaponHandling != 0) {
         handlingStrength += 3;
     }
+
     if (handlingStrength < reqStrength) {
         toHit -= (reqStrength - handlingStrength) * 20;
     }
+
     if (weaponPerk == ItemPerks::Accurate) {
         toHit += 20;
     }
+
     int acmod = target.ArmorClass;
     if (ammo != null) {
         acmod += ammo.Ammo_AcMod;
     }
+
     if (acmod > 0) {
         toHit -= acmod;
     }
+
     // TODO: tohit += 15 if target is multihex
     // TODO: light penalty
 
     if (chosen.IsDamagedEye) {
         toHit -= 25;
     }
-    if (chosen.PerkVampireAccuracy != 0 && IS_NIGHT(GameTime::GetHour())) {
+
+    if (chosen.PerkVampireAccuracy != 0 && Tla::IsNight(GameTime::GetHour())) {
         toHit += 13;
     }
+
     if (target.IsKnockout()) {
         toHit += 40;
     }
+
     toHit += target.Multihex * 15;
 
     int hitMod = GetHitAim(hitLocation);
     if (skill == CritterProperty::SkillMeleeWeapons || skill == CritterProperty::SkillUnarmed) {
         hitMod /= 2;
     }
+
     toHit -= hitMod;
-    toHit = CLAMP(toHit, 5, 95);
+    toHit = Tla::Clamp(toHit, 5, 95);
 
     return toHit;
 }
@@ -442,24 +464,26 @@ int GetHitAim(int hitLocation)
     default:
         break;
     }
+
     return 0;
 }
 
 // //////////////////////////////////////////////////////////////////////////////////////////////////
 // Override aim location set by player through targetting screen or simple click on target.
-void hit_aim(int& aim)
+void HitAim(int& aim)
 {
 }
 
 // //////////////////////////////////////////////////////////////////////////////////////////////////
 // Combat results.
-[[ClientRemoteCall]]
+[[ClientRemoteCall]] [[Async]]
 void CombatResult(any[] data)
 {
     int datalen = data.length();
     if (datalen == 0) {
         return;
     }
+
     if (data[0] != datalen) {
         return;
     }
@@ -475,21 +499,22 @@ void CombatResult(any[] data)
         int mode = data[current++];
         ident who = data[current++];
         ident who2;
-        Critter originalTarget;
+        Critter? originalTarget;
 
-        Critter cr = Game.GetCritter(who);
-        Critter trueTarget = null;
+        Critter? cr = Game.GetCritter(who);
+        Critter? trueTarget = null;
+        if (cr == null) {
+            continue;
+        }
 
         bool self = (who == Chosen.Id);
 
         string name = "error0";
-        if (cr != null) {
-            if (!self) {
-                name = cr.Name;
-            }
-            else {
-                name = Game.GetText(TextPackKey(TextPackName::Combat, "" + (Chosen.Gender == GenderType::Male ? 506 : 556)));
-            }
+        if (!self) {
+            name = cr.Name;
+        }
+        else {
+            name = Game.GetText(TextPackKey(TextPackName::Combat, "" + (Chosen.Gender == GenderType::Male ? 506 : 556)));
         }
 
         int offset;
@@ -527,6 +552,7 @@ void CombatResult(any[] data)
             if (damage > 1) {
                 result = Game.ReplaceText(result, "%d", damage);
             }
+
             break;
         case MessageSpecifications::Hit:
         case MessageSpecifications::HitDead:
@@ -536,6 +562,7 @@ void CombatResult(any[] data)
             if (damage > 1) {
                 result = Game.ReplaceText(result, "%d", damage);
             }
+
             break;
         case MessageSpecifications::AimedHit:
         case MessageSpecifications::AimedHitDead:
@@ -547,6 +574,7 @@ void CombatResult(any[] data)
             if (damage > 1) {
                 result = Game.ReplaceText(result, "%d", damage);
             }
+
             break;
         case MessageSpecifications::CritHit:
             damage = data[current++];
@@ -557,6 +585,7 @@ void CombatResult(any[] data)
             if (damage > 1) {
                 result = Game.ReplaceText(result, "%d", damage);
             }
+
             break;
         case MessageSpecifications::CritAimedHit:
             loc = data[current++];
@@ -569,6 +598,7 @@ void CombatResult(any[] data)
             if (damage > 1) {
                 result = Game.ReplaceText(result, "%d", damage);
             }
+
             break;
         case MessageSpecifications::CritHitDead:
             damage = data[current++];
@@ -578,6 +608,7 @@ void CombatResult(any[] data)
             if (damage > 1) {
                 result = Game.ReplaceText(result, "%d", damage);
             }
+
             break;
         case MessageSpecifications::CritAimedHitDead:
             loc = data[current++];
@@ -589,6 +620,7 @@ void CombatResult(any[] data)
             if (damage > 1) {
                 result = Game.ReplaceText(result, "%d", damage);
             }
+
             break;
         case MessageSpecifications::Oops:
             who2 = data[current++]; // who2 was hit instead of who
@@ -602,6 +634,7 @@ void CombatResult(any[] data)
                 if (trueTarget != null) {
                     nameTrue = trueTarget.Name;
                 }
+
                 result = Game.ReplaceText(result, "%s", nameTrue);
             }
             else {
@@ -616,10 +649,13 @@ void CombatResult(any[] data)
                     if (trueTarget != null) {
                         nameTrue = trueTarget.Name;
                     }
+
                     result = Game.ReplaceText(result, "%s", nameTrue);
                 }
+
                 result = Game.ReplaceText(result, "%s", name);
             }
+
             break;
         case MessageSpecifications::Miss:
             result = Game.GetText(TextPackKey(TextPackName::Combat, "" + (offset + 9)));
@@ -644,79 +680,100 @@ void CombatResult(any[] data)
             offset -= 306;
             if (mode > MessageSpecifications::CritMissDamage) // Hit flags
             {
-                if (FLAG(effect, HF_KNOCKOUT)) {
+                if (Tla::HasFlag(effect, Tla::HF_KNOCKOUT)) {
                     ext.insertLast(Game.GetText(TextPackKey(TextPackName::Combat, "" + (offset + 0))));
                 }
-                if (FLAG(effect, HF_KNOCKDOWN)) {
+
+                if (Tla::HasFlag(effect, Tla::HF_KNOCKDOWN)) {
                     ext.insertLast(Game.GetText(TextPackKey(TextPackName::Combat, "" + (offset + 1))));
                 }
-                if (FLAG(effect, HF_CRIPPLED_LEFT_LEG)) {
+
+                if (Tla::HasFlag(effect, Tla::HF_CRIPPLED_LEFT_LEG)) {
                     ext.insertLast(Game.GetText(TextPackKey(TextPackName::Combat, "" + (offset + 2))));
                 }
-                if (FLAG(effect, HF_CRIPPLED_RIGHT_LEG)) {
+
+                if (Tla::HasFlag(effect, Tla::HF_CRIPPLED_RIGHT_LEG)) {
                     ext.insertLast(Game.GetText(TextPackKey(TextPackName::Combat, "" + (offset + 3))));
                 }
-                if (FLAG(effect, HF_CRIPPLED_LEFT_ARM)) {
+
+                if (Tla::HasFlag(effect, Tla::HF_CRIPPLED_LEFT_ARM)) {
                     ext.insertLast(Game.GetText(TextPackKey(TextPackName::Combat, "" + (offset + 4))));
                 }
-                if (FLAG(effect, HF_CRIPPLED_RIGHT_ARM)) {
+
+                if (Tla::HasFlag(effect, Tla::HF_CRIPPLED_RIGHT_ARM)) {
                     ext.insertLast(Game.GetText(TextPackKey(TextPackName::Combat, "" + (offset + 5))));
                 }
-                if (FLAG(effect, HF_BLINDED)) {
+
+                if (Tla::HasFlag(effect, Tla::HF_BLINDED)) {
                     ext.insertLast(Game.GetText(TextPackKey(TextPackName::Combat, "" + (offset + 6))));
                 }
-                // if(FLAG(effect, HF_DEATH))              ext.insertLast(Game.GetText(TextPackKey(TextPackName::Combat, "" + (offset)))); // This is handled elsewhere
-                // if(FLAG(effect, HF_ON_FIRE))            ext.insertLast(Game.GetText(TextPackKey(TextPackName::Combat, "" + (offset + 10)))); // Not used
-                if (FLAG(effect, HF_BYPASS_ARMOR)) {
+
+                // if(HasFlag(effect, HF_DEATH))              ext.insertLast(Game.GetText(TextPackKey(TextPackName::Combat, "" + (offset)))); // This is handled elsewhere
+                // if(HasFlag(effect, HF_ON_FIRE))            ext.insertLast(Game.GetText(TextPackKey(TextPackName::Combat, "" + (offset + 10)))); // Not used
+                if (Tla::HasFlag(effect, Tla::HF_BYPASS_ARMOR)) {
                     ext.insertLast(Game.GetText(TextPackKey(TextPackName::Combat, "" + (offset + 11))));
                 }
-                if (FLAG(effect, HF_DROPPED_WEAPON)) {
+
+                if (Tla::HasFlag(effect, Tla::HF_DROPPED_WEAPON)) {
                     ext.insertLast(Game.GetText(TextPackKey(TextPackName::Combat, "" + (offset + 14))));
                 }
-                if (FLAG(effect, HF_LOST_NEXT_TURN)) {
+
+                if (Tla::HasFlag(effect, Tla::HF_LOST_NEXT_TURN)) {
                     ext.insertLast(Game.GetText(TextPackKey(TextPackName::Combat, "" + (offset + 15))));
                 }
-                if (FLAG(effect, HF_RANDOM)) {
+
+                if (Tla::HasFlag(effect, Tla::HF_RANDOM)) {
                     ext.insertLast(Game.GetText(TextPackKey(TextPackName::Combat, "" + (offset + 21))));
                 }
             }
             else {
-                if (FLAG(effect, MF_KNOCKED_DOWN)) {
+                if (Tla::HasFlag(effect, Tla::MF_KNOCKED_DOWN)) {
                     ext.insertLast(Game.GetText(TextPackKey(TextPackName::Combat, "" + (offset + 1))));
                 }
-                // if(FLAG(effect, MF_ON_FIRE))              ext.insertLast(Game.GetText(TextPackKey(TextPackName::Combat, "" + (offset + 10)))); // Not used
-                if (FLAG(effect, MF_WEAPON_EXPLODED)) {
+
+                // if(HasFlag(effect, MF_ON_FIRE))              ext.insertLast(Game.GetText(TextPackKey(TextPackName::Combat, "" + (offset + 10)))); // Not used
+                if (Tla::HasFlag(effect, Tla::MF_WEAPON_EXPLODED)) {
                     ext.insertLast(Game.GetText(TextPackKey(TextPackName::Combat, "" + (offset + 12))));
                 }
-                if (FLAG(effect, MF_WEAPON_DESTROYED)) {
+
+                if (Tla::HasFlag(effect, Tla::MF_WEAPON_DESTROYED)) {
                     ext.insertLast(Game.GetText(TextPackKey(TextPackName::Combat, "" + (offset + 13))));
                 }
-                if (FLAG(effect, MF_WEAPON_DROPPED)) {
+
+                if (Tla::HasFlag(effect, Tla::MF_WEAPON_DROPPED)) {
                     ext.insertLast(Game.GetText(TextPackKey(TextPackName::Combat, "" + (offset + 14))));
                 }
-                if (FLAG(effect, MF_LOST_NEXT_TURN)) {
+
+                if (Tla::HasFlag(effect, Tla::MF_LOST_NEXT_TURN)) {
                     ext.insertLast(Game.GetText(TextPackKey(TextPackName::Combat, "" + (offset + 15))));
                 }
-                if (FLAG(effect, MF_HIT_SELF)) {
+
+                if (Tla::HasFlag(effect, Tla::MF_HIT_SELF)) {
                     ext.insertLast(Game.GetText(TextPackKey(TextPackName::Combat, "" + (offset + 16))));
                 }
-                if (FLAG(effect, MF_LOST_REST_OF_AMMO)) {
+
+                if (Tla::HasFlag(effect, Tla::MF_LOST_REST_OF_AMMO)) {
                     ext.insertLast(Game.GetText(TextPackKey(TextPackName::Combat, "" + (offset + 17))));
                 }
-                if (FLAG(effect, MF_FIRED_DUD_SHOT)) {
+
+                if (Tla::HasFlag(effect, Tla::MF_FIRED_DUD_SHOT)) {
                     ext.insertLast(Game.GetText(TextPackKey(TextPackName::Combat, "" + (offset + 18))));
                 }
-                if (FLAG(effect, MF_HURT_SELF)) {
+
+                if (Tla::HasFlag(effect, Tla::MF_HURT_SELF)) {
                     ext.insertLast(Game.GetText(TextPackKey(TextPackName::Combat, "" + (offset + 19))));
                 }
-                // if(FLAG(effect, MF_HIT_RANDOMLY))         ext.insertLast(Game.GetText(TextPackKey(TextPackName::Combat, "" + (offset + 20)))); // This is handled elsewhere
-                if (FLAG(effect, MF_CRIPPLED_RANDOM_LIMB)) {
+
+                // if(HasFlag(effect, MF_HIT_RANDOMLY))         ext.insertLast(Game.GetText(TextPackKey(TextPackName::Combat, "" + (offset + 20)))); // This is handled elsewhere
+                if (Tla::HasFlag(effect, Tla::MF_CRIPPLED_RANDOM_LIMB)) {
                     ext.insertLast(Game.GetText(TextPackKey(TextPackName::Combat, "" + (offset + 21))));
                 }
-                if (FLAG(effect, MF_WAS_KILLED)) {
+
+                if (Tla::HasFlag(effect, Tla::MF_WAS_KILLED)) {
                     ext.insertLast(Game.GetText(TextPackKey(TextPackName::Combat, "" + (offset + 7))));
                 }
             }
+
             offset += 306;
         }
 
@@ -755,123 +812,111 @@ void CombatResult(any[] data)
 // //////////////////////////////////////////////////////////////////////////////////////////////////
 // Generic description. Descriptions type look in _client_defines.fos, Generic descriptions types.
 // int& offsX, int& offsY - offsets of text, by default is zero.
-string generic_description(int descType, int& offsX, int& offsY)
+string GenericDescription(int descType, int& offsX, int& offsY)
 {
-    Critter chosen = Chosen;
-    if (chosen == null) {
+    if (!HasChosen) {
         return "";
     }
+
+    Critter chosen = Chosen;
     string result;
 
     if (descType == GenericDescriptionsTypes::InventoryMain) {
         result += chosen.Name + "\n";
         result += "---------------------\n";
-        result += Game.GetText(TextPackKey(TextPackName::Game, "" + (STR_INV_SHORT_SPECIAL(CritterProperty::Strength)))) + "\n";
-        result += Game.GetText(TextPackKey(TextPackName::Game, "" + (STR_INV_SHORT_SPECIAL(CritterProperty::Perception)))) + "\n";
-        result += Game.GetText(TextPackKey(TextPackName::Game, "" + (STR_INV_SHORT_SPECIAL(CritterProperty::Endurance)))) + "\n";
-        result += Game.GetText(TextPackKey(TextPackName::Game, "" + (STR_INV_SHORT_SPECIAL(CritterProperty::Charisma)))) + "\n";
-        result += Game.GetText(TextPackKey(TextPackName::Game, "" + (STR_INV_SHORT_SPECIAL(CritterProperty::Intellect)))) + "\n";
-        result += Game.GetText(TextPackKey(TextPackName::Game, "" + (STR_INV_SHORT_SPECIAL(CritterProperty::Agility)))) + "\n";
-        result += Game.GetText(TextPackKey(TextPackName::Game, "" + (STR_INV_SHORT_SPECIAL(CritterProperty::Luck)))) + "\n";
+        result += Game.GetText(TextPackKey(TextPackName::Game, "" + (MsgStr::InvShortSpecialTextId(CritterProperty::Strength)))) + "\n";
+        result += Game.GetText(TextPackKey(TextPackName::Game, "" + (MsgStr::InvShortSpecialTextId(CritterProperty::Perception)))) + "\n";
+        result += Game.GetText(TextPackKey(TextPackName::Game, "" + (MsgStr::InvShortSpecialTextId(CritterProperty::Endurance)))) + "\n";
+        result += Game.GetText(TextPackKey(TextPackName::Game, "" + (MsgStr::InvShortSpecialTextId(CritterProperty::Charisma)))) + "\n";
+        result += Game.GetText(TextPackKey(TextPackName::Game, "" + (MsgStr::InvShortSpecialTextId(CritterProperty::Intellect)))) + "\n";
+        result += Game.GetText(TextPackKey(TextPackName::Game, "" + (MsgStr::InvShortSpecialTextId(CritterProperty::Agility)))) + "\n";
+        result += Game.GetText(TextPackKey(TextPackName::Game, "" + (MsgStr::InvShortSpecialTextId(CritterProperty::Luck)))) + "\n";
         result += "---------------------\n";
 
         AbstractItem weaponMain = CritterItem::GetActive(chosen);
-        if (weaponMain != null) {
-            int use = _WeaponModeUse(weaponMain.Mode);
-            if (use > 2) {
-                use = 0;
+        int use = Tla::WeaponModeUse(weaponMain.Mode);
+        if (use > 2) {
+            use = 0;
+        }
+
+        result += Game.GetText(TextPackKey(TextPackName::Items, "" + (MsgStr::ItemNameTextId(weaponMain)))) + "\n";
+
+        if (weaponMain.Type == ItemType::Weapon) {
+            result += Game.GetText(TextPackKey(TextPackName::Game, "" + (MsgStr::StrInvDmg))) + " ";
+            result += Tla::WeaponDamageMin(weaponMain, use) + "-";
+            int wpnMaxDmg = Tla::WeaponDamageMax(weaponMain, use);
+            if (Tla::IsWeaponHthAttack(weaponMain, use)) {
+                wpnMaxDmg += chosen.MeleeDamage;
             }
 
-            result += Game.GetText(TextPackKey(TextPackName::Items, "" + (STR_ITEM_NAME(weaponMain)))) + "\n";
+            result += wpnMaxDmg;
 
-            if (weaponMain.Type == ItemType::Weapon) {
-                result += Game.GetText(TextPackKey(TextPackName::Game, "" + (MsgStr::StrInvDmg))) + " ";
-                result += _WeaponDmgMin(weaponMain, use) + "-";
-                int wpnMaxDmg = _WeaponDmgMax(weaponMain, use);
-                if (_WeaponIsHtHAttack(weaponMain, use)) {
-                    wpnMaxDmg += chosen.MeleeDamage;
+            if (Tla::WeaponMaxDistance(weaponMain, use) > 1) {
+                result += " " + Game.GetText(TextPackKey(TextPackName::Game, "" + (MsgStr::StrInvDist))) + " ";
+                int wpnMaxDist = Tla::WeaponMaxDistance(weaponMain, use);
+                if (Tla::WeaponSkill(weaponMain, use) == CritterProperty::SkillThrowing) {
+                    wpnMaxDist = Tla::Min(wpnMaxDist, 3 * Tla::Min(int(10), chosen.Strength + 2 * chosen.PerkHeaveHo));
                 }
-                result += wpnMaxDmg;
 
-                if (_WeaponMaxDist(weaponMain, use) > 1) {
-                    result += " " + Game.GetText(TextPackKey(TextPackName::Game, "" + (MsgStr::StrInvDist))) + " ";
-                    int wpnMaxDist = _WeaponMaxDist(weaponMain, use);
-                    if (_WeaponSkill(weaponMain, use) == CritterProperty::SkillThrowing) {
-                        wpnMaxDist = MIN(wpnMaxDist, 3 * MIN(int(10), chosen.Strength + 2 * chosen.PerkHeaveHo));
-                    }
-                    result += wpnMaxDist;
-                }
-                result += "\n";
-
-                if (weaponMain.Weapon_MaxAmmoCount > 0) {
-                    result += Game.GetText(TextPackKey(TextPackName::Game, "" + (MsgStr::StrInvAmmo))) + " ";
-                    result += weaponMain.AmmoCount + "/";
-                    result += weaponMain.Weapon_MaxAmmoCount + " ";
-                    result += Game.GetText(TextPackKey(TextPackName::Game, "" + (STR_CALIBER(weaponMain.Weapon_Caliber))));
-                }
-                result += "\n";
+                result += wpnMaxDist;
             }
-            else {
-                result += "\n\n";
+
+            result += "\n";
+
+            if (weaponMain.Weapon_MaxAmmoCount > 0) {
+                result += Game.GetText(TextPackKey(TextPackName::Game, "" + (MsgStr::StrInvAmmo))) + " ";
+                result += weaponMain.AmmoCount + "/";
+                result += weaponMain.Weapon_MaxAmmoCount + " ";
+                result += Game.GetText(TextPackKey(TextPackName::Game, "" + (MsgStr::CaliberTextId(weaponMain.Weapon_Caliber))));
             }
+
+            result += "\n";
         }
         else {
-            // Unarmed
-            AbstractItem unarmed = CritterItem::GetActive(chosen);
-            result += Game.GetText(TextPackKey(TextPackName::Game, "" + (MsgStr::StrInvNoItem))) + "\n";
-            result += Game.GetText(TextPackKey(TextPackName::Game, "" + (MsgStr::StrInvUnarmedDmg))) + " ";
-            result += _WeaponDmgMin(unarmed, _WeaponModeUse(unarmed.Mode)) + "-";
-            result += (_WeaponDmgMax(unarmed, _WeaponModeUse(unarmed.Mode)) + chosen.MeleeDamage);
             result += "\n\n";
         }
+
         result += "---------------------\n";
 
         AbstractItem weaponExt = CritterItem::GetActive(chosen, CritterItemSlot::Secondary);
-        if (weaponExt != null) {
-            int use = _WeaponModeUse(weaponExt.Mode);
-            if (use > 2) {
-                use = 0;
+        use = Tla::WeaponModeUse(weaponExt.Mode);
+        if (use > 2) {
+            use = 0;
+        }
+
+        result += Game.GetText(TextPackKey(TextPackName::Items, "" + (MsgStr::ItemNameTextId(weaponExt)))) + "\n";
+
+        if (weaponExt.Type == ItemType::Weapon) {
+            result += Game.GetText(TextPackKey(TextPackName::Game, "" + (MsgStr::StrInvDmg))) + " ";
+            result += Tla::WeaponDamageMin(weaponExt, use) + "-";
+            int wpnMaxDmg = Tla::WeaponDamageMax(weaponExt, use);
+            if (Tla::IsWeaponHthAttack(weaponExt, use)) {
+                wpnMaxDmg += chosen.MeleeDamage;
             }
 
-            result += Game.GetText(TextPackKey(TextPackName::Items, "" + (STR_ITEM_NAME(weaponExt)))) + "\n";
+            result += wpnMaxDmg;
+            if (Tla::WeaponMaxDistance(weaponExt, use) > 1) {
+                result += " " + Game.GetText(TextPackKey(TextPackName::Game, "" + (MsgStr::StrInvDist))) + " ";
+                int wpnMaxDist = Tla::WeaponMaxDistance(weaponExt, use);
+                if (Tla::WeaponSkill(weaponExt, use) == CritterProperty::SkillThrowing) {
+                    wpnMaxDist = Tla::Min(wpnMaxDist, 3 * Tla::Min(int(10), chosen.Strength + 2 * chosen.PerkHeaveHo));
+                }
 
-            if (weaponExt.Type == ItemType::Weapon) {
-                result += Game.GetText(TextPackKey(TextPackName::Game, "" + (MsgStr::StrInvDmg))) + " ";
-                result += _WeaponDmgMin(weaponExt, use) + "-";
-                int wpnMaxDmg = _WeaponDmgMax(weaponExt, use);
-                if (_WeaponIsHtHAttack(weaponExt, use)) {
-                    wpnMaxDmg += chosen.MeleeDamage;
-                }
-                result += wpnMaxDmg;
-                if (_WeaponMaxDist(weaponExt, use) > 1) {
-                    result += " " + Game.GetText(TextPackKey(TextPackName::Game, "" + (MsgStr::StrInvDist))) + " ";
-                    int wpnMaxDist = _WeaponMaxDist(weaponExt, use);
-                    if (_WeaponSkill(weaponExt, use) == CritterProperty::SkillThrowing) {
-                        wpnMaxDist = MIN(wpnMaxDist, 3 * MIN(int(10), chosen.Strength + 2 * chosen.PerkHeaveHo));
-                    }
-                    result += wpnMaxDist;
-                }
-                result += "\n";
+                result += wpnMaxDist;
+            }
 
-                if (weaponExt.Weapon_MaxAmmoCount > 0) {
-                    result += Game.GetText(TextPackKey(TextPackName::Game, "" + (MsgStr::StrInvAmmo))) + " ";
-                    result += weaponExt.AmmoCount + "/";
-                    result += weaponExt.Weapon_MaxAmmoCount + " ";
-                    result += Game.GetText(TextPackKey(TextPackName::Game, "" + (STR_CALIBER(weaponExt.Weapon_Caliber))));
-                }
-                result += "\n";
+            result += "\n";
+
+            if (weaponExt.Weapon_MaxAmmoCount > 0) {
+                result += Game.GetText(TextPackKey(TextPackName::Game, "" + (MsgStr::StrInvAmmo))) + " ";
+                result += weaponExt.AmmoCount + "/";
+                result += weaponExt.Weapon_MaxAmmoCount + " ";
+                result += Game.GetText(TextPackKey(TextPackName::Game, "" + (MsgStr::CaliberTextId(weaponExt.Weapon_Caliber))));
             }
-            else {
-                result += "\n\n";
-            }
+
+            result += "\n";
         }
         else {
-            // Unarmed
-            AbstractItem unarmed = CritterItem::GetActive(chosen, CritterItemSlot::Secondary);
-            result += Game.GetText(TextPackKey(TextPackName::Game, "" + (MsgStr::StrInvNoItem))) + "\n";
-            result += Game.GetText(TextPackKey(TextPackName::Game, "" + (MsgStr::StrInvUnarmedDmg))) + " ";
-            result += _WeaponDmgMin(unarmed, _WeaponModeUse(unarmed.Mode)) + "-";
-            result += (_WeaponDmgMax(unarmed, _WeaponModeUse(unarmed.Mode)) + chosen.MeleeDamage);
             result += "\n\n";
         }
 
@@ -920,11 +965,11 @@ string generic_description(int descType, int& offsX, int& offsY)
 
 // //////////////////////////////////////////////////////////////////////////////////////////////////
 // Item description. Look types look in _client_defines.fos, Item look types.
-string item_description(Item item, ItemLookTypes lookType)
+string ItemDescription(Item item, ItemLookTypes lookType)
 {
     // Default error text
     if (not Game.IsTextPresent(
-            TextPackKey(TextPackName::Items, "" + (STR_ITEM_NAME(item) + (lookType != ItemLookTypes::OnlyName ? "Desc".hstr().uhash : 0))))) {
+            TextPackKey(TextPackName::Items, "" + (MsgStr::ItemNameTextId(item) + (lookType != ItemLookTypes::OnlyName ? "Desc".hstr().uhash : 0))))) {
         return Game.GetText(TextPackKey(TextPackName::Game, "" + (MsgStr::StrItemLookNothing)));
     }
 
@@ -939,23 +984,25 @@ string item_description(Item item, ItemLookTypes lookType)
         deterioration = Game.ReplaceText(deterioration, "VALUE", item.Deterioration * 100 / item.Car_MaxDeterioration);
         result = fuel + "\n" + deterioration;
     }
+
     // Short info
     else if (lookType == ItemLookTypes::OnlyName) {
         result += Game.ReplaceText(Game.GetText(TextPackKey(TextPackName::Game, "" + (MsgStr::StrItemLook))),
                                    "NAME",
-                                   Game.GetText(TextPackKey(TextPackName::Items, "" + (STR_ITEM_NAME(item)))));
+                                   Game.GetText(TextPackKey(TextPackName::Items, "" + (MsgStr::ItemNameTextId(item)))));
     }
+
     // Full info
     else {
         if (lookType == ItemLookTypes::Inventory) {
-            result += Game.GetText(TextPackKey(TextPackName::Items, "" + (STR_ITEM_NAME(item)))) + "\n";
+            result += Game.GetText(TextPackKey(TextPackName::Items, "" + (MsgStr::ItemNameTextId(item)))) + "\n";
         }
 
         if (item.ProtoId == Content::Item::holodisk && item.HolodiskNum != 0) {
-            result += Game.GetText(TextPackKey(TextPackName::Holo, "" + (STR_HOLO_INFO_NAME(item.HolodiskNum))));
+            result += Game.GetText(TextPackKey(TextPackName::Holo, "" + (MsgStr::HoloInfoNameTextId(item.HolodiskNum))));
         }
         else {
-            result += Game.GetText(TextPackKey(TextPackName::Items, "" + (STR_ITEM_INFO(item))));
+            result += Game.GetText(TextPackKey(TextPackName::Items, "" + (MsgStr::ItemInfoTextId(item))));
         }
 
         if (lookType != ItemLookTypes::Map) {
@@ -970,7 +1017,7 @@ string item_description(Item item, ItemLookTypes lookType)
                 string str = Game.GetText(TextPackKey(TextPackName::Game, "" + (MsgStr::StrInvHasShots)));
                 str = Game.ReplaceText(str, "VALUE", item.AmmoCount);
                 str = Game.ReplaceText(str, "MAXVAL", item.Weapon_MaxAmmoCount);
-                str = Game.ReplaceText(str, "AMMO", Game.GetText(TextPackKey(TextPackName::Game, "" + (STR_CALIBER(item.Weapon_Caliber)))));
+                str = Game.ReplaceText(str, "AMMO", Game.GetText(TextPackKey(TextPackName::Game, "" + (MsgStr::CaliberTextId(item.Weapon_Caliber)))));
                 result += str;
             }
 
@@ -1010,7 +1057,7 @@ string item_description(Item item, ItemLookTypes lookType)
                 }
 
                 // Broken count
-                if (Chosen != null && Chosen.PerkMrFixit != 0) {
+                if (HasChosen && Chosen.PerkMrFixit != 0) {
                     result += "\n" +
                               Game.ReplaceText(Game.GetText(TextPackKey(TextPackName::Game, "" + (MsgStr::StrDeteriorationBrokenCount))), "VALUE", brokenCount);
                 }
@@ -1024,9 +1071,10 @@ string item_description(Item item, ItemLookTypes lookType)
     }
 
     // Format tags
-    if (item.Lexems != "") {
-        return Game.FormatTags(result, item.Lexems);
+    if (item.TextArgs != "") {
+        return Game.FormatTags(result, item.TextArgs);
     }
+
     return result;
 }
 
@@ -1043,7 +1091,7 @@ int GetTextNumUpperCompat(TextPackName textPack, uint strNum)
 
 // //////////////////////////////////////////////////////////////////////////////////////////////////
 // Critter description. Look types look in _client_defines.fos, Critter look types.
-string critter_description(Critter& cr, CritterLookTypes lookType)
+string CritterDescription(Critter& cr, CritterLookTypes lookType)
 {
     string result;
     int gender = cr.Gender;
@@ -1054,27 +1102,31 @@ string critter_description(Critter& cr, CritterLookTypes lookType)
         if (lookType == CritterLookTypes::OnlyName) {
             result = cr.Name; // No change
         }
+
         // Short info
         else if (lookType == CritterLookTypes::LookShort) {
-            result += Game.GetText(TextPackKey(TextPackName::Game, "" + (STR_CRIT_LOOK1(gender))));
+            result += Game.GetText(TextPackKey(TextPackName::Game, "" + (MsgStr::CritLook1TextId(gender))));
             result += cr.Name;
             result += ".";
         }
+
         // Full info
         else {
-            result += Game.GetText(TextPackKey(TextPackName::Game, "" + (STR_CRIT_LOOK1(gender))));
+            result += Game.GetText(TextPackKey(TextPackName::Game, "" + (MsgStr::CritLook1TextId(gender))));
 
             // Age
-            int ageStr = GetTextNumUpperCompat(TextPackName::Game, STR_CRIT_LOOK_AGE(gender, cr.Age));
+            int ageStr = GetTextNumUpperCompat(TextPackName::Game, MsgStr::CritLookAgeTextId(gender, cr.Age));
             if (ageStr != 0) {
                 result += Game.GetText(TextPackKey(TextPackName::Game, "" + (ageStr)));
             }
             else {
                 result += cr.Name;
             }
+
             result += ".";
         }
     }
+
     // Npc
     else {
         hstring dlgId = cr.DialogId;
@@ -1084,31 +1136,33 @@ string critter_description(Critter& cr, CritterLookTypes lookType)
         if (lookType == CritterLookTypes::OnlyName) {
             result = MsgStr::NpcName(dlgId, npcPid);
         }
+
         // Short info
         else if (lookType == CritterLookTypes::LookShort) {
-            if (cr.IsAlive() && Game.IsTextPresent(TextPackKey(TextPackName::Dialogs, "" + (STR_NPC_INFO_LIFE(dlgId, npcPid))))) {
+            if (cr.IsAlive() && Game.IsTextPresent(TextPackKey(TextPackName::Dialogs, "" + (MsgStr::NpcInfoLifeTextId(dlgId, npcPid))))) {
                 result += MsgStr::NpcDesc(dlgId, npcPid);
             }
-            else if (cr.IsKnockout() && Game.IsTextPresent(TextPackKey(TextPackName::Dialogs, "" + (STR_NPC_INFO_KO(dlgId, npcPid))))) {
-                result += Game.GetText(TextPackKey(TextPackName::Dialogs, "" + (STR_NPC_INFO_KO(dlgId, npcPid))));
+            else if (cr.IsKnockout() && Game.IsTextPresent(TextPackKey(TextPackName::Dialogs, "" + (MsgStr::NpcInfoKoTextId(dlgId, npcPid))))) {
+                result += Game.GetText(TextPackKey(TextPackName::Dialogs, "" + (MsgStr::NpcInfoKoTextId(dlgId, npcPid))));
             }
-            else if (cr.IsDead() && Game.IsTextPresent(TextPackKey(TextPackName::Dialogs, "" + (STR_NPC_INFO_DEAD(dlgId, npcPid))))) {
-                result += Game.GetText(TextPackKey(TextPackName::Dialogs, "" + (STR_NPC_INFO_DEAD(dlgId, npcPid))));
+            else if (cr.IsDead() && Game.IsTextPresent(TextPackKey(TextPackName::Dialogs, "" + (MsgStr::NpcInfoDeadTextId(dlgId, npcPid))))) {
+                result += Game.GetText(TextPackKey(TextPackName::Dialogs, "" + (MsgStr::NpcInfoDeadTextId(dlgId, npcPid))));
             }
             else {
                 defaultText = true;
             }
         }
+
         // Full info
         else {
             if (cr.IsAlive()) {
                 result += MsgStr::NpcDesc(dlgId, npcPid);
             }
-            else if (cr.IsKnockout() && Game.IsTextPresent(TextPackKey(TextPackName::Dialogs, "" + (STR_NPC_FULL_INFO_KO(dlgId, npcPid))))) {
-                result += Game.GetText(TextPackKey(TextPackName::Dialogs, "" + (STR_NPC_FULL_INFO_KO(dlgId, npcPid))));
+            else if (cr.IsKnockout() && Game.IsTextPresent(TextPackKey(TextPackName::Dialogs, "" + (MsgStr::NpcFullInfoKoTextId(dlgId, npcPid))))) {
+                result += Game.GetText(TextPackKey(TextPackName::Dialogs, "" + (MsgStr::NpcFullInfoKoTextId(dlgId, npcPid))));
             }
-            else if (cr.IsDead() && Game.IsTextPresent(TextPackKey(TextPackName::Dialogs, "" + (STR_NPC_FULL_INFO_DEAD(dlgId, npcPid))))) {
-                result += Game.GetText(TextPackKey(TextPackName::Dialogs, "" + (STR_NPC_FULL_INFO_DEAD(dlgId, npcPid))));
+            else if (cr.IsDead() && Game.IsTextPresent(TextPackKey(TextPackName::Dialogs, "" + (MsgStr::NpcFullInfoDeadTextId(dlgId, npcPid))))) {
+                result += Game.GetText(TextPackKey(TextPackName::Dialogs, "" + (MsgStr::NpcFullInfoDeadTextId(dlgId, npcPid))));
             }
             else {
                 defaultText = true;
@@ -1131,6 +1185,7 @@ string critter_description(Critter& cr, CritterLookTypes lookType)
                         Game.ReplaceText(Game.GetText(TextPackKey(TextPackName::Game, "" + (MsgStr::StrCritLookDead))), "NAME", MsgStr::NpcName(dlgId, npcPid));
                 }
             }
+
             // Set default text
             else {
                 result += Game.GetText(TextPackKey(TextPackName::Game, "" + (MsgStr::StrCritLookNothing)));
@@ -1143,87 +1198,83 @@ string critter_description(Critter& cr, CritterLookTypes lookType)
         if (result.length() > 0 && result[result.length() - 1] != ".") {
             result += ".";
         }
+
         result += " ";
 
-        if (Chosen != null && Chosen.PerkAwareness != 0) // Awareness
+        if (HasChosen && Chosen.PerkAwareness != 0) // Awareness
         {
-            result += Game.GetText(TextPackKey(TextPackName::Game, "" + (STR_CRIT_LOOK_HP(gender))));
+            result += Game.GetText(TextPackKey(TextPackName::Game, "" + (MsgStr::CritLookHpTextId(gender))));
             result = Game.ReplaceText(result, "CUR", cr.CurrentHp);
-            result = Game.ReplaceText(result, "MAX", cr.MaxLife);
+            result = Game.ReplaceText(result, "Max", cr.MaxLife);
 
             AbstractItem item = CritterItem::GetActive(cr);
-            if (_CritIsInjured(cr)) {
-                if (item != null) {
-                    result += ", ";
-                }
-                else {
-                    result += Game.GetText(TextPackKey(TextPackName::Game, "" + (MsgStr::StrAnd)));
-                }
-
-                result += Game.GetText(TextPackKey(TextPackName::Game, "" + (STR_CRIT_LOOK_LIMBS(gender, false))));
+            if (Tla::IsCritterInjured(cr)) {
+                result += ", ";
+                result += Game.GetText(TextPackKey(TextPackName::Game, "" + (MsgStr::CritLookLimbsTextId(gender, false))));
             }
 
-            if (item != null) {
-                if (item.Type == ItemType::Weapon) {
-                    if (item.Weapon_MaxAmmoCount == 0) {
-                        result += Game.GetText(TextPackKey(TextPackName::Game, "" + (MsgStr::StrCritLookWeap)));
-                        result = Game.ReplaceText(result, "WEAPON", Game.GetText(TextPackKey(TextPackName::Items, "" + (STR_ITEM_NAME(item)))));
-                    }
-                    else {
-                        result += Game.GetText(TextPackKey(TextPackName::Game, "" + (MsgStr::StrCritLookWeapAmmo)));
-                        result = Game.ReplaceText(result, "WEAPON", Game.GetText(TextPackKey(TextPackName::Items, "" + (STR_ITEM_NAME(item)))));
-                        result = Game.ReplaceText(result, "CUR", item.AmmoCount);
-                        result = Game.ReplaceText(result, "MAX", item.Weapon_MaxAmmoCount);
-                        result = Game.ReplaceText(result, "AMMO", Game.GetText(TextPackKey(TextPackName::Game, "" + (STR_CALIBER(item.Weapon_Caliber)))));
-                    }
+            if (item.Type == ItemType::Weapon) {
+                if (item.Weapon_MaxAmmoCount == 0) {
+                    result += Game.GetText(TextPackKey(TextPackName::Game, "" + (MsgStr::StrCritLookWeap)));
+                    result = Game.ReplaceText(result, "WEAPON", Game.GetText(TextPackKey(TextPackName::Items, "" + (MsgStr::ItemNameTextId(item)))));
                 }
                 else {
-                    result += Game.GetText(TextPackKey(TextPackName::Game, "" + (MsgStr::StrCritLookMisc)));
-                    result = Game.ReplaceText(result, "MISC", Game.GetText(TextPackKey(TextPackName::Items, "" + (STR_ITEM_NAME(item)))));
+                    result += Game.GetText(TextPackKey(TextPackName::Game, "" + (MsgStr::StrCritLookWeapAmmo)));
+                    result = Game.ReplaceText(result, "WEAPON", Game.GetText(TextPackKey(TextPackName::Items, "" + (MsgStr::ItemNameTextId(item)))));
+                    result = Game.ReplaceText(result, "CUR", item.AmmoCount);
+                    result = Game.ReplaceText(result, "Max", item.Weapon_MaxAmmoCount);
+                    result = Game.ReplaceText(result, "AMMO", Game.GetText(TextPackKey(TextPackName::Game, "" + (MsgStr::CaliberTextId(item.Weapon_Caliber)))));
                 }
+            }
+            else {
+                result += Game.GetText(TextPackKey(TextPackName::Game, "" + (MsgStr::StrCritLookMisc)));
+                result = Game.ReplaceText(result, "MISC", Game.GetText(TextPackKey(TextPackName::Items, "" + (MsgStr::ItemNameTextId(item)))));
             }
         }
         else // Simple
         {
-            result += Game.GetText(TextPackKey(TextPackName::Game, "" + (STR_CRIT_LOOK_WHO(gender))));
+            result += Game.GetText(TextPackKey(TextPackName::Game, "" + (MsgStr::CritLookWhoTextId(gender))));
 
             int hp_proc = cr.CurrentHp * 100 / cr.MaxLife;
             if (cr.IsDead()) {
-                result += Game.GetText(TextPackKey(TextPackName::Game, "" + (STR_CRIT_LOOK_STATE(0))));
+                result += Game.GetText(TextPackKey(TextPackName::Game, "" + (MsgStr::CritLookStateTextId(0))));
             }
             else if (hp_proc < 34) {
-                result += Game.GetText(TextPackKey(TextPackName::Game, "" + (STR_CRIT_LOOK_STATE(1))));
+                result += Game.GetText(TextPackKey(TextPackName::Game, "" + (MsgStr::CritLookStateTextId(1))));
             }
             else if (hp_proc < 67) {
-                result += Game.GetText(TextPackKey(TextPackName::Game, "" + (STR_CRIT_LOOK_STATE(2))));
+                result += Game.GetText(TextPackKey(TextPackName::Game, "" + (MsgStr::CritLookStateTextId(2))));
             }
             else if (hp_proc < 100) {
-                result += Game.GetText(TextPackKey(TextPackName::Game, "" + (STR_CRIT_LOOK_STATE(3))));
+                result += Game.GetText(TextPackKey(TextPackName::Game, "" + (MsgStr::CritLookStateTextId(3))));
             }
             else {
-                result += Game.GetText(TextPackKey(TextPackName::Game, "" + (STR_CRIT_LOOK_STATE(4))));
+                result += Game.GetText(TextPackKey(TextPackName::Game, "" + (MsgStr::CritLookStateTextId(4))));
             }
 
-            if (_CritIsInjured(cr)) {
+            if (Tla::IsCritterInjured(cr)) {
                 if (hp_proc < 90) {
                     result += Game.GetText(TextPackKey(TextPackName::Game, "" + (MsgStr::StrAnd)));
                 }
-                result += Game.GetText(TextPackKey(TextPackName::Game, "" + (STR_CRIT_LOOK_LIMBS(gender, hp_proc >= 90))));
+
+                result += Game.GetText(TextPackKey(TextPackName::Game, "" + (MsgStr::CritLookLimbsTextId(gender, hp_proc >= 90))));
             }
         }
+
         result += ".";
     }
 
     // Format tags
-    if (cr.Lexems != "") {
-        return Game.FormatTags(result, cr.Lexems);
+    if (cr.TextArgs != "") {
+        return Game.FormatTags(result, cr.TextArgs);
     }
+
     return result;
 }
 
 // //////////////////////////////////////////////////////////////////////////////////////////////////
 // Call to determine available timeouts.
-void get_available_timeouts(CritterProperty[] & timeouts)
+void GetAvailableTimeouts(CritterProperty[] & timeouts)
 {
     for (int i = 0; i < CritterPropertyGroup::Timeouts.length(); i++) {
         timeouts.insertLast(CritterPropertyGroup::Timeouts[i]);
@@ -1233,7 +1284,7 @@ void get_available_timeouts(CritterProperty[] & timeouts)
 // //////////////////////////////////////////////////////////////////////////////////////////////////
 // Call on some critter action.
 [[Event]]
-void critter_action(bool localCall, Critter cr, CritterAction action, int actionExt, AbstractItem? item)
+void CritterAction(bool localCall, Critter cr, CritterAction action, int actionExt, AbstractItem? item)
 {
     // Not process locally called actions
     if (cr.IsChosen && not localCall) {
@@ -1262,6 +1313,7 @@ void critter_action(bool localCall, Critter cr, CritterAction action, int action
     switch (action) {
     case CritterAction::MoveItem:
         if (cr.IsAlive()) {
+            verify(item != null, "Move item action requires item", cr);
             CritterItemSlot fromSlot = CritterItemSlot(actionExt);
             CritterItemSlot toSlot = item.CritterSlot;
 
@@ -1280,11 +1332,12 @@ void critter_action(bool localCall, Critter cr, CritterAction action, int action
                 cr.Animate(CritterStateAnim::None, CritterActionAnim::SwitchItems);
             }
         }
+
         break;
     case CritterAction::SwapItems:
         break;
     case CritterAction::UseItem:
-        if (cr.IsAlive() && proto != null) {
+        if (cr.IsAlive()) {
             if (proto.Type == ItemType::Weapon && cr.IsAnimAvailable(proto.Weapon_StateAnim, proto.Weapon_ActionAnim_0)) {
                 cr.Animate(proto.Weapon_StateAnim, proto.Weapon_ActionAnim_0, item);
             }
@@ -1292,22 +1345,24 @@ void critter_action(bool localCall, Critter cr, CritterAction action, int action
                 cr.Animate(CritterStateAnim::None, CritterActionAnim::Use, item);
             }
         }
+
         break;
     case CritterAction::DropItem:
         if (cr.IsAlive()) {
             cr.Animate(CritterStateAnim::None, CritterActionAnim::PickUp);
         }
+
         break;
     case CritterAction::UseWeapon:
-        if (cr.IsAlive() && proto != null) {
+        if (cr.IsAlive()) {
             int use = (actionExt & 0xF);
             int aim = ((actionExt >> 4) & 0xF);
             bool fail = (((actionExt >> 8) & 1) != 0);
 
             cr.Animate(CritterStateAnim::None, CritterActionAnim::PrepareWeapon);
 
-            Effects::PlayWeaponSound(SOUND_WEAPON_USE, _WeaponSoundId(proto, use), use != 1 ? '1' : '2');
-            cr.Animate(CritterStateAnim::None, _WeaponActionAnim(proto, use), item, true);
+            Effects::PlayWeaponSound(Tla::SOUND_WEAPON_USE, Tla::WeaponSoundId(proto, use), use != 1 ? '1' : '2');
+            cr.Animate(CritterStateAnim::None, Tla::WeaponActionAnim(proto, use), item, true);
 
             if (fail) {
                 cr.Animate(CritterStateAnim::None, CritterActionAnim::DamageFront, item);
@@ -1316,22 +1371,26 @@ void critter_action(bool localCall, Critter cr, CritterAction action, int action
                 cr.Animate(CritterStateAnim::None, CritterActionAnim::TurnOffWeapon, item, true);
             }
         }
+
         break;
     case CritterAction::ReloadWeapon:
-        if (cr.IsAlive() && proto != null) {
-            Effects::PlayWeaponSound(SOUND_WEAPON_RELOAD, proto.Weapon_SoundId_0, '1');
-            cr.Animate(item.Weapon_StateAnim, CritterActionAnim::Reload, item);
+        if (cr.IsAlive()) {
+            Effects::PlayWeaponSound(Tla::SOUND_WEAPON_RELOAD, proto.Weapon_SoundId_0, '1');
+            cr.Animate(proto.Weapon_StateAnim, CritterActionAnim::Reload, item);
         }
+
         break;
     case CritterAction::UseSkill:
         if (cr.IsAlive() && actionExt != CritterProperty::SkillSneak) {
             cr.Animate(CritterStateAnim::None, CritterActionAnim::Use);
         }
+
         break;
     case CritterAction::PickItem:
-        if (cr.IsAlive() && proto != null) {
+        if (cr.IsAlive()) {
             cr.Animate(CritterStateAnim::None, proto.GroundLevel ? CritterActionAnim::PickUp : CritterActionAnim::Use);
         }
+
         break;
     case CritterAction::PickCritter:
         if (cr.IsAlive()) {
@@ -1350,6 +1409,7 @@ void critter_action(bool localCall, Critter cr, CritterAction action, int action
                 break;
             }
         }
+
         break;
     case CritterAction::OperateContainer:
         if (cr.IsAlive()) {
@@ -1363,11 +1423,13 @@ void critter_action(bool localCall, Critter cr, CritterAction action, int action
                 cr.Animate(CritterStateAnim::None, CritterActionAnim::Use);
             }
         }
+
         break;
     case CritterAction::Dodge:
         if (not cr.IsAnimPlaying() && cr.IsAlive()) {
             cr.Animate(CritterStateAnim::None, actionExt == 0 ? CritterActionAnim::DodgeFront : CritterActionAnim::DodgeBack);
         }
+
         break;
     case CritterAction::Damage:
         if (not cr.IsAnimPlaying()) {
@@ -1387,6 +1449,7 @@ void critter_action(bool localCall, Critter cr, CritterAction action, int action
             // CritterActionAnim::Run_DAMAGE_FRONT
             // CritterActionAnim::Run_DAMAGE_BACK
         }
+
         break;
     case CritterAction::DamageForce:
         if (cr.IsAlive()) {
@@ -1395,26 +1458,31 @@ void critter_action(bool localCall, Critter cr, CritterAction action, int action
         else if (cr.IsKnockout()) {
             cr.Animate(CritterStateAnim::None, actionExt == 0 ? CritterActionAnim::DamageProneFront : CritterActionAnim::DamageProneBack);
         }
+
         break;
     case CritterAction::Knockout:
         if (not cr.IsKnockout()) {
             cr.Animate(CritterStateAnim::None, CritterActionAnim(actionExt));
         }
+
         break;
     case CritterAction::StandUp:
         if (cr.IsKnockout()) {
             cr.Animate(CritterStateAnim::None, CritterActionAnim(actionExt));
         }
+
         break;
     case CritterAction::Fidget:
         if (cr.IsAlive() && not cr.IsAnimPlaying()) {
             cr.Animate(CritterStateAnim::None, CritterActionAnim::Fidget);
         }
+
         break;
     case CritterAction::Dead:
         if (not cr.IsDead()) {
             cr.Animate(CritterStateAnim::None, CritterActionAnim(actionExt));
         }
+
         break;
     case CritterAction::Connect:
         break;
@@ -1435,7 +1503,7 @@ void critter_action(bool localCall, Critter cr, CritterAction action, int action
 // Collection constants see in Items collections _client_defines.fos
 // If you want disable showing than just null pointer in collection
 [[Event]]
-void items_collection(int collection, Item[] items)
+void ItemsCollection(int collection, Item[] items)
 {
     // Example
     // Disable showing of all weapons in USE mode:
@@ -1449,30 +1517,30 @@ void items_collection(int collection, Item[] items)
 
 // //////////////////////////////////////////////////////////////////////////////////////////////////
 // Called to check interface hit.
-bool check_interface_hit(int x, int y)
+bool CheckInterfaceHit(int x, int y)
 {
     return Gui::CheckHit(ipos(x, y));
 }
 
 // //////////////////////////////////////////////////////////////////////////////////////////////////
 // Called to check current container item under mouse.
-bool get_cont_item(ident& itemId, bool& isEnemy)
+bool GetContItem(ident& itemId, bool& isEnemy)
 {
-    Gui::Screen screen = Gui::GetActiveScreen(GuiScreen::Inventory);
+    Gui::Screen? screen = Gui::GetActiveScreen(GuiScreen::Inventory);
     if (screen == null) {
         return false;
     }
 
     if (Gui::Cursor == CursorType::Default) {
-        Gui::Object hitObj = screen.FindMouseHit();
+        Gui::Object? hitObj = screen.FindMouseHit();
         if (hitObj != null && hitObj.Grid != null) {
-            Gui::ItemView itemView = cast<Gui::ItemView>(hitObj.Grid);
+            Gui::ItemView? itemView = cast<Gui::ItemView?>(hitObj.Grid);
             if (itemView != null) {
-                Item item = itemView.GetItem(hitObj.CellIndex);
+                Item? item = itemView.GetItem(hitObj.CellIndex);
                 if (item != null) {
                     itemId = item.Id;
-                    isEnemy = (itemView.UserDataExt == ITEMS_BARTER_OPPONENT || itemView.UserDataExt == ITEMS_BARTER_OPPONENT_OFFER ||
-                               itemView.UserDataExt == ITEMS_PICKUP_FROM);
+                    isEnemy = (itemView.UserDataExt == ClientDefines::ITEMS_BARTER_OPPONENT ||
+                               itemView.UserDataExt == ClientDefines::ITEMS_BARTER_OPPONENT_OFFER || itemView.UserDataExt == ClientDefines::ITEMS_PICKUP_FROM);
                 }
             }
         }
@@ -1490,18 +1558,19 @@ bool ItemsDragAndDropHandler(Gui::Object obj, Gui::Object? target)
     }
 
     // Destination
-    Gui::ItemView targetItemView;
-    Item targetItem;
+    Gui::ItemView? targetItemView = null;
+    Item? targetItem;
     if (target != null) {
         if (target.Grid != null) {
-            targetItemView = cast<Gui::ItemView>(target.Grid);
+            targetItemView = cast<Gui::ItemView?>(target.Grid);
             if (targetItemView == null) {
                 return false;
             }
+
             targetItem = targetItemView.GetItem(target.CellIndex);
         }
         else {
-            targetItemView = cast<Gui::ItemView>(target);
+            targetItemView = cast<Gui::ItemView?>(target);
             if (targetItemView == null) {
                 return false;
             }
@@ -1509,11 +1578,12 @@ bool ItemsDragAndDropHandler(Gui::Object obj, Gui::Object? target)
     }
 
     // Source
-    Gui::ItemView objItemView = cast<Gui::ItemView>(obj.Grid);
+    Gui::ItemView? objItemView = cast<Gui::ItemView?>(obj.Grid);
     if (objItemView == null) {
         return false;
     }
-    Item objItem = objItemView.GetItem(obj.CellIndex);
+
+    Item? objItem = objItemView.GetItem(obj.CellIndex);
     if (objItem == null) {
         return false;
     }
@@ -1521,19 +1591,20 @@ bool ItemsDragAndDropHandler(Gui::Object obj, Gui::Object? target)
     // Drop item
     if (targetItemView == null) {
         if (objItem.Stackable && objItem.Count > 1) {
-            Gui::ShowScreen(GuiScreen::Split, dict<string, any> = {{"TargetItemId", objItem.Id}, {"ItemsCollection", ITEMS_CHOSEN_ALL}});
+            Gui::ShowScreen(GuiScreen::Split, dict<string, any> = {{"TargetItemId", objItem.Id}, {"ItemsCollection", ClientDefines::ITEMS_CHOSEN_ALL}});
         }
         else {
             ChosenActions::SetChosenActions({Tla::ChosenMoveItem, objItem.Id, objItem.Count, CritterItemSlot::Outside, 0, 0, 0});
         }
+
         return true;
     }
 
     // Barter
-    if ((objItemView.UserDataExt == ITEMS_BARTER && targetItemView.UserDataExt == ITEMS_BARTER_OFFER) ||
-        (objItemView.UserDataExt == ITEMS_BARTER_OPPONENT && targetItemView.UserDataExt == ITEMS_BARTER_OPPONENT_OFFER) ||
-        (objItemView.UserDataExt == ITEMS_BARTER_OFFER && targetItemView.UserDataExt == ITEMS_BARTER) ||
-        (objItemView.UserDataExt == ITEMS_BARTER_OPPONENT_OFFER && targetItemView.UserDataExt == ITEMS_BARTER_OPPONENT)) {
+    if ((objItemView.UserDataExt == ClientDefines::ITEMS_BARTER && targetItemView.UserDataExt == ClientDefines::ITEMS_BARTER_OFFER) ||
+        (objItemView.UserDataExt == ClientDefines::ITEMS_BARTER_OPPONENT && targetItemView.UserDataExt == ClientDefines::ITEMS_BARTER_OPPONENT_OFFER) ||
+        (objItemView.UserDataExt == ClientDefines::ITEMS_BARTER_OFFER && targetItemView.UserDataExt == ClientDefines::ITEMS_BARTER) ||
+        (objItemView.UserDataExt == ClientDefines::ITEMS_BARTER_OPPONENT_OFFER && targetItemView.UserDataExt == ClientDefines::ITEMS_BARTER_OPPONENT)) {
         if (objItem.Stackable && objItem.Count > 1) {
             Gui::ShowScreen(GuiScreen::Split, dict<string, any> = {{"TargetItemId", objItem.Id}, {"ItemsCollection", objItemView.UserDataExt}});
         }
@@ -1541,12 +1612,13 @@ bool ItemsDragAndDropHandler(Gui::Object obj, Gui::Object? target)
             ClientItems::BarterTransfer(objItem.Id, objItemView.UserDataExt, objItem.Count);
             //Game.CustomCall("BarterMoveItem " + objItem.Id + " " + objItemView.UserDataExt + " " + objItem.Count);
         }
+
         return true;
     }
 
     // Loot
-    if ((objItemView.UserDataExt == ITEMS_PICKUP && targetItemView.UserDataExt == ITEMS_PICKUP_FROM) ||
-        (objItemView.UserDataExt == ITEMS_PICKUP_FROM && targetItemView.UserDataExt == ITEMS_PICKUP)) {
+    if ((objItemView.UserDataExt == ClientDefines::ITEMS_PICKUP && targetItemView.UserDataExt == ClientDefines::ITEMS_PICKUP_FROM) ||
+        (objItemView.UserDataExt == ClientDefines::ITEMS_PICKUP_FROM && targetItemView.UserDataExt == ClientDefines::ITEMS_PICKUP)) {
         if (objItem.Stackable && objItem.Count > 1) {
             // Game.CustomCall( "SplitItem " + objItem.Id + " " + objItemView.UserDataExt );
             Gui::ShowScreen(GuiScreen::Split, dict<string, any> = {{"TargetItemId", objItem.Id}, {"ItemsCollection", objItemView.UserDataExt}});
@@ -1558,26 +1630,30 @@ bool ItemsDragAndDropHandler(Gui::Object obj, Gui::Object? target)
             for (int i = 0; i < useItemAction.length(); i++) {
                 actions.insertLast(useItemAction[i]);
             }
+
             ChosenActions::SetChosenActions(actions);
         }
+
         return true;
     }
 
     // Load ammo
-    if ((objItemView.UserDataExt == ITEMS_INVENTORY || objItemView.UserDataExt == ITEMS_CHOSEN_ALL) && targetItem != null && objItem.Type == ItemType::Ammo &&
-        targetItem.Type == ItemType::Weapon) {
+    if ((objItemView.UserDataExt == ClientDefines::ITEMS_INVENTORY || objItemView.UserDataExt == ClientDefines::ITEMS_CHOSEN_ALL) && targetItem != null &&
+        objItem.Type == ItemType::Ammo && targetItem.Type == ItemType::Weapon) {
         if (objItem.Ammo_Caliber == targetItem.Weapon_Caliber &&
             (targetItem.AmmoCount < targetItem.Weapon_MaxAmmoCount || targetItem.AmmoPid != objItem.ProtoId)) {
             any[] actions = {};
             ChosenActions::GetChosenActions(actions);
-            any[] useItemAction = {Tla::ChosenUseItem, targetItem.Id, 0, TARGET_SELF_ITEM, objItem.Id, USE_RELOAD, 0};
+            any[] useItemAction = {Tla::ChosenUseItem, targetItem.Id, 0, ClientDefines::TARGET_SELF_ITEM, objItem.Id, Tla::USE_RELOAD, 0};
             for (int i = 0; i < useItemAction.length(); i++) {
                 actions.insertLast(useItemAction[i]);
             }
+
             ChosenActions::SetChosenActions(actions);
             return true;
         }
     }
+
     // Transfer between slots
     int objSlot = objItemView.UserData;
     int targetSlot = targetItemView.UserData;
@@ -1588,30 +1664,32 @@ bool ItemsDragAndDropHandler(Gui::Object obj, Gui::Object? target)
         for (int i = 0; i < useItemAction.length(); i++) {
             actions.insertLast(useItemAction[i]);
         }
+
         ChosenActions::SetChosenActions(actions);
         return true;
     }
+
     return true;
 }
 
 // //////////////////////////////////////////////////////////////////////////////////////////////////
 // Event on create lmenu node collection.
 // In nodes located collected nodes by engine.
-void lmenu_collect_nodes(Critter cr, Item item, int[] & nodes)
+void LmenuCollectNodes(Critter cr, Item item, int[] & nodes)
 {
     //
 }
 
 // //////////////////////////////////////////////////////////////////////////////////////////////////
 // Event on lmenu node selection.
-bool lmenu_node_select(int nodeType, Critter cr, Item item)
+bool LmenuNodeSelect(int nodeType, Critter cr, Item item)
 {
     // Pass to engine handler
     return false;
 }
 
 [[Event]]
-void on_screen_size_changed()
+void OnScreenSizeChanged()
 {
     Gui::Callback_OnResolutionChanged();
 }

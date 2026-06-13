@@ -12,30 +12,30 @@ namespace NcrMichael
 ///@ Property Critter Server int32 NcrMichealMessageNum Mutable Persistent
 ///@ Property Map Server ident NcrMichaelCritterId Mutable Persistent
 
-#define HEX_EXIT_GRID               (HASHI(17))  // гекс перехода базар/центр города
-#define NPC_ROLE_PRIVATE            (317)        // рядовой на воротах (юг)
-#define NPC_ROLE_MAIN               (318)        // командир охраны на воротах (север)
-#define MSG_NUM_INCOMING_MIKE       (317)        // номер сообщения - Майк приближается.
-#define MSG_NUM_INCOMING_MIKE_GUARD (318)        // номер сообщения - Майк приближается.
-#define HEX_NEW_MIKE_HOME           (HASHI(171)) // номер гекса новой домашней позиции майка
+const hstring HEX_EXIT_GRID = ("" + 17).hstr();      // гекс перехода базар/центр города
+const int NPC_ROLE_PRIVATE = 317;                    // рядовой на воротах (юг)
+const int NPC_ROLE_MAIN = 318;                       // командир охраны на воротах (север)
+const int MSG_NUM_INCOMING_MIKE = 317;               // номер сообщения - Майк приближается.
+const int MSG_NUM_INCOMING_MIKE_GUARD = 318;         // номер сообщения - Майк приближается.
+const hstring HEX_NEW_MIKE_HOME = ("" + 171).hstr(); // номер гекса новой домашней позиции майка
 
-#define MSG_NUM_START_MOVE          (2910) // {2910}{}{Посмотрим, что изменилось в Республике...}
-#define MSG_NUM_SEE_MIKE            (2911) // {2911}{}{Бог ты мой, это же Майкл! Майкл, какими судьбами?}
-#define MSG_NUM_SHOUT               (2912) // {2912}{}{Отставить базар! Ему разрешено пройти.}
+const int MSG_NUM_START_MOVE = 2910; // {2910}{}{Посмотрим, что изменилось в Республике...}
+const int MSG_NUM_SEE_MIKE = 2911;   // {2911}{}{Бог ты мой, это же Майкл! Майкл, какими судьбами?}
+const int MSG_NUM_SHOUT = 2912;      // {2912}{}{Отставить базар! Ему разрешено пройти.}
 
 // вызов из диалога - начало движения
 [[DialogResult]]
-void r_PrepareComing(Critter player, Critter npc, any val)
+void PrepareComing(Critter player, Critter npc, any val)
 {
     // движение начинаем через 3 игровые минуты
-    NpcPlanes::AddMiscPlane(npc, 2, Game.SynchronizedTime + Time::GameMinutes(3), NcrMichael::plane_StartMichaelMove);
+    NpcPlanes::AddMiscPlane(npc, 2, Game.SynchronizedTime + Time::GameMinutes(3), NcrMichael::StartMichaelMove);
 
     npc.NcrMichealMessageNum = MSG_NUM_INCOMING_MIKE;
-    npc.OnNpcPlaneEnd.Subscribe(_MichaelPlaneEnd);
+    npc.OnNpcPlaneEnd.Subscribe(MichaelPlaneEnd);
 }
 
 // начало движения
-void plane_StartMichaelMove(Critter npc)
+void StartMichaelMove(Critter npc)
 {
     // сообщаем миру о начале движения
     Messaging::SayOnHead(npc, TextPackKey(TextPackName::Text, "" + (MSG_NUM_START_MOVE))); // "Посмотрим, что изменилось в Республике...");
@@ -45,6 +45,7 @@ void plane_StartMichaelMove(Critter npc)
     if (!Entrance::GetNearEntry(npc.GetMap(), HEX_EXIT_GRID, hex)) {
         return;
     }
+
     // при установке новой домащней позиции, Майкл туда проследует, когда закончит все текущие планы
     npc.HomeHex = hex;
     npc.HomeDir = HDIR_Random.value;
@@ -52,9 +53,9 @@ void plane_StartMichaelMove(Critter npc)
 
 // завершение выполнения некоего плана
 [[Event]]
-EventResult _MichaelPlaneEnd(Critter npc, int planeId, int reason, Critter someCr, Item someItem)
+EventResult MichaelPlaneEnd(Critter npc, int planeId, int reason, Critter someCr, Item someItem)
 {
-    NpcPlanes::NpcPlane plane = NpcPlanes::GetCritterPlane(npc, planeId);
+    NpcPlanes::NpcPlane? plane = NpcPlanes::GetCritterPlane(npc, planeId);
 
     // Messaging::SayOnHead(npc, "Plane end. ID: " + plane.Identifier + " reason: " + reason);
     // завершен план следования к экзит гриду
@@ -63,10 +64,14 @@ EventResult _MichaelPlaneEnd(Critter npc, int planeId, int reason, Critter someC
         // майкл отправляет сообщение "Я пришел" для охранников на входе города
         SendMessage::ToWhoSeesMe(npc, MSG_NUM_INCOMING_MIKE, 0);
         // телепорт майкла в центр города. Будет торчать в баре Дасти
-        Map map = Game.GetMap(Content::Map::ncr_downtown);
-        Map map_bazaar = npc.GetMap();
+        Map? map = Game.GetMap(Content::Map::ncr_downtown);
+        Map? map_bazaar = npc.GetMap();
         if (map == null) {
             Game.Log("Michael teleport map not found error");
+            return EventResult::StopChain;
+        }
+
+        if (map_bazaar == null) {
             return EventResult::StopChain;
         }
 
@@ -83,33 +88,33 @@ EventResult _MichaelPlaneEnd(Critter npc, int planeId, int reason, Critter someC
         // а вот если будет очищена карта Базара, а Майкл уже телепортирован в центр города, копию в центре городу нужно удалить, иначе будет существовать два
         // майкла
         map_bazaar.NcrMichaelCritterId = npc.Id;
-        map_bazaar.OnFinish.Subscribe(_eOnFinishMap);
+        map_bazaar.OnFinish.Subscribe(EOnFinishMap);
     }
 
     return EventResult::StopChain;
 }
 
 // для рядового охранника, слева у входа стоит
-void _PrivateGuardInit(Critter npc, bool firstTime)
+void PrivateGuardInit(Critter npc, bool firstTime)
 {
     if (firstTime) {
         npc.NpcRole = NPC_ROLE_PRIVATE;
-        npc.OnMessage.Subscribe(_NpcOnMessage);
+        npc.OnMessage.Subscribe(NpcOnMessage);
     }
 }
 
 // для главного охранника (справа у входа в город)
-void _MainGuardInit(Critter npc, bool firstTime)
+void MainGuardInit(Critter npc, bool firstTime)
 {
     if (firstTime) {
         npc.NpcRole = NPC_ROLE_MAIN;
-        npc.OnMessage.Subscribe(_NpcOnMessage);
+        npc.OnMessage.Subscribe(NpcOnMessage);
     }
 }
 
 // обработка сообщения от майкла "я пришел"
 [[Event]]
-void _NpcOnMessage(Critter npcB, Critter npcA, int num, any val)
+void NpcOnMessage(Critter npcB, Critter npcA, int num, any val)
 {
     // сначала говорит рядовой
     if (num == MSG_NUM_INCOMING_MIKE && npcB.NpcRole == NPC_ROLE_PRIVATE) {
@@ -122,12 +127,12 @@ void _NpcOnMessage(Critter npcB, Critter npcA, int num, any val)
     // ему отвечает сержант
     if (num == MSG_NUM_INCOMING_MIKE_GUARD && npcB.NpcRole == NPC_ROLE_MAIN) {
         // отвечает не мгновенно, иначе непонятно. кто первым прокомментировал появление Майкла
-        NpcPlanes::AddMiscPlane(npcB, 2, Game.SynchronizedTime + Time::GameMinutes(1), NcrMichael::plane_MainGuardAnswer);
+        NpcPlanes::AddMiscPlane(npcB, 2, Game.SynchronizedTime + Time::GameMinutes(1), NcrMichael::MainGuardAnswer);
     }
 }
 
 // ответ Сержанта у ворот
-void plane_MainGuardAnswer(Critter npc)
+void MainGuardAnswer(Critter npc)
 {
     Messaging::SayShoutOnHead(npc,
                               TextPackKey(TextPackName::Text, "" + (MSG_NUM_SHOUT))); // npc.Say(SAY_SHOUT_ON_HEAD,"Отставить базар! Ему разрешено пройти.");
@@ -136,16 +141,18 @@ void plane_MainGuardAnswer(Critter npc)
 // при очистке карты базара, если Майкл уже там нужно удалить его копию
 // иначе будет существовать два Майкла одновременно
 [[Event]]
-void _eOnFinishMap(Map map)
+void EOnFinishMap(Map map)
 {
-    Map map_downtown = Game.GetMap(Content::Map::ncr_downtown);
+    Map? map_downtown = Game.GetMap(Content::Map::ncr_downtown);
     if (map_downtown == null) {
         return;
     }
-    Critter npc = map_downtown.GetCritter(map.NcrMichaelCritterId);
+
+    Critter? npc = map_downtown.GetCritter(map.NcrMichaelCritterId);
     if (npc == null) {
         return;
     }
+
     Game.DestroyCritter(npc);
 }
 

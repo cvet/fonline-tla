@@ -7,27 +7,40 @@ namespace SmokeGrenade // Sort 2
 
 ///@ Property Item Server ident SmokeGrenadeOwnerId Mutable Persistent
 
-#define MAX_STEP            (5)
-#define SMOKE_TOHIT_PENALTY #(attacker)(attacker.ControlledByPlayer ? 80 : 40)
-#define GAS_TOHIT_PENALTY   #(attacker)(attacker.ControlledByPlayer ? 50 : 25)
-#define RND                 #(v1, v2)(Game.Random(v1, v2) == 1)
+const int MAX_STEP = 5;
+int SmokeToHitPenalty(Critter attacker)
+{
+    return attacker.ControlledByPlayer ? 80 : 40;
+}
+int GasToHitPenalty(Critter attacker)
+{
+    return attacker.ControlledByPlayer ? 50 : 25;
+}
+bool RandomRoll(int v1, int v2)
+{
+    return Game.Random(v1, v2) == 1;
+}
 
 int GetSmokePenalty(Map? map, Critter? attacker, Critter? target)
 {
     if (map != null) {
         if (attacker != null && map.GetItemOnHex(attacker.Hex, Content::Item::smoke) != null) {
-            return SMOKE_TOHIT_PENALTY(attacker);
+            return SmokeToHitPenalty(attacker);
         }
+
         if (target != null && map.GetItemOnHex(target.Hex, Content::Item::smoke) != null) {
-            return SMOKE_TOHIT_PENALTY(attacker);
+            return attacker != null ? SmokeToHitPenalty(attacker) : 0;
         }
+
         if (attacker != null && map.GetItemOnHex(attacker.Hex, Content::Item::mustard_gas) != null) {
-            return GAS_TOHIT_PENALTY(attacker);
+            return GasToHitPenalty(attacker);
         }
+
         if (target != null && map.GetItemOnHex(target.Hex, Content::Item::mustard_gas) != null) {
-            return GAS_TOHIT_PENALTY(attacker);
+            return attacker != null ? GasToHitPenalty(attacker) : 0;
         }
     }
+
     return 0;
 }
 
@@ -40,25 +53,30 @@ void SmokeBlast(Map map, mpos hex, hstring smokePid, ident ownerId)
 [[TimeEvent]]
 void DoSmokeBlast(any[] values)
 {
-    Map map = Game.GetMap(ident(values[0]));
+    Map? map = Game.GetMap(ident(values[0]));
+    if (map == null) {
+        return;
+    }
+
     mpos hex = mpos(values[1], values[2]);
     int step = values[3];
     hstring pid = values[4];
     ident ownerId = values[5];
     int penaltyLowSkill = 0;
     if (ownerId != ZERO_IDENT) {
-        Critter cr = Game.GetCritter(ownerId);
+        Critter? cr = Game.GetCritter(ownerId);
         if (cr != null) {
-            penaltyLowSkill = 4 - int(CLAMP(cr.SkillThrowing, 0, 100) / 25);
+            penaltyLowSkill = 4 - int(Tla::Clamp(cr.SkillThrowing, 0, 100) / 25);
         }
     }
+
     if (step > (MAX_STEP - penaltyLowSkill)) {
         return;
     }
 
     ident[] smokeIds = {};
     Effects::PlaySound(map, "gas.wav", hex, 25);
-    AddSmoke(map, hex, (step == 0 || (step < 2 && RND(1, 2))), pid, ownerId, smokeIds);
+    AddSmoke(map, hex, (step == 0 || (step < 2 && RandomRoll(1, 2))), pid, ownerId, smokeIds);
 
     for (int curStep = 1; curStep < step; curStep++) {
         hex = mpos(values[1], values[2]);
@@ -66,7 +84,7 @@ void DoSmokeBlast(any[] values)
         for (int i = 0; i < 6; i++) {
             for (int j = 0; j < curStep; j++) {
                 map.MoveHexByDir(hex, i, 1);
-                AddSmoke(map, hex, (curStep + 2 > step) || ((curStep + 3 > step) && RND(1, 2)) || RND(1, 3), pid, ownerId, smokeIds);
+                AddSmoke(map, hex, (curStep + 2 > step) || ((curStep + 3 > step) && RandomRoll(1, 2)) || RandomRoll(1, 3), pid, ownerId, smokeIds);
             }
         }
     }
@@ -93,14 +111,15 @@ void DeleteSmokes(any[] values)
         if (values[i] == 0) {
             continue;
         }
-        Item item = Game.GetItem(values[i]);
+
+        Item? item = Game.GetItem(values[i]);
         if (item != null) {
             Game.DestroyItem(item);
         }
     }
 }
 
-void _SmokeInit(Item item, bool firstTime)
+void SmokeInit(Item item, bool firstTime)
 {
     if (!firstTime) {
         Game.DestroyItem(item);
@@ -109,14 +128,15 @@ void _SmokeInit(Item item, bool firstTime)
         item.NoBlock = true;
         item.ShootThru = true;
         if (item.ProtoId == Content::Item::mustard_gas) {
-            item.OnCritterWalk.Subscribe(_MustardGasWalk);
+            item.OnCritterWalk.Subscribe(MustardGasWalk);
         }
+
         // item.OnFinish.Subscribe(_SmokeFinish);
     }
 }
 
 [[Event]]
-void _MustardGasWalk(Item mine, Critter cr, bool entered, mdir dir)
+void MustardGasWalk(Item mine, Critter cr, bool entered, mdir dir)
 {
     if (entered) {
         if (cr.ControlledByPlayer && !cr.IsNoPvp) {
@@ -134,11 +154,9 @@ void AddSmoke(Map? map, mpos hex, bool place, hstring pid, ident ownerId, ident[
 {
     if (map != null && place && (map.IsHexMovable(hex) || map.GetCritterOnHex(hex) != null)) {
         Item item = map.AddItem(hex, pid, 1);
-        if (item != null) {
-            item.SmokeGrenadeOwnerId = ownerId;
-            ids.insertLast(item.Id);
-            item.SetupScript(_SmokeInit);
-        }
+        item.SmokeGrenadeOwnerId = ownerId;
+        ids.insertLast(item.Id);
+        item.SetupScript(SmokeInit);
     }
 }
 

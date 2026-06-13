@@ -16,21 +16,22 @@ namespace PatternCommon
 const int MsgAttackTarget = 156;
 const int MsgPlayerMustDie = 157;
 const int MsgHealme = 356;
-#define MSG_ATTACKING_PLAYER (357)
-#define MSG_COVERME          (358)
+const int MSG_ATTACKING_PLAYER = 357;
+const int MSG_COVERME = 358;
 // радиус реакции на сообщения, если расстояние между тем, кто отправил сообщение и тем, кто его принял меньше либо равно радиусу
 // получатель сообщения отреагирует, иначе проигнорирует сообшение
-#define ATMSG_HELP_DIST (12)
+const int ATMSG_HELP_DIST = 12;
 
 class CommonPattern
 {
     // вспомогательная функция - определяет, должен ли получатель реагировать на сообщение
-    bool _MsgReact(Critter sender, Critter reciever, int msg)
+    bool MsgReact(Critter sender, Critter reciever, int msg)
     {
         int dist = Game.GetDistance(sender, reciever);
         if (dist == 0) {
             return false;
         }
+
         if (sender.Id == reciever.Id) {
             return false;
         }
@@ -43,32 +44,34 @@ class CommonPattern
         default:
             break;
         }
+
         return false;
     }
 
     // Вспомогательная функция - попытка использовать стимпак, если он есть в инвентаре
     // Если здоровья меньше 50% и в инвентаре есть стимпаки
-    void _TryUseStim(Critter cr)
+    void TryUseStim(Critter cr)
     {
         if (!cr.IsAlive()) {
             return;
         }
+
         if (cr.CurrentHp * 100 > cr.MaxLife * 50) {
             return;
         }
 
         if (cr.CountItem(Content::Item::super_stimpak) > 0 || cr.CountItem(Content::Item::stimpak) > 0) {
-            Item item = cr.GetItem((cr.CountItem(Content::Item::super_stimpak) > 0 ? Content::Item::super_stimpak : Content::Item::stimpak));
+            Item? item = cr.GetItem((cr.CountItem(Content::Item::super_stimpak) > 0 ? Content::Item::super_stimpak : Content::Item::stimpak));
             Drugs::UseDrugOn(cr, cr, item);
-            _CritAnimateUse(cr);
+            Tla::AnimateCritterUse(cr);
             return;
         }
     }
 
     // Игрок в радиусе видимости
-    void _ShowCritter(Critter cr, Critter showCrit)
+    void ShowCritter(Critter cr, Critter showCrit)
     {
-        if (!NpcPlanes::IsCurPlane(cr, AI_PLANE_ATTACK) && showCrit.ControlledByPlayer) {
+        if (!NpcPlanes::IsCurPlane(cr, NpcPlanes::AI_PLANE_ATTACK) && showCrit.ControlledByPlayer) {
             NpcPlanes::NpcPlane[] planes = {};
             int count = NpcPlanes::GetPlanes(cr, planes);
             if (count > 0) {
@@ -79,20 +82,21 @@ class CommonPattern
                     }
                 }
             }
+
             AttackPlayer(cr, showCrit);
         }
     }
 
     // Криттер атакован
-    bool _Attacked(Critter cr, Critter attacker)
+    bool Attacked(Critter cr, Critter attacker)
     {
-        _TryUseStim(cr);
+        TryUseStim(cr);
         SendMessage::ToAllOnMap(cr, MsgHealme, 0);
         return false;
     }
 
     // Криттер убит
-    void _Dead(Critter cr, Critter killer)
+    void Dead(Critter cr, Critter killer)
     {
         if (!cr.IsDead()) {
             return;
@@ -111,18 +115,22 @@ class CommonPattern
     }
 
     // начало выполнения плана
-    bool _PlaneBegin(Critter cr, int planeId, int reason, Critter someCr, Item someItem)
+    bool PlaneBegin(Critter cr, int planeId, int reason, Critter someCr, Item someItem)
     {
-        NpcPlanes::NpcPlane plane = NpcPlanes::GetCritterPlane(cr, planeId);
+        NpcPlanes::NpcPlane? plane = NpcPlanes::GetCritterPlane(cr, planeId);
+        if (plane == null) {
+            return true;
+        }
 
-        if (plane.Type == AI_PLANE_ATTACK) {
-            Critter target = Game.GetCritter(plane.Attack_TargId);
+        if (plane.Type == NpcPlanes::AI_PLANE_ATTACK) {
+            Critter? target = Game.GetCritter(plane.Attack_TargId);
             if (target != null && target.TeamId == cr.TeamId) {
                 NpcPlanes::EraseAttackPlane(cr, target);
                 NpcPlanes::EraseAttackPlane(target, cr);
                 return false; // Отмена атаки криттера из своей группы.
             }
         }
+
         return true;
     }
 
@@ -136,6 +144,7 @@ class CommonPattern
         if (!player.ControlledByPlayer) {
             return;
         }
+
         NpcPlanes::AddAttackPlane(cr, priority, player);
     }
 
@@ -147,11 +156,12 @@ class CommonPattern
 /* **************************************** Вспомогательные функции **************************************** */
 // Находит минимум и максимум в массиве целых. Если не найдены - вернет ложь
 bool
-_GetLimits(int[] arr, int min, int max)
+GetLimits(int[] arr, int min, int max)
 {
     if (arr.length() == 0) {
         return false;
     }
+
     min = arr[0];
     max = arr[0];
     for (int i = 0; i < arr.length(); i++) {
@@ -161,12 +171,13 @@ _GetLimits(int[] arr, int min, int max)
 
     return true;
 }
+
 // Находит индекс минимального значения в массиве
-bool _GetFirstMinIndex(int[] arr, int& minIndex)
+bool GetFirstMinIndex(int[] arr, int& minIndex)
 {
     int min = 0;
     int max = 0;
-    if (!_GetLimits(arr, min, max)) {
+    if (!GetLimits(arr, min, max)) {
         return false;
     }
 
@@ -175,28 +186,32 @@ bool _GetFirstMinIndex(int[] arr, int& minIndex)
             minIndex = i;
         }
     }
+
     return false;
 }
+
 // Берет случайный элемент массива из всех элементов, равных максимуму в данном массиве
-bool _GetRandomMaxIndex(int[] arr, int maxIndex)
+bool GetRandomMaxIndex(int[] arr, int maxIndex)
 {
     int min = 0;
     int max = 0;
-    if (!_GetLimits(arr, min, max)) {
+    if (!GetLimits(arr, min, max)) {
         return false;
     }
+
     int[] maxes = {};
     for (int i = 0; i < arr.length(); i++) {
         if (arr[i] == max) {
             maxes.insertLast(i);
         }
     }
+
     maxIndex = maxes[Game.Random(0, maxes.length() - 1)];
     return true;
 }
 
 /* Раньше, из-за инклуд, этот скрипт распространялся на все другие скрипты, включающие его, теперь метод нужно отдельно прописать в каждом наследнике.
-   void _CritterInit( Critter cr, bool firstTime )
+   void CritterInit( Critter cr, bool firstTime )
    {
     pattern.SetEvents( cr );
    }

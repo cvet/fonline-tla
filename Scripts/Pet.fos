@@ -21,16 +21,18 @@ namespace Pet
 ///@ Property Item Server ident PetId Mutable Persistent
 ///@ Property Item Server hstring PetProto Mutable Persistent
 
-#define OwnerLostDist (8) // Расстояние в гексах до хозяина, после превышения которого пет бежит за ним
+const int OwnerLostDist = 8; // Расстояние в гексах до хозяина, после превышения которого пет бежит за ним
 
-#define ROLE_PET      (765567) // Внимание, эту роль нужно заблокировать
+const int ROLE_PET = 765567; // Внимание, эту роль нужно заблокировать
 
-// #define DL                     # (s) ( Game.Log( "Pet: " + s ) )
-#define DL #(s)
+// #define DebugLog                     # (s) ( Game.Log( "Pet: " + s ) )
+void DebugLog(string s)
+{
+}
 
 /* Pet */
 
-void _PetInit(Critter cr, bool firstTime)
+void PetInit(Critter cr, bool firstTime)
 {
     cr.IsInvulnerable = true;
     cr.IsNoSteal = true;
@@ -42,35 +44,36 @@ void _PetInit(Critter cr, bool firstTime)
     cr.IsNoTalk = true;
     cr.NpcRole = ROLE_PET;
 
-    cr.OnCritterDisappearedDist1.Subscribe(_PetHideCritter);
-    cr.OnNpcPlaneBegin.Subscribe(_PetPlanBegin);
-    cr.OnNpcPlaneEnd.Subscribe(_PetPlanEnd);
-    cr.OnSomeUseItemOnMe.Subscribe(_PetUseItemOnMe);
-    cr.OnAttacked.Subscribe(_PetAttacked);
-    cr.StartTimeEvent(Time::Asap(), Time::Seconds(1), _PetIdle);
+    cr.OnCritterDisappearedDist1.Subscribe(PetHideCritter);
+    cr.OnNpcPlaneBegin.Subscribe(PetPlanBegin);
+    cr.OnNpcPlaneEnd.Subscribe(PetPlanEnd);
+    cr.OnSomeUseItemOnMe.Subscribe(PetUseItemOnMe);
+    cr.OnAttacked.Subscribe(PetAttacked);
+    cr.StartTimeEvent(Time::Asap(), Time::Seconds(1), PetIdle);
 
     cr.ShowCritterDist1 = OwnerLostDist;
 }
 
 [[TimeEvent]]
-void _PetIdle(Critter cr)
+void PetIdle(Critter cr)
 {
     if (cr.IsAlive() && FollowMaster(cr, cr.PetOwnerId)) {
         if (Game.Random(1, 5) > 4 && NpcPlanes::IsNoPlanes(cr)) {
             MoveRandom::CritterMoveRandom(cr);
         }
+
         return;
     }
     else {
         if (cr.PetLifeTime + Time::Seconds(10) < Game.SynchronizedTime) {
-            DL("Deleting");
+            DebugLog("Deleting");
             Game.DestroyCritter(cr);
         }
     }
 }
 
 [[Event]]
-EventResult _PetAttacked(Critter cr, Critter attacker)
+EventResult PetAttacked(Critter cr, Critter attacker)
 {
     // При атаке пета он удаляется, чтобы всегда можно было освободить любой проход, если его занял пет
     Game.DestroyCritter(cr);
@@ -78,32 +81,36 @@ EventResult _PetAttacked(Critter cr, Critter attacker)
 }
 
 [[Event]]
-EventResult _PetUseItemOnMe(Critter cr, Critter whoUse, Item item, int param)
+EventResult PetUseItemOnMe(Critter cr, Critter whoUse, Item item, int param)
 {
     return (UseItem(cr, whoUse, item)) ? EventResult::StopChain : EventResult::StopChain;
 }
 
 [[Event]]
-EventResult _PetPlanBegin(Critter cr, int planeId, int reason, Critter someCr, Item someItem)
+EventResult PetPlanBegin(Critter cr, int planeId, int reason, Critter someCr, Item someItem)
 {
-    NpcPlanes::NpcPlane plane = NpcPlanes::GetCritterPlane(cr, planeId);
-
-    if (plane.Type == AI_PLANE_ATTACK) {
+    NpcPlanes::NpcPlane? plane = NpcPlanes::GetCritterPlane(cr, planeId);
+    if (plane == null) {
         return EventResult::StopChain;
     }
+
+    if (plane.Type == NpcPlanes::AI_PLANE_ATTACK) {
+        return EventResult::StopChain;
+    }
+
     return EventResult::StopChain;
 }
 
 [[Event]]
-EventResult _PetPlanEnd(Critter cr, int planeId, int reason, Critter someCr, Item someItem)
+EventResult PetPlanEnd(Critter cr, int planeId, int reason, Critter someCr, Item someItem)
 {
-    NpcPlanes::NpcPlane plane = NpcPlanes::GetCritterPlane(cr, planeId);
+    NpcPlanes::NpcPlane? plane = NpcPlanes::GetCritterPlane(cr, planeId);
 
     return EventResult::StopChain;
 }
 
 [[Event]]
-void _PetHideCritter(Critter cr, Critter hideCrit)
+void PetHideCritter(Critter cr, Critter hideCrit)
 {
     if (hideCrit.Id == cr.PetOwnerId) {
         if (!FollowMaster(cr, cr.PetOwnerId)) {
@@ -112,19 +119,20 @@ void _PetHideCritter(Critter cr, Critter hideCrit)
     }
 }
 
-#define MAX_DISTANCE (40) // При превышении этого значения пет удаляется
+const int MAX_DISTANCE = 40; // При превышении этого значения пет удаляется
 
 bool FollowMaster(Critter pet, ident idMaster)
 {
-    Critter cr = Game.GetCritter(idMaster);
+    Critter? cr = Game.GetCritter(idMaster);
     if (cr != null) {
-        Map mapCr = cr.GetMap();
-        Map mapPet = pet.GetMap();
+        Map? mapCr = cr.GetMap();
+        Map? mapPet = pet.GetMap();
         if (mapCr != null && mapPet != null && mapCr.Id == mapPet.Id) {
             int dist = Game.GetDistance(cr, pet);
             if (dist <= OwnerLostDist) {
                 return true;
             }
+
             if (dist > OwnerLostDist && dist < MAX_DISTANCE) {
                 mpos hex = cr.Hex;
                 if (Entrance::GetFreeHex(mapCr, 2, hex)) {
@@ -143,24 +151,26 @@ bool UseItem(Critter cr, Critter whoUse, Item item)
 {
     return false; // реакция по умолчанию
 }
+
 /* Box */
 
-void _BoxInit(Item item, bool firstTime)
+void BoxInit(Item item, bool firstTime)
 {
     if (item.PetId != ZERO_IDENT) {
-        Critter pet = Game.GetCritter(item.PetId);
+        Critter? pet = Game.GetCritter(item.PetId);
         if (pet != null) {
             Game.DestroyCritter(pet);
         }
     }
-    item.OnCritterUse.Subscribe(_BoxUse);
+
+    item.OnCritterUse.Subscribe(BoxUse);
 }
 
 [[Event]]
-EventResult _BoxUse(Item item, Critter cr, int param)
+EventResult BoxUse(Item item, Critter cr, int param)
 {
     if (item.PetId != ZERO_IDENT) {
-        Critter pet = Game.GetCritter(item.PetId);
+        Critter? pet = Game.GetCritter(item.PetId);
         item.PetId = ZERO_IDENT;
         if (pet != null) {
             Game.DestroyCritter(pet);
@@ -168,31 +178,28 @@ EventResult _BoxUse(Item item, Critter cr, int param)
         }
     }
 
-    Map map = cr.GetMap();
+    Map? map = cr.GetMap();
     if (map != null && item.PetProto != EMPTY_HSTRING) {
         mpos hex = cr.Hex;
         if (Entrance::GetFreeHex(map, 2, hex)) {
             int[] props = {CritterProperty::NpcRole, ROLE_PET /*, CritterProperty::Var2, cr.Id, CritterProperty::Var1, Game.SynchronizedTime */};
             Critter pet = map.AddCritter(item.PetProto, hex, Game.GetDirection(hex, cr.Hex), Tla::GetCritPropsDict(props));
-            pet.SetupScript(_PetInit);
-            if (pet != null) {
-                item.PetId = pet.Id;
-                pet.PetOwnerId = cr.Id;
-                return EventResult::StopChain;
-            }
+            pet.SetupScript(PetInit);
+            item.PetId = pet.Id;
+            pet.PetOwnerId = cr.Id;
+            return EventResult::StopChain;
         }
     }
+
     return EventResult::StopChain;
 }
 
 void AddPetBox(Critter cr, hstring boxPid, hstring petPid)
 {
     Item box = cr.AddItem(boxPid, 1);
-    if (box != null) {
-        box.PetProto = petPid;
-        box.IsCanUse = true;
-        box.SetupScript(_BoxInit);
-    }
+    box.PetProto = petPid;
+    box.IsCanUse = true;
+    box.SetupScript(BoxInit);
 }
 
 #endif

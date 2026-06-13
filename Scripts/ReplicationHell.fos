@@ -7,11 +7,14 @@ namespace ReplicationHell
 
 ///@ Property Critter Server uint8 ReplHellTurretHack Mutable Persistent Max = 100
 
-#define TIME_TO_DEATH (Time::Minutes(Game.Random(110, 130))) // Время самоубийства турели
+timespan DeathTime()
+{
+    return Time::Minutes(Game.Random(110, 130));
+} // Время самоубийства турели
 
 ident[] TurretIds = {};
 
-void _TurretInit(Critter turret, bool firstTime)
+void TurretInit(Critter turret, bool firstTime)
 {
     turret.TeamId = Teams::ReplicationTurret;
     turret.ReplicationTime = 1;
@@ -26,11 +29,11 @@ void _TurretInit(Critter turret, bool firstTime)
     turret.IsUnlimitedAmmo = true;
     turret.PerkTerminator = 1;
 
-    turret.OnSomeCritterUseSkill.Subscribe(_TurretSmthUseSkill);
-    turret.OnSomeCritterAttack.Subscribe(_TurretSmthAttack);
+    turret.OnSomeCritterUseSkill.Subscribe(TurretSmthUseSkill);
+    turret.OnSomeCritterAttack.Subscribe(TurretSmthAttack);
 
-    if (turret.CountTimeEvent(cte_KillTurret) == 0) {
-        turret.StartTimeEvent(TIME_TO_DEATH, cte_KillTurret);
+    if (turret.CountTimeEvent(KillTurret) == 0) {
+        turret.StartTimeEvent(DeathTime(), KillTurret);
     }
 
     if (turret.CountItem(Content::Item::heavy_dual_minigun_long_range) == 0) {
@@ -41,25 +44,26 @@ void _TurretInit(Critter turret, bool firstTime)
 }
 
 [[TimeEvent]]
-void cte_KillTurret(Critter cr)
+void KillTurret(Critter cr, TimeEventContext event)
 {
     if (!cr.IsDead()) {
         CritterState::ToDead(cr, CritterActionAnim::DeadFront, null);
     }
-    timespan delayTicks = TIME_TO_DEATH;
+
+    timespan delayTicks = DeathTime();
     if (delayTicks != ZERO_TIMESPAN) {
-        Game.RepeatCurrentTimeEvent(delayTicks);
+        event.Repeat(delayTicks);
     }
 }
 
 [[ItemTrigger]]
-void t_Electro(Critter cr, StaticItem trigger, bool entered, mdir dir)
+void Electro(Critter cr, StaticItem trigger, bool entered, mdir dir)
 {
     if (not entered || not cr.ControlledByPlayer) {
         return;
     }
 
-    Map map = cr.GetMap();
+    Map? map = cr.GetMap();
     if (map == null) {
         return;
     }
@@ -70,6 +74,7 @@ void t_Electro(Critter cr, StaticItem trigger, bool entered, mdir dir)
     if (dir == 1 || dir == 2 || dir == 3) {
         attack = true;
     }
+
     // Из отстойника. Проверяем баланс репликации, если отрицательный, то убиваем.
     else if (cr.ReplicationMoney < 0) {
         attack = true;
@@ -77,7 +82,7 @@ void t_Electro(Critter cr, StaticItem trigger, bool entered, mdir dir)
 
     if (attack) {
         for (int i = 0; i < TurretIds.length(); i++) {
-            Critter turret = Game.GetCritter(TurretIds[i]);
+            Critter? turret = Game.GetCritter(TurretIds[i]);
             if (turret != null && not turret.IsDead()) {
                 NpcPlanes::AddAttackPlane(turret, 0, cr);
             }
@@ -86,11 +91,11 @@ void t_Electro(Critter cr, StaticItem trigger, bool entered, mdir dir)
 }
 
 [[Event]]
-void _TurretSmthUseSkill(Critter turret, Critter hacker, CritterProperty skill, Critter? onCritter, Item onItem, StaticItem onScenery)
+void TurretSmthUseSkill(Critter turret, Critter hacker, CritterProperty skill, Critter? onCritter, Item onItem, StaticItem onScenery)
 {
     if (skill == CritterProperty::SkillScience && onCritter != null && onCritter.Id == turret.Id) {
         int sk = hacker.SkillScience - hacker.ReplHellTurretHack * 10;
-        sk = CLAMP(sk, 6, 95);
+        sk = Tla::Clamp(sk, 6, 95);
         if (sk >= Game.Random(1, 100)) {
             NpcPlanes::DropPlanes(turret);
             NpcPlanes::AddMiscPlane(turret, 100, Game.SynchronizedTime + Time::Seconds(10), null); // Wait 10 seconds
@@ -107,7 +112,7 @@ void _TurretSmthUseSkill(Critter turret, Critter hacker, CritterProperty skill, 
 }
 
 [[Event]]
-void _TurretSmthAttack(Critter turret, Critter attacker, Critter target, Item weapon, int weaponMode, ProtoItem ammo)
+void TurretSmthAttack(Critter turret, Critter attacker, Critter target, Item weapon, int weaponMode, ProtoItem ammo)
 {
     if (attacker.ControlledByPlayer) {
         NpcPlanes::AddAttackPlane(turret, 0, attacker);

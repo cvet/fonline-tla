@@ -10,7 +10,7 @@ namespace PlayerRegistration
 
 const hstring PlayerNamesCollectionName = "PlayerNames".hstr();
 
-Player GetPlayerByName(string playerName)
+Player? GetPlayerByName(string playerName)
 {
     ident playerId = ResolvePlayerIdByName(playerName);
     return playerId != ZERO_IDENT ? Game.GetPlayer(playerId) : null;
@@ -21,10 +21,12 @@ ident ResolvePlayerIdByName(string playerName)
     if (!Game.DbHasRecord(PlayerNamesCollectionName, playerName)) {
         return ZERO_IDENT;
     }
+
     dict<string, string> linkEntry = Game.DbGetRecord(PlayerNamesCollectionName, playerName);
     if (!linkEntry.exists("PlayerId")) {
         return ZERO_IDENT;
     }
+
     ident playerId = ZERO_IDENT;
     playerId.value = linkEntry["PlayerId"].toInt64();
     return playerId;
@@ -35,6 +37,7 @@ void UpsertPlayerName(string playerName, ident playerId)
     if (!Game.DbHasRecord(PlayerNamesCollectionName, playerName)) {
         Game.DbInsertRecord(PlayerNamesCollectionName, playerName, {{"_Name", playerName}});
     }
+
     Game.DbUpdateRecordInt64(PlayerNamesCollectionName, playerName, "PlayerId", playerId.value);
 }
 
@@ -54,6 +57,7 @@ void InitPlayerRegistration()
     for (int i = 0; i < CritterPropertyGroup::Traits.length(); i++) {
         AddRegistrationProperty(CritterPropertyGroup::Traits[i]);
     }
+
     AddRegistrationProperty(CritterProperty::Age);
     AddRegistrationProperty(CritterProperty::Gender);
 }
@@ -70,7 +74,7 @@ void LoginExistingPlayer(Player player, string name)
 {
     ident playerId = ResolvePlayerIdByName(name);
     if (playerId == ZERO_IDENT) {
-        Messaging::Info(player, TextPackKey(TextPackName::Game, "" + (STR_NET_WRONG_LOGIN)));
+        Messaging::Info(player, TextPackKey(TextPackName::Game, "" + (MsgStr::STR_NET_WRONG_LOGIN)));
         player.Disconnect();
         return;
     }
@@ -138,7 +142,7 @@ bool ValidateRegistrationProps(Player player, string name, dict<CritterProperty,
     return true;
 }
 
-[[ServerRemoteCall]]
+[[ServerRemoteCall]] [[Async]]
 void RegisterNewPlayer(Player player, string name, dict<CritterProperty, int> props)
 {
     if (!ValidateRegistrationProps(player, name, props)) {
@@ -147,7 +151,7 @@ void RegisterNewPlayer(Player player, string name, dict<CritterProperty, int> pr
     }
 
     if (ResolvePlayerIdByName(name) != ZERO_IDENT) {
-        Messaging::Info(player, TextPackKey(TextPackName::Game, "" + (STR_NET_ACCOUNT_ALREADY)));
+        Messaging::Info(player, TextPackKey(TextPackName::Game, "" + (MsgStr::STR_NET_ACCOUNT_ALREADY)));
         player.Disconnect();
         return;
     }
@@ -157,26 +161,45 @@ void RegisterNewPlayer(Player player, string name, dict<CritterProperty, int> pr
         critterProps[props.getKey(i)] = any(props.getValue(i));
     }
 
+    Map? startMap = Replication::GetStartReplicatorMap();
+    if (startMap == null) {
+        Game.Log("Player registration rejected due to missing start replication map");
+        player.Disconnect();
+        return;
+    }
+
+    if (!Sync::Lock(player, startMap)) {
+        return;
+    }
+
+    Location startLocation = startMap.GetLocation();
+    if (!Sync::Lock(player, startMap, startLocation)) {
+        return;
+    }
+
     player.SetName(name);
     Critter cr = Game.CreateCritter(Content::Critter::Player, true, critterProps);
+
+    if (!Sync::Lock(array<Entity> = {player, cr, startMap, startLocation})) {
+        return;
+    }
+
     // MainCritterId must be set before LoginPlayerToNewRecord — the engine rejects an empty
     // player document on insert and only Persistent properties get serialized. As a side effect
     // the engine auto-attaches the critter during login, so no SwitchCritter call is needed.
     player.MainCritterId = cr.Id;
     Player loginedPlayer = Game.LoginPlayerToNewRecord(player);
 
-    if (loginedPlayer != null) {
-        UpsertPlayerName(name, loginedPlayer.Id);
-        loginedPlayer.DisplayName = loginedPlayer.Name;
-        cr.DisplayName = loginedPlayer.DisplayName;
-        cr.IsGenerated = true;
-        Game.Log("Player registered and entered the game");
-    }
+    UpsertPlayerName(name, loginedPlayer.Id);
+    loginedPlayer.DisplayName = loginedPlayer.Name;
+    cr.DisplayName = loginedPlayer.DisplayName;
+    cr.IsGenerated = true;
+    Game.Log("Player registered and entered the game");
 }
 
 string GetPlayerName(ident crId)
 {
-    Critter cr = Game.GetCritter(crId);
+    Critter? cr = Game.GetCritter(crId);
     if (cr != null && cr.ControlledByPlayer) {
         return cr.Name;
     }

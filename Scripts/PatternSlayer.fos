@@ -37,18 +37,39 @@ const int[] slayerStats_ =
 
 // clang-format on
 
-#define LvlCount           (5)
-#define ColumnsCount(9)    // Индекс первой колонки=0
-#define _SlayerCell        #(lvl, column)(slayerStats_[(lvl < LvlCount ? lvl : 0) * ColumnsCount + (column < ColumnsCount ? column : 0)])
-#define _SlayerMeleeSkill  #(lvl)(Game.Random(_SlayerCell(lvl, 0), _SlayerCell(lvl, 1)))
-#define _SlayerSneakSkill  #(lvl)(Game.Random(_SlayerCell(lvl, 2), _SlayerCell(lvl, 3)))
-#define _SlayerMeleeDamage #(lvl)(_SlayerCell(lvl, 4))
-#define _SlayerHP          #(lvl)(_SlayerCell(lvl, 5))
-#define _SlayerResist      #(lvl)(Game.Random(_SlayerCell(lvl, 6), _SlayerCell(lvl, 7)))
-#define _SlayerAP          #(lvl)(_SlayerCell(lvl, 8))
-#define ATTACK_DIST        (10)
+const int LvlCount = 5;
+const int ColumnsCount = 9; // Индекс первой колонки=0
+int SlayerStatCell(int lvl, int column)
+{
+    return slayerStats_[(lvl < LvlCount ? lvl : 0) * ColumnsCount + (column < ColumnsCount ? column : 0)];
+}
+int SlayerMeleeSkill(int lvl)
+{
+    return Game.Random(SlayerStatCell(lvl, 0), SlayerStatCell(lvl, 1));
+}
+int SlayerSneakSkill(int lvl)
+{
+    return Game.Random(SlayerStatCell(lvl, 2), SlayerStatCell(lvl, 3));
+}
+int SlayerMeleeDamage(int lvl)
+{
+    return SlayerStatCell(lvl, 4);
+}
+int SlayerHitPoints(int lvl)
+{
+    return SlayerStatCell(lvl, 5);
+}
+int SlayerResistance(int lvl)
+{
+    return Game.Random(SlayerStatCell(lvl, 6), SlayerStatCell(lvl, 7));
+}
+int SlayerActionPoints(int lvl)
+{
+    return SlayerStatCell(lvl, 8);
+}
+const int ATTACK_DIST = 10;
 
-void _CritterInit(Critter cr, bool firstTime)
+void CritterInit(Critter cr, bool firstTime)
 {
     pattern.SetEvents(cr);
 }
@@ -57,28 +78,31 @@ class SlayerPattern : PatternCommon::CommonPattern
 {
     // При начале любого плана нпц уходит в бег, если нет таймаута битвы
     // Также включает сник, если позволяет таймаут сника
-    bool _PlaneBegin(Critter cr, int planeId, int reason, Critter someCr, Item someItem)
+    bool PlaneBegin(Critter cr, int planeId, int reason, Critter someCr, Item someItem)
     {
-        NpcPlanes::NpcPlane plane = NpcPlanes::GetCritterPlane(cr, planeId);
+        NpcPlanes::NpcPlane? plane = NpcPlanes::GetCritterPlane(cr, planeId);
+        if (plane == null) {
+            return true;
+        }
 
-        _SetRun(plane, cr);
-        _SetSneak(cr);
+        SetRun(plane, cr);
+        SetSneak(cr);
 
-        if (plane.Type == AI_PLANE_ATTACK) {
-            Game.StartTimeEvent(SNEAK_TIMEOUT(cr) - Game.SynchronizedTime, SneakWhileAttack, cr.Id);
+        if (plane.Type == NpcPlanes::AI_PLANE_ATTACK) {
+            Game.StartTimeEvent(Tla::SneakTimeout(cr) - Game.SynchronizedTime, SneakWhileAttack, cr.Id);
         }
 
         return true;
     }
 
-    void _SetSneak(Critter cr)
+    void SetSneak(Critter cr)
     {
         if (!Time::IsTimeoutActive(cr.TimeoutSneak) && !cr.InSneakMode) {
             cr.InSneakMode = true;
         }
     }
 
-    void _SetRun(NpcPlanes::NpcPlane plane, Critter cr)
+    void SetRun(NpcPlanes::NpcPlane plane, Critter cr)
     {
         if (!Time::IsTimeoutActive(cr.TimeoutBattle)) {
             plane.Run = true;
@@ -89,20 +113,27 @@ class SlayerPattern : PatternCommon::CommonPattern
     }
 
     // Если позволяет таймаут, при выполнении любого плана слеер стремится уйти в сник
-    bool _PlaneRun(Critter cr, int planeId, int reason, any& result0, any& result1, any& result2)
+    bool PlaneRun(Critter cr, int planeId, int reason, any& result0, any& result1, any& result2)
     {
-        NpcPlanes::NpcPlane plane = NpcPlanes::GetCritterPlane(cr, planeId);
+        NpcPlanes::NpcPlane? plane = NpcPlanes::GetCritterPlane(cr, planeId);
+        if (plane == null) {
+            return true;
+        }
 
-        _SetRun(plane, cr);
-        _SetSneak(cr);
+        SetRun(plane, cr);
+        SetSneak(cr);
         return true;
     }
 
-    void _Idle(Critter cr)
+    void Idle(Critter cr)
     {
-        _SetSneak(cr);
+        SetSneak(cr);
 
-        Map map = cr.GetMap();
+        Map? map = cr.GetMap();
+        if (map == null) {
+            return;
+        }
+
         Critter[] critters = map.GetCrittersInRadius(cr.Hex, ATTACK_DIST, CritterFindType::NonDeadPlayers);
         for (int i = 0; i < critters.length(); i++) {
             Critter player = critters[i];
@@ -113,31 +144,31 @@ class SlayerPattern : PatternCommon::CommonPattern
         }
     }
 
-    bool _Attack(Critter cr, Critter target)
+    bool Attack(Critter cr, Critter target)
     {
         if (!target.ControlledByPlayer) {
             return false;
         }
 
-        NpcPlanes::NpcPlane plane = NpcPlanes::GetCurPlane(cr);
-        _SetRun(plane, cr);
+        NpcPlanes::NpcPlane? plane = NpcPlanes::GetCurPlane(cr);
+        if (plane != null) {
+            SetRun(plane, cr);
+        }
 
         if (target.IsKnockout()) {
             return false;
         }
 
         AbstractItem weapon = CritterItem::GetActive(cr);
-        if (weapon == null) {
-            return false;
-        }
         if (weapon.Type != ItemType::Weapon) {
             return false;
         }
+
         if (weapon.Weapon_Skill_0 != CritterProperty::SkillMeleeWeapons && weapon.Weapon_Skill_0 != CritterProperty::SkillUnarmed) {
             return false;
         }
 
-        Item weaponInHands = _CritGetItemHand(cr);
+        Item? weaponInHands = Tla::GetCritterHandItem(cr);
         if (weaponInHands == null) {
             return false;
         }
@@ -146,18 +177,18 @@ class SlayerPattern : PatternCommon::CommonPattern
 
         // Скопировано из основного обработчика
         cr.TimeoutAggressor = Game.SynchronizedTime + Time::Minutes(1);
-        Combat::CombatAttack(cr, target, weapon, _WeaponModeMake(0, HitLocations::LocationEyes), ammo);
+        Combat::CombatAttack(cr, target, weapon, Tla::MakeWeaponMode(0, HitLocations::LocationEyes), ammo);
         return true;
     }
 
     void SetEvents(Critter cr)
     {
-        cr.OnAttack.Subscribe(_SlayerAttack);
-        cr.OnNpcPlaneRun.Subscribe(_SlayerPlaneRun);
-        cr.OnNpcPlaneBegin.Subscribe(_SlayerPlaneBegin);
-        cr.OnAttacked.Subscribe(_SlayerAttacked);
-        cr.StartTimeEvent(Time::Asap(), Time::Seconds(1), _SlayerIdle);
-        cr.OnDead.Subscribe(_SlayerDead);
+        cr.OnAttack.Subscribe(SlayerAttack);
+        cr.OnNpcPlaneRun.Subscribe(SlayerPlaneRun);
+        cr.OnNpcPlaneBegin.Subscribe(SlayerPlaneBegin);
+        cr.OnAttacked.Subscribe(SlayerAttacked);
+        cr.StartTimeEvent(Time::Asap(), Time::Seconds(1), SlayerIdle);
+        cr.OnDead.Subscribe(SlayerDead);
     }
 }
 
@@ -166,95 +197,98 @@ SlayerPattern pattern; // Для наследников нужно опреде�
 #endif
 
 [[Event]]
-void _SlayerDead(Critter cr, Critter killer)
+void SlayerDead(Critter cr, Critter killer)
 {
-    pattern._Dead(cr, killer);
+    pattern.Dead(cr, killer);
 }
 
-void _SlayerInit(Critter cr, bool firstTime)
+void SlayerInit(Critter cr, bool firstTime)
 {
-    _CritterInit(cr, firstTime);
+    CritterInit(cr, firstTime);
 }
 
 void SetSlayerStats(Critter cr, int lvl)
 {
-    lvl = CLAMP(lvl, 0, LvlCount - 1);
+    lvl = Tla::Clamp(lvl, 0, LvlCount - 1);
     if (lvl < 1) {
         return;
     }
+
     if (lvl > 2) {
         cr.PerkBetterCriticals = 1;
     }
+
     cr.PerkSilentDeath = 1;
     if (lvl > 2) {
         cr.PerkSlayer = 1;
     }
+
     cr.PerkSilentRunning = 1;
 
-    cr.MeleeDamageBase = _SlayerMeleeDamage(lvl);
+    cr.MeleeDamageBase = SlayerMeleeDamage(lvl);
     cr.StrengthBase = 10;
-    cr.MaxLifeBase = _SlayerHP(lvl);
+    cr.MaxLifeBase = SlayerHitPoints(lvl);
     cr.CurrentHp = cr.MaxLife;
-    cr.ActionPointsBase = _SlayerAP(lvl);
+    cr.ActionPointsBase = SlayerActionPoints(lvl);
 
     for (int i = 0; i < CritterPropertyGroup::ResistsBase.length(); i++) {
         if (CritterPropertyGroup::ResistsBase[i] != CritterProperty::EmpResistanceBase) {
-            cr.SetAsInt(CritterPropertyGroup::ResistsBase[i], _SlayerResist(lvl));
+            cr.SetAsInt(CritterPropertyGroup::ResistsBase[i], SlayerResistance(lvl));
         }
     }
 
-    cr.SkillMeleeWeapons = _SlayerMeleeSkill(lvl);
-    cr.SkillUnarmed = _SlayerMeleeSkill(lvl);
-    cr.SkillSneak = _SlayerSneakSkill(lvl);
+    cr.SkillMeleeWeapons = SlayerMeleeSkill(lvl);
+    cr.SkillUnarmed = SlayerMeleeSkill(lvl);
+    cr.SkillSneak = SlayerSneakSkill(lvl);
 }
 
 // При начале любого плана нпц уходит в бег, если нет таймаута битвы
 // Также включает сник, если позволяет таймаут сника
 [[Event]]
-EventResult _SlayerPlaneBegin(Critter cr, int planeId, int reason, Critter someCr, Item someItem)
+EventResult SlayerPlaneBegin(Critter cr, int planeId, int reason, Critter someCr, Item someItem)
 {
-    return (pattern._PlaneBegin(cr, planeId, reason, someCr, someItem)) ? EventResult::StopChain : EventResult::StopChain;
+    return (pattern.PlaneBegin(cr, planeId, reason, someCr, someItem)) ? EventResult::StopChain : EventResult::StopChain;
 }
 
 // регулярные попытки уйти в сник
 [[TimeEvent]]
 void SneakWhileAttack(any value)
 {
-    Critter cr = Game.GetCritter(value);
+    Critter? cr = Game.GetCritter(value);
     if (cr == null) {
         return;
     }
 
-    pattern._SetSneak(cr);
-    if (NpcPlanes::IsCurPlane(cr, AI_PLANE_ATTACK)) {
-        Game.StartTimeEvent(SNEAK_TIMEOUT(cr) - Game.SynchronizedTime, SneakWhileAttack, value);
+    pattern.SetSneak(cr);
+    if (NpcPlanes::IsCurPlane(cr, NpcPlanes::AI_PLANE_ATTACK)) {
+        Game.StartTimeEvent(Tla::SneakTimeout(cr) - Game.SynchronizedTime, SneakWhileAttack, value);
     }
 }
 
 // Если позволяет таймаут, при выполнении любого плана слеер стремится уйти в сник
 [[Event]]
-EventResult _SlayerPlaneRun(Critter cr, int planeId, int reason, any& result0, any& result1, any& result2)
+EventResult SlayerPlaneRun(Critter cr, int planeId, int reason, any& result0, any& result1, any& result2)
 {
-    return (pattern._PlaneRun(cr, planeId, reason, result0, result1, result2)) ? EventResult::StopChain : EventResult::StopChain;
+    return (pattern.PlaneRun(cr, planeId, reason, result0, result1, result2)) ? EventResult::StopChain : EventResult::StopChain;
 }
 
 // Снайпер атакован
 [[Event]]
-EventResult _SlayerAttacked(Critter sniper, Critter attacker)
+EventResult SlayerAttacked(Critter sniper, Critter attacker)
 {
-    return (pattern._Attacked(sniper, attacker)) ? EventResult::StopChain : EventResult::StopChain;
+    return (pattern.Attacked(sniper, attacker)) ? EventResult::StopChain : EventResult::StopChain;
 }
 
 [[TimeEvent]]
-void _SlayerIdle(Critter cr)
+void SlayerIdle(Critter cr)
 {
-    pattern._Idle(cr);
+    pattern.Idle(cr);
 }
 
 [[Event]]
-EventResult _SlayerAttack(Critter cr, Critter target, Item weapon, int weaponMode, ProtoItem ammo)
+EventResult SlayerAttack(Critter cr, Critter target, Item weapon, int weaponMode, ProtoItem ammo)
 {
-    return (pattern._Attack(cr, target)) ? EventResult::StopChain : EventResult::StopChain;
+    return (pattern.Attack(cr, target)) ? EventResult::StopChain : EventResult::StopChain;
 }
 
 void testSlayer(Critter cr, int lvl, int team, int bag)
@@ -262,8 +296,13 @@ void testSlayer(Critter cr, int lvl, int team, int bag)
     // ~run PatternSlayer testSlayer 0 0 0
     // ~run test SetStat 1 72 10000
     int[] props = {CritterProperty::BagId, bag, CritterProperty::TeamId, team};
-    Critter npc = cr.GetMap().AddCritter(Content::Critter::VaultCityPatrolMale, mpos(cr.Hex.x - 5, cr.Hex.y - 5), 0, Tla::GetCritPropsDict(props));
-    npc.SetupScript(_CritterInit);
+    Map? map = cr.GetMap();
+    if (map == null) {
+        return;
+    }
+
+    Critter npc = map.AddCritter(Content::Critter::VaultCityPatrolMale, mpos(cr.Hex.x - 5, cr.Hex.y - 5), 0, Tla::GetCritPropsDict(props));
+    npc.SetupScript(CritterInit);
     SetSlayerStats(npc, lvl);
 }
 

@@ -41,9 +41,6 @@ void OnReceiveItems(Item[] items, any contextParam)
     }
 
     Critter chosen = Chosen;
-    if (chosen == null) {
-        return;
-    }
 
     TransferTypes transfer = chosen.TransferType;
 
@@ -71,18 +68,22 @@ void OnReceiveItems(Item[] items, any contextParam)
 Item[] GetCollection(Collection collection)
 {
     Item[] items = {};
-    Critter chosen = Chosen;
+    Critter? chosen = HasChosen ? Chosen : null;
 
-    if (collection == Collection::ChosenAll && chosen != null) {
-        items = chosen.GetItems();
+    if (collection == Collection::ChosenAll) {
+        if (chosen != null) {
+            items = chosen.GetItems();
+        }
     }
-    else if (collection == Collection::Inventory && chosen != null) {
-        items = chosen.GetItems(ItemProperty::CritterSlot, CritterItemSlot::Inventory);
+    else if (collection == Collection::Inventory) {
+        if (chosen != null) {
+            items = chosen.GetItems(ItemProperty::CritterSlot, CritterItemSlot::Inventory);
+        }
     }
     else if (collection == Collection::Loot) {
         items = ReceivedItems;
         /*if (chosen != null && chosen.TransferContainerId != ZERO_IDENT) {
-            Critter targetCr = Game.GetCritter(chosen.TransferContainerId);
+            Critter? targetCr = Game.GetCritter(chosen.TransferContainerId);
             if (targetCr != null) {
                 items = targetCr.GetItems(ItemProperty::CritterSlot, CritterItemSlot::Inventory);
                 TODO: Уточнить, зачем здесь преметы забираютс¤ из инвентаря
@@ -104,6 +105,7 @@ Item[] GetCollection(Collection collection)
     if (collection != Collection::BarterOffer && collection != Collection::BarterTraderOffer) {
         ExcludeItems(items, collection != Collection::Loot ? BarterOfferItems : BarterTraderOfferItems);
     }
+
     ExcludeItems(items, RemovedItems);
 
     return items;
@@ -111,8 +113,8 @@ Item[] GetCollection(Collection collection)
 
 void RemoveItem(Collection collection, Item& item, int count)
 {
-    Assert(count > 0);
-    Assert(count <= item.Count);
+    verify(count > 0, "Assertion failed");
+    verify(count <= item.Count, "Assertion failed");
 
     RemovedItems.insertLast(item.Clone(count));
 }
@@ -135,6 +137,7 @@ void ExcludeItems(Item[] & items, Item[] & excludeItems)
                 else {
                     items[j] = item.Clone(item.Count - excludeItem.Count);
                 }
+
                 break;
             }
         }
@@ -146,29 +149,30 @@ Collection GetCollectionFromType(int collectionType)
     Collection collection = Collection::ChosenAll;
 
     switch (collectionType) {
-    case ITEMS_CHOSEN_ALL:
+    case ClientDefines::ITEMS_CHOSEN_ALL:
         collection = Collection::ChosenAll;
         break;
-    case ITEMS_INVENTORY:
+    case ClientDefines::ITEMS_INVENTORY:
         collection = Collection::Inventory;
         break;
-    case ITEMS_BARTER:
-    case ITEMS_PICKUP_FROM:
+    case ClientDefines::ITEMS_BARTER:
+    case ClientDefines::ITEMS_PICKUP_FROM:
         collection = Collection::Inventory;
         break;
-    case ITEMS_PICKUP:
+    case ClientDefines::ITEMS_PICKUP:
         collection = Collection::Loot;
         break;
-    case ITEMS_BARTER_OFFER:
+    case ClientDefines::ITEMS_BARTER_OFFER:
         collection = Collection::BarterOffer;
         break;
-    case ITEMS_BARTER_OPPONENT_OFFER:
+    case ClientDefines::ITEMS_BARTER_OPPONENT_OFFER:
         collection = Collection::BarterTraderOffer;
         break;
-    case ITEMS_BARTER_OPPONENT:
+    case ClientDefines::ITEMS_BARTER_OPPONENT:
         collection = Collection::Loot;
         break;
     }
+
     return collection;
 }
 
@@ -203,7 +207,7 @@ void ChangeCollectionItemCount(ident itemId, Collection collection, int count)
     }
 }
 
-Item GetCollectionItem(ident itemId, Collection collection)
+Item? GetCollectionItem(ident itemId, Collection collection)
 {
     Item[] items = GetCollection(collection);
     for (int i = 0; i < items.length(); i++) {
@@ -221,9 +225,6 @@ void BarterOffer()
     int[] saleItemsCount = {};
     ident[] buyItemsIds = {};
     int[] buyItemsCount = {};
-    if (Chosen == null) {
-        return;
-    }
 
     Item[] itemsSale = GetCollection(Collection::BarterOffer);
     Item[] itemsBuy = GetCollection(Collection::BarterTraderOffer);
@@ -246,19 +247,19 @@ void BarterTransfer(ident item_id, int collectionTypeFrom, int item_count)
     Collection collectionFrom;
     Collection collectionTo;
     switch (collectionTypeFrom) {
-    case ITEMS_BARTER:
+    case ClientDefines::ITEMS_BARTER:
         collectionTo = Collection::BarterOffer;
         collectionFrom = Collection::Inventory;
         break;
-    case ITEMS_BARTER_OFFER:
+    case ClientDefines::ITEMS_BARTER_OFFER:
         collectionTo = Collection::Inventory;
         collectionFrom = Collection::BarterOffer;
         break;
-    case ITEMS_BARTER_OPPONENT:
+    case ClientDefines::ITEMS_BARTER_OPPONENT:
         collectionTo = Collection::BarterTraderOffer;
         collectionFrom = Collection::Loot;
         break;
-    case ITEMS_BARTER_OPPONENT_OFFER:
+    case ClientDefines::ITEMS_BARTER_OPPONENT_OFFER:
         collectionTo = Collection::Loot;
         collectionFrom = Collection::BarterTraderOffer;
         break;
@@ -266,7 +267,7 @@ void BarterTransfer(ident item_id, int collectionTypeFrom, int item_count)
         return;
     }
 
-    Item item = GetCollectionItem(item_id, collectionFrom);
+    Item? item = GetCollectionItem(item_id, collectionFrom);
 
     if (item == null) {
         return;
@@ -276,7 +277,7 @@ void BarterTransfer(ident item_id, int collectionTypeFrom, int item_count)
         return;
     }
 
-    Item itemTo = null;
+    Item? itemTo = null;
     Item[] itemsTo = GetCollection(collectionTo);
 
     if (item.Stackable) {
@@ -287,7 +288,8 @@ void BarterTransfer(ident item_id, int collectionTypeFrom, int item_count)
             }
         }
     }
-    if (collectionTypeFrom == ITEMS_BARTER || collectionTypeFrom == ITEMS_BARTER_OPPONENT) {
+
+    if (collectionTypeFrom == ClientDefines::ITEMS_BARTER || collectionTypeFrom == ClientDefines::ITEMS_BARTER_OPPONENT) {
         if (itemTo != null) {
             ChangeCollectionItemCount(item_id, collectionTo, itemTo.Count + item_count);
         }
@@ -309,10 +311,39 @@ void BarterTransfer(ident item_id, int collectionTypeFrom, int item_count)
 
 #if SERVER
 
-[[ServerRemoteCall]]
+[[ServerRemoteCall]] [[Async]]
 void ProcessBarterNpcOffer(Player player, ident[] saleItemsIds, int[] saleItemsCount, ident[] buyItemsIds, int[] buyItemsCount)
 {
-    Barter::ProcessBarterNpcOffer(player.GetControlledCritter(), saleItemsIds, saleItemsCount, buyItemsIds, buyItemsCount);
+    Critter? cr = player.GetControlledCritter();
+    if (cr == null) {
+        return;
+    }
+
+    Critter? trader = Game.GetCritter(cr.TransferContainerId);
+    if (trader != null && !Sync::Lock(cr, trader)) {
+        return;
+    }
+
+    Map? crMap = cr.GetMap();
+    Map? traderMap = trader != null ? trader.GetMap() : null;
+    Entity[] entities = {cr};
+    if (trader != null) {
+        entities.insertLast(trader);
+    }
+
+    if (crMap != null) {
+        entities.insertLast(crMap);
+    }
+
+    if (traderMap != null) {
+        entities.insertLast(traderMap);
+    }
+
+    if (!Sync::Lock(entities)) {
+        return;
+    }
+
+    Barter::ProcessBarterNpcOffer(cr, saleItemsIds, saleItemsCount, buyItemsIds, buyItemsCount);
 }
 
 #endif

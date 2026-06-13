@@ -171,7 +171,7 @@ Built applications are emitted under `Binaries/`, with platform-specific directo
 
 ## Running A Local Shard
 
-The `LocalTest` subconfig is the intended local development profile. It keeps the client on `localhost`, enables network hash debugging, and uses the default project port (`4008`).
+The `LocalTest` subconfig is the intended local development profile. It keeps the client on `localhost` and uses the default project port (`4008`); at the moment it intentionally has no overrides beyond the base config.
 
 Build and bake first:
 
@@ -370,6 +370,10 @@ Gameplay code is AngelScript (`*.fos`) with FOnline project conventions:
 - Mapper-specific logic belongs under `#if MAPPER`.
 - Startup functions use `[[ModuleInit]]` and subscribe to events from there.
 - Event handlers return `void` for implicit continuation or `EventResult` for explicit chain control.
+- `[[TimeEvent]]` and remote callbacks that run on worker threads must be marked `[[Async]]` before using async helpers, and must lock the entity cover they touch. For map-visible critter work, use `Sync::LockCritterWithMap(cr)` before reading or mutating critter/map state.
+- Nullable handles are explicit: use `T?` when an engine call or dictionary lookup can return `null`, then narrow before dereferencing.
+- Generated component accessors are guarded by `Has<Component>` flags such as `HasRadio` or `HasDialogContext`; do not probe component accessors with `== null`.
+- Dialog answer links used by `.fodlg` files, such as `Answer Barter`, require globally visible `///@ Enum DialogAnswerLink ...` metadata so the dialog baker can resolve them.
 - TLA assumes a hex grid. Prefer engine/game helpers such as distance, direction, tracing, and pathing APIs over ad hoc rectangular math.
 
 Common script areas:
@@ -434,8 +438,8 @@ Subconfigs:
 
 | Subconfig | Purpose |
 | --------- | ------- |
-| `Unpackaged` | Development-oriented unpackaged startup. Disables music, enables network hash debugging, adds artificial lag, and adjusts timeout/debug settings. |
-| `LocalTest` | Local development shard. Enables network hash debugging while keeping localhost defaults. |
+| `Unpackaged` | Development-oriented unpackaged startup. Disables music, adds artificial lag, enables render debug, and adjusts timeout/debug settings. |
+| `LocalTest` | Local development shard used by launch tasks. Currently empty, so it keeps the base localhost/default-port settings. |
 | `PublicGame` | Public-game profile with a public port and server UI collapse behavior. |
 
 Apply a subconfig at runtime with:
@@ -458,7 +462,7 @@ Use the narrowest verification that covers the changed surface:
 | Native server extension | Build the narrowest affected server target; run `TLA_UnitTests` if covered by engine tests. |
 | Native client extension | Build `TLA_Client`; add server/client runtime smoke tests if the change crosses the network boundary. |
 | Baker/dialog bake support | Build `TLA_Baker`, then `Bake Resources` or `Force Bake Resources`. |
-| Engine submodule update | Bake resources, build server and client, run unit tests when relevant, and smoke-test server startup. |
+| Engine submodule update | Bake resources, build server and client, compare `H:/lf-30` for migration patterns, run unit tests when relevant, and smoke-test server startup. |
 
 Baseline broad verification:
 
@@ -488,7 +492,7 @@ Start at the boundary that failed, then inspect the first relevant log.
 | Server startup/runtime issue | `Build :: TLA_ServerHeadless`, then run with `LocalTest` | `TLA_ServerHeadless.log`, `TLA_Server.log` |
 | Client presentation/input issue | `Build :: TLA_Client`, then run client/server pair | `TLA_Client.log` |
 | Mapper issue | `Build :: TLA_Mapper` | `TLA_Mapper.log` |
-| Engine regression | Inspect `Engine` commits and compare a reference project if needed | Unit-test output, engine logs |
+| Engine regression | Inspect `Engine` commits and compare `H:/lf-30` if needed | Unit-test output, engine logs |
 
 Common local log files in the repository root:
 

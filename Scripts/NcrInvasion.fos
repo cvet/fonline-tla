@@ -3,26 +3,30 @@ namespace NcrInvasion // Sort 2
 
 #if SERVER
 
+void DebugLog(string s)
+{
+}
+
 ///@ Property Critter Common uint8 QNcrElizeInvasion Mutable OwnerSync Persistent Group = Quests Quest = 4265 Max = 4
 ///@ Property Game Server bool NCRInvasion Mutable Persistent
 
-#define NPC_ROLE_RAIDER     (17) // роль рядового рейдера
+const int NPC_ROLE_RAIDER = 17; // роль рядового рейдера
 
-#define GANG_SIZE           (6) // размер одной банды
+const int GANG_SIZE = 6; // размер одной банды
 
-#define ENTRY_HEX_NUM       (111) // номер гекса на котором появляются рейдеры
+const int ENTRY_HEX_NUM = 111; // номер гекса на котором появляются рейдеры
 
-#define STR_SHOUT_RAIDERS   (2950) // номер cстроки, которое периодически выкрикивают рейдеры
-#define STR_ELIZE_RADIO     (2951) // номер строки из fotext которое отправляется по радио в начале нападения
+const int STR_SHOUT_RAIDERS = 2950; // номер cстроки, которое периодически выкрикивают рейдеры
+const int STR_ELIZE_RADIO = 2951;   // номер строки из fotext которое отправляется по радио в начале нападения
 
-#define MSG_ATTACK          (6) // сообщение "атаковать цель"
-#define MSG_RAIDER_KILLED   (7) // сообщение "нашего убили"
+const int MSG_ATTACK = 6;        // сообщение "атаковать цель"
+const int MSG_RAIDER_KILLED = 7; // сообщение "нашего убили"
 
-#define ENEMY_SEARCH_RAD    (35) // радиуск поиска врагов в гексах
+const int ENEMY_SEARCH_RAD = 35; // радиуск поиска врагов в гексах
 
-#define NEXT_INVASION       (Time::Days(5)) // время следующего нападения (через 5 дней)
+const timespan NEXT_INVASION = Time::Days(5); // время следующего нападения (через 5 дней)
 
-#define TIME_TO_DELETE_DEAD (Time::Hours(1)) // трупы удаляются через час
+const timespan TIME_TO_DELETE_DEAD = Time::Hours(1); // трупы удаляются через час
 
 // локаций лагерей нападающих
 hstring[] LocPids = {Content::Location::ncr_siege_1,
@@ -36,7 +40,7 @@ void DefineInvasionEvent()
     Game.StartTimeEvent(NEXT_INVASION, BeginInvasion); //SavedDeferredCall
 }
 
-void BeginInvasion_Impl()
+void BeginInvasionImpl()
 {
     // откладываем выполнение на следующий день
     if (Game.NCRInvasion) {
@@ -48,7 +52,7 @@ void BeginInvasion_Impl()
         return;
     }
 
-    Location ncr = Game.GetLocation(Content::Location::ncr);
+    Location? ncr = Game.GetLocation(Content::Location::ncr);
     if (ncr == null) {
         return;
     }
@@ -58,7 +62,7 @@ void BeginInvasion_Impl()
         return;
     }
 
-    Map bazaar = ncr.GetMap(Content::Map::ncr_bazaar);
+    Map? bazaar = ncr.GetMap(Content::Map::ncr_bazaar);
     if (bazaar == null) {
         return;
     }
@@ -70,16 +74,12 @@ void BeginInvasion_Impl()
         }
 
         Map map = locations[i].GetMapByIndex(locations[i].GetMapCount() - 1);
-        if (map == null) {
-            continue;
-        }
-
         auto raiders = map.GetCritters(CritterProperty::NpcRole, NPC_ROLE_RAIDER, CritterFindType::NonDeadNpc);
         if (raiders.isEmpty()) {
             continue;
         }
 
-        DL("Raiders:" + raiders.length());
+        DebugLog("Raiders:" + raiders.length());
         FighterPattern::FighterPattern fp = FighterPattern::FighterPattern();
         fp.ForceArmourLvl = 0;
 
@@ -91,6 +91,7 @@ void BeginInvasion_Impl()
             if (!Entrance::GetFreeHex(bazaar, 4, hex)) {
                 continue;
             }
+
             // Entrance::GetFreeHex
             int[] props = {CritterProperty::DialogId,
                            donor.DialogId.hash,
@@ -109,7 +110,7 @@ void BeginInvasion_Impl()
                            CritterProperty::Level,
                            donor.Level};
             Critter raider = bazaar.AddCritter(donor.ProtoId, hex, HDIR_Random, Tla::GetCritPropsDict(props));
-            raider.SetupScript(_InvaderInit);
+            raider.SetupScript(InvaderInit);
             fp.ForceCritterArmour(raider);
             Item[] items = donor.GetItems();
             for (int k = 0; k < items.length(); k++) {
@@ -117,7 +118,8 @@ void BeginInvasion_Impl()
             }
         }
     }
-    DL("invasion done");
+
+    DebugLog("invasion done");
 
     Radio::SendChannelRadioMessage(0, TextPackKey(TextPackName::Text, "" + (STR_ELIZE_RADIO)));
     Game.NCRInvasion = true; // нападение началось!
@@ -126,22 +128,25 @@ void BeginInvasion_Impl()
 [[TimeEvent]]
 void BeginInvasion()
 {
-    BeginInvasion_Impl();
+    BeginInvasionImpl();
 }
 
 bool IsValidToAttack(Critter raider, Critter target)
 {
-    // DL("Script^ " + target.GetInitScript());
+    // DebugLog("Script^ " + target.GetInitScript());
 
     if (!target.IsAlive()) {
         return false;
     }
+
     if (target.ControlledByPlayer) {
         return true;
     }
+
     if (raider.TeamId == target.TeamId) {
         return false;
     }
+
     if (target.TeamId == 0) {
         return false;
     }
@@ -149,32 +154,33 @@ bool IsValidToAttack(Critter raider, Critter target)
     return true;
 }
 
-void _InvaderInit(Critter raider, bool firstTime)
+void InvaderInit(Critter raider, bool firstTime)
 {
-    EncounterNpc::_NpcInit(raider, firstTime);
+    EncounterNpc::NpcInit(raider, firstTime);
     raider.IsNoSupply = true;
-    raider.OnCritterAppeared.Subscribe(_RaiderCritterAppeared);
-    raider.OnAttacked.Subscribe(_RaiderAttacked);
-    raider.StartTimeEvent(Time::Asap(), Time::Seconds(1), _RaiderIdle);
-    raider.OnDead.Subscribe(_RaiderDead);
-    raider.OnMessage.Subscribe(_CritterInvasionMessage);
-    raider.OnNpcPlaneEnd.Subscribe(_OnInvaderPlaneEnd);
+    raider.OnCritterAppeared.Subscribe(RaiderCritterAppeared);
+    raider.OnAttacked.Subscribe(RaiderAttacked);
+    raider.StartTimeEvent(Time::Asap(), Time::Seconds(1), RaiderIdle);
+    raider.OnDead.Subscribe(RaiderDead);
+    raider.OnMessage.Subscribe(CritterInvasionMessage);
+    raider.OnNpcPlaneEnd.Subscribe(OnInvaderPlaneEnd);
 }
 
 [[TimeEvent]]
 void DeleteDeadRaider(any value)
 {
-    Critter raider = Game.GetCritter(value);
+    Critter? raider = Game.GetCritter(value);
     if (raider == null) {
-        DL("Raider not found");
+        DebugLog("Raider not found");
         return;
     }
+
     Game.DestroyCritter(raider);
-    DL("Raider deleted");
+    DebugLog("Raider deleted");
 }
 
 [[Event]]
-void _RaiderDead(Critter cr, Critter? killer)
+void RaiderDead(Critter cr, Critter? killer)
 {
     // добавляем событие удаления трупа
     Game.StartTimeEvent(TIME_TO_DELETE_DEAD, DeleteDeadRaider, cr.Id); //SavedDeferredCall
@@ -184,7 +190,7 @@ void _RaiderDead(Critter cr, Critter? killer)
     }
 
     SendMessage::ToAllOnMap(cr, MSG_RAIDER_KILLED, killer.Id);
-    EncounterNpc::_NpcDead_Impl(cr, killer);
+    EncounterNpc::NpcDeadImpl(cr, killer);
 
     // работа с переменными
     if (killer.ControlledByPlayer) {
@@ -194,7 +200,7 @@ void _RaiderDead(Critter cr, Critter? killer)
     }
 
     // проверка, если все рейдеры мертвы, присваиваем всем игрокам статус квеста: выполнено
-    Map map = cr.GetMap();
+    Map? map = cr.GetMap();
     if (map == null) {
         return;
     }
@@ -212,6 +218,7 @@ void _RaiderDead(Critter cr, Critter? killer)
         if (players[i].QNcrElizeInvasion != 2) {
             continue;
         }
+
         players[i].QNcrElizeInvasion = 3;
     }
 
@@ -219,22 +226,28 @@ void _RaiderDead(Critter cr, Critter? killer)
 }
 
 [[Event]]
-void _CritterInvasionMessage(Critter cr, Critter fromCr, int message, any value)
+void CritterInvasionMessage(Critter cr, Critter fromCr, int message, any value)
 {
     if (message == MSG_RAIDER_KILLED) {
         if (NpcPlanes::IsNoPlanes(cr)) {
-            NpcPlanes::AddWalkPlane(cr, AI_PLANE_ATTACK - 1, fromCr.Hex, HDIR_Random, true, Game.Random(1, 2));
+            NpcPlanes::AddWalkPlane(cr, NpcPlanes::AI_PLANE_ATTACK - 1, fromCr.Hex, HDIR_Random, true, Game.Random(1, 2));
         }
+
         return;
     }
-    EncounterNpc::_NpcMessage_Impl(cr, fromCr, message, value);
+
+    EncounterNpc::NpcMessageImpl(cr, fromCr, message, value);
 }
 
-[[TimeEvent]]
-void _RaiderIdle(Critter cr)
+[[TimeEvent]] [[Async]]
+void RaiderIdle(Critter cr)
 {
+    if (!Sync::LockCritterWithMap(cr)) {
+        return;
+    }
+
     if (NpcPlanes::IsNoPlanes(cr)) {
-        Map map = cr.GetMap();
+        Map? map = cr.GetMap();
         if (map == null) {
             return;
         }
@@ -242,7 +255,7 @@ void _RaiderIdle(Critter cr)
         Critter[] critters = map.GetCrittersInRadius(cr.Hex, ENEMY_SEARCH_RAD, CritterFindType::NonDead);
         for (int i = 0; i < critters.length(); i++) {
             if (IsValidToAttack(cr, critters[i])) {
-                NpcPlanes::AddAttackPlane(cr, AI_PLANE_ATTACK * (critters[i].ControlledByPlayer ? 2 : 1), critters[i]);
+                NpcPlanes::AddAttackPlane(cr, NpcPlanes::AI_PLANE_ATTACK * (critters[i].ControlledByPlayer ? 2 : 1), critters[i]);
             }
         }
     }
@@ -250,15 +263,17 @@ void _RaiderIdle(Critter cr)
 
 // CRITTER_EVENT_ATTACKED
 [[Event]]
-EventResult _RaiderAttacked(Critter cr, Critter attacker)
+EventResult RaiderAttacked(Critter cr, Critter attacker)
 {
     if (!IsValidToAttack(cr, attacker)) {
         if (EnemyStack::CheckEnemyInStack(cr, attacker.Id)) {
             EnemyStack::EraseEnemyFromStack(cr, attacker.Id);
         }
+
         if (EnemyStack::CheckEnemyInStack(attacker, cr.Id)) {
             EnemyStack::EraseEnemyFromStack(attacker, cr.Id);
         }
+
         NpcPlanes::EraseAttackPlane(attacker, cr.Id);
         return EventResult::StopChain;
     }
@@ -269,37 +284,40 @@ EventResult _RaiderAttacked(Critter cr, Critter attacker)
 
 // CRITTER_EVENT_SHOW_CRITTER
 [[Event]]
-void _RaiderCritterAppeared(Critter cr, Critter showCrit)
+void RaiderCritterAppeared(Critter cr, Critter showCrit)
 {
     if (!IsValidToAttack(cr, showCrit)) {
         return;
     }
 
-    NpcPlanes::AddAttackPlane(cr, AI_PLANE_ATTACK * (showCrit.ControlledByPlayer ? 2 : 1), showCrit);
+    NpcPlanes::AddAttackPlane(cr, NpcPlanes::AI_PLANE_ATTACK * (showCrit.ControlledByPlayer ? 2 : 1), showCrit);
 
     if (!showCrit.ControlledByPlayer && Game.Random(1, 10) == 1) {
-        // Todo: say type CLAMP(Game.Random(0, 5), SAY_NORM_ON_HEAD, SAY_SHOUT_ON_HEAD)
+        // Todo: say type Clamp(Game.Random(0, 5), SAY_NORM_ON_HEAD, SAY_SHOUT_ON_HEAD)
         Messaging::SayShoutOnHead(cr, TextPackKey(TextPackName::Text, "" + (STR_SHOUT_RAIDERS)));
     }
 }
 
 // если путь заблокирован, уменьшаем приоритет плана, если есть хотя бы еще один план
 [[Event]]
-EventResult _OnInvaderPlaneEnd(Critter cr, int planeId, int reason, Critter? someCr, Item someItem)
+EventResult OnInvaderPlaneEnd(Critter cr, int planeId, int reason, Critter? someCr, Item someItem)
 {
-    NpcPlanes::NpcPlane plane = NpcPlanes::GetCritterPlane(cr, planeId);
-
-    if (EncounterNpc::_NpcPlaneEnd_Impl(cr, planeId, reason, someCr, someItem)) {
+    if (EncounterNpc::NpcPlaneEndImpl(cr, planeId, reason, someCr, someItem)) {
         return EventResult::StopChain;
     }
 
-    if (reason == REASON_HEX_BUSY || reason == REASON_HEX_BUSY_RING || reason == REASON_POSITION_NOT_FOUND || reason == REASON_FIND_PATH_ERROR ||
-        reason == REASON_HEX_TOO_FAR) {
+    NpcPlanes::NpcPlane? plane = NpcPlanes::GetCritterPlane(cr, planeId);
+    if (plane == null) {
+        return EventResult::StopChain;
+    }
+
+    if (reason == NpcPlanes::REASON_HEX_BUSY || reason == NpcPlanes::REASON_HEX_BUSY_RING || reason == NpcPlanes::REASON_POSITION_NOT_FOUND ||
+        reason == NpcPlanes::REASON_FIND_PATH_ERROR || reason == NpcPlanes::REASON_HEX_TOO_FAR) {
         if (NpcPlanes::GetPlanes(cr, null) > 1 && plane.Priority > 1) {
             plane.Priority--;
         }
     }
-    else if (reason == REASON_GAG_CRITTER) // к двери не пройти, мешает другой нпц
+    else if (reason == NpcPlanes::REASON_GAG_CRITTER) // к двери не пройти, мешает другой нпц
     {
         if (someCr != null) {
             if (!someCr.ControlledByPlayer) {
@@ -309,6 +327,7 @@ EventResult _OnInvaderPlaneEnd(Critter cr, int planeId, int reason, Critter? som
             }
         }
     }
+
     return EventResult::StopChain;
 }
 
@@ -316,7 +335,7 @@ EventResult _OnInvaderPlaneEnd(Critter cr, int planeId, int reason, Critter? som
 // ~run NcrInvasion BI 0 0 0
 void BI(Critter cr, int p0, int p1, int p2)
 {
-    BeginInvasion_Impl();
+    BeginInvasionImpl();
 }
 
 #endif

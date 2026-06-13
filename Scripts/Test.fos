@@ -18,23 +18,43 @@ void OnMapCritterIn(Map map, Critter cr)
     Game.Log("Critter state: " + cr.Condition);
 }
 
-[[ServerRemoteCall]]
+[[ServerRemoteCall]] [[Async]]
 void CreateLocationSelf(Player player, hstring locPid, int mapIndex, hstring entry)
 {
-    Critter cr = player.GetControlledCritter();
+    Critter? cr = player.GetControlledCritter();
+    if (cr == null) {
+        return;
+    }
+
     Location loc = Location::CreateLocation(locPid, ipos(cr.WorldPos.x, cr.WorldPos.y), null);
+    if (!Sync::Lock(cr, loc)) {
+        return;
+    }
+
     Map map = loc.GetMapByIndex(mapIndex);
+    if (!Sync::Lock(cr, loc, map)) {
+        return;
+    }
+
     mpos hex;
     if (Entrance::MapGetEntryCoords(map, entry, 0, hex)) {
         cr.TransferToMap(map, hex, HDIR_Random);
     }
 }
 
-[[ServerRemoteCall]]
+[[ServerRemoteCall]] [[Async]]
 void GetPropValue(Player player, int prop, any crId)
 {
-    Critter cr = player.GetControlledCritter();
-    Critter someCr = Game.GetCritter(ident(crId));
+    Critter? cr = player.GetControlledCritter();
+    Critter? someCr = Game.GetCritter(ident(crId));
+    if (cr == null || someCr == null) {
+        return;
+    }
+
+    if (!Sync::Lock(cr, someCr)) {
+        return;
+    }
+
     int value = someCr.GetAsInt(CritterProperty(prop));
     Messaging::Say(cr, "Prop value: " + value + "; name: " + Game.EnumToString(CritterProperty(prop)));
 }
@@ -42,13 +62,18 @@ void GetPropValue(Player player, int prop, any crId)
 //~run Test::ToMap klamath, 92, 102
 void ToMap(Critter cr, int mapPid, int hexX, int hexY)
 {
-    Map map = Game.GetLocation(Content::Location::klamath).GetMapByIndex(0);
+    Location? loc = Game.GetLocation(Content::Location::klamath);
+    if (loc == null) {
+        return;
+    }
+
+    Map map = loc.GetMapByIndex(0);
     cr.TransferToMap(map, mpos(92, 102), HDIR_Random);
 }
 
 void HP2(Critter cr, int, int, int)
 {
-    Map map = cr.GetMap();
+    Map? map = cr.GetMap();
     if (map != null) {
         Critter[] critters = map.GetCritters(CritterFindType::Any);
         for (int i = 0, l = critters.length(); i < l; i++) {
@@ -57,7 +82,7 @@ void HP2(Critter cr, int, int, int)
     }
 }
 
-void _TraceInit(Critter cr, bool firstTime)
+void TraceInit(Critter cr, bool firstTime)
 {
     TraceNpcPlane(cr);
 }
@@ -73,6 +98,10 @@ void TraceNpcPlane(Critter npc)
 void TraceOnNpcPlaneBegin(Critter npc, int planeId, int reason, Critter someCr, Item someItem)
 {
     auto plan = NpcPlanes::GetCritterPlane(npc, planeId);
+    if (plan == null) {
+        return;
+    }
+
     NpcPlanes::NL(npc, "begin " + plan.ToString() + "reason: " + reason);
 }
 
@@ -80,6 +109,10 @@ void TraceOnNpcPlaneBegin(Critter npc, int planeId, int reason, Critter someCr, 
 void TraceOnNpcPlaneEnd(Critter npc, int planeId, int reason, Critter someCr, Item someItem)
 {
     auto plan = NpcPlanes::GetCritterPlane(npc, planeId);
+    if (plan == null) {
+        return;
+    }
+
     NpcPlanes::NL(npc, "end " + plan.ToString() + "reason: " + reason);
 }
 
@@ -87,6 +120,10 @@ void TraceOnNpcPlaneEnd(Critter npc, int planeId, int reason, Critter someCr, It
 void TraceOnNpcPlaneRun(Critter npc, int planeId, int reason, any& result0, any& result1, any& result2)
 {
     auto plan = NpcPlanes::GetCritterPlane(npc, planeId);
+    if (plan == null) {
+        return;
+    }
+
     NpcPlanes::NL(npc, "run " + plan.ToString() + "reason: " + reason);
 }
 
@@ -110,12 +147,14 @@ bool ParseMessage(string message)
             CurPlayer.ServerCall.CreateLocationSelf(a1, p1, a2);
             return true;
         }
+
         if (cmd == "GetPropValue") {
             p1 = Game.ParseEnum_CritterProperty(args[2]);
             CurPlayer.ServerCall.GetPropValue(p1, args[3].toInt());
             return true;
         }
     }
+
     return false;
 }
 

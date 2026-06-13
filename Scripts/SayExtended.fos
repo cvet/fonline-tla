@@ -9,7 +9,7 @@ namespace SayExtended
 // Перевести диалог на указанный результат
 ///@ RemoteCall Client ForceDialogResult(ident talkerId, hstring dialogId, bool isNpc, int32 result, bool refresh)
 // Добавить к тексту диалога строку из FODLG_MSG
-///@ RemoteCall Client AddDialogStr(int32 msg, string lexems, bool append)
+///@ RemoteCall Client AddDialogStr(int32 msg, string textArgs, bool append)
 
 ///@ RemoteCall Server Rpc_ProcessSayExtended(string text)
 
@@ -21,12 +21,12 @@ namespace SayExtended
 // Игрок может отправлять текст на сервер. Переменную нужно уставлять вручную в dlg_ - функциях
 // введена, чтобы не отправляли любые тексты из любых диалогов
 ///@ Property Critter Common bool CanSendSay Mutable OwnerSync Persistent
-#define MAX_SAY_TEXT_LENGTH (100)
+const int MAX_SAY_TEXT_LENGTH = 100;
 
 // Answer
-#define ANSWER_BEGIN  (0xF0)
-#define ANSWER_END    (0xF1)
-#define ANSWER_BARTER (0xF2)
+const int ANSWER_BEGIN = 0xF0;
+const int ANSWER_END = 0xF1;
+const int ANSWER_BARTER = 0xF2;
 
 #if SERVER
 
@@ -38,7 +38,11 @@ void ShowScreenEx(Critter cr, int msgIdHeader)
 [[ServerRemoteCall]]
 void Rpc_ProcessSayExtended(Player player, string text)
 {
-    Critter cr = player.GetControlledCritter();
+    Critter? cr = player.GetControlledCritter();
+    if (cr == null) {
+        return;
+    }
+
     CritterState::Wait(cr, 1000);
     Game.OnPlayerSaidText.Fire(cr, text, false, ZERO_IDENT, false);
 }
@@ -46,7 +50,10 @@ void Rpc_ProcessSayExtended(Player player, string text)
 [[ServerRemoteCall]]
 void Rpc_ProcessSay(Player player, string text, bool fromDialog, ident talkerId, bool isNpc)
 {
-    Critter cr = player.GetControlledCritter();
+    Critter? cr = player.GetControlledCritter();
+    if (cr == null) {
+        return;
+    }
 
     CritterState::Wait(cr, 1000);
     if (!cr.CanSendSay) {
@@ -54,6 +61,7 @@ void Rpc_ProcessSay(Player player, string text, bool fromDialog, ident talkerId,
         Game.Log("Player said restricted text " + cr.Id);
         return;
     }
+
     if (text.length() > MAX_SAY_TEXT_LENGTH) {
         CritterState::Wait(cr, 10000);
         Game.Log("Too long text from cr " + cr.Id + ": " + text.length());
@@ -65,10 +73,13 @@ void Rpc_ProcessSay(Player player, string text, bool fromDialog, ident talkerId,
     Game.OnPlayerSaidText.Fire(cr, text, fromDialog, talkerId, isNpc);
 }
 
-[[ServerRemoteCall]]
+[[ServerRemoteCall]] [[Async]]
 void ProcessSayExtendedFromScenery(Player player, string text, hstring sceneryPid, mpos hex)
 {
-    Critter cr = player.GetControlledCritter();
+    Critter? cr = player.GetControlledCritter();
+    if (cr == null) {
+        return;
+    }
 
     CritterState::Wait(cr, 1000);
 
@@ -77,16 +88,20 @@ void ProcessSayExtendedFromScenery(Player player, string text, hstring sceneryPi
         Game.Log("Player said restricted text " + cr.Id);
         return;
     }
+
     if (text.length() > MAX_SAY_TEXT_LENGTH) {
         CritterState::Wait(cr, 10000);
         Game.Log("Too long text from cr " + cr.Id + ": " + text.length());
         return;
     }
 
-    Map map = cr.GetMap();
+    Map? map = cr.GetMap();
+    if (map != null && !Sync::Lock(cr, map)) {
+        return;
+    }
 
     if (map != null) {
-        StaticItem scenery = map.GetStaticItemOnHex(hex, sceneryPid);
+        StaticItem? scenery = map.GetStaticItemOnHex(hex, sceneryPid);
 
         if (scenery != null) {
             cr.OnPlayerSaidTextFromScenery.Fire(sceneryPid, hex, text);
@@ -105,31 +120,43 @@ void ForceDialogResult(ident talkerId, hstring dialogId, bool isNpc, int result,
     if (refresh) {
         // (CustomCall removed) Game.CustomCall("DialogAnswer " + isNpc + " " + (isNpc ? talkerId.value : dialogId.uhash) + " " + ANSWER_BEGIN);
     }
+
     // (CustomCall removed) Game.CustomCall("DialogAnswer " + isNpc + " " + (isNpc ? talkerId.value : dialogId.uhash) + " " + result);
     //Game.Log(">>DialogAnswer " + isNpc + " " + (isNpc ? talkerId.value : dialogId.uhash) + " " + result);
 }
 
 [[ClientRemoteCall]]
-void AddDialogStr(int msg, string lexems, bool append)
+void AddDialogStr(int msg, string textArgs, bool append)
 {
     //Game.Log("MSG NUM recieved " + msg);
     auto screen = Gui::GetActiveScreen(GuiScreen::Dialog);
     if (screen != null) {
         auto dialog = cast<GuiScreens::Dialog::Dialog>(screen);
-        if (dialog != null) {
-            string text = Game.GetText(TextPackKey(TextPackName::Dialogs, "" + (msg)));
+        string text = Game.GetText(TextPackKey(TextPackName::Dialogs, "" + (msg)));
 
-            auto panel = screen.FindPanel("SpeechPanel");
-            auto textbox = panel.FindText("SpeechText");
-            text = append ? dialog.Text + "##" + text : text + "##" + dialog.Text;
-            text = Game.FormatTags(text, lexems);
-
-            int lines = 0;
-            isize box;
-            Game.GetTextInfo(text, isize(textbox.Size.width, 1000), TextFormat(FontType(int(textbox.TextFont)), FontFlag(textbox.TextFlags), 0), box, lines);
-            textbox.SetSize(textbox.Parent.Size.width, Math::Max(box.height, textbox.Parent.Size.height));
-            textbox.SetText(text);
+        auto panel = screen.FindPanel("SpeechPanel");
+        if (panel == null) {
+            return;
         }
+
+        auto textbox = panel.FindText("SpeechText");
+        if (textbox == null) {
+            return;
+        }
+
+        text = append ? dialog.Text + "##" + text : text + "##" + dialog.Text;
+        text = Game.FormatTags(text, textArgs);
+
+        int lines = 0;
+        isize box;
+        Game.GetTextInfo(text, isize(textbox.Size.width, 1000), TextFormat(FontType(int(textbox.TextFont)), FontFlag(textbox.TextFlags), 0), box, lines);
+        Gui::Object? parent = textbox.Parent;
+        if (parent == null) {
+            return;
+        }
+
+        textbox.SetSize(parent.Size.width, Math::Max(box.height, parent.Size.height));
+        textbox.SetText(text);
     }
 }
 
@@ -142,7 +169,7 @@ void ShowSayExtended(int msgIdHeader, int p1, int p2)
 [[ClientRemoteCall]]
 void ShowSayExtendedScreenFromScenery(int msgIdHeader, int msgIdInputText, hstring sceneryPid, mpos hex)
 {
-    if (CurMap != null && Chosen != null) {
+    if (HasCurMap && HasChosen) {
         Gui::ShowScreen(
             GuiScreen::SayExtended,
             dict<string, any> = {{"MsgHeaderId", msgIdHeader}, {"InputMessageID", msgIdInputText}, {"ProtoID", sceneryPid}, {"HexX", hex.x}, {"HexY", hex.y}});

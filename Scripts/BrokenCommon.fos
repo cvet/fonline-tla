@@ -11,12 +11,12 @@ namespace BrokenCommon
 ///@ Property Critter Server uint8 BHHubHoloRemembered Mutable Persistent Max = 1
 ///@ Property Critter Server uint8 BHUranDiscount Mutable Persistent Max = 1
 
-#define STR_KILL_SABOTEUR (5900)
-#define HOLO_MSG_ID       (56)
-#define STR_LOW_SCIENCE   (5901)
-#define STR_HIGH_SCIENCE  (5902)
-#define MIN_SCIENCE       (120)
-#define URANIUM_DISCOUNT  (25) // Скидка в процентах на уран для выполнившего квест
+const int STR_KILL_SABOTEUR = 5900;
+const int HOLO_MSG_ID = 56;
+const int STR_LOW_SCIENCE = 5901;
+const int STR_HIGH_SCIENCE = 5902;
+const int MIN_SCIENCE = 120;
+const int URANIUM_DISCOUNT = 25; // Скидка в процентах на уран для выполнившего квест
 
 // Подсчет убитых саботажников для квеста
 void CountDeadSaboteurs(Critter cr, Map? map, Critter? killer)
@@ -35,7 +35,7 @@ void CountDeadSaboteurs(Critter cr, Map? map, Critter? killer)
     }
 
     Critter[] grp = {};
-    Critter leader = GlobalmapGroupExtended::GetFollowLeader(killer);
+    Critter? leader = GlobalmapGroupExtended::GetFollowLeader(killer);
     if (leader == null) {
         leader = killer;
     }
@@ -44,9 +44,6 @@ void CountDeadSaboteurs(Critter cr, Map? map, Critter? killer)
     GlobalmapGroupExtended::GetFollowGroup(leader, CritterFindType::NonDead, grp);
     for (int i = 0, l = grp.length(); i < l; i++) {
         Critter player = grp[i];
-        if (player == null) {
-            continue;
-        }
         if (!player.ControlledByPlayer) {
             continue;
         }
@@ -60,36 +57,32 @@ void CountDeadSaboteurs(Critter cr, Map? map, Critter? killer)
         }
 
         player.BHDeadSaboteursCounter += 1;
-        Messaging::Info(player, TextPackKey(TextPackName::Text, "" + (STR_KILL_SABOTEUR)), "$dead" + player.BHDeadSaboteursCounter);
+        Messaging::Info(player, TextPackKey(TextPackName::Text, "" + (STR_KILL_SABOTEUR)), "|dead:" + player.BHDeadSaboteursCounter);
     }
 }
 
 [[DialogResult]]
-void r_WriteHolodisk(Critter player, Critter npc)
+void WriteHolodisk(Critter player, Critter npc)
 {
     Item holo = player.AddItem(Content::Item::holodisk, 1);
-    if (holo == null) {
-        return;
-    }
-
-    holo.SetupScript(_HoloInit);
+    holo.SetupScript(HoloInit);
 }
 
-void _HoloInit(Item holo, bool firstTime)
+void HoloInit(Item holo, bool firstTime)
 {
     holo.HolodiskNum = HOLO_MSG_ID;
-    holo.OnCritterUse.Subscribe(_HoloUse);
-    holo.OnCritterUseSkill.Subscribe(_HoloSkill);
+    holo.OnCritterUse.Subscribe(HoloUse);
+    holo.OnCritterUseSkill.Subscribe(HoloSkill);
 }
 
 [[Event]]
-EventResult _HoloSkill(Item item, Critter cr, CritterProperty skill)
+EventResult HoloSkill(Item item, Critter cr, CritterProperty skill)
 {
     return EventResult::StopChain;
 }
 
 [[Event]]
-EventResult _HoloUse(Item item, Critter cr, int param)
+EventResult HoloUse(Item item, Critter cr, int param)
 {
     if (cr.SkillScience >= MIN_SCIENCE) {
         Messaging::Info(cr, TextPackKey(TextPackName::Text, "" + (STR_HIGH_SCIENCE)));
@@ -100,23 +93,24 @@ EventResult _HoloUse(Item item, Critter cr, int param)
     else {
         Messaging::Info(cr, TextPackKey(TextPackName::Text, "" + (STR_LOW_SCIENCE)));
     }
+
     return EventResult::StopChain;
 }
 
 [[DialogResult]]
-void r_GrantPlayer(Critter cr, Critter npc)
+void GrantPlayer(Critter cr, Critter npc)
 {
     cr.RadiationResistanceBase += 5;
 }
 
-void _GhoulTraderInit(Critter cr, bool firstTime)
+void GhoulTraderInit(Critter cr, bool firstTime)
 {
-    Trader::_TraderInit(cr, firstTime);
-    cr.OnBarter.Subscribe(_GhoulBarter);
+    Trader::TraderInit(cr, firstTime);
+    cr.OnBarter.Subscribe(GhoulBarter);
 }
 
 [[Event]]
-EventResult _GhoulBarter(Critter cr, Critter player, bool attach, int barterCount)
+EventResult GhoulBarter(Critter cr, Critter player, bool attach, int barterCount)
 {
     bool setDisc = false;
     if (attach) {
@@ -126,31 +120,33 @@ EventResult _GhoulBarter(Critter cr, Critter player, bool attach, int barterCoun
             }
         }
     }
+
     SedUraniumCost(cr, (setDisc ? 100 - URANIUM_DISCOUNT : 100));
     return EventResult::StopChain;
 }
 
 void SedUraniumCost(Critter cr, int percent)
 {
-    Item ore = cr.GetItem(Content::Item::refined_ore);
+    Item? ore = cr.GetItem(Content::Item::refined_ore);
     if (ore == null) {
         return;
     }
+
     int newCost = int(ore.Cost * percent / 100);
     ore.Cost = newCost;
 }
 
-void _SaboteurInit(Critter npc, bool firstTime)
+void SaboteurInit(Critter npc, bool firstTime)
 {
-    EncounterNpc::_NpcInit(npc, firstTime);
-    npc.OnDead.Subscribe(_SaboteurDead);
+    EncounterNpc::NpcInit(npc, firstTime);
+    npc.OnDead.Subscribe(SaboteurDead);
 }
 
 [[Event]]
-void _SaboteurDead(Critter npc, Critter killer)
+void SaboteurDead(Critter npc, Critter killer)
 {
     CountDeadSaboteurs(npc, npc.GetMap(), killer);
-    EncounterNpc::_NpcDead_Impl(npc, killer);
+    EncounterNpc::NpcDeadImpl(npc, killer);
 }
 
 #endif

@@ -30,7 +30,7 @@ void InitDropMenuHandler()
 
 bool CanFollowGroup(Critter? cr, Item item)
 {
-    return cr != null && CurMap != null && !cr.IsChosen && cr.IsAlive() && cr.ControlledByPlayer && !cr.IsPlayerOffline;
+    return cr != null && !cr.IsChosen && cr.IsAlive() && cr.ControlledByPlayer && !cr.IsPlayerOffline;
 }
 
 void DoFollowGroup(Critter? cr, Item item)
@@ -67,6 +67,7 @@ void DoUseSkill(Critter? cr, Item? item)
             critterId = cr.Id;
         }
     }
+
     Gui::ShowScreen(GuiScreen::SkillBox, dict<string, any> = {{"TargetCritterId", critterId}, {"TargetItemId", itemId}, {"IsInventory", isInventory}});
 }
 
@@ -83,6 +84,7 @@ void DoUseItemFromInventory(Critter? cr, Item? item)
             Game.Log("Target name " + cr.DisplayName);
         }
     }
+
     TlaFixedDropMenu::SetDropMenuEnabled(false);
     Gui::ShowScreen(GuiScreen::Use, dict<string, any> = {{"TargetCritterId", critterId}, {"TargetItemId", itemId}});
 }
@@ -101,7 +103,7 @@ void Dialog(Critter cr, Item item)
 
 bool IsChosenAlive()
 {
-    return Chosen != null && Chosen.IsAlive();
+    return Chosen.IsAlive();
 }
 
 // Close menu
@@ -124,10 +126,10 @@ bool CanLook(Critter? cr, Item? item)
 void Look(Critter? cr, Item? item)
 {
     if (item != null) {
-        Messaging::Info(ClientMain::item_description(item, ItemLookTypes::Default));
+        Messaging::Info(ClientMain::ItemDescription(item, ItemLookTypes::Default));
     }
     else if (cr != null) {
-        Messaging::Info(ClientMain::critter_description(cr, CritterLookTypes::LookFull));
+        Messaging::Info(ClientMain::CritterDescription(cr, CritterLookTypes::LookFull));
     }
 }
 
@@ -165,7 +167,7 @@ void Use(Critter? cr, Item? item)
 
     if (item != null && IsChosenAlive() && IsChosenItem(item) && (item.IsCanUse || item.IsCanUseOnSmth)) {
         Game.Log("use on self");
-        ChosenActions::SetChosenActions({Tla::ChosenUseItem, item.Id, 0, TARGET_SELF, 0, _WeaponModeMake(USE_USE, 0), 0});
+        ChosenActions::SetChosenActions({Tla::ChosenUseItem, item.Id, 0, ClientDefines::TARGET_SELF, 0, Tla::MakeWeaponMode(Tla::USE_USE, 0), 0});
     }
 }
 
@@ -182,7 +184,7 @@ bool IsChosenItem(Item item)
 void Drop(Critter cr, Item item)
 {
     if (item.Stackable && item.Count > 1) {
-        Gui::ShowScreen(GuiScreen::Split, dict<string, any> = {{"TargetItemId", item.Id}, {"ItemsCollection", ITEMS_CHOSEN_ALL}});
+        Gui::ShowScreen(GuiScreen::Split, dict<string, any> = {{"TargetItemId", item.Id}, {"ItemsCollection", ClientDefines::ITEMS_CHOSEN_ALL}});
     }
     else {
         ChosenActions::SetChosenActions({Tla::ChosenMoveItem, item.Id, item.Count, CritterItemSlot::Outside, 0, 0, 0});
@@ -191,7 +193,7 @@ void Drop(Critter cr, Item item)
 
 bool CanRotate(Critter? cr, Item item)
 {
-    return cr != null && CurMap != null && cr.IsChosen && cr.IsAlive();
+    return cr != null && cr.IsChosen && cr.IsAlive();
 }
 
 void Rotate(Critter cr, Item item)
@@ -213,22 +215,22 @@ void DoUnload(Critter cr, Item item)
 
 #if SERVER
 
-[[ServerRemoteCall]]
+[[ServerRemoteCall]] [[Async]]
 void StartDialog(Player player, ident npcId)
 {
-    Critter cr = player.GetControlledCritter();
-    Critter npc = Game.GetCritter(npcId);
-    if (cr != null && cr.IsAlive() && npc != null && npc.IsAlive() && !npc.ControlledByPlayer && !npc.IsNoTalk) {
+    Critter? cr = player.GetControlledCritter();
+    Critter? npc = Game.GetCritter(npcId);
+    if (cr != null && npc != null && Sync::Lock(cr, npc) && cr.IsAlive() && npc.IsAlive() && !npc.ControlledByPlayer && !npc.IsNoTalk) {
         Dialogs::RunDialog(cr, npc, false);
     }
 }
 
-[[ServerRemoteCall]]
+[[ServerRemoteCall]] [[Async]]
 void UseSkillOnItem(Player player, ident itemId, CritterProperty skill)
 {
-    Critter cr = player.GetControlledCritter();
-    Item item = Game.GetItem(itemId);
-    if (cr != null && item != null) {
+    Critter? cr = player.GetControlledCritter();
+    Item? item = Game.GetItem(itemId);
+    if (cr != null && item != null && Sync::Lock(cr, item)) {
         if (item.Type == ItemType::Container || item.Type == ItemType::Door) {
             Lockers::UseSkillOnLocker(cr, item, CritterProperty::SpecialSkillPickOnGround);
         }

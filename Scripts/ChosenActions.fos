@@ -33,28 +33,25 @@ void InitChosenActions()
 
 int GetChosenActions(any[] & actions)
 {
-    if (actions != null) {
-        actions = ChosenActions.clone();
-    }
+    actions = ChosenActions.clone();
     return ChosenActions.length();
 }
 
 void SetChosenActions(any[] actions)
 {
     ChosenActions.resize(0);
-    if (actions != null) {
-        Assert(actions.length() % 7 == 0);
-        ChosenActions = actions.clone();
-    }
+    verify(actions.length() % 7 == 0, "Assertion failed");
+    ChosenActions = actions.clone();
 }
 
 void SetAction(any[] action, bool append, bool toBeginning)
 {
-    Assert(action.length() == 7);
+    verify(action.length() == 7, "Assertion failed");
 
     if (!append) {
         ChosenActions.resize(0);
     }
+
     if (toBeginning) {
         for (int i = int(action.length()) - 1; i >= 0; i--) {
             ChosenActions.insertFirst(action[i]);
@@ -67,33 +64,16 @@ void SetAction(any[] action, bool append, bool toBeginning)
     }
 }
 
-#define CHECK_NEED_AP \
-    #(needAp) if (chosen.ActionPoints < int(needAp)) \
-    { \
-        Messaging::Info(Game.ReplaceText(Game.GetText(TextPackKey(TextPackName::Combat, "" + (MsgStr::StrCombatNeedAp))), "%d", needAp)); \
-        break; \
-    } \
-    if (chosen.CurrentAp / AP_DIVIDER < int(needAp)) \
-        return;
-
-#define CHECK_NEED_AP2 \
-    #(needAp) if (chosen.ActionPoints < int(needAp)) \
-    { \
-        Messaging::Info(Game.ReplaceText(Game.GetText(TextPackKey(TextPackName::Combat, "" + (MsgStr::StrCombatNeedAp))), "%d", needAp)); \
-        return true; \
-    } \
-    if (chosen.CurrentAp / AP_DIVIDER < int(needAp)) \
-        return false;
-
 [[Event]]
 void ChosenProcess()
 {
-    Critter chosen = Chosen;
-    if (chosen == null) {
+    if (!HasChosen) {
         return;
     }
 
-    if (CurMap != null) {
+    Critter chosen = Chosen;
+
+    if (HasCurMap) {
         // Roof
         CurMap.SetHiddenRoof(chosen.Hex);
 
@@ -121,7 +101,7 @@ void ChosenProcess()
     }
 
     // Ap regeneration
-    if (chosen.CurrentAp < chosen.ActionPoints * AP_DIVIDER) {
+    if (chosen.CurrentAp < chosen.ActionPoints * Tla::AP_DIVIDER) {
         nanotime tick = Game.FrameTime;
         if (chosen.ApRegenerationTick == ZERO_NANOTIME) {
             chosen.ApRegenerationTick = tick;
@@ -136,7 +116,7 @@ void ChosenProcess()
                 apRegeneration = Settings.Combat.ApRegeneration;
             }
 
-            int maxAp = chosen.ActionPoints * AP_DIVIDER;
+            int maxAp = chosen.ActionPoints * Tla::AP_DIVIDER;
             chosen.CurrentAp = chosen.CurrentAp + maxAp * delta.milliseconds / apRegeneration;
             if (chosen.CurrentAp > int(maxAp)) {
                 chosen.CurrentAp = maxAp;
@@ -144,12 +124,14 @@ void ChosenProcess()
         }
     }
 
-    if (chosen.CurrentAp / AP_DIVIDER > chosen.ActionPoints) {
-        chosen.CurrentAp = chosen.ActionPoints * AP_DIVIDER;
+    if (chosen.CurrentAp / Tla::AP_DIVIDER > chosen.ActionPoints) {
+        chosen.CurrentAp = chosen.ActionPoints * Tla::AP_DIVIDER;
     }
+
     if (ChosenActions.length() == 0) {
         return;
     }
+
     if (!chosen.IsAlive()) {
         ChosenActions.clear();
         return;
@@ -171,13 +153,13 @@ void ChosenProcess()
         bool isRun = (ChosenActions[3] != 0);
         int cut = ChosenActions[4];
 
-        if (CurMap == null) {
+        if (!HasCurMap) {
             break;
         }
 
         // Move to critter
         if (actionType == Tla::ChosenMoveToCrit) {
-            Critter cr = Game.GetCritter(ChosenActions[1]);
+            Critter? cr = Game.GetCritter(ChosenActions[1]);
             if (cr != null) {
                 hex = cr.Hex;
             }
@@ -237,6 +219,7 @@ void ChosenProcess()
 
             // chosen.ApRegenerationTick = 0;
         }
+
         if (chosen.IsMoving()) {
             return;
         }
@@ -244,7 +227,7 @@ void ChosenProcess()
     case Tla::ChosenDir: {
         bool cw = (ChosenActions[1] == 0);
 
-        if (CurMap == null) {
+        if (!HasCurMap) {
             break;
         }
 
@@ -266,6 +249,7 @@ void ChosenProcess()
                     dirVal = 5;
                 }
             }
+
             dir = mdir(hdir(dirVal));
         }
 
@@ -277,10 +261,20 @@ void ChosenProcess()
         if (weapon == null || weapon.Type != ItemType::Weapon || weapon.Weapon_MaxAmmoCount == 0 || weapon.AmmoCount == 0) {
             break;
         }
-        int apCost = Parameters::GetItemUseApCost(chosen, weapon, USE_RELOAD);
-        CHECK_NEED_AP(apCost);
+
+        int apCost = Parameters::GetItemUseApCost(chosen, weapon, Tla::USE_RELOAD);
+        {
+            int needApValue = int(apCost);
+            if (chosen.ActionPoints < needApValue) {
+                Messaging::Info(Game.ReplaceText(Game.GetText(TextPackKey(TextPackName::Combat, "" + (MsgStr::StrCombatNeedAp))), "%d", needApValue));
+                break;
+            }
+            if (chosen.CurrentAp / Tla::AP_DIVIDER < needApValue) {
+                return;
+            }
+        }
         CurPlayer.ServerCall.ReloadWeapon(weapon.Id, ZERO_IDENT);
-        chosen.CurrentAp -= apCost * AP_DIVIDER;
+        chosen.CurrentAp -= apCost * Tla::AP_DIVIDER;
     } break;
     case Tla::ChosenUseItem: {
         ident itemId = ChosenActions[1];
@@ -292,92 +286,112 @@ void ChosenProcess()
         int aim = (rate >> 4);
 
         // Find item
-        AbstractItem item = (itemId != ZERO_IDENT ? cast<AbstractItem>(chosen.GetItem(itemId)) : CritterItem::GetSlotItemProto(chosen));
+        AbstractItem? item = (itemId != ZERO_IDENT ? cast<AbstractItem>(chosen.GetItem(itemId)) : CritterItem::GetSlotItemProto(chosen));
         if (item == null) {
             break;
         }
 
-        Item realItem = cast<Item>(item);
-        Item mainslotItem = chosen.GetItem(ItemProperty::CritterSlot, CritterItemSlot::Main);
+        Item? realItem = cast<Item>(item);
+        Item? mainslotItem = chosen.GetItem(ItemProperty::CritterSlot, CritterItemSlot::Main);
         bool isMainItem = (realItem == null || (mainslotItem != null && realItem.Id == mainslotItem.Id));
 
         // Find target
-        Critter targetCr;
-        Item targetItem;
-        Item targetSelfItem;
-        if (targetType == TARGET_SELF) {
+        Critter? targetCr;
+        Item? targetItem;
+        Item? targetSelfItem;
+        if (targetType == ClientDefines::TARGET_SELF) {
             targetCr = chosen;
         }
-        else if (targetType == TARGET_SELF_ITEM) {
+        else if (targetType == ClientDefines::TARGET_SELF_ITEM) {
             targetSelfItem = chosen.GetItem(targetId);
         }
-        else if (targetType == TARGET_CRITTER) {
+        else if (targetType == ClientDefines::TARGET_CRITTER) {
             targetCr = Game.GetCritter(targetId);
         }
-        else if (targetType == TARGET_ITEM) {
+        else if (targetType == ClientDefines::TARGET_ITEM) {
             targetItem = Game.GetItem(targetId);
         }
         else {
             break;
         }
 
-        if (targetType == TARGET_CRITTER && chosen is targetCr) {
-            targetType = TARGET_SELF;
+        if (targetType == ClientDefines::TARGET_CRITTER && chosen is targetCr) {
+            targetType = ClientDefines::TARGET_SELF;
         }
-        if (targetType == TARGET_SELF) {
+
+        if (targetType == ClientDefines::TARGET_SELF) {
             targetId = chosen.Id;
         }
 
         // Check
-        if (targetType == TARGET_CRITTER && targetCr == null) {
+        if (targetType == ClientDefines::TARGET_CRITTER && targetCr == null) {
             break;
         }
-        if (targetType == TARGET_ITEM && targetItem == null) {
+
+        if (targetType == ClientDefines::TARGET_ITEM && targetItem == null) {
             break;
         }
-        if (targetType != TARGET_CRITTER && realItem == null) {
+
+        if (targetType != ClientDefines::TARGET_CRITTER && realItem == null) {
             break;
         }
 
         // Parse use
-        bool isAttack = (targetType == TARGET_CRITTER && isMainItem && item.Type == ItemType::Weapon && use < MAX_USES);
-        bool isReload = (targetType == TARGET_SELF_ITEM && use == USE_RELOAD && item.Type == ItemType::Weapon);
-        bool isSelf = (targetType == TARGET_SELF || targetType == TARGET_SELF_ITEM);
+        bool isAttack = (targetType == ClientDefines::TARGET_CRITTER && isMainItem && item.Type == ItemType::Weapon && use < Tla::MAX_USES);
+        bool isReload = (targetType == ClientDefines::TARGET_SELF_ITEM && use == Tla::USE_RELOAD && item.Type == ItemType::Weapon);
+        bool isSelf = (targetType == ClientDefines::TARGET_SELF || targetType == ClientDefines::TARGET_SELF_ITEM);
 
         // Calculate ap cost
         int apCost = Parameters::GetItemUseApCost(chosen, item, rate);
-        CHECK_NEED_AP(apCost);
-
+        {
+            int needApValue = int(apCost);
+            if (chosen.ActionPoints < needApValue) {
+                Messaging::Info(Game.ReplaceText(Game.GetText(TextPackKey(TextPackName::Combat, "" + (MsgStr::StrCombatNeedAp))), "%d", needApValue));
+                break;
+            }
+            if (chosen.CurrentAp / Tla::AP_DIVIDER < needApValue) {
+                return;
+            }
+        }
         // Check weapon
         if (isAttack) {
             // ChosenActions::SetChosenActions({Tla::ChosenUseItem, useItem.Id, 0, TARGET_CRITTER, cr.Id, isAttack ? mode : USE_USE, 0});
 
-            if (CurMap == null) {
+            if (!HasCurMap) {
                 break;
             }
+
             if (isSelf) {
                 break;
             }
+
             if (item.Type != ItemType::Weapon) {
                 break;
             }
-            if (targetCr.IsDead()) {
+
+            verify(targetCr != null, "Attack action requires a target critter");
+            Critter attackTarget = targetCr;
+            if (attackTarget.IsDead()) {
                 break;
             }
+
             if (!chosen.IsUnlimitedAmmo && item.Weapon_MaxAmmoCount > 0 && item.AmmoCount == 0) {
                 int sound = (use == 0 ? item.Weapon_SoundId_0 : (use == 1 ? item.Weapon_SoundId_1 : item.Weapon_SoundId_2));
-                Effects::PlayWeaponSound(SOUND_WEAPON_EMPTY, sound, '1');
+                Effects::PlayWeaponSound(Tla::SOUND_WEAPON_EMPTY, sound, '1');
 
                 break;
             }
+
             if (item.Weapon_IsTwoHanded && (chosen.IsDamagedRightArm || chosen.IsDamagedLeftArm)) {
                 Messaging::Info(TextPackKey(TextPackName::Combat, "" + (MsgStr::StrCombatNeedDmgArm)));
                 break;
             }
+
             if (chosen.IsDamagedRightArm && chosen.IsDamagedLeftArm && realItem != null) {
                 Messaging::Info(TextPackKey(TextPackName::Combat, "" + (MsgStr::StrCombatNeedDmgTwoArms)));
                 break;
             }
+
             if (item.Deteriorable && item.IsBroken) {
                 Messaging::Info(TextPackKey(TextPackName::Game, "" + (MsgStr::StrDeteriorationWeaponBroken)));
                 break;
@@ -387,12 +401,25 @@ void ChosenProcess()
             if (!isSelf) {
                 break;
             }
-            CHECK_NEED_AP(apCost);
+
+            {
+                int needApValue = int(apCost);
+
+                if (chosen.ActionPoints < needApValue) {
+                    Messaging::Info(Game.ReplaceText(Game.GetText(TextPackKey(TextPackName::Combat, "" + (MsgStr::StrCombatNeedAp))), "%d", needApValue));
+
+                    break;
+                }
+
+                if (chosen.CurrentAp / Tla::AP_DIVIDER < needApValue) {
+                    return;
+                }
+            }
             if (isMainItem) {
-                Parameters::SetWeaponMode(item, USE_PRIMARY);
+                Parameters::SetWeaponMode(item, Tla::USE_PRIMARY);
             }
 
-            Gui::Screen screen = Gui::GetActiveScreen();
+            Gui::Screen? screen = Gui::GetActiveScreen();
             if (screen == null || screen.Num == GuiScreen::None || screen.Num == GuiScreen::Game) {
                 Gui::Cursor = CursorType::UseWeapon;
             }
@@ -405,9 +432,10 @@ void ChosenProcess()
                 if (item.AmmoCount >= item.Weapon_MaxAmmoCount) {
                     break; // Is full
                 }
+
                 if (item.Weapon_Caliber != 0) {
                     hstring ammoPid = item.AmmoPid != EMPTY_HSTRING ? item.AmmoPid : item.Weapon_DefaultAmmoPid;
-                    Item ammoCaliber;
+                    Item? ammoCaliber;
                     Item[] items = chosen.GetItems(ItemProperty::Type, ItemType::Ammo);
                     for (int i = 0; i < items.length(); i++) {
                         if (items[i].ProtoId == ammoPid) {
@@ -419,6 +447,7 @@ void ChosenProcess()
                             ammoCaliber = items[i];
                         }
                     }
+
                     if (targetSelfItem == null) {
                         if (ammoCaliber != null) {
                             targetSelfItem = ammoCaliber;
@@ -427,8 +456,11 @@ void ChosenProcess()
                             break;
                         }
                     }
+
+                    verify(targetSelfItem != null, "Reload action requires ammo item");
                     targetId = targetSelfItem.Id;
                 }
+
                 /*if( item.Weapon_Caliber )
                    {
                     targetSelfItem = chosen->GetAmmoAvialble( item );
@@ -442,31 +474,38 @@ void ChosenProcess()
                 if (item.Weapon_Caliber != targetSelfItem.Ammo_Caliber) {
                     break; // Different caliber
                 }
+
                 if (item.AmmoPid == targetSelfItem.ProtoId && item.AmmoCount == item.Weapon_MaxAmmoCount) {
                     break; // Is full
                 }
             }
 
+            if (realItem == null) {
+                break;
+            }
+
             CurPlayer.ServerCall.ReloadWeapon(realItem.Id, targetId);
-            chosen.CurrentAp -= apCost * AP_DIVIDER;
+            chosen.CurrentAp -= apCost * Tla::AP_DIVIDER;
         }
         else // Use
         {
-            if (use != USE_USE) {
+            if (use != Tla::USE_USE) {
                 break;
             }
         }
 
         // Find Target
-        if (!isSelf && CurMap != null) {
+        if (!isSelf && HasCurMap) {
             int hx, hy;
             if (targetCr != null) {
                 hx = targetCr.Hex.x;
                 hy = targetCr.Hex.y;
             }
             else {
-                hx = targetItem.Hex.x;
-                hy = targetItem.Hex.y;
+                verify(targetItem != null, "Use action requires a target item");
+                Item resolvedTargetItem = targetItem;
+                hx = resolvedTargetItem.Hex.x;
+                hy = resolvedTargetItem.Hex.y;
             }
 
             int maxDist = 0;
@@ -478,6 +517,7 @@ void ChosenProcess()
             else {
                 maxDist = 1 + chosen.Multihex;
             }
+
             if (targetCr != null) {
                 maxDist += targetCr.Multihex;
             }
@@ -513,7 +553,16 @@ void ChosenProcess()
             }
 
             // Refresh orientation
-            CHECK_NEED_AP(apCost);
+            {
+                int needApValue = int(apCost);
+                if (chosen.ActionPoints < needApValue) {
+                    Messaging::Info(Game.ReplaceText(Game.GetText(TextPackKey(TextPackName::Combat, "" + (MsgStr::StrCombatNeedAp))), "%d", needApValue));
+                    break;
+                }
+                if (chosen.CurrentAp / Tla::AP_DIVIDER < needApValue) {
+                    return;
+                }
+            }
             mdir dir = Game.GetDirection(chosen.Hex, mpos(hx, hy));
             if (Game.GetDistance(chosen.Hex, mpos(hx, hy)) >= 1 && chosen.Dir != dir) {
                 chosen.ChangeDir(dir);
@@ -521,21 +570,26 @@ void ChosenProcess()
         }
 
         // Use
-        CHECK_NEED_AP(apCost);
-
-        /*if( targetItem && targetItem->IsGenericOrGrid() )
-            Net_SendUseItem( apCost, itemId, rate, targetType, ( targetItem.HexX << 16 ) | ( targetItem.HexY & 0xFFFF ), targetItem->GetProtoId(), param );
-           else
-            Net_SendUseItem( apCost, itemId, rate, targetType, targetId, 0, param );  // Item or critter
-         */
-        if (use != USE_RELOAD && !isAttack) {
-            if (targetType == TARGET_ITEM || targetType == TARGET_SELF_ITEM) {
-                if (targetType == TARGET_SELF_ITEM) {
+        {
+            int needApValue = int(apCost);
+            if (chosen.ActionPoints < needApValue) {
+                Messaging::Info(Game.ReplaceText(Game.GetText(TextPackKey(TextPackName::Combat, "" + (MsgStr::StrCombatNeedAp))), "%d", needApValue));
+                break;
+            }
+            if (chosen.CurrentAp / Tla::AP_DIVIDER < needApValue) {
+                return;
+            }
+        }
+        if (use != Tla::USE_RELOAD && !isAttack) {
+            if (targetType == ClientDefines::TARGET_ITEM || targetType == ClientDefines::TARGET_SELF_ITEM) {
+                if (targetType == ClientDefines::TARGET_SELF_ITEM) {
                     targetItem = targetSelfItem;
                 }
 
-                if (targetItem.IsScenery) {
-                    CurPlayer.ServerCall.UseItemOn(itemId, ZERO_IDENT, ZERO_IDENT, targetItem.ProtoId, targetItem.Hex, param);
+                verify(targetItem != null, "Use action requires a target item");
+                Item resolvedTargetItem = targetItem;
+                if (resolvedTargetItem.IsScenery) {
+                    CurPlayer.ServerCall.UseItemOn(itemId, ZERO_IDENT, ZERO_IDENT, resolvedTargetItem.ProtoId, resolvedTargetItem.Hex, param);
                 }
                 else {
                     CurPlayer.ServerCall.UseItemOn(itemId, ZERO_IDENT, targetId, EMPTY_HSTRING, ZERO_MPOS, param);
@@ -545,19 +599,22 @@ void ChosenProcess()
                 CurPlayer.ServerCall.UseItemOn(itemId, targetId, ZERO_IDENT, EMPTY_HSTRING, ZERO_MPOS, param);
             }
         }
-        if (use >= USE_PRIMARY && use <= USE_THIRD) {
+
+        if (use >= Tla::USE_PRIMARY && use <= Tla::USE_THIRD) {
             (Game.OnCritterActionEx.Fire(true, chosen, CritterAction::UseWeapon, rate, item) == EventResult::ContinueChain);
         }
-        else if (use == USE_RELOAD) {
+        else if (use == Tla::USE_RELOAD) {
             (Game.OnCritterActionEx.Fire(true, chosen, CritterAction::ReloadWeapon, 0, item) == EventResult::ContinueChain);
         }
         else {
             (Game.OnCritterActionEx.Fire(true, chosen, CritterAction::UseItem, 0, item) == EventResult::ContinueChain);
         }
-        chosen.CurrentAp -= apCost * AP_DIVIDER;
+
+        chosen.CurrentAp -= apCost * Tla::AP_DIVIDER;
         if (isAttack && targetCr != null) {
             CurPlayer.ServerCall.Attack(targetCr.Id, rate);
         }
+
         /*if( isAttack && !aim && Keyb::ShiftDwn )               // Continue battle after attack
            {
            SetAction( curAction, false, false );
@@ -570,9 +627,9 @@ void ChosenProcess()
         CritterItemSlot toSlot = CritterItemSlot(int(ChosenActions[3]));
         bool isSecondTry = (ChosenActions[5] != 0);
 
-        Assert(itemCount > 0);
+        verify(itemCount > 0, "Assertion failed");
 
-        Item item = chosen.GetItem(itemId);
+        Item? item = chosen.GetItem(itemId);
         if (item == null) {
             break;
         }
@@ -588,7 +645,7 @@ void ChosenProcess()
             }
         }
 
-        Item itemSwap = null;
+        Item? itemSwap = null;
         if (toSlot != CritterItemSlot::Inventory && toSlot != CritterItemSlot::Outside) {
             itemSwap = chosen.GetItem(ItemProperty::CritterSlot, toSlot);
         }
@@ -608,6 +665,7 @@ void ChosenProcess()
                     return;
                 }
             }
+
             break;
         }
 
@@ -617,11 +675,24 @@ void ChosenProcess()
             (fromSlot == CritterItemSlot::Secondary && toSlot == CritterItemSlot::Main)) {
             apCost = 0;
         }
+
         if (toSlot == CritterItemSlot::Outside) {
             apCost = Settings.Movement.RtApCostDropItem;
         }
-        CHECK_NEED_AP(apCost);
 
+        {
+            int needApValue = int(apCost);
+
+            if (chosen.ActionPoints < needApValue) {
+                Messaging::Info(Game.ReplaceText(Game.GetText(TextPackKey(TextPackName::Combat, "" + (MsgStr::StrCombatNeedAp))), "%d", needApValue));
+
+                break;
+            }
+
+            if (chosen.CurrentAp / Tla::AP_DIVIDER < needApValue) {
+                return;
+            }
+        }
         // Game.CustomCall( "MoveItem " + apCost + " " + itemCount + " " + itemId + " " + ( itemSwap != null ? itemSwap.Id : 0 ) + " " + toSlot );
 
         //Game.CustomCall("MoveItem " + itemCount + " " + itemId + " " + (itemSwap != null ? itemSwap.Id : ZERO_IDENT) + " " +
@@ -641,22 +712,26 @@ void ChosenProcess()
         int itemCont = ChosenActions[2];
         int count = ChosenActions[3];
 
-        Assert(itemCont == ITEMS_PICKUP || itemCont == ITEMS_PICKUP_FROM);
-        Assert(count > 0);
+        verify(itemCont == ClientDefines::ITEMS_PICKUP || itemCont == ClientDefines::ITEMS_PICKUP_FROM, "Assertion failed");
+        verify(count > 0, "Assertion failed");
 
         Item[] cont = ClientItems::RefreshItemsCollection(itemCont);
-        Item item;
+        Item? item;
         for (int i = 0; i < cont.length() && item == null; i++) {
             if (cont[i].Id == itemId) {
                 item = cont[i];
             }
         }
 
+        if (item == null) {
+            break;
+        }
+
         if (count > item.Count) {
             break;
         }
 
-        Entity contEntity;
+        Entity? contEntity;
         TransferTypes transferType = chosen.TransferType;
         ident transferContainerId = chosen.TransferContainerId;
         if (transferContainerId != ZERO_IDENT) {
@@ -673,19 +748,36 @@ void ChosenProcess()
             break;
         }
 
+        if (contEntity == null) {
+            break;
+        }
+
         auto colType = ClientItems::GetCollectionFromType(itemCont);
         bool take = (colType == ClientItems::Collection::Loot);
-        Entity from = (itemCont == ITEMS_PICKUP ? cast<Entity>(chosen) : contEntity);
-        Entity to = (itemCont == ITEMS_PICKUP ? contEntity : cast<Entity>(chosen));
+        Entity from = (itemCont == ClientDefines::ITEMS_PICKUP ? cast<Entity>(chosen) : contEntity);
+        Entity to = (itemCont == ClientDefines::ITEMS_PICKUP ? contEntity : cast<Entity>(chosen));
         if ((Game.OnItemCheckMove.Fire(item, count, from, to) == EventResult::StopChain)) {
             break;
         }
 
         int apCost = Settings.Movement.RtApCostMoveItemContainer;
-        CHECK_NEED_AP(apCost);
+        {
+            int needApValue = int(apCost);
+            if (chosen.ActionPoints < needApValue) {
+                Messaging::Info(Game.ReplaceText(Game.GetText(TextPackKey(TextPackName::Combat, "" + (MsgStr::StrCombatNeedAp))), "%d", needApValue));
+                break;
+            }
+            if (chosen.CurrentAp / Tla::AP_DIVIDER < needApValue) {
+                return;
+            }
+        }
+        Critter? toCritter = cast<Critter?>(to);
+        if (take || toCritter != null) {
+            Critter? toCr = take ? chosen : toCritter;
+            if (toCr == null) {
+                break;
+            }
 
-        if (take || cast<Critter>(to) != null) {
-            Critter toCr = take ? chosen : cast<Critter>(to);
             if (int(toCr.ItemsWeight) + item.Weight * count > toCr.CarryWeight) {
                 Messaging::Info(TextPackKey(TextPackName::Game, "" + ((take ? MsgStr::StrOverweight : MsgStr::StrOvervolume))));
                 break;
@@ -701,8 +793,16 @@ void ChosenProcess()
     } break;
     /*case Tla::ChosenTakeAll:
        {
-        CHECK_NEED_AP( chosen->GetApCostMoveItemContainer() );
-
+        {
+            int needApValue = int(chosen->GetApCostMoveItemContainer());
+            if (chosen.ActionPoints < needApValue) {
+                Messaging::Info(Game.ReplaceText(Game.GetText(TextPackKey(TextPackName::Combat, "" + (MsgStr::StrCombatNeedAp))), "%d", needApValue));
+                break;
+            }
+            if (chosen.CurrentAp / AP_DIVIDER < needApValue) {
+                return;
+            }
+        }
         if( PupCont2Init.empty() )
             break;
 
@@ -723,11 +823,20 @@ void ChosenProcess()
         chosen->Action( CritterAction::OperateContainer, PupTransferType * 10 + 1, nullptr );
         chosen->SubAp( chosen->GetApCostMoveItemContainer() );
        }
+
        break;*/
     /*case Tla::ChosenPutAll:
        {
-        CHECK_NEED_AP( chosen->GetApCostMoveItemContainer() );
-
+        {
+            int needApValue = int(chosen->GetApCostMoveItemContainer());
+            if (chosen.ActionPoints < needApValue) {
+                Messaging::Info(Game.ReplaceText(Game.GetText(TextPackKey(TextPackName::Combat, "" + (MsgStr::StrCombatNeedAp))), "%d", needApValue));
+                break;
+            }
+            if (chosen.CurrentAp / AP_DIVIDER < needApValue) {
+                return;
+            }
+        }
         if( InvContInit.empty() )
             break;
 
@@ -735,11 +844,20 @@ void ChosenProcess()
         chosen->Action( CritterAction::OperateContainer, PupTransferType * 10 + 3, nullptr );
         chosen->SubAp( chosen->GetApCostMoveItemContainer() );
        }
+
        break;*/
     case Tla::ChosenSneak: {
         int apCost = Settings.Movement.RtApCostUseSkill;
-        CHECK_NEED_AP(apCost);
-
+        {
+            int needApValue = int(apCost);
+            if (chosen.ActionPoints < needApValue) {
+                Messaging::Info(Game.ReplaceText(Game.GetText(TextPackKey(TextPackName::Combat, "" + (MsgStr::StrCombatNeedAp))), "%d", needApValue));
+                break;
+            }
+            if (chosen.CurrentAp / Tla::AP_DIVIDER < needApValue) {
+                return;
+            }
+        }
         // Game.CustomCall( "UseCritterSkill " + CritterProperty::UseSneak + " " + apCost + " " + chosen.Id );
     } break;
     case Tla::ChosenUseSklOnItem: {
@@ -747,30 +865,33 @@ void ChosenProcess()
         ident itemId = ChosenActions[2];
         bool isInv = (ChosenActions[3] > 0);
 
-        Item itemAction = null;
+        Item? itemAction = null;
 
         if (isInv) {
-            Item item = chosen.GetItem(itemId);
+            Item? item = chosen.GetItem(itemId);
             if (item == null) {
                 break;
             }
+
             itemAction = item;
             if (item.IsHolodisk) {
                 // TODO: запись и чтение голодисков. см CHOSEN_USE_SKL_ON_ITEM cr.cpp
                 break;
             }
-            CurPlayer.ServerCall.UseSkill(skill, ZERO_IDENT, itemAction.Id, EMPTY_HSTRING, ZERO_MPOS);
+
+            CurPlayer.ServerCall.UseSkill(skill, ZERO_IDENT, item.Id, EMPTY_HSTRING, ZERO_MPOS);
         }
         else {
-            Item item = Game.GetItem(itemId);
+            Item? item = Game.GetItem(itemId);
             if (item == null) {
                 break;
             }
+
             itemAction = item;
 
-            if (CurMap != null) {
-                int hx = itemAction.Hex.x;
-                int hy = itemAction.Hex.y;
+            if (HasCurMap) {
+                int hx = item.Hex.x;
+                int hy = item.Hex.y;
                 int dist = Game.GetDistance(chosen.Hex, mpos(hx, hy));
                 int useDist = 1 + chosen.Multihex;
                 if (dist > useDist) {
@@ -783,9 +904,19 @@ void ChosenProcess()
                     return;
                 }
             }
+
             int apCost = Settings.Movement.RtApCostUseSkill;
-            CHECK_NEED_AP(apCost);
-            CurPlayer.ServerCall.UseSkill(skill, ZERO_IDENT, itemAction.Id, EMPTY_HSTRING, ZERO_MPOS);
+            {
+                int needApValue = int(apCost);
+                if (chosen.ActionPoints < needApValue) {
+                    Messaging::Info(Game.ReplaceText(Game.GetText(TextPackKey(TextPackName::Combat, "" + (MsgStr::StrCombatNeedAp))), "%d", needApValue));
+                    break;
+                }
+                if (chosen.CurrentAp / Tla::AP_DIVIDER < needApValue) {
+                    return;
+                }
+            }
+            CurPlayer.ServerCall.UseSkill(skill, ZERO_IDENT, item.Id, EMPTY_HSTRING, ZERO_MPOS);
         }
     } break;
     case Tla::ChosenUseSklOnScen: {
@@ -802,10 +933,13 @@ void ChosenProcess()
         CritterProperty skill = CritterProperty(int(ChosenActions[1]));
         ident crId = ChosenActions[2];
 
-        Critter cr = (crId != ZERO_IDENT ? Game.GetCritter(crId) : chosen);
+        Critter? cr = (crId != ZERO_IDENT ? Game.GetCritter(crId) : chosen);
+        if (cr == null) {
+            break;
+        }
 
         if (cr.Id != chosen.Id) {
-            if (CurMap == null) {
+            if (!HasCurMap) {
                 break;
             }
 
@@ -824,15 +958,23 @@ void ChosenProcess()
         }
 
         int apCost = Settings.Movement.RtApCostUseSkill;
-        CHECK_NEED_AP(apCost);
-
+        {
+            int needApValue = int(apCost);
+            if (chosen.ActionPoints < needApValue) {
+                Messaging::Info(Game.ReplaceText(Game.GetText(TextPackKey(TextPackName::Combat, "" + (MsgStr::StrCombatNeedAp))), "%d", needApValue));
+                break;
+            }
+            if (chosen.CurrentAp / Tla::AP_DIVIDER < needApValue) {
+                return;
+            }
+        }
         // Refresh orientation
         mdir dir = Game.GetDirection(chosen.Hex, cr.Hex);
         if (Game.GetDistance(chosen.Hex, cr.Hex) >= 1 && chosen.Dir != dir) {
             chosen.ChangeDir(dir);
         }
 
-        chosen.CurrentAp = chosen.CurrentAp - apCost * AP_DIVIDER;
+        chosen.CurrentAp = chosen.CurrentAp - apCost * Tla::AP_DIVIDER;
 
         (Game.OnCritterActionEx.Fire(true, chosen, CritterAction::UseSkill, 0, null) == EventResult::ContinueChain);
         CurPlayer.ServerCall.UseSkill(skill, cr.Id, ZERO_IDENT, EMPTY_HSTRING, ZERO_MPOS);
@@ -840,10 +982,11 @@ void ChosenProcess()
     case Tla::ChosenTalkNpc: {
         ident crId = ChosenActions[1];
 
-        Critter cr = Game.GetCritter(crId);
+        Critter? cr = Game.GetCritter(crId);
         if (cr == null) {
             break;
         }
+
         if (cr.IsDead()) {
             break;
         }
@@ -882,7 +1025,7 @@ void ChosenProcess()
         int hy = ChosenActions[3];
         ident itemId = ChosenActions[4];
 
-        if (CurMap == null) {
+        if (!HasCurMap) {
             break;
         }
 
@@ -895,23 +1038,33 @@ void ChosenProcess()
             if (CurMap.GetPathLength(chosen, mpos(hx, hy), useDist) > 0) {
                 SetAction({Tla::ChosenPickItem, pid, hx, hy, 0, 0, 0}, true, false);
             }
+
             return;
         }
-        int apCost = Settings.Movement.RtApCostPickItem;
-        CHECK_NEED_AP(apCost);
 
+        int apCost = Settings.Movement.RtApCostPickItem;
+        {
+            int needApValue = int(apCost);
+            if (chosen.ActionPoints < needApValue) {
+                Messaging::Info(Game.ReplaceText(Game.GetText(TextPackKey(TextPackName::Combat, "" + (MsgStr::StrCombatNeedAp))), "%d", needApValue));
+                break;
+            }
+            if (chosen.CurrentAp / Tla::AP_DIVIDER < needApValue) {
+                return;
+            }
+        }
         // Refresh orientation
         mdir dir = Game.GetDirection(chosen.Hex, mpos(hx, hy));
         if (Game.GetDistance(chosen.Hex, mpos(hx, hy)) >= 1 && chosen.Dir != dir) {
             chosen.ChangeDir(dir);
         }
 
-        chosen.CurrentAp = chosen.CurrentAp - apCost * AP_DIVIDER;
+        chosen.CurrentAp = chosen.CurrentAp - apCost * Tla::AP_DIVIDER;
         // Game.CustomCall( "PickItem " + apCost + " " + pid + " " + hx + " " + hy );
         CurPlayer.ServerCall.PickItem(mpos(hx, hy), pid);
 
         if (itemId != ZERO_IDENT) {
-            Item item = Game.GetItem(itemId);
+            Item? item = Game.GetItem(itemId);
             if (item != null) {
                 (Game.OnCritterActionEx.Fire(true, chosen, CritterAction::PickItem, 0, item) == EventResult::ContinueChain);
             }
@@ -921,11 +1074,11 @@ void ChosenProcess()
         ident crId = ChosenActions[1];
         bool isLoot = (ChosenActions[2] == 0);
 
-        if (CurMap == null) {
+        if (!HasCurMap) {
             break;
         }
 
-        Critter cr = Game.GetCritter(crId);
+        Critter? cr = Game.GetCritter(crId);
         if (cr == null) {
             break;
         }
@@ -933,6 +1086,7 @@ void ChosenProcess()
         if (isLoot && (!cr.IsDead() || cr.IsNoLoot)) {
             break;
         }
+
         if (!isLoot && (!cr.IsAlive() || cr.IsNoPush)) {
             break;
         }
@@ -945,12 +1099,21 @@ void ChosenProcess()
             if (CurMap.GetPathLength(chosen, cr.Hex, pickDist) > 0) {
                 SetAction(curAction, true, false);
             }
+
             return;
         }
 
         int apCost = Settings.Movement.RtApCostPickCritter;
-        CHECK_NEED_AP(apCost);
-
+        {
+            int needApValue = int(apCost);
+            if (chosen.ActionPoints < needApValue) {
+                Messaging::Info(Game.ReplaceText(Game.GetText(TextPackKey(TextPackName::Combat, "" + (MsgStr::StrCombatNeedAp))), "%d", needApValue));
+                break;
+            }
+            if (chosen.CurrentAp / Tla::AP_DIVIDER < needApValue) {
+                return;
+            }
+        }
         // Refresh orientation
         mdir dir = Game.GetDirection(chosen.Hex, cr.Hex);
         if (Game.GetDistance(chosen.Hex, cr.Hex) >= 1 && chosen.Dir != dir) {
@@ -970,9 +1133,9 @@ void ChosenProcess()
     }
 }
 
-bool UseSkillOnScenerySuccess(CritterProperty skill, Critter? chosen, hstring sceneryProto, int hx, int hy)
+bool UseSkillOnScenerySuccess(CritterProperty skill, Critter chosen, hstring sceneryProto, int hx, int hy)
 {
-    if (CurMap != null && chosen != null) {
+    if (HasCurMap) {
         int dist = Game.GetDistance(chosen.Hex, mpos(hx, hy));
         int useDist = 1 + chosen.Multihex;
         if (dist > useDist) {
@@ -982,14 +1145,25 @@ bool UseSkillOnScenerySuccess(CritterProperty skill, Critter? chosen, hstring sc
             if (CurMap.GetPathLength(chosen, mpos(hx, hy), useDist) > 0) {
                 SetAction({Tla::ChosenUseSklOnScen, int(skill), sceneryProto, hx, hy, 0, 0}, true, false);
             }
+
             return false;
         }
-        int apCost = Settings.Movement.RtApCostUseSkill;
-        CHECK_NEED_AP2(apCost);
 
+        int apCost = Settings.Movement.RtApCostUseSkill;
+        {
+            int needApValue = int(apCost);
+            if (chosen.ActionPoints < needApValue) {
+                Messaging::Info(Game.ReplaceText(Game.GetText(TextPackKey(TextPackName::Combat, "" + (MsgStr::StrCombatNeedAp))), "%d", needApValue));
+                return true;
+            }
+            if (chosen.CurrentAp / Tla::AP_DIVIDER < needApValue) {
+                return false;
+            }
+        }
         (Game.OnCritterActionEx.Fire(true, chosen, CritterAction::UseSkill, 0, null) == EventResult::ContinueChain);
         CurPlayer.ServerCall.UseSkill(skill, ZERO_IDENT, ZERO_IDENT, sceneryProto, mpos(hx, hy));
     }
+
     return true;
 }
 
@@ -1000,12 +1174,12 @@ bool UseSkillOnScenerySuccess(CritterProperty skill, Critter? chosen, hstring sc
         return;
 
     if( !cr.IsAlive() )
-        ThrowException( "Client is not alive", client );
+        throw( "Client is not alive", client );
     if( enable && Time::IsTimeoutActive( cr.TimeoutSneak ) )
-        ThrowException( "Sneak timeout", client );
+        throw( "Sneak timeout", client );
 
     if( enable )
-        cr.TimeoutSneak = SNEAK_TIMEOUT( client );
+        cr.TimeoutSneak = SneakTimeout( client );
     cr.InSneakMode = !cr.InSneakMode;
     CritterState::Wait(cr,  Settings.Movement.Breaktime );
    }*/
@@ -1024,58 +1198,242 @@ bool IsFree(Critter cr)
 
 #if SERVER
 
-[[ServerRemoteCall]]
+[[Async]]
+bool LockPickCritterAction(Critter cr, Critter target)
+{
+    return Sync::Lock(cr, target);
+}
+
+[[Async]]
+bool LockUseSkillAction(Critter cr, ident targetCrId, ident targetItemId, hstring sceneryPid)
+{
+    if (targetCrId != ZERO_IDENT && targetCrId != cr.Id) {
+        Critter? target = Game.GetCritter(targetCrId);
+        if (target != null) {
+            return Sync::Lock(cr, target);
+        }
+
+        return Sync::Lock(cr);
+    }
+
+    if (targetItemId != ZERO_IDENT || sceneryPid != EMPTY_HSTRING) {
+        return Sync::LockCritterWithMap(cr);
+    }
+
+    return Sync::Lock(cr);
+}
+
+[[Async]]
+bool LockOperateContainerAction(Critter cr)
+{
+    const ident containerId = cr.TransferContainerId;
+    if (containerId == ZERO_IDENT || containerId == cr.Id) {
+        return Sync::Lock(cr);
+    }
+
+    const TransferTypes transferType = cr.TransferType;
+    if (transferType == TransferTypes::HexContUp || transferType == TransferTypes::HexContDown || transferType == TransferTypes::FarCont) {
+        Item? itemCont = Game.GetItem(containerId);
+        if (itemCont == null) {
+            return Sync::Lock(cr);
+        }
+
+        return Sync::Lock(cr, itemCont);
+    }
+
+    if (transferType == TransferTypes::CritLoot || transferType == TransferTypes::CritSteal || transferType == TransferTypes::CritBarter ||
+        transferType == TransferTypes::FarCrit) {
+        Critter? crCont = Game.GetCritter(containerId);
+        if (crCont == null) {
+            return Sync::Lock(cr);
+        }
+
+        return Sync::Lock(cr, crCont);
+    }
+
+    return Sync::Lock(cr);
+}
+
+[[Async]]
+bool LockAttackAction(Critter cr, ident targetId)
+{
+    Map? map = cr.GetMap();
+    Critter? target = Game.GetCritter(targetId);
+
+    if (map != null && target != null) {
+        return Sync::Lock(array<Entity> = {cr, map, target});
+    }
+
+    if (map != null) {
+        return Sync::Lock(cr, map);
+    }
+
+    if (target != null) {
+        return Sync::Lock(cr, target);
+    }
+
+    return Sync::Lock(cr);
+}
+
+[[Async]]
+bool LockUseItemOnAction(Critter cr, ident usedItemId, ident targetCrId, ident targetItemId, hstring sceneryPid)
+{
+    Entity[] entities = {cr};
+
+    Item? usedItem = Game.GetItem(usedItemId);
+    if (usedItem != null) {
+        entities.insertLast(usedItem);
+    }
+
+    if (targetCrId != ZERO_IDENT && targetCrId != cr.Id) {
+        Critter? target = Game.GetCritter(targetCrId);
+        if (target != null) {
+            entities.insertLast(target);
+        }
+    }
+    else if (targetItemId != ZERO_IDENT || sceneryPid != EMPTY_HSTRING) {
+        Map? map = cr.GetMap();
+        if (map != null) {
+            entities.insertLast(map);
+        }
+
+        if (targetItemId != ZERO_IDENT) {
+            Item? targetItem = Game.GetItem(targetItemId);
+            if (targetItem != null) {
+                entities.insertLast(targetItem);
+            }
+        }
+    }
+
+    return Sync::Lock(entities);
+}
+
+[[ServerRemoteCall]] [[Async]]
 void PickCritter(Player player, ident crId)
 {
-    CritterActions::PickCritter(player.GetControlledCritter(), Game.GetCritter(crId));
+    Critter? cr = player.GetControlledCritter();
+    if (cr == null) {
+        return;
+    }
+
+    Critter? target = Game.GetCritter(crId);
+    if (target == null || !LockPickCritterAction(cr, target)) {
+        return;
+    }
+
+    CritterActions::PickCritter(cr, target);
 }
 
-[[ServerRemoteCall]]
+[[ServerRemoteCall]] [[Async]]
 void PickItem(Player player, mpos hex, hstring pid)
 {
-    CritterActions::PickItem(player.GetControlledCritter(), hex, pid);
+    Critter? cr = player.GetControlledCritter();
+    if (cr == null) {
+        return;
+    }
+
+    if (!Sync::LockCritterWithMap(cr)) {
+        return;
+    }
+
+    CritterActions::PickItem(cr, hex, pid);
 }
 
-[[ServerRemoteCall]]
+[[ServerRemoteCall]] [[Async]]
 void DropInvItem(Player player, ident itemId, int count)
 {
-    CritterActions::DropInvItem(player.GetControlledCritter(), itemId, count);
+    Critter? cr = player.GetControlledCritter();
+    if (cr == null) {
+        return;
+    }
+
+    if (!Sync::LockCritterWithMap(cr)) {
+        return;
+    }
+
+    CritterActions::DropInvItem(cr, itemId, count);
 }
 
-[[ServerRemoteCall]]
+[[ServerRemoteCall]] [[Async]]
 void UseSkill(Player player, CritterProperty skill, ident targetCrId, ident targetItemId, hstring sceneryPid, mpos hex)
 {
-    CritterActions::UseSkill(player.GetControlledCritter(), skill, targetCrId, targetItemId, sceneryPid, hex.x, hex.y);
+    Critter? cr = player.GetControlledCritter();
+    if (cr == null) {
+        return;
+    }
+
+    if (!LockUseSkillAction(cr, targetCrId, targetItemId, sceneryPid)) {
+        return;
+    }
+
+    CritterActions::UseSkill(cr, skill, targetCrId, targetItemId, sceneryPid, hex.x, hex.y);
 }
 
 [[ServerRemoteCall]]
 void MoveInvItem(Player player, ident itemId, CritterItemSlot slot)
 {
-    CritterActions::MoveInvItem(player.GetControlledCritter(), itemId, slot);
+    Critter? cr = player.GetControlledCritter();
+    if (cr == null) {
+        return;
+    }
+
+    CritterActions::MoveInvItem(cr, itemId, slot);
 }
 
-[[ServerRemoteCall]]
+[[ServerRemoteCall]] [[Async]]
 void OperateContainer(Player player, bool take, bool all, ident itemId, int itemCount)
 {
-    CritterActions::OperateContainer(player.GetControlledCritter(), take, all, itemId, itemCount);
+    Critter? cr = player.GetControlledCritter();
+    if (cr == null) {
+        return;
+    }
+
+    if (!LockOperateContainerAction(cr)) {
+        return;
+    }
+
+    CritterActions::OperateContainer(cr, take, all, itemId, itemCount);
 }
 
 [[ServerRemoteCall]]
 void ReloadWeapon(Player player, ident weaponId, ident ammoId)
 {
-    CritterActions::ReloadWeapon(player.GetControlledCritter(), weaponId, ammoId);
+    Critter? cr = player.GetControlledCritter();
+    if (cr == null) {
+        return;
+    }
+
+    CritterActions::ReloadWeapon(cr, weaponId, ammoId);
 }
 
-[[ServerRemoteCall]]
+[[ServerRemoteCall]] [[Async]]
 void Attack(Player player, ident targetId, int mode)
 {
-    CritterActions::Attack(player.GetControlledCritter(), targetId, mode);
+    Critter? cr = player.GetControlledCritter();
+    if (cr == null) {
+        return;
+    }
+
+    if (!LockAttackAction(cr, targetId)) {
+        return;
+    }
+
+    CritterActions::Attack(cr, targetId, mode);
 }
 
-[[ServerRemoteCall]]
+[[ServerRemoteCall]] [[Async]]
 void UseItemOn(Player player, ident usedItemId, ident targetCrId, ident targetItemId, hstring sceneryPid, mpos hex, int timer)
 {
-    CritterActions::UseItemOn(player.GetControlledCritter(), usedItemId, targetCrId, targetItemId, sceneryPid, hex.x, hex.y, timer);
+    Critter? cr = player.GetControlledCritter();
+    if (cr == null) {
+        return;
+    }
+
+    if (!LockUseItemOnAction(cr, usedItemId, targetCrId, targetItemId, sceneryPid)) {
+        return;
+    }
+
+    CritterActions::UseItemOn(cr, usedItemId, targetCrId, targetItemId, sceneryPid, hex.x, hex.y, timer);
 }
 
 #endif

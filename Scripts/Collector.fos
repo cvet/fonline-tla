@@ -11,20 +11,24 @@ namespace Collector
 
 ///@ Property Critter Server synctime CollectorTimeNextSearch Mutable Persistent
 
-#define NEXT_SEARCH_TIME   (Time::Minutes(5))
-#define ENTRY_CONTAINER    (87)
-#define PUT_ITEMS_PRIORITY (25)
+const timespan NEXT_SEARCH_TIME = Time::Minutes(5);
+const int ENTRY_CONTAINER = 87;
+const int PUT_ITEMS_PRIORITY = 25;
 
-void _CollectorInit(Critter cr, bool firstTime)
+void CollectorInit(Critter cr, bool firstTime)
 {
-    cr.StartTimeEvent(Time::Asap(), Time::Seconds(1), _CollectorIdle);
-    cr.OnNpcPlaneEnd.Subscribe(_CollectorPlaneEnd);
+    cr.StartTimeEvent(Time::Asap(), Time::Seconds(1), CollectorIdle);
+    cr.OnNpcPlaneEnd.Subscribe(CollectorPlaneEnd);
     cr.CollectorTimeNextSearch = Game.SynchronizedTime + NEXT_SEARCH_TIME;
 }
 
-[[TimeEvent]]
-void _CollectorIdle(Critter cr)
+[[TimeEvent]] [[Async]]
+void CollectorIdle(Critter cr)
 {
+    if (!Sync::LockCritterWithMap(cr)) {
+        return;
+    }
+
     if (Game.SynchronizedTime >= cr.CollectorTimeNextSearch) {
         SearchForItems(cr);
         cr.CollectorTimeNextSearch = Game.SynchronizedTime + NEXT_SEARCH_TIME; // Следующий поиск
@@ -37,7 +41,7 @@ void _CollectorIdle(Critter cr)
 void MoveItemsToContainer(Critter cr) // Складывает все предметы из инвентаря в контейнер
 {
     if (NpcPlanes::IsNoPlanes(cr)) {
-        Map map = cr.GetMap();
+        Map? map = cr.GetMap();
         if (map == null) {
             return;
         }
@@ -51,7 +55,7 @@ void MoveItemsToContainer(Critter cr) // Складывает все предм�
         if (entries > 0) {
             mpos hex;
             if (Entrance::MapGetEntryCoords(map, ENTRY_CONTAINER, Game.Random(0, entries - 1), hex)) {
-                Item container = map.GetItemOnHex(hex, ItemProperty::Type, ItemType::Container);
+                Item? container = map.GetItemOnHex(hex, ItemProperty::Type, ItemType::Container);
                 if (container != null) {
                     NpcPlanes::AddPickPlane(cr, PUT_ITEMS_PRIORITY, container, ZERO_IDENT, true);
                     return;
@@ -71,6 +75,7 @@ void MoveItemsToContainer(Critter cr) // Складывает все предм�
                 ind = i;
             }
         }
+
         if (ind >= 0) {
             NpcPlanes::AddPickPlane(cr, PUT_ITEMS_PRIORITY, containers[ind], ZERO_IDENT, true);
         }
@@ -79,7 +84,7 @@ void MoveItemsToContainer(Critter cr) // Складывает все предм�
 
 void SearchForItems(Critter cr) // Поиск предметов, валяющихся на карте
 {
-    Map map = cr.GetMap(); // Карта с криттером, на которой будем искать вещи
+    Map? map = cr.GetMap(); // Карта с криттером, на которой будем искать вещи
     if (map == null) {
         return;
     }
@@ -98,26 +103,43 @@ void SearchForItems(Critter cr) // Поиск предметов, валяющи
     }
 }
 
-[[Event]]
-EventResult _CollectorPlaneEnd(Critter cr, int planeId, int reason, Critter someCr, Item someItem)
+[[Event]] [[Async]]
+EventResult CollectorPlaneEnd(Critter cr, int planeId, int reason, Critter someCr, Item someItem)
 {
-    NpcPlanes::NpcPlane plane = NpcPlanes::GetCritterPlane(cr, planeId);
+    NpcPlanes::NpcPlane? plane = NpcPlanes::GetCritterPlane(cr, planeId);
+    if (plane == null) {
+        return EventResult::StopChain;
+    }
 
-    if (plane.Type == AI_PLANE_PICK && plane.Priority == PUT_ITEMS_PRIORITY) {
-        Map map = cr.GetMap();
-        Item cont = map.GetItemOnHex(plane.Pick_Hex, plane.Pick_Pid);
-        if (cont != null && reason == REASON_SUCCESS && cont.Type == ItemType::Container) {
+    if (plane.Type == NpcPlanes::AI_PLANE_PICK && plane.Priority == PUT_ITEMS_PRIORITY) {
+        if (!Sync::LockCritterWithMap(cr)) {
+            return EventResult::StopChain;
+        }
+
+        Map? map = cr.GetMap();
+        if (map == null) {
+            return EventResult::StopChain;
+        }
+
+        Item? cont = map.GetItemOnHex(plane.Pick_Hex, plane.Pick_Pid);
+        if (cont != null && reason == NpcPlanes::REASON_SUCCESS && cont.Type == ItemType::Container) {
             Item[] items = cr.GetItems(ItemProperty::CritterSlot, CritterItemSlot::Inventory);
-            ItemMovement::MoveItems(items, cont, ROOT_CONTAINER_STACK);
+            ItemMovement::MoveItems(items, cont, Tla::RootContainerStack());
         }
     }
+
     return EventResult::StopChain;
 }
 
 void AddCollector(Critter cr, int, int, int)
 {
-    Critter npc = cr.GetMap().AddCritter(Content::Critter::HeroMale, cr.Hex, 3);
-    npc.SetupScript(_CollectorInit);
+    Map? map = cr.GetMap();
+    if (map == null) {
+        return;
+    }
+
+    Critter npc = map.AddCritter(Content::Critter::HeroMale, cr.Hex, 3);
+    npc.SetupScript(CollectorInit);
 }
 
 #endif

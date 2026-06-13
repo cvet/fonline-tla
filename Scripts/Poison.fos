@@ -6,13 +6,13 @@ namespace Poison
 // Author: cvet
 // Original Fallout2 system
 
-#define POISON_BASE_DURATION_SECONDS (505)
-#define POISON_DURATION_SUB          (5)
+const int POISON_BASE_DURATION_SECONDS = 505;
+const int POISON_DURATION_SUB = 5;
 
-#define STR_POISON_GAIN              (12810)
-#define STR_POISON_PROCESS           (12811)
-#define STR_POISON_REDUCE            (12812)
-#define STR_POISON_FREE              (12813)
+const int STR_POISON_GAIN = 12810;
+const int STR_POISON_PROCESS = 12811;
+const int STR_POISON_REDUCE = 12812;
+const int STR_POISON_FREE = 12813;
 
 void AffectPoison(Critter cr, int value)
 {
@@ -20,7 +20,7 @@ void AffectPoison(Critter cr, int value)
         return;
     }
 
-    bool isActive = cr.CountTimeEvent(cte_Poison) != 0;
+    bool isActive = cr.CountTimeEvent(Poison) != 0;
     int levelVal = cr.PoisoningLevel;
     int resistVal = cr.DamageResistance[DamageTypes::Poison];
 
@@ -30,7 +30,8 @@ void AffectPoison(Critter cr, int value)
     else if (levelVal == 0) {
         return;
     }
-    cr.PoisoningLevel = CLAMP(levelVal + value, 0, 2000);
+
+    cr.PoisoningLevel = Tla::Clamp(levelVal + value, 0, 2000);
     levelVal = cr.PoisoningLevel;
 
     int strNum = 0;
@@ -43,6 +44,7 @@ void AffectPoison(Critter cr, int value)
     else if (value < 0) {
         strNum = STR_POISON_REDUCE;
     }
+
     if (strNum != 0) {
         Messaging::Info(cr, TextPackKey(TextPackName::Game, "" + (strNum)));
     }
@@ -58,6 +60,7 @@ void AffectPoison(Critter cr, int value)
             if (cr.CurrentHp <= 0) {
                 CritterState::ToDead(cr, Game.Random(0, 1) == 0 ? CritterActionAnim::DeadFront : CritterActionAnim::DeadBack, null);
             }
+
             cr.PoisoningLevel = 100;
         }
     }
@@ -70,7 +73,7 @@ void AffectPoison(Critter cr, int value)
     if (isActive) {
         // Try hurry event, if new stage aviable
         if (levelVal == 0) {
-            cr.StopTimeEvent(cte_Poison);
+            cr.StopTimeEvent(Poison);
         }
         else {
             //int oldDuration = durations[0];
@@ -78,19 +81,19 @@ void AffectPoison(Critter cr, int value)
             //if (newDuration < oldDuration) {
             //    cr.ChangeTimeEvent(indexes[0], newDuration, 0);
             //}
-            cr.StopTimeEvent(cte_Poison);
-            cr.StartTimeEvent(newDuration, cte_Poison);
+            cr.StopTimeEvent(Poison);
+            cr.StartTimeEvent(newDuration, Poison);
         }
     }
     else {
         // Try start new event
-        cr.StartTimeEvent(GetPoisonDuration(cr), cte_Poison);
+        cr.StartTimeEvent(GetPoisonDuration(cr), Poison);
     }
 }
 
 void DropPoison(Critter cr)
 {
-    cr.StopTimeEvent(cte_Poison);
+    cr.StopTimeEvent(Poison);
     cr.PoisoningLevel = 0;
     if (cr.IsPoisoned) {
         cr.IsPoisoned = false;
@@ -98,19 +101,19 @@ void DropPoison(Critter cr)
 }
 
 [[TimeEvent]]
-void cte_Poison(Critter cr)
+void Poison(Critter cr, TimeEventContext event)
 {
     if (cr.IsDead()) {
         timespan delayTicks = Time::Seconds(100);
         if (delayTicks != ZERO_TIMESPAN) {
-            Game.RepeatCurrentTimeEvent(delayTicks);
+            event.Repeat(delayTicks);
         }
     }
 
     int levelVal = cr.PoisoningLevel;
     if (levelVal > 0) {
         Messaging::Info(cr, TextPackKey(TextPackName::Game, "" + (STR_POISON_PROCESS)));
-        cr.PoisoningLevel = CLAMP(levelVal - 2, 0, 2000);
+        cr.PoisoningLevel = Tla::Clamp(levelVal - 2, 0, 2000);
         cr.CurrentHp -= 1;
         if (cr.CurrentHp <= 0) {
             CritterState::ToDead(cr, Game.Random(0, 1) == 0 ? CritterActionAnim::DeadFront : CritterActionAnim::DeadBack, null);
@@ -122,12 +125,13 @@ void cte_Poison(Critter cr)
         if (cr.IsPoisoned) {
             cr.IsPoisoned = false;
         }
+
         return;
     }
 
     timespan delayTicks = GetPoisonDuration(cr);
     if (delayTicks != ZERO_TIMESPAN) {
-        Game.RepeatCurrentTimeEvent(delayTicks);
+        event.Repeat(delayTicks);
     }
 }
 
@@ -138,10 +142,12 @@ timespan GetPoisonDuration(Critter cr)
     if (levelVal == 0) {
         return ZERO_TIMESPAN;
     }
+
     duration -= levelVal * POISON_DURATION_SUB;
     if (duration <= 0) {
         duration = 1;
     }
+
     return Time::Seconds(duration);
 }
 
@@ -151,39 +157,41 @@ timespan GetPoisonDuration(Critter cr)
 
    Each time the poison level is adjusted by N (N can be >0 or <0), the following happens:
 
-   adjust_poison(int N) // original fallout version
+   AdjustPoison(int N) // original fallout version
    {
    if (N <= 0)
    {
     poison_level+=N;
     if (poison_level<0) poison_level=0;
    }
+
    if (N>0) poison_level += N * (100 - poison_resistance) / 100;
 
    if (poison_level > 0)
    {
     delete time event "check poison", if there is one;
-    add new time event "check poison" MAX(5050-50*poison_level,0) ticks from now;
+    add new time event "check poison" Max(5050-50*poison_level,0) ticks from now;
    }
    }
 
    "check poison" event does the following:
    {
-   adjust_poison(-2);
+   AdjustPoison(-2);
    injure_critter(1); // this is "uncalled" damage
    }
 
    -------------
    Note: it's often the case that fallout add events with time = 0, but they can be resolved immediately. this is always the case if poison_level>100, so
-   adjust_poison can be easily changed to this:
+   AdjustPoison can be easily changed to this:
 
-   adjust_poison(int N)  // simplified fallout version
+   AdjustPoison(int N)  // simplified fallout version
    {
    if (N <= 0)
    {
     poison_level+=N;
     if (poison_level<0) poison_level=0;
    }
+
    if (N>0) then poison_level += N * (100 - poison_resistance) / 100;
 
    if (poison_level > 0)
@@ -193,8 +201,9 @@ timespan GetPoisonDuration(Critter cr)
       injure_critter(poison_level - 100);
       poison_level=100;
     }
+
     delete time event "check poison", if there is one;
-    add new time event "check poison" MAX(5050-50*poison_level,0) ticks from now;
+    add new time event "check poison" Max(5050-50*poison_level,0) ticks from now;
    }
    }
 
@@ -202,7 +211,7 @@ timespan GetPoisonDuration(Critter cr)
    delete this event and place a new one. but it's better to take min(previous time, new time). Also, another bug (or maybe it's not a bug?): if there is an
    event placed, and someone drinks anditode and set his poison_level to 0, event is not deleted. So:
 
-   adjust_poison(int N)  // modified and debugged fallout version
+   AdjustPoison(int N)  // modified and debugged fallout version
    {
    if (N <= 0)
    {
@@ -210,6 +219,7 @@ timespan GetPoisonDuration(Critter cr)
     if (poison_level<0) poison_level=0;
     if (poison_level==0) delete time event "check poison", if there is one; // this line is questionable
    }
+
    if (N>0) then poison_level += N * (100 - poison_resistance) / 100;
 
 
@@ -221,6 +231,7 @@ timespan GetPoisonDuration(Critter cr)
       injure_critter(poison_level - 100);
       poison_level=100;
     }
+
     int time = 5050-50*poison_level;
     if (there is an "check poison" event)
     {

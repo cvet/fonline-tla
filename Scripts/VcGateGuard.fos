@@ -20,25 +20,27 @@ ident[] PlayerWarned = {}; // Массив с id игроков которых �
 
 GuardLib::CGuardsManager Grd;
 
-void _GateGuardInit(Critter guard, bool firstTime)
+void GateGuardInit(Critter guard, bool firstTime)
 {
-    guard.OnMessage.Subscribe(Guard_OnMessage);
-    guard.OnCritterAppeared.Subscribe(Guard_on_add_critter);
-    guard.OnCritterDisappeared.Subscribe(Guard_on_remove_critter);
-    guard.OnItemOnMapDisappeared.Subscribe(Guard_on_pick_item);
+    guard.OnMessage.Subscribe(OnMessage);
+    guard.OnCritterAppeared.Subscribe(OnAddCritter);
+    guard.OnCritterDisappeared.Subscribe(OnRemoveCritter);
+    guard.OnItemOnMapDisappeared.Subscribe(OnPickItem);
 }
 
 [[Event]]
-void Guard_on_add_critter(Critter npc, Critter player)
+void OnAddCritter(Critter npc, Critter player)
 {
     if (not player.ControlledByPlayer) {
         return;
     }
+
     // Game.Log("Add OK.");
     int i = UtilsForArray::FindInArray(PlayerOk, player.Id);
     if (i > 0) {
         PlayerOk.removeAt(i);
     }
+
     i = UtilsForArray::FindInArray(PlayerWarned, player.Id);
     if (i > 0) {
         PlayerWarned.removeAt(i);
@@ -47,15 +49,17 @@ void Guard_on_add_critter(Critter npc, Critter player)
 
 // Вызывается, когда из поля зрения NPC исчезает криттер.
 [[Event]]
-void Guard_on_remove_critter(Critter npc, Critter player)
+void OnRemoveCritter(Critter npc, Critter player)
 {
     if (not player.ControlledByPlayer) {
         return;
     }
+
     int i = UtilsForArray::FindInArray(PlayerOk, player.Id);
     if (i > 0) {
         PlayerOk.removeAt(i);
     }
+
     i = UtilsForArray::FindInArray(PlayerWarned, player.Id);
     if (i > 0) {
         PlayerWarned.removeAt(i);
@@ -92,33 +96,40 @@ int Searching(Critter npc, Critter player)
         if (not ItemTest(pid)) {
             return 1;
         }
+
         if (pid == Content::Item::day_pass) {
             result = 0;
         }
+
         if (pid == Content::Item::fake_citizenship) {
             result = 0;
         }
     }
+
     return result;
 }
 
 // Сообщения от тригеров
 [[Event]]
-void Guard_OnMessage(Critter guard, Critter player, int num, any val)
+void OnMessage(Critter guard, Critter player, int num, any val)
 {
     // Game.Log("OnMessage ok");
     if (not player.ControlledByPlayer) {
         return;
     }
+
     if (not NpcPlanes::IsNoPlanes(guard)) {
         return;
     }
+
     if (guard.Condition != CritterCondition::Alive) {
         return;
     }
+
     if (player.CurrentHp < 0) {
         return;
     }
+
     if (VcGuardsman::GetRank(player) > 0) {
         return; // Гвардейцам разрешено проходить без пропуска
     }
@@ -128,15 +139,17 @@ void Guard_OnMessage(Critter guard, Critter player, int num, any val)
         if (UtilsForArray::Present(player.Id, PlayerWarned)) {
             return; // значит мы его уже предупредили - дважды повторять не будем
         }
+
         PlayerWarned.insertLast(player.Id);
-        Item itm = _CritGetItemArmor(player);
+        Item? itm = Tla::GetCritterArmorItem(player);
         if (itm != null) {
             if (UtilsForArray::Present(itm.ProtoId, PidsGroups::Pids_ArmorHeavy)) {
-                Messaging::SayOnHead(guard, TextPackKey(TextPackName::Dialogs, "" + (DLGSTR(Content::Dialog::vc_gate_guard, 5))));
+                Messaging::SayOnHead(guard, TextPackKey(TextPackName::Dialogs, "" + (MsgStr::DialogTextId(Content::Dialog::vc_gate_guard, 5))));
                 return;
             }
         }
-        Messaging::SayOnHead(guard, TextPackKey(TextPackName::Dialogs, "" + (DLGSTR(Content::Dialog::vc_gate_guard, 1))));
+
+        Messaging::SayOnHead(guard, TextPackKey(TextPackName::Dialogs, "" + (MsgStr::DialogTextId(Content::Dialog::vc_gate_guard, 1))));
         return;
     }
 
@@ -145,39 +158,43 @@ void Guard_OnMessage(Critter guard, Critter player, int num, any val)
             if (UtilsForArray::Present(player.Id, PlayerOk)) {
                 return; // мы его уже обыскивали - больше покачто небудем.
             }
+
             guard.SetDir(Game.GetDirection(guard.Hex, player.Hex));
-            if (VcGuard::GuardItemTest(_CritGetItemHand(player))) {
+            if (VcGuard::GuardItemTest(Tla::GetCritterHandItem(player))) {
                 // оружие в руках
-                Messaging::SayOnHead(guard, TextPackKey(TextPackName::Dialogs, "" + (DLGSTR(Content::Dialog::vc_gate_guard, 6))));
+                Messaging::SayOnHead(guard, TextPackKey(TextPackName::Dialogs, "" + (MsgStr::DialogTextId(Content::Dialog::vc_gate_guard, 6))));
                 return;
             }
-            Item itm = _CritGetItemArmor(player);
+
+            Item? itm = Tla::GetCritterArmorItem(player);
             if (itm != null) {
                 if (UtilsForArray::Present(itm.ProtoId, PidsGroups::Pids_ArmorHeavy)) {
                     // плохая броня
-                    Messaging::SayOnHead(guard, TextPackKey(TextPackName::Dialogs, "" + (DLGSTR(Content::Dialog::vc_gate_guard, 5))));
+                    Messaging::SayOnHead(guard, TextPackKey(TextPackName::Dialogs, "" + (MsgStr::DialogTextId(Content::Dialog::vc_gate_guard, 5))));
                     return;
                 }
             }
-            _CritAnimateUse(guard);
+
+            Tla::AnimateCritterUse(guard);
             int searchResult = 0;
             if ((searchResult = Searching(guard, player)) == 0) {
                 // все окей
                 // Messaging::SayOnHead(guard, TextPackKey("Даже отобрать нечего, "" + (топай дальше")));
-                Messaging::SayOnHead(guard, TextPackKey(TextPackName::Dialogs, "" + (DLGSTR(Content::Dialog::vc_gate_guard, 2))));
+                Messaging::SayOnHead(guard, TextPackKey(TextPackName::Dialogs, "" + (MsgStr::DialogTextId(Content::Dialog::vc_gate_guard, 2))));
                 PlayerOk.insertLast(player.Id);
             }
             else {
                 if (searchResult == 5) { // нету пропуска
-                    Messaging::SayOnHead(guard, TextPackKey(TextPackName::Dialogs, "" + (DLGSTR(Content::Dialog::vc_gate_guard, 7))));
+                    Messaging::SayOnHead(guard, TextPackKey(TextPackName::Dialogs, "" + (MsgStr::DialogTextId(Content::Dialog::vc_gate_guard, 7))));
                 }
                 else {
                     // плохие предметы
                     // Messaging::SayOnHead(guard, "О! да у тебя тут Алкоголь и Наркотики. Не уходи от нас братец!");
-                    Messaging::SayOnHead(guard, TextPackKey(TextPackName::Dialogs, "" + (DLGSTR(Content::Dialog::vc_gate_guard, 3))));
+                    Messaging::SayOnHead(guard, TextPackKey(TextPackName::Dialogs, "" + (MsgStr::DialogTextId(Content::Dialog::vc_gate_guard, 3))));
                     PlayerOk.removeAt(int(UtilsForArray::FindInArray(PlayerOk, player.Id)));
                 }
             }
+
             return;
         }
         else {
@@ -189,7 +206,7 @@ void Guard_OnMessage(Critter guard, Critter player, int num, any val)
         if (not UtilsForArray::Present(player.Id, PlayerOk)) {
             // игрок ушел в город и его надо вернуть назад
             // ALERT!
-            Messaging::SayShoutOnHead(guard, TextPackKey(TextPackName::Dialogs, "" + (DLGSTR(Content::Dialog::vc_gate_guard, 4))));
+            Messaging::SayShoutOnHead(guard, TextPackKey(TextPackName::Dialogs, "" + (MsgStr::DialogTextId(Content::Dialog::vc_gate_guard, 4))));
             // guard.Say(SAY_SHOUT_ON_HEAD,"Стой! Стрелять буду!");
 
             // игрок 'просит' чтобы его пристрелили
@@ -209,18 +226,20 @@ void Guard_OnMessage(Critter guard, Critter player, int num, any val)
             if (idx >= 0) {
                 PlayerOk.removeAt(idx);
             }
+
             idx = int(UtilsForArray::FindInArray(PlayerOk, player.Id));
             if (idx >= 0) {
                 PlayerWarned.removeAt(idx);
             }
-            Messaging::SayOnHead(guard, TextPackKey(TextPackName::Dialogs, "" + (DLGSTR(Content::Dialog::vc_gate_guard, 1))));
+
+            Messaging::SayOnHead(guard, TextPackKey(TextPackName::Dialogs, "" + (MsgStr::DialogTextId(Content::Dialog::vc_gate_guard, 1))));
         }
     }
 }
 
 // зона в которой солдаты предупреждают о необходимости обыскивания
 [[ItemTrigger]]
-void t_incoming(Critter player, StaticItem trigger, bool entered, mdir dir)
+void Incoming(Critter player, StaticItem trigger, bool entered, mdir dir)
 {
     if (not entered) {
         return;
@@ -245,24 +264,26 @@ void t_incoming(Critter player, StaticItem trigger, bool entered, mdir dir)
 }
 
 // обыскивают
-// rename t_income -> t_searching
+// rename Income -> t_searching
 [[ItemTrigger]]
-void t_income(Critter player, StaticItem trigger, bool entered, mdir dir)
+void Income(Critter player, StaticItem trigger, bool entered, mdir dir)
 {
     if (not entered) {
         return;
     }
+
     // Проверяем игрок ли это
     if (not player.ControlledByPlayer) {
         return;
     }
+
     // Посылаем сообщение о том, что наступили на этот хекс.
     SendMessage::ToWhoSeesMe(player, GuardLib::MessagePlayerOnSearchHex, 0);
 }
 
 // игрок проходит первые ворота города
 [[ItemTrigger]]
-void t_pre_enter(Critter player, StaticItem trigger, bool entered, mdir dir)
+void PreEnter(Critter player, StaticItem trigger, bool entered, mdir dir)
 {
     if (not entered) {
         return;
@@ -276,13 +297,14 @@ void t_pre_enter(Critter player, StaticItem trigger, bool entered, mdir dir)
     if (dir == 1 || dir == 2 || dir == 3) {
         return;
     }
+
     // Посылаем сообщение о том, что наступили на этот хекс.
     SendMessage::ToWhoSeesMe(player, GuardLib::MessagePlayerOnPreEnter, 0);
 }
 
 // игрок вошел в город
 [[ItemTrigger]]
-void t_enter(Critter player, StaticItem trigger, bool entered, mdir dir)
+void Enter(Critter player, StaticItem trigger, bool entered, mdir dir)
 {
     if (not entered) {
         return;
@@ -306,41 +328,47 @@ void t_enter(Critter player, StaticItem trigger, bool entered, mdir dir)
 }
 
 [[Event]]
-void Guard_on_pick_item(Critter guard, Item hideItem, Critter? picker)
+void OnPickItem(Critter guard, Item hideItem, Critter? picker)
 {
     if (picker == null) {
         return;
     }
+
     if (not picker.ControlledByPlayer) {
         return;
     }
+
     if (not NpcPlanes::IsNoPlanes(guard)) {
         return;
     }
+
     if (guard.Condition != CritterCondition::Alive) {
         return;
     }
+
     // Game.Log("pickup detect");
 
     if (not ItemTest(hideItem.ProtoId)) {
         int i = 0;
         if (UtilsForArray::FindInArray(PlayerOk, picker.Id, i)) {
             PlayerOk.removeAt(i);
-            Messaging::SayOnHead(guard, TextPackKey(TextPackName::Dialogs, "" + (DLGSTR(Content::Dialog::vc_gate_guard, 1))));
+            Messaging::SayOnHead(guard, TextPackKey(TextPackName::Dialogs, "" + (MsgStr::DialogTextId(Content::Dialog::vc_gate_guard, 1))));
         }
     }
 }
 
 [[DialogResult]]
-int r_searching(Critter player, Critter guard, any val)
+int Searching(Critter player, Critter guard, any val)
 {
     if (Searching(guard, player) == 0) {
         // окей
         if (not UtilsForArray::Present(player.Id, PlayerOk)) {
             PlayerOk.insertLast(player.Id);
         }
+
         return 9;
     }
+
     // не пускаем
     return 10;
 }
@@ -348,88 +376,88 @@ int r_searching(Critter player, Critter guard, any val)
 // constructor [ heX ]
 
 // Инициализация нпц. происходит при вводе нпц в игру
-void _GuardInit(Critter npc, bool firstTime)
+void GuardInit(Critter npc, bool firstTime)
 {
     // вешаем обработчики событий
-    npc.OnCritterAppeared.Subscribe(_GuardOnAddCritter);
-    npc.OnCritterDisappeared.Subscribe(_GuardOnRemoveCritter);
-    // npc.StartTimeEvent(Time::Asap(), Time::Seconds(1), _GuardIdle);
-    npc.OnNpcPlaneEnd.Subscribe(_GuardEndPlane);
-    npc.OnMessage.Subscribe(_GuardOnMessage);
-    npc.OnSomeCritterMoveItem.Subscribe(_GuardOnMoveItem);
-    npc.OnSomeCritterUseItem.Subscribe(_GuardOnUseItem);
-    npc.OnSomeCritterStealing.Subscribe(_GuardStealing);
-    npc.OnSomeCritterAttack.Subscribe(_GuardOnSmthAttack);
-    npc.OnSomeCritterDropItem.Subscribe(_GuardOnDropItem); // r17
+    npc.OnCritterAppeared.Subscribe(GuardOnAddCritter);
+    npc.OnCritterDisappeared.Subscribe(GuardOnRemoveCritter);
+    // npc.StartTimeEvent(Time::Asap(), Time::Seconds(1), GuardIdle);
+    npc.OnNpcPlaneEnd.Subscribe(GuardEndPlane);
+    npc.OnMessage.Subscribe(GuardOnMessage);
+    npc.OnSomeCritterMoveItem.Subscribe(GuardOnMoveItem);
+    npc.OnSomeCritterUseItem.Subscribe(GuardOnUseItem);
+    npc.OnSomeCritterStealing.Subscribe(GuardStealing);
+    npc.OnSomeCritterAttack.Subscribe(GuardOnSmthAttack);
+    npc.OnSomeCritterDropItem.Subscribe(GuardOnDropItem); // r17
 
     // Создаем событие наблюдения
-    if (not firstTime && npc.CountTimeEvent(cte_Observing) == 0) {
-        npc.StartTimeEvent(OBSERV_PERIOD, cte_Observing);
+    if (not firstTime && npc.CountTimeEvent(Observing) == 0) {
+        npc.StartTimeEvent(GuardLib::ObservationPeriod(), Observing);
     }
 }
 
 [[TimeEvent]]
-void cte_Observing(Critter npc)
+void Observing(Critter npc, TimeEventContext event)
 {
     timespan delayTicks = Grd.EventObserving(npc);
     if (delayTicks != ZERO_TIMESPAN) {
-        Game.RepeatCurrentTimeEvent(delayTicks);
+        event.Repeat(delayTicks);
     }
 }
 
 [[Event]]
-void _GuardOnAddCritter(Critter crit, Critter showCrit)
+void GuardOnAddCritter(Critter crit, Critter showCrit)
 {
     Grd.EventOnAddCritter(crit, showCrit);
 }
 
 [[Event]]
-void _GuardOnRemoveCritter(Critter crit, Critter hideCrit)
+void GuardOnRemoveCritter(Critter crit, Critter hideCrit)
 {
     Grd.EventOnRemoveCritter(crit, hideCrit);
 }
 
 [[Event]]
-EventResult _GuardEndPlane(Critter npc, int planeId, int reason, Critter someCr, Item someItem)
+EventResult GuardEndPlane(Critter npc, int planeId, int reason, Critter someCr, Item someItem)
 {
-    NpcPlanes::NpcPlane plane = NpcPlanes::GetCritterPlane(npc, planeId);
+    NpcPlanes::NpcPlane? plane = NpcPlanes::GetCritterPlane(npc, planeId);
 
     Grd.EventEndPlane(npc);
     return EventResult::StopChain;
 }
 
 [[Event]]
-void _GuardOnMoveItem(Critter crit, Critter fromCrit, Item item, CritterItemSlot fromSlot)
+void GuardOnMoveItem(Critter crit, Critter fromCrit, Item item, CritterItemSlot fromSlot)
 {
     Grd.EventOnMoveItem(crit, fromCrit, Game.GetItem(item.Id), fromSlot);
 }
 
 [[Event]]
-void _GuardOnMessage(Critter crit, Critter fromCrit, int message, any value)
+void GuardOnMessage(Critter crit, Critter fromCrit, int message, any value)
 {
     Grd.EventOnMessage(crit, fromCrit, message, value);
 }
 
 [[Event]]
-void _GuardOnUseItem(Critter crit, Critter fromCrit, Item item, Critter onCritter, Item onItem, StaticItem onScenery, int param)
+void GuardOnUseItem(Critter crit, Critter fromCrit, Item item, Critter onCritter, Item onItem, StaticItem onScenery, int param)
 {
     Grd.EventOnUseItem(crit, fromCrit, item, onCritter, onItem, null);
 }
 
 [[Event]]
-void _GuardOnDropItem(Critter crit, Critter fromCrit, Item item) // r17
+void GuardOnDropItem(Critter crit, Critter fromCrit, Item item) // r17
 {
     Grd.EventOnDropItem(crit, fromCrit, item);
 }
 
 [[Event]]
-void _GuardOnSmthAttack(Critter crit, Critter fromCrit, Critter target, Item weapon, int weaponMode, ProtoItem ammo)
+void GuardOnSmthAttack(Critter crit, Critter fromCrit, Critter target, Item weapon, int weaponMode, ProtoItem ammo)
 {
     Grd.EventOnSmthAttack(crit, fromCrit, target);
 }
 
 [[Event]]
-void _GuardStealing(Critter crit, Critter thief, Critter fromCrit, Item item, int count)
+void GuardStealing(Critter crit, Critter thief, Critter fromCrit, Item item, int count)
 {
     Grd.EventStealing(crit, fromCrit, thief, false, item, count);
 }

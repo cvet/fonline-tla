@@ -33,9 +33,29 @@ void OnCritterUseWeapon(Critter cr, WeaponUseMode useMode, HitLocation aim, Crit
 }
 ```
 
-The `?` suffix is **stripped by the engine preprocessor** before AngelScript parses the source — see `StripNullableTypeSuffix` in [Engine/Source/Scripting/AngelScript/AngelScriptAttributes.cpp](../Engine/Source/Scripting/AngelScript/AngelScriptAttributes.cpp). The marker is purely script-source-level documentation; AS still sees plain handle types (`Critter@`, etc.).
+The `?` suffix is now **parsed natively by the AngelScript compiler** (FOnline "strong nullable" patch in [Engine/ThirdParty/AngelScript/sdk/angelscript/source/as_parser.cpp](../Engine/ThirdParty/AngelScript/sdk/angelscript/source/as_parser.cpp) and `as_compiler.cpp`). It is no longer stripped by a preprocessor — the compiler tracks nullability through type checking and emits **compile-time diagnostics** (see «Compile-time diagnostics» below). The parser distinguishes type-suffix `?` from the ternary operator `?` by scanning forward at the same nesting level: a type-suffix is followed by an identifier/`[`/`,`/`)` boundary; a ternary is followed by `:` after the truthy expression.
 
-The preprocessor distinguishes type-suffix `?` from ternary operator `?` by scanning forward at the same nesting level: a type-suffix is followed by an identifier/`[`/`,`/`)` boundary; a ternary is followed by `:` after the truthy expression.
+### Compile-time diagnostics
+
+The compiler now reports three nullability problems as warnings. Treat them as errors to fix, not noise:
+
+| Warning | Meaning | Fix |
+|---------|---------|-----|
+| `Redundant null comparison: 'T@' is a non-nullable handle and can never be null` | A `== null` / `!= null` test on a value the compiler knows is non-null. | Remove the test. If the source *can* actually be null, mark the source `T?` (or the API `FO_NULLABLE`). |
+| `Dereference of nullable handle 'T@?' without a null-check` | A field/method access on a `T?` value that has not been narrowed. | Narrow it first (see narrowing below), or — if it was over-marked — drop the `?`. |
+| `Redundant '?': initializer of type 'T@' cannot be null` | A `T? x = <non-null expr>;` local where the initializer is provably non-null. | Drop the `?`: `T x = <expr>;`. |
+
+**Flow-sensitive narrowing.** Inside a guarded scope the compiler narrows a `T?` **local** (not a member access or repeated call) to non-nullable `T`. Recognized forms — one operand must be the literal `null`, the other the local:
+
+- `if (x != null) { /* x is T here */ }` and `if (x == null) { return; } /* x is T after */`
+- the same in a ternary: `x != null ? x.foo() : ...`
+- short-circuits: `x != null && x.foo()`, `x == null || x.foo()`
+
+Not recognized: multi-condition conjunctions in a block head (`if (a != null && b != null) { ... }` does **not** narrow `a`/`b` in the block body — bind/guard each separately), member-access targets (`obj.Field != null` does not narrow `obj.Field`; bind it to a local first), and a fresh call each time (`Game.GetCritter(id) != null && !Game.GetCritter(id).IsX` — the second call is unnarrowed; bind once to a `T?` local).
+
+**Reference casts.** `cast<T>(x)` is typed **non-nullable** `T@` (the "assume the cast succeeds" contract), so `cast<T>(x) != null` warns as redundant even though a failed downcast returns `null` at runtime. For the type-test idiom, spell the cast nullable: `cast<T?>(x) != null`, or `T? y = cast<T?>(x); if (y != null) { ... }`.
+
+**Formatting.** clang-format treats `?` as the conditional operator and mangles the nullable suffix (`Item? item` → `Item ? item`, `cast<Item?>(x)` → `cast < Item ? > (x)`, `T?[] a` even splits across lines). Always format via the project formatter — VS Code `Format :: *` tasks, [Tools/Formatter/format_project.py](Tools/Formatter/format_project.py), or [FormatSource.bat](FormatSource.bat) — which post-processes clang-format output to restore the suffix in both `.fos` and `.fogui`. Do **not** run `Tools/clang-format-20.exe` directly on these files; it re-mangles the suffix. The GUI generator ([Tools/InterfaceEditor/generate_gui_screens.py](Tools/InterfaceEditor/generate_gui_screens.py)) applies the same repair, so regenerated `Scripts/GuiScreens.fos` stays clean.
 
 ### `///@ Event` and `///@ RemoteCall` declarations
 
@@ -60,7 +80,7 @@ void OnCritterDamaged(Critter cr, Critter? attacker, int32 damage) { ... }
 void OnCritterDamaged(Critter cr, Critter attacker, int32 damage) { ... }
 ```
 
-Because the AngelScript preprocessor strips `?` before AS sees the source, the AS engine itself only enforces the bare types. The nullable contract is enforced statically by `validate_nullable.py` (and the engine's runtime null guards on entity meta-types — see «Runtime enforcement» below).
+The AngelScript compiler now parses `?` natively and emits the compile-time diagnostics above, so per-arg nullability is checked while compiling. `validate_nullable.py` still enforces declaration↔handler parity across files (the compiler only sees one translation unit at a time), and the engine's runtime null guards on entity meta-types back it up — see «Runtime enforcement» below.
 
 ## Engine side: `FO_NULLABLE` macro
 
@@ -109,6 +129,17 @@ Marking `?` / `FO_NULLABLE` on a primitive value type (`int`, `bool`, `mpos`, `h
 **Out of scope (not implemented yet):** script-to-script call validation. AS does not natively call our bridge for direct script→script invocation; runtime enforcement there would require patching the AS interpreter (`asCContext::ExecuteNext`). In practice script-to-script null contracts are kept by:
 - the static analyzer (see [Tooling](#tooling))
 - the convention itself — every chain eventually reaches an engine call, which IS validated
+
+## TLA migration notes
+
+The current engine enforces these contracts during normal runtime, not only during static checks:
+
+- Bind nullable dictionary/engine results as nullable locals. For example, `dict.get(id, null)` must assign to `T?`, not `T`, when the key can be absent.
+- Generated component accessors are not nullable probes. Check `Has<Component>` first (`cr.HasDialogContext`, `item.HasRadio`, etc.), then use the component accessor.
+- Worker-run callbacks that touch entities need sync coverage. Mark the callback `[[Async]]`, lock the relevant entities with `Sync::Lock...`, and remember that `Game.Sync(...)` replaces the held lock set.
+- Dialog metadata participates in baking. Special answer links used by `.fodlg` files need globally visible `///@ Enum DialogAnswerLink ...` declarations, otherwise the dialog baker cannot resolve them even if AngelScript compilation succeeds.
+- The client `Chosen` accessor (`Game.Chosen`) is **non-nullable and throws** when there is no chosen critter. Guard with `HasChosen` instead of a null-check: replace `if (Chosen == null) return;` with `if (!HasChosen) return;`, and place the `HasChosen` guard *before* any `Critter chosen = Chosen;` assignment (the assignment itself throws when absent). `Game.GetCritter`, `Game.GetItem`, `Critter.GetItem`, `Map.GetCritterAtScreenPos`, etc. are `FO_NULLABLE` — bind their results to `T?` and narrow.
+- GUI screen warnings surface in the generated [Scripts/GuiScreens.fos](Scripts/GuiScreens.fos), but the fix belongs in the owning [Gui/*.fogui](Gui/) embedded code (the `?` markers live there in `Type? name` form; clang-format renders them `Type ? name` in the generated output). Edit the `.fogui`, regenerate with `Generate :: GuiScreens.fos`, then recompile — regeneration is faithful, so a fix in the source reproduces exactly.
 
 ## Tooling
 

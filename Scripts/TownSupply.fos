@@ -9,17 +9,20 @@ namespace TownSupply // Sort 2
 ///@ Property Critter Server ident TownSupplyVictimId Mutable Persistent
 ///@ Property Critter Server ident TownSupplyHostileId Mutable Persistent
 
-#define ENTER_ENTRY         (0)
-#define EXIT_ENTRY          (0)
-#define ROLE_GUARD          (29)
-#define PLANE_GOTO_EXIT     (29)
-#define SUPPLY_GAME_MINUTES (Game.Random(5, 60))
+const int ENTER_ENTRY = 0;
+const int EXIT_ENTRY = 0;
+const int ROLE_GUARD = 29;
+const int PLANE_GOTO_EXIT = 29;
+int SupplyGameMinutes()
+{
+    return Game.Random(5, 60);
+}
 
 void CallTownSupply(Critter victim, Critter hostile)
 {
     if (IsValidForSupply(victim, hostile)) {
         any[] values = {victim.Id, hostile.Id, 0};
-        Game.StartTimeEvent(Time::GameMinutes(SUPPLY_GAME_MINUTES), CallTownSupplyNext, values); //SavedDeferredCall
+        Game.StartTimeEvent(Time::GameMinutes(SupplyGameMinutes()), CallTownSupplyNext, values); //SavedDeferredCall
     }
 }
 
@@ -27,7 +30,7 @@ void CallTownSupply(Critter victim, Critter hostile)
 void CallTownSupplyNext(any[] values)
 {
     ident victimId = values[0];
-    Critter hostile = Game.GetCritter(values[1]);
+    Critter? hostile = Game.GetCritter(values[1]);
 
     values[2] = int(values[2]) + 1;
     int rate = values[2];
@@ -46,7 +49,7 @@ void CallTownSupplyNext(any[] values)
         return;
     }
 
-    Game.StartTimeEvent(Time::GameMinutes(SUPPLY_GAME_MINUTES), CallTownSupplyNext, values); //SavedDeferredCall
+    Game.StartTimeEvent(Time::GameMinutes(SupplyGameMinutes()), CallTownSupplyNext, values); //SavedDeferredCall
 }
 
 bool IsValidForSupply(Critter victim, Critter hostile)
@@ -55,21 +58,22 @@ bool IsValidForSupply(Critter victim, Critter hostile)
     if (hostile.ControlledByPlayer && !victim.ControlledByPlayer && !victim.IsNoSupply) {
         int bt = victim.BodyType;
         if (bt >= BodyTypes::Men && bt <= BodyTypes::Ghoul) {
-            Map map = hostile.GetMap();
+            Map? map = hostile.GetMap();
             if (map != null) {
                 hstring locPid = map.GetLocation().ProtoId;
-                if (LOCATION_IS_CITY(locPid)) {
+                if (Maps::IsCityLocation(locPid)) {
                     return true;
                 }
             }
         }
     }
+
     return false;
 }
 
 void CallSupply(ident victimId, Critter target, int supplyCount)
 {
-    Map map = target.GetMap();
+    Map? map = target.GetMap();
     if (map == null) {
         return;
     }
@@ -103,11 +107,7 @@ void CallSupply(ident victimId, Critter target, int supplyCount)
                                         {CritterProperty::TownSupplyHostileId, target.Id}};
 
     Critter bountyHunter = map.AddCritter(hunters[rnd], hex, HDIR_Random, props);
-    if (bountyHunter == null) {
-        return;
-    }
-
-    bountyHunter.SetupScript(_GuardInit);
+    bountyHunter.SetupScript(GuardInit);
 
     NpcPlanes::AddAttackPlane(bountyHunter, 0, target, true);
 
@@ -116,14 +116,14 @@ void CallSupply(ident victimId, Critter target, int supplyCount)
     }
 }
 
-void _GuardInit(Critter bountyHunter, bool firstTime)
+void GuardInit(Critter bountyHunter, bool firstTime)
 {
     bountyHunter.NpcRole = ROLE_GUARD;
-    bountyHunter.StartTimeEvent(Time::Asap(), Time::Seconds(1), _GuardIdle);
-    bountyHunter.OnDead.Subscribe(_GuardDead);
-    bountyHunter.OnSomeCritterDead.Subscribe(_GuardSmthDead);
-    // bountyHunter.OnSomeCritterAttack.Subscribe(_GuardSmthAttack);
-    bountyHunter.OnNpcPlaneEnd.Subscribe(_GuardPlaneEnd);
+    bountyHunter.StartTimeEvent(Time::Asap(), Time::Seconds(1), GuardIdle);
+    bountyHunter.OnDead.Subscribe(GuardDead);
+    bountyHunter.OnSomeCritterDead.Subscribe(GuardSmthDead);
+    // bountyHunter.OnSomeCritterAttack.Subscribe(GuardSmthAttack);
+    bountyHunter.OnNpcPlaneEnd.Subscribe(GuardPlaneEnd);
     bountyHunter.BonusLook = 100;
     bountyHunter.PerkSniper = 1;
     bountyHunter.PerkSlayer = 1;
@@ -131,18 +131,22 @@ void _GuardInit(Critter bountyHunter, bool firstTime)
     bountyHunter.PerkBetterCriticals = 1;
 }
 
-[[TimeEvent]]
-void _GuardIdle(Critter bountyHunter)
+[[TimeEvent]] [[Async]]
+void GuardIdle(Critter bountyHunter)
 {
+    if (!Sync::LockCritterWithMap(bountyHunter)) {
+        return;
+    }
+
     mpos hex = bountyHunter.Hex;
     if (not Entrance::GetNearEntry(bountyHunter.GetMap(), EXIT_ENTRY, hex)) {
         Game.DestroyCritter(bountyHunter);
     }
     else {
-        bountyHunter.CurrentAp = bountyHunter.ActionPoints * AP_DIVIDER;
+        bountyHunter.CurrentAp = bountyHunter.ActionPoints * Tla::AP_DIVIDER;
         NpcPlanes::NpcPlane plane = NpcPlanes::CreatePlane();
-        plane.Type = AI_PLANE_WALK;
-        plane.Priority = AI_PLANE_WALK_PRIORITY;
+        plane.Type = NpcPlanes::AI_PLANE_WALK;
+        plane.Priority = NpcPlanes::AI_PLANE_WALK_PRIORITY;
         plane.Identifier = PLANE_GOTO_EXIT;
         plane.Walk_Hex = hex;
         plane.Walk_Dir = 6;
@@ -155,7 +159,7 @@ void _GuardIdle(Critter bountyHunter)
 }
 
 [[Event]]
-void _GuardDead(Critter bountyHunter, Critter? killer)
+void GuardDead(Critter bountyHunter, Critter? killer)
 {
     /*if (killer != null && IsValidForSupply(bountyHunter,killer)) {
         CallSupply(killer, 1);
@@ -164,7 +168,7 @@ void _GuardDead(Critter bountyHunter, Critter? killer)
 }
 
 [[Event]]
-void _GuardSmthDead(Critter bountyHunter, Critter fromCrit, Critter? killer)
+void GuardSmthDead(Critter bountyHunter, Critter fromCrit, Critter? killer)
 {
     // Add to stack player who kills another guards
     if (killer != null && killer.ControlledByPlayer && fromCrit.NpcRole == ROLE_GUARD) {
@@ -176,22 +180,25 @@ void _GuardSmthDead(Critter bountyHunter, Critter fromCrit, Critter? killer)
     ident victimId = bountyHunter.TownSupplyVictimId;
     ident hostileId = bountyHunter.TownSupplyHostileId;
     if (victimId != ZERO_IDENT && hostileId == fromCrit.Id) {
-        Critter victim = Game.GetCritter(victimId);
+        Critter? victim = Game.GetCritter(victimId);
         if (victim != null) {
             EnemyStack::EraseEnemyFromStack(victim, hostileId);
         }
     }
 }
 
-void _GuardSmthAttack(Critter bountyHunter, Critter fromCrit, Critter target)
+void GuardSmthAttack(Critter bountyHunter, Critter fromCrit, Critter target)
 {
     // bountyHunter.AddEnemyToStack
 }
 
 [[Event]]
-EventResult _GuardPlaneEnd(Critter bountyHunter, int planeId, int reason, Critter someCr, Item someItem)
+EventResult GuardPlaneEnd(Critter bountyHunter, int planeId, int reason, Critter someCr, Item someItem)
 {
-    NpcPlanes::NpcPlane plane = NpcPlanes::GetCritterPlane(bountyHunter, planeId);
+    NpcPlanes::NpcPlane? plane = NpcPlanes::GetCritterPlane(bountyHunter, planeId);
+    if (plane == null) {
+        return EventResult::StopChain;
+    }
 
     if (plane.Identifier == PLANE_GOTO_EXIT) {
         Game.DestroyCritter(bountyHunter);

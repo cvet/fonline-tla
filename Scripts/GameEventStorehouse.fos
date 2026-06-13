@@ -8,11 +8,17 @@ namespace GameEventStorehouse // Sort 3
 
 ///@ Property Location Server ident StorehouseContId Mutable Persistent
 
-#define LOC_DELTA           (int(3 * Settings.GlobalMap.GlobalMapZoneLength)) // Радиус установки локации
-#define LOC_SEARCH          (6 * Settings.GlobalMap.GlobalMapZoneLength)      // Радиус поиска локации
-#define ENTRY_GUARD         (177)
-#define ENTRY_DIR           (178)
-#define MAX_CONTAINER_ITEMS (200)
+int LocationDelta()
+{
+    return int(3 * Settings.GlobalMap.GlobalMapZoneLength);
+} // Радиус установки локации
+int LocationSearchRadius()
+{
+    return 6 * Settings.GlobalMap.GlobalMapZoneLength;
+} // Радиус поиска локации
+const int ENTRY_GUARD = 177;
+const int ENTRY_DIR = 178;
+const int MAX_CONTAINER_ITEMS = 200;
 
 const int[][] GlobalCoords = {{668, 1121}, {375, 709}, {274, 367}, {685, 218}, {1224, 632}, {1073, 1181}, {1019, 119}};
 
@@ -23,18 +29,18 @@ void CreateStoreHouse()
     int idx = Game.Random(0, GlobalCoords.length() - 1);
 
     // Ищем склад
-    Location[] locations = Location::GetLocationsInRadius(ipos(GlobalCoords[idx][0], GlobalCoords[idx][1]), LOC_SEARCH);
+    Location[] locations = Location::GetLocationsInRadius(ipos(GlobalCoords[idx][0], GlobalCoords[idx][1]), LocationSearchRadius());
     if (locations.length() > 0) {
         for (int i = 0, l = locations.length(); i < l; i++) {
             Location loc = locations[i];
-            if (loc != null && loc.StorehouseContId != ZERO_IDENT) {
+            if (loc.StorehouseContId != ZERO_IDENT) {
                 return; // в данном регионе уже есть склад
             }
         }
     }
 
-    int locX = GlobalCoords[idx][0] + Game.Random(-1 * LOC_DELTA, LOC_DELTA);
-    int locY = GlobalCoords[idx][1] + Game.Random(-1 * LOC_DELTA, LOC_DELTA);
+    int locX = GlobalCoords[idx][0] + Game.Random(-1 * LocationDelta(), LocationDelta());
+    int locY = GlobalCoords[idx][1] + Game.Random(-1 * LocationDelta(), LocationDelta());
     if (locX < Settings.GlobalMap.GlobalMapZoneLength || locY < Settings.GlobalMap.GlobalMapZoneLength ||
         locX >= Settings.GlobalMap.GlobalMapZoneLength * (Settings.GlobalMap.GlobalMapHeight - 3) ||
         locY >= Settings.GlobalMap.GlobalMapZoneLength * (Settings.GlobalMap.GlobalMapHeight - 3)) {
@@ -44,46 +50,42 @@ void CreateStoreHouse()
 
     // Не найдена локация в данной области
     Location loc = Location::CreateLocation(Content::Location::desert_12, ipos(locX, locY), null);
-    if (loc != null) {
-        loc.AutoGarbage = false;
+    loc.AutoGarbage = false;
+    loc.Hidden = true;
+    Map map = loc.GetMapByIndex(0);
+    map.SetupScript(MapInit);
+    Item[] items = map.GetItems(Content::Item::footlocker_clean_left);
+    if (items.length() > 0) {
+        loc.StorehouseContId = items[0].Id;
         loc.Hidden = true;
-        Map map = loc.GetMapByIndex(0);
-        if (map != null) {
-            map.SetupScript(_MapInit);
-            Item[] items = map.GetItems(Content::Item::footlocker_clean_left);
-            if (items.length() > 0) {
-                loc.StorehouseContId = items[0].Id;
-                loc.Hidden = true;
-                loc.AutoGarbage = false;
-                mpos hex;
-                Entrance::GetNearEntry(map, ENTRY_DIR, hex);
-                Entrance::Entry[] entries = Entrance::ParseEntries(map, ENTRY_GUARD);
-                for (int i = 0; i < entries.length(); i++) {
-                    mdir dir = Game.GetDirection(entries[i].Hex, hex);
-                    hstring pid = Game.Random(0, 1) == 0 ? Content::Critter::JackalSniper : Content::Critter::JackalTerminator;
-                    int[] props = {CritterProperty::TeamId,
-                                   Teams::Bandit,
-                                   CritterProperty::NpcRole,
-                                   17,
-                                   CritterProperty::BagId,
-                                   pid == Content::Critter::JackalSniper ? Bags::Sniper1 : Bags::Term1,
-                                   CritterProperty::ReplicationTime,
-                                   -1};
-                    Critter npc = map.AddCritter(pid, entries[i].Hex, dir, Tla::GetCritPropsDict(props));
-                    npc.SetupScript(EncounterNpc::_NpcInit);
-                }
-            }
+        loc.AutoGarbage = false;
+        mpos hex;
+        Entrance::GetNearEntry(map, ENTRY_DIR, hex);
+        Entrance::Entry[] entries = Entrance::ParseEntries(map, ENTRY_GUARD);
+        for (int i = 0; i < entries.length(); i++) {
+            mdir dir = Game.GetDirection(entries[i].Hex, hex);
+            hstring pid = Game.Random(0, 1) == 0 ? Content::Critter::JackalSniper : Content::Critter::JackalTerminator;
+            int[] props = {CritterProperty::TeamId,
+                           Teams::Bandit,
+                           CritterProperty::NpcRole,
+                           17,
+                           CritterProperty::BagId,
+                           pid == Content::Critter::JackalSniper ? Bags::Sniper1 : Bags::Term1,
+                           CritterProperty::ReplicationTime,
+                           -1};
+            Critter npc = map.AddCritter(pid, entries[i].Hex, dir, Tla::GetCritPropsDict(props));
+            npc.SetupScript(EncounterNpc::NpcInit);
         }
     }
 }
 
-void _MapInit(Map map, bool firstTime)
+void MapInit(Map map, bool firstTime)
 {
-    map.OnCritterIn.Subscribe(_MapInCritter);
+    map.OnCritterIn.Subscribe(MapInCritter);
 }
 
 [[Event]]
-void _MapInCritter(Map map, Critter cr)
+void MapInCritter(Map map, Critter cr)
 {
     if (cr.ControlledByPlayer) {
         Critter[] npc = map.GetCritters(CritterFindType::NonDeadNpc);
@@ -99,15 +101,11 @@ void _MapInCritter(Map map, Critter cr)
 void SaveLoot2Storehouse(int WorldX, int WorldY, Item[] items)
 {
     // Ищем локацию
-    Location[] locations = Location::GetLocationsInRadius(ipos(WorldX, WorldY), LOC_SEARCH);
-    Location storeHouse;
+    Location[] locations = Location::GetLocationsInRadius(ipos(WorldX, WorldY), LocationSearchRadius());
+    Location? storeHouse;
     if (locations.length() > 0) {
         for (int i = 0, l = locations.length(); i < l; i++) {
             Location loc = locations[i];
-            if (loc == null) {
-                continue;
-            }
-
             if (loc.StorehouseContId != ZERO_IDENT) {
                 storeHouse = loc;
                 break;
@@ -116,13 +114,14 @@ void SaveLoot2Storehouse(int WorldX, int WorldY, Item[] items)
     }
 
     if (storeHouse != null && storeHouse.Hidden && storeHouse.StorehouseContId != ZERO_IDENT) {
-        Item container = Game.GetItem(storeHouse.StorehouseContId);
+        Item? container = Game.GetItem(storeHouse.StorehouseContId);
         if (container != null) {
-            ItemMovement::MoveItems(items, container, ROOT_CONTAINER_STACK);
+            ItemMovement::MoveItems(items, container, Tla::RootContainerStack());
             if (CountContainerItems(container) > MAX_CONTAINER_ITEMS) {
                 storeHouse.Hidden = false;
                 Game.StartTimeEvent(Time::GameDays(4), DeferredDestroyLocation, storeHouse.Id); //SavedDeferredCall
             }
+
             return;
         }
     }
@@ -131,7 +130,7 @@ void SaveLoot2Storehouse(int WorldX, int WorldY, Item[] items)
 int CountContainerItems(Item container)
 {
     int count = 0;
-    Item[] items = container.GetItems(ROOT_CONTAINER_STACK);
+    Item[] items = container.GetItems(Tla::RootContainerStack());
     for (int i = 0; i < items.length(); i++) {
         Item item = items[i];
         if (item.Type == ItemType::Weapon || item.Type == ItemType::Armor || item.Type == ItemType::Drug) {
@@ -141,13 +140,14 @@ int CountContainerItems(Item container)
             count += 1;
         }
     }
+
     return count;
 }
 
 [[TimeEvent]]
 void DeferredDestroyLocation(any value)
 {
-    Location loc = Game.GetLocation(ident(value));
+    Location? loc = Game.GetLocation(ident(value));
     if (loc != null) {
         Game.DestroyLocation(loc.Id);
     }

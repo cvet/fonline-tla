@@ -276,15 +276,15 @@ string FO_NAMESPACE Server_Game_RunSpeechScript(ServerEngine* server, DialogSpee
 {
     FO_STACK_TRACE_ENTRY();
 
-    string lexems;
+    string textArgs;
 
     if (speech->DlgScriptFuncName) {
         bool failed = false;
 
-        if (auto func = server->FindFunc<void, Critter*, Critter*, string&>(speech->DlgScriptFuncName); func && !func.Call(cr, talker, lexems)) {
+        if (auto func = server->FindFunc<void, Critter*, Critter*, string&>(speech->DlgScriptFuncName); func && !func.Call(cr, talker, textArgs)) {
             failed = true;
         }
-        if (auto func = server->FindFunc<uint32_t, Critter*, Critter*, string&>(speech->DlgScriptFuncName); func && !func.Call(cr, talker, lexems)) {
+        if (auto func = server->FindFunc<uint32_t, Critter*, Critter*, string&>(speech->DlgScriptFuncName); func && !func.Call(cr, talker, textArgs)) {
             failed = true;
         }
 
@@ -293,7 +293,7 @@ string FO_NAMESPACE Server_Game_RunSpeechScript(ServerEngine* server, DialogSpee
         }
     }
 
-    return lexems;
+    return textArgs;
 }
 
 bool FO_NAMESPACE Server_Game_DialogScriptDemand(ServerEngine* server, DialogAnswerReq* demand, Critter* master, Critter* slave)

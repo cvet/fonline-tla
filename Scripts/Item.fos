@@ -11,16 +11,17 @@ namespace Item // Sort 2
 ///@ Property Item Server hstring DoorAutoDialog Mutable Persistent
 
 // Дверь, которая зпкроется через 2 игровые минуты илии через некоторое число реальных секунд , указанное в DoorAutoCloseTime
-void _DoorAutoCloseInit(Item door, bool firstTime)
+void DoorAutoCloseInit(Item door, bool firstTime)
 {
     if (firstTime) {
         door.DoorAutoCloseTime = door.Val3;
     }
-    door.OnCritterUseSkill.Subscribe(e_UseAutoCloseDoor);
+
+    door.OnCritterUseSkill.Subscribe(UseAutoCloseDoor);
 }
 
 [[Event]]
-EventResult e_UseAutoCloseDoor(Item door, Critter cr, CritterProperty skill)
+EventResult UseAutoCloseDoor(Item door, Critter cr, CritterProperty skill)
 {
     Game.StartTimeEvent(Time::Seconds(door.DoorAutoCloseTime == 0 ? 2 * 60 : door.DoorAutoCloseTime), AutoCloseDoor, door.Id); //SavedDeferredCall
     return EventResult::StopChain;
@@ -29,21 +30,22 @@ EventResult e_UseAutoCloseDoor(Item door, Critter cr, CritterProperty skill)
 [[TimeEvent]]
 void AutoCloseDoor(any value)
 {
-    Item door = Game.GetItem(value);
+    Item? door = Game.GetItem(value);
     if (door == null) {
         return;
     }
+
     if (!door.Opened) {
         return;
     }
 
     mpos hex;
-    Map map = door.GetMapPosition(hex);
+    Map? map = door.GetMapPosition(hex);
     if (map == null) {
         return;
     }
 
-    Critter cr = map.GetCritterOnHex(hex);
+    Critter? cr = map.GetCritterOnHex(hex);
     if (cr != null) {
         if (cr.IsAlive()) {
             Game.StartTimeEvent(Time::Seconds(3), AutoCloseDoor, value); //SavedDeferredCall
@@ -61,39 +63,41 @@ void AutoCloseDoor(any value)
 }
 
 // Дверь, которая не открывается стандартными способами
-void _ClosedDoorInit(Item door, bool firstTime)
+void ClosedDoorInit(Item door, bool firstTime)
 {
-    door.OnCritterUseSkill.Subscribe(_UseDoor);
+    door.OnCritterUseSkill.Subscribe(UseDoor);
 }
 
 [[Event]]
-EventResult _UseDoor(Item item, Critter cr, CritterProperty skill)
+EventResult UseDoor(Item item, Critter cr, CritterProperty skill)
 {
     return EventResult::StopChain;
 }
 
 // Дверь, при использовании которой открывается диалог
-void _DialogDoorInit(Item door, bool firstTime)
+void DialogDoorInit(Item door, bool firstTime)
 {
     if (firstTime) {
         door.DoorAutoDialog = hstring(door.Val3);
     }
-    door.OnCritterUseSkill.Subscribe(_UseDialogDoor);
+
+    door.OnCritterUseSkill.Subscribe(UseDialogDoor);
 }
 
 [[Event]]
-EventResult _UseDialogDoor(Item door, Critter cr, CritterProperty skill)
+EventResult UseDialogDoor(Item door, Critter cr, CritterProperty skill)
 {
     Dialogs::RunDialog(cr, door.DoorAutoDialog, false);
     return EventResult::StopChain;
 }
 
 // Голодиск с номером, присвоенном в Val0
-void _HoloInit(Item item, bool firstTime)
+void HoloInit(Item item, bool firstTime)
 {
     if (item.ProtoId != Content::Item::holodisk) {
         return;
     }
+
     item.HolodiskNum = item.Val0;
     item.SetupScript(null);
 }
@@ -107,7 +111,7 @@ void SetDestroyItem(Item item, int delHours)
 [[TimeEvent]]
 void DeferredDestroyItem(any value)
 {
-    Item item = Game.GetItem(value);
+    Item? item = Game.GetItem(value);
     if (item != null) {
         Game.DestroyItem(item);
     }
@@ -118,16 +122,16 @@ void DeferredDestroyItem(any value)
 // обратите внимание, игрок может застрять за дверью, если пройдет внутрь, а она захлопнется
 // в Val1 прописывается номер роли НПЦ которые будут говорить, должно быть отличным от ноля
 // если скрипт только на одно использование - в Val2 - нужно указать любое значение, это может использоваться для охраняемых предметов, например оружия
-#define STR_DONTOUCH (540)
+const int STR_DONTOUCH = 540;
 
-void _GuardedItemInit(Item item, bool firstTime)
+void GuardedItemInit(Item item, bool firstTime)
 {
-    item.OnCritterUseSkill.Subscribe(_GuardedItemSkill);
+    item.OnCritterUseSkill.Subscribe(GuardedItemSkill);
 }
 
-bool _GuardedItemSkill_Impl(Item item, Critter cr, CritterProperty skill)
+bool GuardedItemSkillImpl(Item item, Critter cr, CritterProperty skill)
 {
-    Map map = cr.GetMap();
+    Map? map = cr.GetMap();
     if (map == null) {
         return false;
     }
@@ -138,7 +142,7 @@ bool _GuardedItemSkill_Impl(Item item, Critter cr, CritterProperty skill)
         Critter[] guards = map.GetCritters(CritterProperty::NpcRole, role, CritterFindType::NonDeadNpc);
         if (guards.isEmpty()) {
             if (reset) {
-                item.OnCritterUseSkill.Unsubscribe(_GuardedItemSkill);
+                item.OnCritterUseSkill.Unsubscribe(GuardedItemSkill);
                 item.SetupScript(null);
             }
 
@@ -156,11 +160,11 @@ bool _GuardedItemSkill_Impl(Item item, Critter cr, CritterProperty skill)
         guardedItemSkill.setIfNotExist(cr.Id, 0);
         if (guardedItemSkill[cr.Id] < 2) {
             NpcPlanes::NpcPlane[] planes = {};
-            if (NpcPlanes::GetPlanes(guard, AI_PLANE_ATTACK, planes) > 0) {
+            if (NpcPlanes::GetPlanes(guard, NpcPlanes::AI_PLANE_ATTACK, planes) > 0) {
                 for (int i = 0, l = planes.length(); i < l; i++) {
                     if (planes[i].Attack_TargId == cr.Id) {
                         if (reset) {
-                            item.OnCritterUseSkill.Unsubscribe(_GuardedItemSkill);
+                            item.OnCritterUseSkill.Unsubscribe(GuardedItemSkill);
                             item.SetupScript(null);
                         }
 
@@ -171,7 +175,7 @@ bool _GuardedItemSkill_Impl(Item item, Critter cr, CritterProperty skill)
 
             guardedItemSkill[cr.Id] = guardedItemSkill[cr.Id] + 1;
             guard.GuardedItemSkill = guardedItemSkill;
-            Messaging::SayShout(guard, TextPackKey(TextPackName::Text, "" + (STR_DONTOUCH)), "$pname" + PlayerRegistration::GetPlayerName(cr.Id));
+            Messaging::SayShout(guard, TextPackKey(TextPackName::Text, "" + (STR_DONTOUCH)), "|pname:" + PlayerRegistration::GetPlayerName(cr.Id));
         }
         else {
             guardedItemSkill[cr.Id] = 0;
@@ -188,9 +192,9 @@ bool _GuardedItemSkill_Impl(Item item, Critter cr, CritterProperty skill)
 }
 
 [[Event]]
-EventResult _GuardedItemSkill(Item item, Critter cr, CritterProperty skill)
+EventResult GuardedItemSkill(Item item, Critter cr, CritterProperty skill)
 {
-    return (_GuardedItemSkill_Impl(item, cr, skill)) ? EventResult::StopChain : EventResult::StopChain;
+    return (GuardedItemSkillImpl(item, cr, skill)) ? EventResult::StopChain : EventResult::StopChain;
 }
 
 Item ChangeProto(Item item, hstring newProto)

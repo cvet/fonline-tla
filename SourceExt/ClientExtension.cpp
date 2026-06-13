@@ -6,9 +6,9 @@ FO_USING_NAMESPACE();
 
 FO_BEGIN_NAMESPACE
 ///@ ExportMethod
-FO_SCRIPT_API string Client_Game_FormatTags(ClientEngine* client, string_view text, string_view lexems);
+FO_SCRIPT_API string Client_Game_FormatTags(ClientEngine* client, string_view text, string_view textArgs);
 ///@ ExportMethod
-FO_SCRIPT_API string Client_Game_FormatTags(ClientEngine* client, string_view text, string_view lexems, FO_NULLABLE CritterView* talker);
+FO_SCRIPT_API string Client_Game_FormatTags(ClientEngine* client, string_view text, string_view textArgs, FO_NULLABLE CritterView* talker);
 ///@ ExportMethod
 FO_SCRIPT_API bool Client_Critter_IsFree(CritterView* self);
 ///@ ExportMethod
@@ -16,6 +16,8 @@ FO_SCRIPT_API bool Client_Critter_IsBusy(CritterView* self);
 ///@ ExportMethod
 FO_SCRIPT_API void Client_Critter_Wait(CritterView* self, int32_t ms);
 FO_END_NAMESPACE
+
+static auto ResolveTextArg(string_view name, string_view text_args) -> string;
 
 static auto HasFemaleSexTag(const CritterView* cr) -> bool
 {
@@ -27,7 +29,7 @@ static auto HasFemaleSexTag(const CritterView* cr) -> bool
     return sex_tag_female != nullptr && cr->GetProperties().GetValue<bool>(sex_tag_female);
 }
 
-static auto FormatTags(ClientEngine* client, string_view text, string_view lexems, CritterView* talker) -> string
+static auto FormatTags(ClientEngine* client, string_view text, string_view text_args, CritterView* talker) -> string
 {
     FO_STACK_TRACE_ENTRY();
 
@@ -55,7 +57,7 @@ static auto FormatTags(ClientEngine* client, string_view text, string_view lexem
                 break;
             }
 
-            new_text.replace(tag_begin, tag_end - tag_begin, "@lex " + new_text.substr(tag_begin + 1, tag_end - tag_begin - 1) + "@");
+            new_text.replace(tag_begin, tag_end - tag_begin, "@arg " + new_text.substr(tag_begin + 1, tag_end - tag_begin - 1) + "@");
             continue;
         }
         case '@': {
@@ -71,6 +73,13 @@ static auto FormatTags(ClientEngine* client, string_view text, string_view lexem
 
             if (tag.empty()) {
                 break;
+            }
+
+            // Inline color tags are handled by the font renderer, not here — pass them through untouched
+            if (tag == "color" || (tag.size() >= 6 && tag.compare(0, 6, "color ") == 0)) {
+                new_text.insert(i, "@" + tag + "@");
+                i += tag.length() + 2;
+                continue;
             }
 
             // Player name
@@ -117,18 +126,9 @@ static auto FormatTags(ClientEngine* client, string_view text, string_view lexem
                     new_text.insert(first, rnd[client->Random(0, numeric_cast<int32_t>(rnd.size()) - 1)]);
                 }
             }
-            // Lexems
-            else if (tag.length() > 4 && tag[0] == 'l' && tag[1] == 'e' && tag[2] == 'x' && tag[3] == ' ') {
-                auto lex = "$" + tag.substr(4);
-                auto pos = lexems.find(lex);
-
-                if (pos != string::npos) {
-                    pos += lex.length();
-                    tag = strex(lexems.substr(pos)).substring_until('$').trim();
-                }
-                else {
-                    tag = "";
-                }
+            // Text argument
+            else if (tag.length() > 4 && tag[0] == 'a' && tag[1] == 'r' && tag[2] == 'g' && tag[3] == ' ') {
+                tag = ResolveTextArg(tag.substr(4), text_args);
             }
             // Text pack
             else if (tag.length() > 5 && tag[0] == 't' && tag[1] == 'e' && tag[2] == 'x' && tag[3] == 't' && tag[4] == ' ') {
@@ -158,7 +158,7 @@ static auto FormatTags(ClientEngine* client, string_view text, string_view lexem
             else if (tag.length() > 7 && tag[0] == 's' && tag[1] == 'c' && tag[2] == 'r' && tag[3] == 'i' && tag[4] == 'p' && tag[5] == 't' && tag[6] == ' ') {
                 string func_name = strex(tag.substr(7)).substring_until('$');
 
-                if (!client->CallFunc<string, string>(client->Hashes.ToHashedString(func_name), string(lexems), tag)) {
+                if (!client->CallFunc<string, string>(client->Hashes.ToHashedString(func_name), string(text_args), tag)) {
                     tag = "";
                 }
             }
@@ -182,18 +182,43 @@ static auto FormatTags(ClientEngine* client, string_view text, string_view lexem
     return new_text;
 }
 
-string FO_NAMESPACE Client_Game_FormatTags(ClientEngine* client, string_view text, string_view lexems)
+static auto ResolveTextArg(string_view name, string_view text_args) -> string
 {
     FO_STACK_TRACE_ENTRY();
 
-    return FormatTags(client, text, lexems, nullptr);
+    size_t pos = 0;
+
+    while (pos < text_args.length()) {
+        const size_t next_entry = text_args.find('|', pos);
+        const string_view entry = next_entry == string_view::npos ? text_args.substr(pos) : text_args.substr(pos, next_entry - pos);
+        const size_t colon = entry.find(':');
+
+        if (colon != string_view::npos && strex(entry.substr(0, colon)).trim() == name) {
+            return string(strex(entry.substr(colon + 1)).trim());
+        }
+
+        if (next_entry == string_view::npos) {
+            break;
+        }
+
+        pos = next_entry + 1;
+    }
+
+    return "";
 }
 
-string FO_NAMESPACE Client_Game_FormatTags(ClientEngine* client, string_view text, string_view lexems, CritterView* talker)
+string FO_NAMESPACE Client_Game_FormatTags(ClientEngine* client, string_view text, string_view textArgs)
 {
     FO_STACK_TRACE_ENTRY();
 
-    return FormatTags(client, text, lexems, talker);
+    return FormatTags(client, text, textArgs, nullptr);
+}
+
+string FO_NAMESPACE Client_Game_FormatTags(ClientEngine* client, string_view text, string_view textArgs, CritterView* talker)
+{
+    FO_STACK_TRACE_ENTRY();
+
+    return FormatTags(client, text, textArgs, talker);
 }
 
 bool FO_NAMESPACE Client_Critter_IsFree(CritterView* self)

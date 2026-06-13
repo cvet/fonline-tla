@@ -603,6 +603,18 @@ def format_output(path: Path, project_root: Path) -> None:
     clang_format = discover_clang_format(project_root)
     log_progress(f'Formatting {path.name} with {Path(clang_format).name}')
     subprocess.check_call([clang_format, '-i', str(path)])
+    # clang-format mangles the AngelScript nullable suffix (`T?` -> `T ? `,
+    # `cast<T?>` -> `cast < T ? >`); reuse the project formatter's repair so the
+    # generated file matches the hand-formatted convention.
+    formatter_dir = Path(__file__).resolve().parents[1] / 'Formatter'
+    if str(formatter_dir) not in sys.path:
+        sys.path.insert(0, str(formatter_dir))
+    from format_project import fix_fos_nullable_suffix
+
+    content = read_text_strip_bom(path)
+    fixed = fix_fos_nullable_suffix(content)
+    if fixed != content:
+        write_text_utf8(path, fixed)
 
 
 def create_parser() -> argparse.ArgumentParser:

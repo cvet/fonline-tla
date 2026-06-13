@@ -11,10 +11,13 @@ namespace NoPvpMaps
 #if SERVER
 
 // игрок с включенным NoPvp режимом может телепортироваться на глобал
-[[ServerRemoteCall]]
+[[ServerRemoteCall]] [[Async]]
 void Rpc_CritterToGlobal(Player player)
 {
-    Critter cr = player.GetControlledCritter();
+    Critter? cr = player.GetControlledCritter();
+    if (cr == null) {
+        return;
+    }
 
     CritterState::Wait(cr, 1000); // Антиспам
 
@@ -23,7 +26,11 @@ void Rpc_CritterToGlobal(Player player)
         return;
     }
 
-    Map map = cr.GetMap();
+    Map? map = cr.GetMap();
+    if (map != null && !Sync::Lock(cr, map)) {
+        return;
+    }
+
     if (map != null && IsNoPvpMap(map) && cr.IsNoPvp && cr.IsAlive()) {
         cr.TransferToGlobal();
     }
@@ -91,8 +98,8 @@ const hstring[] ExcludeDialogs = {
     Content::Dialog::ncr_hate,          Content::Dialog::vc_shrim,        Content::Dialog::vc_guard_fighter, Content::Dialog::den_ghost};
 const int[] btInvul = {BodyTypes::Men, BodyTypes::Women, BodyTypes::Children, BodyTypes::SuperMutant, BodyTypes::Ghoul};
 
-#define CTE_NOPVP_OFF (42)               // Идентификатор события "очистить нопвп режим"
-#define TIME_CHECK    (Time::Minutes(1)) // Время проверки, не вышел ли игрок с нопвп зоны
+const int CTE_NOPVP_OFF = 42;                // Идентификатор события "очистить нопвп режим"
+const timespan CheckTime = Time::Minutes(1); // Время проверки, не вышел ли игрок с нопвп зоны
 
 void OnCitterMapIn(Critter cr, Map map)
 {
@@ -100,24 +107,28 @@ void OnCitterMapIn(Critter cr, Map map)
     if (cr.ControlledByPlayer && IsNoPvpMap(map)) {
         cr.IsNoPvp = true;
         Messaging::Info(cr, TextPackKey(TextPackName::Text, "" + (1)));
-        if (cr.CountTimeEvent(cte_NoPvpOff) == 0) {
-            cr.StartTimeEvent(TIME_CHECK, cte_NoPvpOff);
+        if (cr.CountTimeEvent(NoPvpOff) == 0) {
+            cr.StartTimeEvent(CheckTime, NoPvpOff);
         }
     }
 }
 
-[[TimeEvent]]
-void cte_NoPvpOff(Critter cr)
+[[TimeEvent]] [[Async]]
+void NoPvpOff(Critter cr, TimeEventContext event)
 {
     if (!cr.IsNoPvp) {
         return;
     }
 
-    Map map = cr.GetMap();
+    Map? map = cr.GetMap();
+    if (map != null && !Sync::Lock(cr, map)) {
+        return;
+    }
+
     if (map != null && IsNoPvpMap(map)) { // если карта с включенным НоПвп, откладываем снятие режима
-        timespan delayTicks = TIME_CHECK;
+        timespan delayTicks = CheckTime;
         if (delayTicks != ZERO_TIMESPAN) {
-            Game.RepeatCurrentTimeEvent(delayTicks);
+            event.Repeat(delayTicks);
         }
     }
 
@@ -127,7 +138,7 @@ void cte_NoPvpOff(Critter cr)
 
 void OnCritterMapOut(Critter cr, Map map)
 {
-    Map mapCr = cr.GetMap();
+    Map? mapCr = cr.GetMap();
     if (mapCr != null && IsNoPvpMap(mapCr)) {
         return;
     }
@@ -145,6 +156,7 @@ bool IsNoPvpMap(Map map)
     if (!Settings.Combat.NoPvpMaps) {
         return false;
     }
+
     return map.IsNoPvPMap;
 }
 
@@ -155,7 +167,7 @@ void SetNoPvp()
     }
 
     for (int i = 0, l = NoPvpMaps.length(); i < l; i++) {
-        Map map = Game.GetMap(NoPvpMaps[i]);
+        Map? map = Game.GetMap(NoPvpMaps[i]);
         if (map != null) {
             SetNoPvp(map, true);
         }

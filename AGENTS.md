@@ -189,6 +189,7 @@ AngelScript embedded in screens lives in the `.fogui` JSON: `OnGlobalMouseDown`,
 
 - Use `Format :: Scripts`, `Format :: Prototypes`, `Format :: Main Config`, or `Format :: All` before handing off when touched files need formatting.
 - `FormatSource.bat` is a smaller formatter path for `Scripts/*.fos`, `Scripts/Json/*.fos`, `SourceExt/*`, and `Gui/*.fogui`.
+- `Tools/ScriptQuality/validate_scripts.py` is a quality *validator* (reports only; not a formatter) for `Scripts/*.fos`: banner tags, Cyrillic comments, magic text-pack ids, hand-rolled-util calls, redundant bool returns, commented-out code, `namespace`==filename, `#if` balance, component `== null` probes, trailing blank line. Run `Analyze :: Script Quality` for a summary; `--ratchet` fails only on new violations vs `Tools/ScriptQuality/baseline.json`; `--fix` applies the few safe autofixes. See `Tools/NullableEstimate/validate_nullable.py` for the complementary `?`/FO_NULLABLE checks.
 - Do not hand-edit generated files: `Scripts/Content.fos`, generated `Scripts/GuiScreens.fos` without the matching `.fogui` update, baked output under `Baking/`, cache files under `Cache/`, or generated `VERSION`.
 - Local working trees such as `TLA-Dev/`, `Baking/`, `Cache/`, and build folders are outputs/debug state, not canonical authored inputs.
 

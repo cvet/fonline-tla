@@ -216,6 +216,7 @@ Pick the boundary before reaching for a heavy interactive session:
 ## Quick Reference
 
 - `README.md` - repo-root overview.
+- `Docs/Refactoring.md` - Scripts/*.fos refactoring plan, phases, and running status.
 - `TLA.fomain` - main config and subconfigs (`LocalTest`, `PublicGame`, resource baking subconfigs).
 - `.vscode/tasks.json` - authoritative build/generate/format/launch tasks.
 - `.vscode/launch.json` - debugger launch profiles when present.

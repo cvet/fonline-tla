@@ -98,14 +98,28 @@ survive majority verification are applied, after a manual re-check.
 
 ## Remaining / deferred
 
-These need runtime checks, design decisions, or content/owner input and were deliberately not changed:
+The active phases above are complete. What is intentionally not changed, and why:
 
-- **Idioms (low value):** textpack magic ids → named keys; flag-soups → enums; the few `any`/`double`
-  `Tla::Clamp` call sites.
-- **Migration debt (disabled subsystems):** racing event (`Main.fos` init commented out, plus a
-  cross-file dialog property rename), `Caravan`/`GameEvent`/`NoPvpMaps` inits, lost `Say`/`SayMsg`
-  player feedback, broken `CustomCall` hotkeys. Re-enabling needs to confirm *why* each was disabled.
-- **Per-module backlog:** medium/low findings in `Build/_audit/`.
+- **Idioms — done where it applies.** Magic text ids were named in all active modules (Behemoth and
+  the live map/quest modules). The residual sits in **dead code** (events under the disabled
+  `GameEvent::DeclareEvents`), **generated** `GuiScreens.fos` (validator-excluded), one **missing-string
+  ref** (`NrWriKidnap.fos:437` → text id 3354 absent from the pack — a separate content bug), and a
+  handful of **single-use** ids where a named const adds no readability. `flag-soups → enums` is gated
+  by the plan's "non-serialized only" rule: the discriminator groups (`AI_PLANE_*`→`plane.Type`→
+  serialized `Planes[]`, `TYPE_ORDER_*`/`ORDER_TYPE_*`→properties, `HF_*`/`MF_*`/`USE_*`→bitwise) are
+  all serialized or bitwise, so none qualify. The two `any`/`double` `Tla::Clamp` sites are correct as
+  is (no `Math::` double overload).
+- **Migration debt — empirically broken; kept disabled.** Re-enabling the commented `start()` inits was
+  tested one at a time (compile + bake + headless smoke). **Every one crashes startup** with a
+  null-pointer on a fresh (in-memory) DB, non-deterministically: `Caravan` (`CaravanInfo::AddRoutePoint`
+  → `CaravanRoute.AddPoint`, Caravan.fos:761), `GameEvent` (`DeclareEvent`, GameEvent.fos:391; also
+  schedules the broken racing event), `BulletinBoard` (`StartMessenger` → `Messenger.Load`,
+  BulletinBoard.fos:243). Enabling any of them makes the server fail to start, so they are left disabled
+  (the working state). Completing them is WIP feature work for the owner, not refactoring.
+- **Structural array→struct** is explicitly **(future)** in the Phases section; the Phase-4 deliverable
+  (god-module split) is done.
+- **Per-module backlog:** remaining medium/low findings in `Build/_audit/` (most medium/high already
+  fixed in the bug passes).
 
 ## Notes / lessons
 

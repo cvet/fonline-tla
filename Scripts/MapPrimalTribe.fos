@@ -3,8 +3,6 @@ namespace MapPrimalTribe // Sort 2
 
 #if SERVER
 
-// Author: Tab10id, Тринитротолуол
-
 ///@ Property Critter Common uint8 TribSulikRaid Mutable OwnerSync Persistent Group = Quests Quest = 4606 Max = 10
 ///@ Property Critter Server int32 TribRaiderKillCount Mutable Persistent
 ///@ Property Critter Server uint8 NCRElizeSlavers Mutable Persistent Max = 10
@@ -29,7 +27,6 @@ const int QUEST_STAT_FAIL_NOT_START = 8;
 const int QUEST_STAT_FAIL_TRIBE_IS_DEAD = 9;
 const int QUEST_STAT_ATTACK_RUNS = 10;
 
-const int MAXDIST = 15;
 timespan RunPeriod()
 {
     return Time::Minutes(6 + Game.Random(0, 7));
@@ -131,7 +128,7 @@ void StartQuest(Critter master, Critter npc)
     master.TribRaiderKillCount = 0;
     NotCome = true;
     QuestPlayers.insertLast(master.Id);
-    StartAttackInvokeId = Game.StartTimeEvent(Tla::GameSeconds(TIME_FOR_START), StartAttack); //SavedDeferredCall
+    StartAttackInvokeId = Game.StartTimeEvent(GameTime::GameSeconds(TIME_FOR_START), StartAttack); //SavedDeferredCall
 }
 
 [[DialogResult]]
@@ -273,7 +270,7 @@ void RaiderDead(Critter crit, Critter? killer)
         SendQuestStat();
     }
 
-    Game.StartTimeEvent(Tla::GameSeconds(60 * Game.Random(20, 60)), DeleteRaider, crit.Id); //SavedDeferredCall
+    Game.StartTimeEvent(GameTime::GameSeconds(60 * Game.Random(20, 60)), DeleteRaider, crit.Id); //SavedDeferredCall
 }
 
 [[Event]]
@@ -534,16 +531,20 @@ void PlayerInMap(Map map, Critter cr)
 
 void RunAwayCritter(Critter crit)
 {
-    int x, y, homeX = 0, homeY = 0, homeM = 0, homeD = 0;
-    mdir dir;
-    do {
-        x = crit.Hex.x + Game.Random(-8, 8);
-    } while ((x < homeX + MAXDIST) or (x > homeX - MAXDIST));
-    do {
-        y = crit.Hex.y + Game.Random(-8, 8);
-    } while ((y < homeY + MAXDIST) or (y > homeY - MAXDIST));
-    dir = Game.GetDirection(crit.Hex, mpos(x, y));
-    NpcPlanes::AddWalkPlane(crit, NpcPlanes::AI_PLANE_WALK_PRIORITY, mpos(x, y), dir, true, 0);
+    Map? map = crit.GetMap();
+    if (map == null) {
+        return;
+    }
+
+    // Flee to a random hex near the current position, clamped to the map so the
+    // destination is always valid. The previous do/while bounded the candidate
+    // against an unset home origin (0,0) with an always-true condition, hanging
+    // the server thread whenever this ran.
+    mpos cur = crit.Hex;
+    int x = Math::Clamp(cur.x + Game.Random(-8, 8), 0, map.Size.width - 1);
+    int y = Math::Clamp(cur.y + Game.Random(-8, 8), 0, map.Size.height - 1);
+    mpos dest = mpos(x, y);
+    NpcPlanes::AddWalkPlane(crit, NpcPlanes::AI_PLANE_WALK_PRIORITY, dest, Game.GetDirection(cur, dest), true, 0);
 }
 
 [[TimeEvent]]

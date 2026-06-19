@@ -81,21 +81,21 @@ void FO_NAMESPACE ServerInitHook(ServerEngine* server)
     auto& ext_data = GetServerExtData(server);
 
     ext_data.LookMinimum = strvex(server->Settings.GetCustomSetting("Look.LookMinimum")).to_int32();
-    FO_RUNTIME_ASSERT(ext_data.LookMinimum != 0);
+    FO_VERIFY_AND_THROW(ext_data.LookMinimum != 0, "Look.LookMinimum setting must be set");
 
     const auto* cr_props = server->GetPropertyRegistrator(Critter::ENTITY_TYPE_NAME);
     ext_data.InSneakMode = cr_props->FindProperty("InSneakMode");
-    FO_RUNTIME_ASSERT(ext_data.InSneakMode);
+    FO_VERIFY_AND_THROW(ext_data.InSneakMode, "Critter property InSneakMode not found");
     ext_data.SneakCoefficient = cr_props->FindProperty("SneakCoefficient");
-    FO_RUNTIME_ASSERT(ext_data.SneakCoefficient);
+    FO_VERIFY_AND_THROW(ext_data.SneakCoefficient, "Critter property SneakCoefficient not found");
 
     const auto* item_props = server->GetPropertyRegistrator(Item::ENTITY_TYPE_NAME);
     ext_data.IsAlwaysView = item_props->FindProperty("IsAlwaysView");
-    FO_RUNTIME_ASSERT(ext_data.IsAlwaysView);
+    FO_VERIFY_AND_THROW(ext_data.IsAlwaysView, "Item property IsAlwaysView not found");
     ext_data.IsTrap = item_props->FindProperty("IsTrap");
-    FO_RUNTIME_ASSERT(ext_data.IsTrap);
+    FO_VERIFY_AND_THROW(ext_data.IsTrap, "Item property IsTrap not found");
     ext_data.TrapValue = item_props->FindProperty("TrapValue");
-    FO_RUNTIME_ASSERT(ext_data.TrapValue);
+    FO_VERIFY_AND_THROW(ext_data.TrapValue, "Item property TrapValue not found");
 
     ext_data.DialogMngr = SafeAlloc::MakeUnique<DialogManager>(*server);
     ext_data.DialogMngr->LoadFromResources(server->Resources);
@@ -213,7 +213,7 @@ isize32 FO_NAMESPACE Server_Game_LoadImage(ServerEngine* server, uint32_t imageS
     [[maybe_unused]] const auto oy = reader.GetLEInt16();
 
     const auto is_spr_ref = reader.GetUInt8();
-    FO_RUNTIME_ASSERT(is_spr_ref == 0);
+    FO_VERIFY_AND_THROW(is_spr_ref == 0, "Sprite reference images are not supported");
 
     const auto width = reader.GetLEUInt16();
     const auto height = reader.GetLEUInt16();
@@ -224,7 +224,7 @@ isize32 FO_NAMESPACE Server_Game_LoadImage(ServerEngine* server, uint32_t imageS
     reader.GoForward(numeric_cast<size_t>(width) * height * 4);
 
     const auto check_number2 = reader.GetUInt8();
-    FO_RUNTIME_ASSERT(check_number2 == 42);
+    FO_VERIFY_AND_THROW(check_number2 == 42, "Image trailing check number mismatch");
 
     auto simg = SafeAlloc::MakeUnique<ServerImage>();
     simg->Width = width;

@@ -3,7 +3,6 @@ namespace SeAndroid // Sort 2
 
 #if SERVER
 
-// Author: rifleman17
 // Квест-специальный энкаунтер. Две последовательные локации
 // На первой игрок находит труп нпц с рацией, если он возьмет рацию, может услышать сообщение о том, что где-то в Пустоши найден военный склад. На самом деле
 // это - ловушка, в которой его поджидает сумасшедший ученый. При заходе на вторую локацию персонаж попадает на хирургический стол, где его оперируют и персонаж
@@ -105,7 +104,7 @@ void AndroidRadio(any[] values)
 
             DebugLog("seAndroidValue: " + cr.SpecialAndroid);
             if (values[1] < 5) { // Максимум 5 повторов раз в 20 секунд на нужной радиоволне
-                Game.StartTimeEvent(Tla::GameSeconds(20), AndroidRadio, values);
+                Game.StartTimeEvent(GameTime::GameSeconds(20), AndroidRadio, values);
             }
         }
     }
@@ -140,7 +139,7 @@ EventResult UseGroundDoor(Item door, Critter cr, CritterProperty skill)
     }
 
     Location loc = map.GetLocation();
-    return (loc.SeAndroidPlayerIn) ? EventResult::StopChain : EventResult::StopChain;
+    return (loc.SeAndroidPlayerIn) ? EventResult::StopChain : EventResult::ContinueChain;
 }
 
 [[ItemTrigger]]
@@ -163,9 +162,9 @@ void TransitPlayer(Critter player, StaticItem trigger, bool entered, mdir dir)
         loc.SeAndroidPlayerId = player.Id;
         player.StartTimeEvent(Time::Minutes(30), CheckPlayerKnockOut); // Подстраховка
         CritterState::ToKnockout(player,
-                                 Tla::KnockoutActionAnimDefaultBegin(true),
-                                 Tla::KnockoutActionAnimDefaultIdle(true),
-                                 Tla::KnockoutActionAnimDefaultEnd(true),
+                                 AnimHelpers::KnockoutActionAnimDefaultBegin(true),
+                                 AnimHelpers::KnockoutActionAnimDefaultIdle(true),
+                                 AnimHelpers::KnockoutActionAnimDefaultEnd(true),
                                  100000,
                                  player.Hex);
         // Все вещи игрока перекладываем в разные ящики
@@ -335,7 +334,7 @@ void TransformPlayer(Map map, Critter player, Critter doctor)
     }
 
     any[] values = {player.Id, doctor.Id, map.Id};
-    Game.StartTimeEvent(Tla::GameSeconds(60), AwakePlayer, values); //SavedDeferredCall
+    Game.StartTimeEvent(GameTime::GameSeconds(60), AwakePlayer, values); //SavedDeferredCall
 }
 
 [[TimeEvent]]
@@ -387,8 +386,8 @@ void Warn(Critter player, StaticItem trigger, bool entered, mdir dir)
         CritterState::Wait(player, 0);
         Messaging::Info(player, TextPackKey(TextPackName::Text, "" + (STR_OUT)));
         loc.SeAndroidMinesTriggered = true;
-        Game.StartTimeEvent(Tla::GameSeconds(1), DeferredExplode, map.Id);     //SavedDeferredCall
-        Game.StartTimeEvent(Tla::GameSeconds(20), DeferredDestroyMap, map.Id); //SavedDeferredCall
+        Game.StartTimeEvent(GameTime::GameSeconds(1), DeferredExplode, map.Id);     //SavedDeferredCall
+        Game.StartTimeEvent(GameTime::GameSeconds(20), DeferredDestroyMap, map.Id); //SavedDeferredCall
     }
 }
 
@@ -409,7 +408,7 @@ void DeferredExplode(any value)
         }
     }
 
-    Game.StartTimeEvent(Tla::GameSeconds(1), DeferredExplode, value); //SavedDeferredCall
+    Game.StartTimeEvent(GameTime::GameSeconds(1), DeferredExplode, value); //SavedDeferredCall
 }
 
 [[TimeEvent]]
@@ -497,16 +496,23 @@ bool Boxes(Critter player, StaticItem scenery, Item itemUse, any skill)
     // Заодно запоминаем последнюю незаполненную переменную
     int id = scenery.Hex.x * scenery.Hex.y;
     LocationProperty varNum = LocationProperty::None;
-    for (int i = 0, j = SeAndroidFoundeds.length(); i <= j; i++) {
-        if (loc.GetAsInt(SeAndroidFoundeds[i]) == 0 && varNum == LocationProperty::None) {
-            varNum = SeAndroidFoundeds[i];
-        }
-
-        if (loc.GetAsInt(SeAndroidFoundeds[i]) == id || varNum == SeAndroidFoundeds.last()) // Эти ящики уже обыскивали, либо найдены все предметы
-        {
+    for (int i = 0, j = SeAndroidFoundeds.length(); i < j; i++) {
+        int slotValue = loc.GetAsInt(SeAndroidFoundeds[i]);
+        if (slotValue == id) {
+            // This container was already searched and gave out its item.
             Messaging::Info(player, TextPackKey(TextPackName::Text, "" + (STR_EMPTY)));
             return true;
         }
+
+        if (slotValue == 0 && varNum == LocationProperty::None) {
+            varNum = SeAndroidFoundeds[i];
+        }
+    }
+
+    if (varNum == LocationProperty::None) {
+        // Every slot is filled - all items in this location have already been found.
+        Messaging::Info(player, TextPackKey(TextPackName::Text, "" + (STR_EMPTY)));
+        return true;
     }
 
     CritterState::Wait(player, 1000);

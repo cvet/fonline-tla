@@ -3,11 +3,6 @@ namespace Patrol
 
 #if SERVER
 
-// Author: rifleman17
-// Скрипт патрульных для некоей локации
-// используется с помощью #include
-// Перед инклудом необходимо добавить дефайн с определением имени скрипта  #define SCRIPTNAME- требуется в misc-планах
-
 void DebugLog(string str)
 {
 }
@@ -42,7 +37,7 @@ class Patroller
                        CritterProperty::AiId,
                        AiPacket,
                        CritterProperty::Level,
-                       Tla::Clamp(PowerLvl * 5, 1, 24),
+                       Math::Clamp(PowerLvl * 5, 1, 24),
                        CritterProperty::IsNoHome,
                        1};
         Critter cr = map.AddCritter(ProtoId, hex, HDIR_Random, Tla::GetCritPropsDict(props));
@@ -214,6 +209,8 @@ class PatrolInfo
             return;
         }
 
+        RegisterPatrol(this);
+
         PatrolPoint? point = Route.CurPoint();
         if (point == null) {
             return;
@@ -250,7 +247,7 @@ class PatrolInfo
 
     bool CheckAllPatrollersAtPoint()
     {
-        PatrolPoint? p = pInfo.Route.CurPoint();
+        PatrolPoint? p = Route.CurPoint();
         if (p == null) {
             return false;
         }
@@ -319,8 +316,32 @@ class PatrolInfo
     }
 };
 
-// глоб переменная уровня скрипта
-PatrolInfo pInfo;
+// Active patrols, registered on BeginPatrol. The per-critter event handlers below resolve the
+// PatrolInfo a given patroller belongs to via FindPatrol (there is one patrol per patrolled map,
+// e.g. Redding inner and Redding miners), so they cannot share a single script-global instance.
+PatrolInfo[] g_patrols = {};
+
+void RegisterPatrol(PatrolInfo info)
+{
+    for (int i = 0; i < g_patrols.length(); i++) {
+        if (g_patrols[i] is info) {
+            return;
+        }
+    }
+
+    g_patrols.insertLast(info);
+}
+
+PatrolInfo? FindPatrol(Critter cr)
+{
+    for (int i = 0; i < g_patrols.length(); i++) {
+        if (g_patrols[i].IsPatroller(cr)) {
+            return g_patrols[i];
+        }
+    }
+
+    return null;
+}
 
 /* ********************* События патрульных *********************** */
 [[Event]]
@@ -330,7 +351,12 @@ void ShowCritter1(Critter cr, Critter showCrit)
         return;
     }
 
-    if (pInfo.IsPlayerAccepted(showCrit)) {
+    PatrolInfo? info = FindPatrol(cr);
+    if (info == null) {
+        return;
+    }
+
+    if (info.IsPlayerAccepted(showCrit)) {
         return;
     }
 
@@ -358,12 +384,17 @@ void ShowCritter1(Critter cr, Critter showCrit)
 // Npc misc plane script
 void MiscWait(Critter npc)
 {
-    if (pInfo.CheckAllPatrollersAtPoint()) {
-        pInfo.Route.MoveNextPoint();
-        pInfo.MovePatrol();
+    PatrolInfo? info = FindPatrol(npc);
+    if (info == null) {
+        return;
+    }
+
+    if (info.CheckAllPatrollersAtPoint()) {
+        info.Route.MoveNextPoint();
+        info.MovePatrol();
     }
     else {
-        PatrolPoint? point = pInfo.Route.CurPoint();
+        PatrolPoint? point = info.Route.CurPoint();
         if (point == null) {
             return;
         }
@@ -413,9 +444,14 @@ void SmthUseSkill(Critter cr, Critter fromCr, CritterProperty skill, Critter? on
 [[Event]]
 EventResult PatrollerTalk(Critter cr, Critter player, bool attach, int talkCount)
 {
+    PatrolInfo? info = FindPatrol(cr);
+    if (info == null) {
+        return EventResult::StopChain;
+    }
+
     if (!attach) {
-        for (int i = 0; i < pInfo.Patrollers.length(); i++) {
-            Critter? pat = Game.GetCritter(pInfo.Patrollers[i].Id);
+        for (int i = 0; i < info.Patrollers.length(); i++) {
+            Critter? pat = Game.GetCritter(info.Patrollers[i].Id);
             if (pat == null) {
                 continue;
             }
@@ -427,7 +463,7 @@ EventResult PatrollerTalk(Critter cr, Critter player, bool attach, int talkCount
         }
 
         // все разговоры закончены, следующая точка патрулирования
-        pInfo.MovePatrol();
+        info.MovePatrol();
     }
     else {
         if (talkCount > 2) {
@@ -452,12 +488,17 @@ EventResult PatrollerPlaneBegin(Critter cr, int planeId, int reason, Critter som
             return EventResult::StopChain;
         }
 
-        for (int i = 0; i < pInfo.Patrollers.length(); i++) {
-            if (pInfo.Patrollers[i].Id == cr.Id) {
+        PatrolInfo? info = FindPatrol(cr);
+        if (info == null) {
+            return EventResult::StopChain;
+        }
+
+        for (int i = 0; i < info.Patrollers.length(); i++) {
+            if (info.Patrollers[i].Id == cr.Id) {
                 continue;
             }
 
-            Critter? pat = Game.GetCritter(pInfo.Patrollers[i].Id);
+            Critter? pat = Game.GetCritter(info.Patrollers[i].Id);
             if (pat != null) {
                 NpcPlanes::NpcPlane[] planes = {};
                 NpcPlanes::GetPlanes(pat, planes);
@@ -494,7 +535,12 @@ EventResult PatrollerPlaneEnd(Critter cr, int planeId, int reason, Critter someC
     }
 
     if (plane.Identifier == PLANE_MOVENEXT_PATROL_POINT) {
-        PatrolPoint? p = pInfo.Route.CurPoint();
+        PatrolInfo? info = FindPatrol(cr);
+        if (info == null) {
+            return EventResult::StopChain;
+        }
+
+        PatrolPoint? p = info.Route.CurPoint();
         if (p == null) {
             return EventResult::StopChain;
         }

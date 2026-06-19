@@ -219,24 +219,35 @@ int ProcessAi(Critter npc)
 
             MovingState state = npc.GetMovingState();
             if (state != MovingState::InProgress && state != MovingState::Success) {
-                ident gagId;
-                npc.GetMovingState();
-                npc.StopMoving();
-
                 int reason = REASON_TRACE_FAIL;
-                switch (state) {
-                case MovingState::GagCritter:
+                if (state == MovingState::GagCritter) {
                     reason = REASON_GAG_CRITTER;
-                    break;
-                case MovingState::GagItem:
+                }
+                else if (state == MovingState::GagItem) {
                     reason = REASON_GAG_ITEM;
-                    break;
                 }
 
-                Critter? gagCr = (gagId == ZERO_IDENT ? null : Game.GetCritter(gagId));
-                Item? gagItem = (gagId == ZERO_IDENT ? null : Game.GetItem(gagId));
+                // Resolve what blocked the move from the moving context's block hex
+                // (set by the engine on a gag) before stopping, so the gag reactions
+                // in NpcPlaneEnd can attack the blocker / open the door. The old code
+                // left gagId unassigned, so these reactions never fired.
+                Critter? gagCr = null;
+                Item? gagItem = null;
+                MovingContext? moving = npc.GetMovingContext();
+                if (moving != null) {
+                    mpos blockHex = moving.GetBlockHex();
+                    if (state == MovingState::GagCritter) {
+                        gagCr = map.GetCritterOnHex(blockHex);
+                    }
+                    else if (state == MovingState::GagItem) {
+                        gagItem = Maps::MapGetDoor(map, blockHex);
+                    }
+                }
+
+                npc.StopMoving();
+
                 if ((Game.OnNpcPlaneEnd.Fire(npc, plane.PlaneId, reason, gagCr, gagItem) == EventResult::ContinueChain)) {
-                    ErasePlane(npc, 0); // TODO: возможно, здесь нужночто-то другое, не удалять план
+                    ErasePlane(npc, 0); // TODO: возможно, здесь нужно что-то другое, не удалять план
                 }
 
                 return 0;
@@ -249,11 +260,7 @@ int ProcessAi(Critter npc)
 
         // Process planes
         switch (plane.Type) {
-        /************************************************************************/
-        /* ==================================================================== */
         /* ========================   Misc   ================================== */
-        /* ==================================================================== */
-        /************************************************************************/
         case AI_PLANE_MISC: {
             if (is_busy) {
                 break;
@@ -272,25 +279,15 @@ int ProcessAi(Critter npc)
                 NextPlane(npc, REASON_SUCCESS);
             }
         } break;
-        /************************************************************************/
-        /* ==================================================================== */
         /* ========================   Attack   ================================ */
-        /* ==================================================================== */
-        /************************************************************************/
         case AI_PLANE_ATTACK: {
             // TODO: tb
-            // if( map->Data.IsTurnBasedAvailable && !map->IsTurnBasedOn )
-            //	map->BeginTurnBased( npc );
 
-            /************************************************************************/
             /* Target is visible                                                    */
-            /************************************************************************/
             Critter? targ = Game.GetCritter(plane.Attack_TargId);
 
             if (targ != null && npc.IsSee(targ)) {
-                /************************************************************************/
                 /* Step 0: Check for success plane and continue target timeout          */
-                /************************************************************************/
 
                 if (plane.Attack_IsGag && (targ.Hex != plane.Attack_GagHex)) {
                     NextPlane(npc, REASON_SUCCESS);
@@ -298,7 +295,7 @@ int ProcessAi(Critter npc)
                 }
 
                 bool attack_to_dead = (plane.Attack_MinHp <= Settings.Combat.DeadHitPoints);
-                if (!plane.Attack_IsGag && (!attack_to_dead && targ.CurrentHp <= plane.Attack_MinHp) || (attack_to_dead && targ.IsDead())) {
+                if (!plane.Attack_IsGag && ((!attack_to_dead && targ.CurrentHp <= plane.Attack_MinHp) || (attack_to_dead && targ.IsDead()))) {
                     NextPlane(npc, REASON_SUCCESS);
                     break;
                 }
@@ -320,9 +317,7 @@ int ProcessAi(Critter npc)
                     return 1000;
                 }
 
-                /************************************************************************/
                 /* Step 1: Choose weapon                                                */
-                /************************************************************************/
                 // Get battle weapon
                 int use;
                 AbstractItem? weap = null;
@@ -384,10 +379,10 @@ int ProcessAi(Critter npc)
                 }
 
                 if (realWeapon != null) {
-                    Parameters::SetWeaponMode(realWeapon, Tla::MakeWeaponMode(use, 0));
+                    Parameters::SetWeaponMode(realWeapon, WeaponHelpers::MakeWeaponMode(use, 0));
                 }
                 else {
-                    npc.HandsItemMode = Tla::MakeWeaponMode(use, 0);
+                    npc.HandsItemMode = WeaponHelpers::MakeWeaponMode(use, 0);
                 }
 
                 // Load weapon
@@ -415,9 +410,7 @@ int ProcessAi(Critter npc)
                     }
                 }
 
-                /************************************************************************/
                 /* Step 2: Move to target                                               */
-                /************************************************************************/
                 bool is_can_walk = !npc.IsNoMove;
                 int bestDist = 0, min_dist = 0, maxDist = 0;
                 r0 = targ.Id;
@@ -458,7 +451,7 @@ int ProcessAi(Critter npc)
                     min_dist = maxDist;
                 }
 
-                bestDist = Tla::Clamp(bestDist, min_dist, maxDist);
+                bestDist = Math::Clamp(bestDist, min_dist, maxDist);
                 int actualDist = Game.GetDistance(npc.Hex, targ.Hex);
 
                 if (actualDist > maxDist) {
@@ -523,9 +516,7 @@ int ProcessAi(Critter npc)
                     }
                 }
 
-                /************************************************************************/
                 /* Step 3: Attack                                                       */
-                /************************************************************************/
 
                 r0 = targ.Id;
                 r1 = 0;
@@ -544,23 +535,21 @@ int ProcessAi(Critter npc)
                 }
 
                 int aim = r1;
-                if (npc.IsNoAim || !Tla::WeaponAim(weap, use)) {
+                if (npc.IsNoAim || !WeaponHelpers::WeaponAim(weap, use)) {
                     aim = 0;
                 }
 
                 if (realWeapon != null) {
-                    Parameters::SetWeaponMode(realWeapon, Tla::MakeWeaponMode(use, aim));
+                    Parameters::SetWeaponMode(realWeapon, WeaponHelpers::MakeWeaponMode(use, aim));
                 }
                 else {
-                    npc.HandsItemMode = Tla::MakeWeaponMode(use, 0);
+                    npc.HandsItemMode = WeaponHelpers::MakeWeaponMode(use, 0);
                 }
 
-                CritterActions::Attack(npc, targ.Id, Tla::MakeWeaponMode(use, aim));
+                CritterActions::Attack(npc, targ.Id, WeaponHelpers::MakeWeaponMode(use, aim));
             }
 
-            /************************************************************************/
             /* Target not visible, try find by last stored position                 */
-            /************************************************************************/
             else {
                 if (is_busy) {
                     break;
@@ -585,11 +574,7 @@ int ProcessAi(Critter npc)
                 break;
             }
         } break;
-        /************************************************************************/
-        /* ==================================================================== */
         /* ========================   Walk   ================================== */
-        /* ==================================================================== */
-        /************************************************************************/
         case AI_PLANE_WALK: {
             if (is_busy) {
                 break;
@@ -616,11 +601,7 @@ int ProcessAi(Critter npc)
                 SavePlan(npc, plane);
             }
         } break;
-        /************************************************************************/
-        /* ==================================================================== */
         /* ========================   Pick   ================================== */
-        /* ==================================================================== */
-        /************************************************************************/
         case AI_PLANE_PICK: {
             mpos hex = plane.Pick_Hex;
             hstring pid = plane.Pick_Pid;
@@ -662,11 +643,6 @@ int ProcessAi(Critter npc)
                 break;
             }
         } break;
-        /************************************************************************/
-        /* ==================================================================== */
-        /* ==================================================================== */
-        /* ==================================================================== */
-        /************************************************************************/
         default: {
             NextPlane(npc, REASON_SUCCESS);
         } break;
@@ -857,19 +833,25 @@ int ErasePlane(Critter cr, int planeType, bool all)
 
     NpcPlane[]? planes = AllNpcPlanes.get(cr.Id, null);
     if (planes != null && !planes.isEmpty()) {
-        for (int i = 0, l = planes.length(); i < l; i++) {
-            NpcPlane plane = planes[i];
-            if (plane.Type == planeType || planeType == -1) {
-                planes.remove(plane);
+        // Remove in place: do not advance i after a removal (the array shifts),
+        // and re-check the live length each iteration so multiple matches under
+        // all=true are not skipped or read past the shrunken end.
+        for (int i = 0; i < planes.length();) {
+            if (planes[i].Type == planeType || planeType == -1) {
+                planes.removeAt(i);
                 erased++;
                 if (!all) {
                     break;
                 }
             }
+            else {
+                i++;
+            }
         }
+
+        AllNpcPlanes.set(cr.Id, planes);
     }
 
-    AllNpcPlanes.set(cr.Id, planes);
     return erased;
 }
 
@@ -1090,8 +1072,13 @@ bool AddPlane(Critter? cr, NpcPlane plane, int reason)
 
         Critter? someCr = (plane.Attack_TargId == ZERO_IDENT ? null : Game.GetCritter(plane.Attack_TargId));
         Item? someItem = (plane.Pick_UseItemId == ZERO_IDENT ? null : Game.GetItem(plane.Pick_UseItemId));
-        if ((Game.OnNpcPlaneBegin.Fire(cr, plane.PlaneId, reason, someCr, someItem) == EventResult::StopChain) ||
-            (cr.OnNpcPlaneBegin.Fire(plane.PlaneId, reason, someCr, someItem) == EventResult::StopChain)) {
+        // Begin handlers claim/allow a plane by returning StopChain; the plane
+        // is kept only when both the global and the per-critter handler allow it.
+        // Erase the freshly inserted plane if either handler vetoes (returns
+        // ContinueChain). This mirrors the pre-migration `if (!Fire() || !Fire())`
+        // veto semantics and the End side (advance only on ContinueChain).
+        if ((Game.OnNpcPlaneBegin.Fire(cr, plane.PlaneId, reason, someCr, someItem) == EventResult::ContinueChain) ||
+            (cr.OnNpcPlaneBegin.Fire(plane.PlaneId, reason, someCr, someItem) == EventResult::ContinueChain)) {
             ErasePlane(cr, index);
             return false;
         }

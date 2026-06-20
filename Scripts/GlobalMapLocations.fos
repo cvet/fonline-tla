@@ -1,3 +1,9 @@
+// GlobalMapLocations — данные о локациях глобальной карты и их синхронизация сервер→клиент.
+// SERVER: собирает список известных криттеру локаций (и параметры группы) и шлёт их клиенту
+//   через RemoteCall при входе на глобалку, начальной инфо и изменении KnownLocations.
+// CLIENT: хранит полученные локации, ищет локацию под курсором и инициирует вход в неё.
+// Связи: Location (валидация известных локаций), GlobalmapGroup (группа на глобальной карте),
+//   Serializator (упаковка/распаковка передаваемых данных), Flags (битовые флаги набора данных).
 namespace GlobalMapLocations
 {
 
@@ -5,6 +11,7 @@ namespace GlobalMapLocations
 
 ///@ RemoteCall Client GetGlobalMapData(int32 flags, uint8[] data)
 
+// Битовые флаги: какие порции данных глобальной карты пакуются и передаются клиенту.
 const int GM_INFO_LOCATIONS = 0x01;
 const int GM_INFO_CRITTERS = 0x02;
 const int GM_INFO_GROUP_PARAM = 0x04;
@@ -63,6 +70,7 @@ class LocationData
 
 #if SERVER
 
+// Подписка на события, при которых клиенту нужно переотправить данные глобальной карты.
 [[ModuleInit]]
 void InitGlobalMapLocations()
 {
@@ -72,6 +80,7 @@ void InitGlobalMapLocations()
     Game.AddPropertySetter(CritterProperty::KnownLocations, OnPlayerSetKnownLocations);
 }
 
+// При смене списка известных локаций обновляем их у криттера, только если он на глобалке (без карты).
 [[PropertySetter]]
 void OnPlayerSetKnownLocations(Critter cr)
 {
@@ -80,6 +89,7 @@ void OnPlayerSetKnownLocations(Critter cr)
     }
 }
 
+// При начальной отправке инфо криттеру, находящемуся на глобалке, шлём весь набор данных карты.
 [[Event]]
 void OnCritterSendInitialInfo(Critter cr)
 {
@@ -88,12 +98,14 @@ void OnCritterSendInitialInfo(Critter cr)
     }
 }
 
+// При входе криттера на глобальную карту обновляем у клиента список локаций.
 [[Event]]
 void OnGlobalMapCritterIn(Critter cr)
 {
     SetGlobalMapData(GM_INFO_LOCATIONS, cr);
 }
 
+// Пакует запрошенные флагами порции данных глобальной карты и отправляет их клиенту криттера.
 void SetGlobalMapData(int flags, Critter cr)
 {
     auto save = Serializator::Serializator();
@@ -124,8 +136,10 @@ void SetGlobalMapData(int flags, Critter cr)
 
 #if CLIENT
 
+// Полученные с сервера локации глобальной карты (клиент не знает класс Location).
 LocationData[] GMLocations = {};
 
+// Возвращает мировые координаты первой локации с заданным прото-id; false — если такой нет.
 bool GetLocationCoordinates(hstring locPid, int& locWx, int& locWy)
 {
     for (int i = 0, l = GMLocations.length(); i < l; i++) {
@@ -139,6 +153,7 @@ bool GetLocationCoordinates(hstring locPid, int& locWx, int& locWy)
     return false;
 }
 
+// Возвращает локацию под точкой (x, y) — первую, в чей радиус попадает точка; null — если ни одной.
 LocationData ? GetHoveredLocationData(int x, int y) //TODO: проверить, почему так часто вызывается
 {
     for (int i = 0, l = GMLocations.length(); i < l; i++) {
@@ -152,6 +167,7 @@ LocationData ? GetHoveredLocationData(int x, int y) //TODO: проверить, 
     return null;
 }
 
+// Принимает с сервера упакованные данные глобальной карты и распаковывает запрошенные флагами порции.
 [[ClientRemoteCall]]
 void GetGlobalMapData(int flags, uint8[] data)
 {
@@ -176,6 +192,7 @@ void GetGlobalMapData(int flags, uint8[] data)
     }
 }
 
+// Пытается войти в локацию под текущей позицией группы; работает, только когда группа стоит (не движется и не в энкаунтере).
 bool TryEnterHoveredLocation()
 {
     ident locId = ZERO_IDENT;
@@ -194,6 +211,7 @@ bool TryEnterHoveredLocation()
 
     return false;
 }
+
 #endif
 
 #endif

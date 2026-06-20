@@ -1,4 +1,7 @@
-namespace Dialog // Sort 2
+// Dialog — серверные обработчики диалогов (DialogDemand/DialogResult).
+// Хранит per-pair переменные криттеров, таймауты, лояльность, флаги истории, награды, телепорты и шпионаж.
+// Исполняется на SERVER; опирается на Stdlib, Location, GlobalmapGroupExtended, NpcPlanes, MsgStr.
+namespace Dialog
 {
 
 #if SERVER
@@ -22,7 +25,8 @@ namespace Dialog // Sort 2
 
 ///@ Property Critter Server hstring=>int8 CurrentDialogNumber Mutable Persistent
 
-// Выбрать активный номер диалога
+// Активный номер диалога хранится per-pair: ключ — DialogId конкретного НПЦ.
+// Так разные собеседники не затирают прогресс друг друга в одном криттере.
 void SetCurrentDialogNumber(Critter cr, Critter npc, int number)
 {
     auto values = cr.CurrentDialogNumber.clone();
@@ -35,6 +39,8 @@ int GetCurrentDialogNumber(Critter cr, Critter npc)
     return cr.CurrentDialogNumber.get(npc.DialogId);
 }
 
+// Шансовые предикаты: при первом обращении к паре (npc, cr.Id) лениво кидается бросок и
+// запоминается, поэтому повторные проверки в рамках одного диалога стабильны.
 [[DialogDemand]]
 bool ChanceOneFromTwo(Critter cr, Critter npc, any value)
 {
@@ -106,6 +112,7 @@ bool ChanceNotOneFromFive(Critter cr, Critter npc, int value)
     return npc.ChanceOneFromFive[cr.Id] != value;
 }
 
+// Универсальное сравнение для демандов: oper задаёт оператор сравнения из диалога.
 bool CheckSomeValue(hstring oper, int value, int actualValue)
 {
     if (oper == ">") {
@@ -127,6 +134,7 @@ bool CheckSomeValue(hstring oper, int value, int actualValue)
     return false;
 }
 
+// Лояльность НПЦ к игроку (per-pair, ключ cr.Id): диапазон 0..10, по умолчанию 5.
 [[DialogDemand]]
 bool CheckLoyality(Critter cr, Critter npc, any oper, any value)
 {
@@ -178,6 +186,7 @@ void SetPokerFraud(Critter cr, Critter npc, any value)
     npc.PokerFraud = values;
 }
 
+// Счётчик кликов по ответу (per-pair, ключ cr.Id): копится через AddClickCounter, по умолчанию 0.
 [[DialogDemand]]
 bool CheckClickCounter(Critter cr, Critter npc, any oper, any value)
 {
@@ -203,6 +212,8 @@ void AddClickCounter(Critter cr, Critter npc, any valueAny)
     npc.ClickCounter = values;
 }
 
+// Булевы флаги истории общения (per-pair, ключ cr.Id): для каждого флага идут предикаты
+// Is.../IsNot... и сеттер Set..., который трактует любое ненулевое value как true.
 [[DialogDemand]]
 bool IsNpcStory(Critter cr, Critter npc)
 {
@@ -360,9 +371,8 @@ void SetSFLoPanPayed(Critter cr, Critter npc, any value)
     npc.SFLoPanPayed = values;
 }
 
-// Возвращает размер группы (живых ее участников)
-// размер береться вне зависимости от того лидер это или просто партиец
-
+// Возвращает размер группы (живых её участников).
+// Считается одинаково независимо от того, лидер игрок или рядовой участник.
 int DFGroupCount(Critter player, Critter npc)
 {
     Critter? followLeader = GlobalmapGroupExtended::GetFollowLeader(player);
@@ -374,7 +384,7 @@ int DFGroupCount(Critter player, Critter npc)
     return groups.length();
 }
 
-// !/ Размер группы больше >=VAL
+// Размер группы не меньше val (val — порог из диалога).
 [[DialogDemand]]
 bool GroupCountMore(Critter player, Critter npc, any val)
 {
@@ -387,8 +397,7 @@ bool GroupCountLess(Critter player, Critter npc, any val)
     return DFGroupCount(player, npc) < val;
 }
 
-// !/ У всех уровень больше >=VAL
-// Проверка что все игроки в группе больше или равны указанному уровню.
+// Уровень каждого участника группы не меньше val.
 [[DialogDemand]]
 bool GroupLevelMore(Critter player, Critter npc, any val)
 {
@@ -396,7 +405,7 @@ bool GroupLevelMore(Critter player, Critter npc, any val)
     groups.insertLast(player);
     GlobalmapGroupExtended::GetFollowGroup(player, CritterFindType::NonDead, groups);
     for (int i = 0; i < groups.length(); i++) {
-        if (groups[i].Level < val) { // если хотябы один из них меньше требуемого уровня
+        if (groups[i].Level < val) { // если хотя бы один ниже требуемого уровня
             return false;
         }
     }
@@ -478,12 +487,8 @@ bool NotGroupPresent(Critter player, Critter npc)
     return not GroupPresentImpl(player, npc);
 }
 
-/** проверка на таймаут
-   используйте функцию TimeoutSet для инициализации
-   если таймаут кончился (или еще и не начинался)
-   то функция вернет истинну (разрешит ответ)
-   иначе вернет ложь (ответ будет скрыт)
- */
+// Проверка таймаута диалога: инициализируется через TimeoutSet.
+// Возвращает true (ответ разрешён), если таймаут истёк или ещё не назначался; иначе false (ответ скрыт).
 bool TimeoutCheckImpl(Critter player, Critter npc)
 {
     return Game.SynchronizedTime >= player.DialogTimeout;
@@ -495,9 +500,7 @@ bool TimeoutCheck(Critter player, Critter npc)
     return TimeoutCheckImpl(player, npc);
 }
 
-/**
-        инверсия TimeoutCheck
- */
+// Инверсия TimeoutCheck.
 [[DialogDemand]]
 bool NotTimeoutCheck(Critter player, Critter npc)
 {
@@ -571,7 +574,9 @@ bool IsDead(Critter player, Critter npc, any v0, any v1)
     return !IsLifeImpl(player, npc, v0, v1);
 }
 
-// Шпионаж
+// Шпионаж через банкира: по имени другого игрока выдаёт всё больше сведений о его персонаже
+// (пол, репликации, статы, навыки, счёт), чем выше навык красноречия говорящего.
+// Вывод реплик сейчас отключён (см. закомментированные SayMsg ниже).
 void TrySpy(Critter player, Critter? banker, string& playerName)
 {
     if (banker == null) {
@@ -1010,6 +1015,8 @@ void TrySpy(Critter player, Critter? banker, string& playerName)
     }
 }
 
+// Результаты-эффекты диалога: лечение, очистка зависимостей/радиации, телепорты, награды и т.п.
+// Большинство — тонкие обёртки над Stdlib и подсистемами.
 [[DialogResult]]
 void ToHeal(Critter player, Critter npc)
 {

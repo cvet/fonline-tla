@@ -1,10 +1,10 @@
+// BulletinBoard — серверная доска объявлений с сообщениями игроков.
+// Обязанности: хранение/сериализация публичных и личных сообщений, листание/выбор в диалогах, запись объявления через NPC (Альдо). Сторона: SERVER.
+// Связи: Serializator, PlayerRegistration, NpcPlanes, Messaging, MsgStr, Tla.
 namespace BulletinBoard
 {
 
 #if SERVER
-
-// Author: rifleman17
-// Доска объявлений с возможностью оставлять сообщения
 
 ///@ Property Critter Server int32 BBMsgPage Mutable Persistent
 ///@ Property Critter Server int32 BBSelectedMsg Mutable Persistent
@@ -17,11 +17,14 @@ namespace BulletinBoard
 
 ///@ Property Game Server uint8[] BulletinBoard Mutable Persistent
 
+// Заглушка отладочного лога: тело пустое, вывод включается через закомментированный макрос ниже.
+// сохранено как breadcrumb: исходный вариант с выводом в лог через Game.Log
 // #define DebugLog#(s) (Game.Log(s))
 void DebugLog(string s)
 {
 }
 
+// Одно объявление на доске: ReaderId == ZERO_IDENT означает публичное сообщение, иначе личное (адресованное конкретному игроку).
 class BBMessage
 {
     int Idx;
@@ -32,6 +35,7 @@ class BBMessage
     string Message;
 }
 
+// Хранилище всех объявлений: добавление, поиск, очистка просроченных, сериализация в Game.BulletinBoard.
 class BBMessenger
 {
     int MsgCount;
@@ -42,6 +46,7 @@ class BBMessenger
         MsgCount = 0;
     }
 
+    // Удаляет просроченные объявления; индекс i откатывается, чтобы не пропустить элемент после сдвига массива.
     void ClearExpiredMessages()
     {
         for (int i = 0; i < MsgCount; i++) {
@@ -53,6 +58,7 @@ class BBMessenger
         }
     }
 
+    // Добавляет новое объявление; при нулевом времени проставляет текущее серверное.
     void AddMessage(ident mapId, ident writer, ident reader, synctime when, string message)
     {
         BBMessage msg;
@@ -66,6 +72,7 @@ class BBMessenger
         MsgCount = Messages.length();
     }
 
+    // Дописывает текст к уже существующему объявлению того же автора/адресата (диктовка «Далее»).
     void ContinueMessage(ident mapId, ident writer, ident reader, string message)
     {
         BBMessage msg;
@@ -77,6 +84,7 @@ class BBMessenger
         }
     }
 
+    // Сериализует все актуальные объявления в свойство Game.BulletinBoard (предварительно чистит просроченные).
     void Save()
     {
         ClearExpiredMessages();
@@ -97,6 +105,7 @@ class BBMessenger
         Game.BulletinBoard = save.GetData();
     }
 
+    // Восстанавливает объявления из Game.BulletinBoard; пустые данные оставляют список нетронутым.
     void Load()
     {
         ident mapId, writer, reader;
@@ -123,6 +132,7 @@ class BBMessenger
         ClearExpiredMessages();
     }
 
+    // Возвращает объявление по его индексу в общем списке или null, если индекс вне диапазона.
     BBMessage? GetMessage(int idx)
     {
         if (idx < MsgCount) {
@@ -132,6 +142,7 @@ class BBMessenger
         return null;
     }
 
+    // Собирает все личные объявления, адресованные конкретному читателю на данной карте.
     BBMessage[] GetPrivateMessages(ident mapId, ident readerId)
     {
         BBMessage[] messages = {};
@@ -144,6 +155,7 @@ class BBMessenger
         return messages;
     }
 
+    // Находит собственное объявление автора на данной карте (используется для проверки/замены при перезаписи).
     BBMessage? GetSelfMessage(ident mapId, ident writerId)
     {
         for (int i = 0; i < MsgCount; i++) {
@@ -155,6 +167,7 @@ class BBMessenger
         return null;
     }
 
+    // Удаляет собственное объявление автора и переиндексирует список (вызывается перед перезаписью объявления).
     void RemoveSelfMessages(ident mapId, ident writerId)
     {
         BBMessage? msg = GetSelfMessage(mapId, writerId);
@@ -166,6 +179,7 @@ class BBMessenger
         Reindex();
     }
 
+    // Пересчитывает поле Idx после удаления, чтобы оно совпадало с позицией в массиве.
     void Reindex()
     {
         for (int i = 0; i < MsgCount; i++) {
@@ -173,6 +187,7 @@ class BBMessenger
         }
     }
 
+    // Возвращает случайное публичное объявление; до 20 попыток отсеять личные сообщения, иначе null.
     BBMessage? GetRandomMessage(ident mapId)
     {
         BBMessage msg;
@@ -206,6 +221,7 @@ class BBMessenger
         return messages;
     }
 
+    // Считает публичные объявления на данной карте (для проверки доступности списка в диалоге).
     int CountPublicMessages(ident mapId)
     {
         int count = 0;
@@ -218,6 +234,7 @@ class BBMessenger
         return count;
     }
 
+    // Срок жизни объявления: публичные живут 20 недель, личные — 80 (личные хранятся дольше).
     bool Expired(BBMessage msg)
     {
         // Персональные сообщения хранятся дольше.
@@ -236,19 +253,23 @@ class BBMessenger
     }
 }
 
+// Единый экземпляр хранилища объявлений на сервере.
 BBMessenger Messenger;
 
+// Загружает доску при старте мира.
 void StartMessenger()
 {
     Messenger.Load();
 }
 
+// Сохраняет доску (вызывается при сохранении мира).
 void SaveMessengerData()
 {
     Messenger.Save();
 }
 
-// Функционал для досок
+// Диалоговые предикаты и форматтеры для доски объявлений.
+// Проверяет, есть ли у игрока собственное объявление на текущей карте.
 bool IsSelfMsg(Critter cr, Critter npc)
 {
     Map? map = cr.GetMap();
@@ -259,11 +280,13 @@ bool IsSelfMsg(Critter cr, Critter npc)
     return false;
 }
 
+// Инверсия IsSelfMsg: у игрока ещё нет своего объявления.
 bool NotSelfMsg(Critter cr, Critter npc)
 {
     return !IsSelfMsg(cr, npc);
 }
 
+// Общая реализация: есть ли личные объявления, адресованные игроку на текущей карте.
 bool IsPrivateMsgImpl(Critter cr, Critter npc)
 {
     Map? map = cr.GetMap();
@@ -274,18 +297,21 @@ bool IsPrivateMsgImpl(Critter cr, Critter npc)
     return false;
 }
 
+// Демонд диалога: у игрока есть хотя бы одно личное объявление.
 [[DialogDemand]]
 bool IsPrivateMsg(Critter cr, Critter npc)
 {
     return IsPrivateMsgImpl(cr, npc);
 }
 
+// Демонд диалога: личных объявлений нет.
 [[DialogDemand]]
 bool NotPrivateMsg(Critter cr, Critter npc)
 {
     return !IsPrivateMsgImpl(cr, npc);
 }
 
+// Демонд диалога: на текущей странице есть личное объявление под номером numMsg (для постраничного листания).
 [[DialogDemand]]
 bool IsPrivateMsg(Critter cr, Critter npc, any numMsg, any msgPerPage)
 {
@@ -297,7 +323,7 @@ bool IsPrivateMsg(Critter cr, Critter npc, any numMsg, any msgPerPage)
     return false;
 }
 
-// lex msg1
+// Формирует строку лексем с именами авторов личных объявлений для текущей страницы (lex msg1).
 void PrivateMsg5(Critter cr, Critter npc, string& textArgs)
 {
     if (!Tla::IsDialogGenerated(textArgs)) {
@@ -319,6 +345,7 @@ void PrivateMsg5(Critter cr, Critter npc, string& textArgs)
     }
 }
 
+// Результат диалога: запоминает в BBSelectedMsg выбранное игроком личное объявление (по странице и номеру).
 [[DialogResult]]
 void SetPrivateMsg(Critter cr, Critter npc, any numMsg, any msgPerPage)
 {
@@ -330,6 +357,7 @@ void SetPrivateMsg(Critter cr, Critter npc, any numMsg, any msgPerPage)
     cr.BBSelectedMsg = Messenger.GetPrivateMessages(map.Id, cr.Id)[int(msgPerPage) * cr.BBMsgPage + int(numMsg)].Idx;
 }
 
+// Подставляет в текст диалога имя автора и тело ранее выбранного объявления.
 void GetMsg(Critter cr, Critter npc, string& textArgs)
 {
     if (!Tla::IsDialogGenerated(textArgs)) {
@@ -344,24 +372,28 @@ void GetMsg(Critter cr, Critter npc, string& textArgs)
     textArgs = "|fromWho:" + PlayerRegistration::GetPlayerName(m.WriterId) + "|msg:" + m.Message;
 }
 
+// Общая реализация: есть ли на текущей карте публичные объявления.
 bool IsPublicMsgImpl(Critter cr, Critter npc)
 {
     Map? map = cr.GetMap();
     return map != null && Messenger.CountPublicMessages(map.Id) > 0;
 }
 
+// Демонд диалога: на карте есть публичные объявления.
 [[DialogDemand]]
 bool IsPublicMsg(Critter cr, Critter npc)
 {
     return IsPublicMsgImpl(cr, npc);
 }
 
+// Демонд диалога: публичных объявлений нет.
 [[DialogDemand]]
 bool NotPublicMsg(Critter cr, Critter npc)
 {
     return !IsPublicMsgImpl(cr, npc);
 }
 
+// Демонд диалога: на текущей странице есть публичное объявление под номером numMsg.
 [[DialogDemand]]
 bool IsPublicMsg(Critter cr, Critter npc, any numMsg, any msgPerPage)
 {
@@ -371,6 +403,7 @@ bool IsPublicMsg(Critter cr, Critter npc, any numMsg, any msgPerPage)
     return map != null && Messenger.GetPublicMessages(map.Id, cr.BBMsgPage * p, p + n).length() > n;
 }
 
+// Результат диалога: запоминает выбранное публичное объявление в BBSelectedMsg.
 [[DialogResult]]
 void SetPublicMsg(Critter cr, Critter npc, any numMsg, any msgPerPage)
 {
@@ -387,6 +420,7 @@ void SetPublicMsg(Critter cr, Critter npc, any numMsg, any msgPerPage)
     }
 }
 
+// Результат диалога: выбирает случайное публичное объявление; возвращает номер ветки диалога (5 — найдено, 8 — нет).
 [[DialogResult]]
 int SetRandomMsg(Critter cr, Critter npc)
 {
@@ -404,7 +438,7 @@ int SetRandomMsg(Critter cr, Critter npc)
     return 8;
 }
 
-// lex msg1
+// Формирует строку лексем с именами авторов публичных объявлений для текущей страницы (lex msg1).
 void PublicMsg5(Critter cr, Critter npc, string& textArgs)
 {
     if (!Tla::IsDialogGenerated(textArgs)) {
@@ -434,30 +468,42 @@ const int STR_FINISHED = 3;   // Все готово, проверяй...
 const int STR_NEXT = 4;       // Если чего еще нужно написать, говори. Все после слова "Далее" я занесу сюда. Когда закончишь, скажи "Хватит".
 const int DLG_NOTFOUND = 34;  // Номер ветки диалога "нет таких..."
 const int DLG_FOUND = 35;     // Хорошо, напишем персональное объявление... Пойдем со мной, продиктуешь.
+
+// Проверяет, что сказанное начинается с ключевого слова «Начали» (старт диктовки).
 bool IsFirstKeyword(string text)
 {
     return text.length() < KEYWORD.length() ? false : text.substr(0, KEYWORD.length()) == KEYWORD;
 }
+
+// Проверяет ключевое слово «Далее» (продолжение диктовки).
 bool IsSecondKeyword(string text)
 {
     return text.length() < KEYWORD2.length() ? false : text.substr(0, KEYWORD2.length()) == KEYWORD2;
 }
+
+// Проверяет ключевое слово «Хватит» (завершение диктовки).
 bool IsThirdKeyword(string text)
 {
     return text.length() < KEYWORD3.length() ? false : text.substr(0, KEYWORD3.length()) == KEYWORD3;
 }
+
 const string KEYWORD = "Начали";
 const string KEYWORD2 = "Далее";
 const string KEYWORD3 = "Хватит";
+
+// Отрезает ключевое слово «Начали» (6 символов) и возвращает текст первого сообщения.
 string GetFirstMessageText(string text)
 {
     return text.substr(6, text.length() - 1);
 }
+
+// Отрезает ключевое слово «Далее» (5 символов) и возвращает текст продолжения.
 string GetSecondMessageText(string text)
 {
     return text.substr(5, text.length() - 1);
 }
 
+// Находит игрока-адресата по имени, сохраняет его id в NPC и возвращает ветку диалога (найден/не найден).
 int GetReaderId(Critter cr, Critter npc, string& textArgs)
 {
     if (!Tla::IsDialogSayMode(textArgs)) {
@@ -478,6 +524,7 @@ int GetReaderId(Critter cr, Critter npc, string& textArgs)
     return DLG_FOUND;
 }
 
+// Результат диалога: отправляет Альдо к доске (ENTRY_ALDO); при неудаче пути сообщает игроку и снимает занятость.
 [[DialogResult]]
 void MoveAldo(Critter player, Critter? npc)
 {
@@ -506,6 +553,7 @@ void MoveAldo(Critter player, Critter? npc)
     }
 }
 
+// Событие завершения плана NPC: когда Альдо дошёл до доски, переводит его в режим приёма диктовки и взводит таймаут.
 [[Event]]
 EventResult AldoPlaneEnd(Critter cr, int planeId, int reason, Critter someCr, Item someItem)
 {
@@ -517,22 +565,27 @@ EventResult AldoPlaneEnd(Critter cr, int planeId, int reason, Critter someCr, It
     if (cr.KlamAldoBusy == 1 && plane.Type == NpcPlanes::AI_PLANE_WALK && reason == NpcPlanes::REASON_SUCCESS) {
         cr.KlamAldoBusy = 2;
         Messaging::SayOnHead(cr, TextPackKey(TextPackName::Dialogs, "" + (MsgStr::DialogTextId(cr.DialogId, STR_IN_PLACE))));
+        // TODO: подключить текст-листенер на ключевое слово (подсистема text-listener ещё не мигрирована)
         // Todo: Game.AddTextListener(SAY_NORM, KEYWORD, cr.GetMap().ProtoId.hash, FirstMessage);
         NpcPlanes::AddMiscPlane(cr, 0, Game.SynchronizedTime + Time::Minutes(2), BulletinBoard::AldoFinished);
         if (cr.CountTimeEvent(ClearVars) == 0) {
             cr.StartTimeEvent(Time::Minutes(10), ClearVars);
         }
 
+        // breadcrumb миграции: прежняя установка события plane-end (старый API)
         // cr.SetEvent( CRITTER_EVENT_PLANE_END, "" );
         cr.OnNpcPlaneEnd.Unsubscribe(AldoPlaneEnd);
+        // breadcrumb миграции: прежняя возвращаемая ветка по флагу PLANE_DISCARD
         // return (PLANE_DISCARD) ? EventResult::StopChain : EventResult::StopChain;
         return EventResult::StopChain;
     }
 
+    // breadcrumb миграции: прежняя возвращаемая ветка по флагу PLANE_RUN_GLOBAL
     // return (PLANE_RUN_GLOBAL) ? EventResult::StopChain : EventResult::StopChain;
     return EventResult::StopChain;
 }
 
+// Обработка слова «Далее»: дописывает строку к объявлению; не более 3 продолжений за приём, иначе Альдо уходит.
 void Next(Critter player, string text)
 {
     Map? map = player.GetMap();
@@ -556,6 +609,7 @@ void Next(Critter player, string text)
 
         if (cr.KlamAldoListenId == player.Id) {
             Messenger.ContinueMessage(map.Id, cr.KlamAldoListenId, cr.KlamAldoReaderId, "\n" + GetSecondMessageText(text));
+            // breadcrumb миграции: прежняя очистка и отложенное подтверждение сохранения (старый API таймивентов)
             // ClearTempVariables(cr);
             // cr.AddTimeEvent(SayMsgSaved, Settings.WorldTime.Multiplier*2, CTE_CONFIRM_SAVE);
             Messaging::SayOnHead(cr, TextPackKey(TextPackName::Dialogs, "" + (MsgStr::DialogTextId(cr.DialogId, 5))));
@@ -563,6 +617,7 @@ void Next(Critter player, string text)
     }
 }
 
+// Обработка слова «Хватит»: завершает приём и через таймивент сообщает, что объявление сохранено.
 void End(Critter player, string text)
 {
     Map? map = player.GetMap();
@@ -577,6 +632,7 @@ void End(Critter player, string text)
     }
 }
 
+// Обработка слова «Начали»: заменяет прежнее объявление игрока новым и подтверждает через таймивент.
 void FirstMessage(Critter player, string text)
 {
     Map? map = player.GetMap();
@@ -589,18 +645,21 @@ void FirstMessage(Critter player, string text)
         if (cr.KlamAldoListenId == player.Id) {
             Messenger.RemoveSelfMessages(map.Id, player.Id);
             Messenger.AddMessage(map.Id, cr.KlamAldoListenId, cr.KlamAldoReaderId, ZERO_SYNCTIME, GetFirstMessageText(text));
+            // breadcrumb миграции: прежняя немедленная очистка временных переменных
             // ClearTempVariables(cr);
             cr.StartTimeEvent(Time::Seconds(2), SayMsgFirstSaved);
         }
     }
 }
 
+// Таймаут приёма диктовки: сбрасывает временные переменные и снимает планы NPC.
 void AldoFinished(Critter cr)
 {
     ClearTempVariables(cr);
     NpcPlanes::DropPlanes(cr);
 }
 
+// Таймивент после первой строки: предлагает диктовать дальше и должен переключить текст-листенеры на «Далее/Хватит».
 [[TimeEvent]] [[Async]]
 void SayMsgFirstSaved(Critter cr)
 {
@@ -615,12 +674,14 @@ void SayMsgFirstSaved(Critter cr)
     }
 
     hstring proto = map.ProtoId;
+    // TODO: переключить текст-листенеры на «Далее/Хватит» (подсистема text-listener ещё не мигрирована)
     // Todo: Game.AddTextListener(SAY_NORM, KEYWORD2, proto.hash, Next);
     // Todo: Game.AddTextListener(SAY_NORM, KEYWORD3, proto.hash, End);
     // Todo: Game.RemoveTextListener(SAY_NORM, KEYWORD, proto.hash);
     return;
 }
 
+// Таймивент завершения записи: сообщает, что всё готово, и отправляет Альдо домой; должен снять текст-листенеры.
 [[TimeEvent]] [[Async]]
 void SayMsgSaved(Critter cr)
 {
@@ -634,6 +695,7 @@ void SayMsgSaved(Critter cr)
     }
 
     hstring proto = map.ProtoId;
+    // TODO: снять текст-листенеры «Далее/Хватит» (подсистема text-listener ещё не мигрирована)
     // Todo: Game.RemoveTextListener(SAY_NORM, KEYWORD2, proto.hash);
     // Todo: Game.RemoveTextListener(SAY_NORM, KEYWORD3, proto.hash);
     Messaging::SayOnHead(cr, TextPackKey(TextPackName::Dialogs, "" + (MsgStr::DialogTextId(cr.DialogId, STR_FINISHED))));
@@ -641,6 +703,7 @@ void SayMsgSaved(Critter cr)
     return;
 }
 
+// Таймивент-сторож: по истечении времени сбрасывает режим записи у Альдо.
 [[TimeEvent]]
 void ClearVars(Critter cr)
 {
@@ -648,6 +711,7 @@ void ClearVars(Critter cr)
     return;
 }
 
+// Возвращает Альдо в исходное состояние: снимает занятость, чистит id слушателя/адресата, останавливает сторож и планы.
 void ClearTempVariables(Critter cr)
 {
     if (cr.KlamAldoBusy > 0) {
@@ -657,6 +721,7 @@ void ClearTempVariables(Critter cr)
     cr.KlamAldoListenId = ZERO_IDENT;
     cr.KlamAldoReaderId = ZERO_IDENT;
 
+    // TODO: снять все текст-листенеры ключевых слов (подсистема text-listener ещё не мигрирована)
     // Todo: Game.RemoveTextListener(SAY_NORM, KEYWORD, cr.GetMap().ProtoId.hash);
     // Todo: Game.RemoveTextListener(SAY_NORM, KEYWORD2, cr.GetMap().ProtoId.hash);
     // Todo: Game.RemoveTextListener(SAY_NORM, KEYWORD3, cr.GetMap().ProtoId.hash);
@@ -668,7 +733,7 @@ void ClearTempVariables(Critter cr)
     NpcPlanes::DropPlanes(cr);
 }
 
-// debug
+// Отладочный хелпер: сбрасывает планы у криттера по id.
 void DropPlanes(Critter cr, any crId)
 {
     Critter? npc = Game.GetCritter(crId);
@@ -680,6 +745,7 @@ void DropPlanes(Critter cr, any crId)
     Messaging::Info(cr, "cr invalid");
 }
 
+// Отладочный хелпер: набивает доску указанным числом тестовых объявлений.
 void AddPublicMsg(Critter cr, int numMsg, any readerId, any writerId)
 {
     Map? map = cr.GetMap();
@@ -693,21 +759,25 @@ void AddPublicMsg(Critter cr, int numMsg, any readerId, any writerId)
     }
 }
 
+// Отладочный хелпер: принудительно сохраняет доску.
 void save(Critter cr)
 {
     Messenger.Save();
 }
 
+// Отладочный хелпер: принудительно перечитывает доску.
 void load(Critter cr)
 {
     Messenger.Load();
 }
 
+// Отладочный хелпер: выводит индекс и текст объявления по позиции в списке.
 void GetMsg(Critter cr, int id)
 {
     Messaging::Info(cr, "Idx" + Messenger.Messages[id].Idx + " " + Messenger.Messages[id].Message);
 }
 
+// Результат диалога: сбрасывает у игрока счётчик продолжений объявления для данного NPC.
 [[DialogResult]]
 void ResetBBMsgCount(Critter cr, Critter npc)
 {

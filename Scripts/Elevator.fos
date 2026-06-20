@@ -1,3 +1,6 @@
+// Elevator — лифты между этажами локации.
+// SERVER: разбор триггера, хранение ElevatorData, показ экрана и перенос на выбранный этаж (RPC + legacy SelectLevel).
+// CLIENT: показ экрана GuiScreen::Elevator и таблица геометрии лифтов GetElevator.
 namespace Elevator
 {
 
@@ -8,10 +11,9 @@ namespace Elevator
 const int RESET_DATA_AFTER = 60 * 60;
 
 #if SERVER
-// лифт, всего существуют 8 типов лифтов. Максимум - 4 этажа
-// для четырехэтажного отдельный триггер
-// 1ый параметр - номер гекса, на который попадет игрок
-// остальные параметры - коды прототипов карт
+
+// Триггер четырёхэтажного лифта (отдельный от обычного, т.к. этажей ровно 4).
+// SceneryParams[0] — гекс, на который попадёт игрок; остальные — прото-id карт этажей.
 void Elevator4(Critter player, StaticItem trigger, bool entered, mdir dir)
 {
     if (!entered) {
@@ -37,10 +39,8 @@ void Elevator4(Critter player, StaticItem trigger, bool entered, mdir dir)
     }
 }
 
-// лифт, в котором меньше чем 4 этажа
-// 1ый параметр - номер гекса, на который попадет игрок
-// 2о1 параметр - типа лифта (от 1 до 8. см. _defines.fos, секцию // Elevators)
-// 3ий..5ый параметры - коды протоипов карт
+// Триггер обычного лифта (меньше четырёх этажей).
+// SceneryParams[0] — гекс, на который попадёт игрок; [1] — тип лифта (1..8, см. _defines.fos, секцию Elevators); [2]..[4] — прото-id карт этажей.
 void Elevator(Critter player, StaticItem trigger, bool entered, mdir dir)
 {
     if (!entered) {
@@ -74,7 +74,8 @@ void Elevator(Critter player, StaticItem trigger, bool entered, mdir dir)
     }
 }
 
-// Работает только для карт в одном экземпляре
+// Готовит данные лифта и открывает игроку экран выбора этажа.
+// Работает только для карт, существующих в единственном экземпляре.
 void ShowElevator(Critter player, int elevatorType, hstring[] mapPids, int entryNum)
 {
     CritterState::Wait(player, 0);
@@ -115,18 +116,20 @@ void ShowElevator(Critter player, int elevatorType, hstring[] mapPids, int entry
         data.insertLast(mapPids[i]);
     }
 
-    // cохраняем описание лифта
+    // Сохраняем описание лифта для этого игрока в свойстве карты.
     auto elevatorData = playerMap.ElevatorData.clone();
     elevatorData[player.Id] = data;
     playerMap.ElevatorData = elevatorData;
 
-    // добавляем событие очистки (если игрок так и не воспользовался лифтом)
+    // Откладываем очистку данных на случай, если игрок так и не воспользуется лифтом.
     any[] values = {player.Id, playerMap.Id};
-    Game.StartTimeEvent(GameTime::GameSeconds(RESET_DATA_AFTER), ResetData, values); //SavedDeferredCall
+    Game.StartTimeEvent(GameTime::GameSeconds(RESET_DATA_AFTER), ResetData, values); // SavedDeferredCall
+    // Старый путь показа экрана до перехода на RPC (оставлено как breadcrumb миграции):
     // player.ShowScreen( ShowScreenModes::Elevator, ElevatorPosition( elevatorType, curLevel ), "SelectLevel" );
     player.PlayerClientCall.ShowScreenElevator(Tla::ElevatorPosition(elevatorType, curLevel), 0, 0);
 }
 
+// Отложенная очистка сохранённого описания лифта, если игрок не выбрал этаж вовремя.
 [[TimeEvent]]
 void ResetData(any[] values)
 {
@@ -138,6 +141,7 @@ void ResetData(any[] values)
     }
 }
 
+// Устаревший обработчик выбора этажа (через ответ диалога-экрана); RPC-путь — Rpc_SelectLevel.
 void SelectLevel(Critter player, int answerI, string answerS)
 {
     Map? map = player.GetMap();
@@ -164,9 +168,11 @@ void SelectLevel(Critter player, int answerI, string answerS)
         return;
     }
 
+    // Ищем карту нужного этажа по прото-id среди карт локации и переносим туда игрока.
     Location loc = map.GetLocation();
     for (int j = 0; j < loc.GetMapCount(); j++) {
-        Map newMap = loc.GetMapByIndex(j); // Game.GetMap(params[i-firstLevelNum+2]);
+        // breadcrumb миграции: раньше карта бралась напрямую — Game.GetMap(params[i-firstLevelNum+2]);
+        Map newMap = loc.GetMapByIndex(j);
         if (newMap.ProtoId == hstring(params[answerI - firstLevelNum + 2])) {
             Entrance::CritterTransferToMapEntry(player, newMap.Id, Tla::EntryHash(entNum));
             return;
@@ -174,6 +180,7 @@ void SelectLevel(Critter player, int answerI, string answerS)
     }
 }
 
+// Основной (RPC) путь выбора этажа: проверяет сохранённые данные лифта и переносит игрока на выбранный этаж.
 [[ServerRemoteCall]] [[Async]]
 void Rpc_SelectLevel(Player player, int level, int p1, int p2)
 {
@@ -215,8 +222,10 @@ void Rpc_SelectLevel(Player player, int level, int p1, int p2)
         return;
     }
 
+    // Ищем карту нужного этажа по прото-id среди карт локации и переносим туда игрока.
     for (int i = 0, j = loc.GetMapCount(); i < j; i++) {
-        Map newMap = loc.GetMapByIndex(i); // Game.GetMap(params[i-firstLevelNum+2]);
+        // breadcrumb миграции: раньше карта бралась напрямую — Game.GetMap(params[i-firstLevelNum+2]);
+        Map newMap = loc.GetMapByIndex(i);
         if (newMap.ProtoId == hstring(params[level - firstLevelNum + 2])) {
             Entrance::CritterTransferToMapEntry(cr, newMap.Id, Tla::EntryHash(entNum));
             return;
@@ -227,26 +236,27 @@ void Rpc_SelectLevel(Player player, int level, int p1, int p2)
 
 #if CLIENT
 
+// Открывает на клиенте экран лифта; тип лифта прокидывается в параметры экрана.
 [[ClientRemoteCall]]
 void ShowScreenElevator(int elevatorType, int p1, int p2)
 {
     Gui::ShowScreen(GuiScreen::Elevator, dict<string, any> = {{"ElevatorType", elevatorType}});
 }
 
-// Elevator generation.
-// Data specification:
+// Возвращает геометрию/ресурсы лифта по его типу (формат данных описан ниже).
+// Описание полей массива data:
 // 1
-// 1 start level		// 1
-// 1 levels count		// 2
-// 1 main pic			// 3
-// 2 main pic width, height		// 4, 5
-// 1 additional pic offset		// 6
-// 2 additional pic point		// 7, 8
-// 1 indicator animation offset in INTRFACE.LST	// 9
-// 2 indicator animation point					// 10, 11
-// 1 button down pic offset in INTRFACE.LST		// 12
-// 1 buttons count								// 13
-// 4 rect for every button						// 14+
+// 1 стартовый этаж		// 1
+// 1 число этажей		// 2
+// 1 основная картинка			// 3
+// 2 размер основной картинки: ширина, высота		// 4, 5
+// 1 смещение дополнительной картинки		// 6
+// 2 точка дополнительной картинки		// 7, 8
+// 1 смещение анимации индикатора в INTRFACE.LST	// 9
+// 2 точка анимации индикатора					// 10, 11
+// 1 смещение картинки нажатой кнопки в INTRFACE.LST		// 12
+// 1 число кнопок								// 13
+// 4 прямоугольник для каждой кнопки						// 14+
 bool GetElevator(int type, any[] data)
 {
     // clang-format off
@@ -254,8 +264,8 @@ bool GetElevator(int type, any[] data)
     const string iface = "art/intrface/Elevator/";
     const        any[][] elevators =
     {
-        //	 Level current, start, count               Main picture size                          Additional picture size                            Indicator animation size                  Buttons count
-        //	         Main picture                               Additional picture                       Indicator animation                                  Button down picture                 Button coordinates
+        //	 Этаж: текущий, стартовый, число             Размер основной картинки                   Размер доп. картинки                               Размер анимации индикатора                Число кнопок
+        //	         Основная картинка                          Доп. картинка                            Анимация индикатора                                  Картинка нажатой кнопки             Координаты кнопок
         // 0) BOS 1234
         { 0, 1, 4,  (iface + "Bos.png").hstr(),       230, 284, 0,                                        0,  0,  (iface + "ElevatorIndicator.frm").hstr(), 121, 41,  (iface + "ElevatorButton.png").hstr(), 4, 11, 42, 58, 91, 11, 102, 58, 151, 11, 162, 58, 211, 11, 222, 58, 271 },
         // 1) BOS G1

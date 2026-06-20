@@ -1,3 +1,7 @@
+// EncounterItems — генерация лута на энкаунтерах. Ключевые обязанности: таблица предметов
+// (прототип, тип энка, кол-во, шанс, гекс), определение типа энкаунтера по локации/карте,
+// выбор гексов и спавн предметов или закладка в контейнеры. Сторона: SERVER.
+// Связи: Entrance, PidsGroups, Tla, Math.
 namespace EncounterItems
 {
 
@@ -28,8 +32,7 @@ const int[] gex_table = {ENT_NAT, ENT_TRASH, ENT_RES, ENT_CONT1, ENT_CONT2};
 
 // clang-format off
 
-// Таблица появляющихся итемов.
-// Ревизия 2 (19.08.2010).
+// Таблица появляющихся итемов: строки по колонкам прототип/тип энка/мин/макс/шанс/гекс.
 const any[] items_table =
 {
 //  КодПрототипа,               ТипЭнка,                        КолВоМин,   КолВоМакс,	Шанс,   НомерГекса
@@ -155,35 +158,44 @@ const any[] items_table =
 
 const int ENTRY_ITEM = 0;    // Гекс для расположения итема
 const int TABLE_COLUMNS = 6; // число колонок в таблице
+
+// Всего определений итемов в таблице (число строк).
 int ItemTableCount()
 {
     return items_table.length() / TABLE_COLUMNS;
-} // всего определений итемов
+}
 
 const int MAX_TRIES = ETYPE_DEFAULT; // максимальное число попыток найти подходящую по типу энкаунтера строку в таблице итемов
 const int MIN_ITEMS = 0;             // минимальное число итемов на энке
-const int MAX_ITEMS = 8;             // Максимальное
+const int MAX_ITEMS = 8;             // максимальное
 
+// Доступ к колонкам строки таблицы по индексу строки idx.
 int GetItemType(int idx)
 {
     return int(items_table[TABLE_COLUMNS * (0 + int(idx)) + 1]);
 }
+
 hstring GetItemPid(int idx)
 {
     return hstring(items_table[TABLE_COLUMNS * (0 + int(idx)) + 0]);
 }
+
 int GetItemQuantity(int idx)
 {
     return Game.Random(int(items_table[TABLE_COLUMNS * (0 + int(idx)) + 2]), int(items_table[TABLE_COLUMNS * (0 + int(idx)) + 3]));
 }
+
 int GetItemChance(int idx)
 {
     return int(items_table[TABLE_COLUMNS * (0 + int(idx)) + 4]);
 }
+
 hstring GetItemHex(int idx)
 {
     return ("" + int(items_table[TABLE_COLUMNS * (0 + int(idx)) + 5])).hstr();
 }
+
+// Карта является внутренностью пещеры (используется для определения типа энкаунтера).
 bool IsCaveMap(hstring mapPid)
 {
     return mapPid == Content::Map::e_cave0_in || mapPid == Content::Map::e_cave1_in || mapPid == Content::Map::e_cave2_in ||
@@ -197,6 +209,7 @@ int[] GetItemsInfo(int eType, hstring hex)
     int[] infos = {};
     for (int i = 0; i < ItemTableCount(); i++) {
         if ((GetItemType(i) == eType || GetItemType(i) == ETYPE_ANY) && GetItemHex(i) == hex) {
+            // отладочный лог совпадений (оставлено как breadcrumb диагностики таблицы)
             // Game.Log("eType:"+eType+"GetItemType:"+GetItemType(i));
             infos.insertLast(i);
         }
@@ -205,6 +218,7 @@ int[] GetItemsInfo(int eType, hstring hex)
     return infos;
 }
 
+// Определяет тип энкаунтера по карте: сначала по прото пещеры, иначе по группе локации.
 int GetEncounterType(Map map)
 {
     if (IsCaveMap(map.ProtoId)) {
@@ -239,8 +253,11 @@ int GetEncounterType(Map map)
     return ETYPE_DEFAULT;
 }
 
+// Главная точка: спавнит лут на энкаунтере. Количество предметов зависит от минимальной
+// Удачи в группе; гексы под предметы выбираются случайно среди распарсенных входов карты.
 void GenerateItems(Map map, Critter[] grp)
 {
+    // Берём минимальную Удачу по группе как множитель щедрости лута.
     int minLuck = 8;
     for (int i = 0, l = grp.length() - 1; i < l; i++) {
         Critter cr = grp[i];
@@ -252,6 +269,7 @@ void GenerateItems(Map map, Critter[] grp)
     int itemz = Game.Random(MIN_ITEMS, Math::Clamp(minLuck, 3, MAX_ITEMS));
     int mapType = GetEncounterType(map);
 
+    // Собираем все гексы-входы карты, подходящие под типы из таблицы гексов.
     Entrance::Entry[] entries = {};
     for (int i = 0, l = gex_table.length(); i < l; i++) {
         entries.insertLast(Entrance::ParseEntries(map, gex_table[i]));
@@ -262,6 +280,7 @@ void GenerateItems(Map map, Critter[] grp)
         return;
     }
 
+    // Случайно набираем уникальные индексы гексов под предметы (не больше itemz).
     int tries = 30;
     int[] foundedEntries = {};
     int cur = 0;
@@ -279,6 +298,7 @@ void GenerateItems(Map map, Critter[] grp)
         tries--;
     }
 
+    // По выбранным гексам бросаем шанс и кладём предмет: в контейнер рядом или прямо на гекс.
     bool found = false;
     for (int i = 0, l = foundedEntries.length(); i < l; i++) {
         Entrance::Entry hex = entries[foundedEntries[i]];

@@ -1,3 +1,7 @@
+// ClientItems — клиентские коллекции предметов для интерфейса.
+// Ключевое: получение коллекций (инвентарь/лут/бартер), исключение отданных/убранных предметов,
+// перенос между коллекциями, отправка бартер-оффера на сервер; SERVER-часть принимает оффер под локами.
+// Сторона: MIXED (CLIENT основной + SERVER RemoteCall). Связи: Gui, Barter, Sync, ClientDefines, Content.
 namespace ClientItems
 {
 
@@ -15,6 +19,9 @@ enum Collection
     RecievedItems
 }
 
+// Клиентские «теневые» коллекции: что пришло от сервера и что игрок уже отдал/убрал в UI
+// (бартер-оффер обеих сторон и временно изъятые предметы). Используются для оптимистичного
+// отображения до подтверждения сервером.
 Item[] ReceivedItems = {};
 Item[] BarterOfferItems = {};
 Item[] BarterTraderOfferItems = {};
@@ -26,6 +33,8 @@ void InitClientItems()
     Game.OnReceiveItems.Subscribe(OnReceiveItems);
 }
 
+// Получили предметы от сервера: сбрасываем теневые коллекции и по типу передачи открываем
+// нужный экран (бартер или подбор/контейнер).
 [[Event]]
 void OnReceiveItems(Item[] items, any contextParam)
 {
@@ -65,6 +74,8 @@ void OnReceiveItems(Item[] items, any contextParam)
     }
 }
 
+// Собирает коллекцию предметов для UI по её типу и вычитает уже отданное в бартер и временно
+// убранное, чтобы интерфейс показывал актуальный остаток до подтверждения сервером.
 Item[] GetCollection(Collection collection)
 {
     Item[] items = {};
@@ -82,12 +93,13 @@ Item[] GetCollection(Collection collection)
     }
     else if (collection == Collection::Loot) {
         items = ReceivedItems;
+        // breadcrumb миграции: альтернативный источник лута из инвентаря криттера-цели; не удалять.
         /*if (chosen != null && chosen.TransferContainerId != ZERO_IDENT) {
             Critter? targetCr = Game.GetCritter(chosen.TransferContainerId);
             if (targetCr != null) {
                 items = targetCr.GetItems(ItemProperty::CritterSlot, CritterItemSlot::Inventory);
-                TODO: Уточнить, зачем здесь преметы забираютс¤ из инвентаря
-                криттера, ведь они невовремя обновл¤ютс¤. На сервере предмет изъят из инвентаря
+                TODO: Уточнить, зачем здесь предметы забираются из инвентаря
+                криттера, ведь они невовремя обновляются. На сервере предмет изъят из инвентаря,
                 на клиенте нет (если это не chosen)
             }
         }*/
@@ -111,6 +123,8 @@ Item[] GetCollection(Collection collection)
     return items;
 }
 
+// Помечает count единиц предмета как временно убранные (теневая коллекция RemovedItems),
+// чтобы UI скрыл их до подтверждения сервером.
 void RemoveItem(Collection collection, Item& item, int count)
 {
     verify(count > 0, "Assertion failed");
@@ -119,11 +133,15 @@ void RemoveItem(Collection collection, Item& item, int count)
     RemovedItems.insertLast(item.Clone(count));
 }
 
+// Заготовка переноса предмета в/из бартер-оффера (тело не реализовано).
 void BarterItem(bool offer, Item& item, int count)
 {
+    // breadcrumb миграции: незавершённая ветка по флагу offer; не удалять
     // if( offer )
 }
 
+// Вычитает excludeItems из items по Id: полностью убирает предмет или уменьшает его количество
+// клонированием, чтобы исходные предметы не мутировались.
 void ExcludeItems(Item[] & items, Item[] & excludeItems)
 {
     for (int i = 0; i < excludeItems.length(); i++) {
@@ -144,6 +162,7 @@ void ExcludeItems(Item[] & items, Item[] & excludeItems)
     }
 }
 
+// Сопоставляет числовой тип коллекции из UI (ClientDefines) с внутренним enum Collection.
 Collection GetCollectionFromType(int collectionType)
 {
     Collection collection = Collection::ChosenAll;
@@ -176,12 +195,14 @@ Collection GetCollectionFromType(int collectionType)
     return collection;
 }
 
+// Точка входа для UI: пересобрать коллекцию по числовому типу.
 Item[] RefreshItemsCollection(int collectionType)
 {
     Collection collection = GetCollectionFromType(collectionType);
     return GetCollection(collection);
 }
 
+// Удаляет предмет по Id из свежесобранной коллекции (работает над локальной копией коллекции).
 void RemoveItemFromCollection(ident itemId, Collection collection)
 {
     Item[] items = GetCollection(collection);
@@ -194,6 +215,7 @@ void RemoveItemFromCollection(ident itemId, Collection collection)
     }
 }
 
+// Меняет количество предмета в коллекции, заменяя его клоном с новым count.
 void ChangeCollectionItemCount(ident itemId, Collection collection, int count)
 {
     Item[] items = GetCollection(collection);
@@ -207,6 +229,7 @@ void ChangeCollectionItemCount(ident itemId, Collection collection, int count)
     }
 }
 
+// Ищет предмет в коллекции по Id; если в коллекции нет — берёт его напрямую из игры.
 Item? GetCollectionItem(ident itemId, Collection collection)
 {
     Item[] items = GetCollection(collection);
@@ -219,6 +242,8 @@ Item? GetCollectionItem(ident itemId, Collection collection)
     return Game.GetItem(itemId);
 }
 
+// Формирует из обеих сторон бартер-оффера параллельные массивы Id/количество и отправляет
+// оффер на сервер удалённым вызовом.
 void BarterOffer()
 {
     ident[] saleItemsIds = {};
@@ -242,6 +267,8 @@ void BarterOffer()
     CurPlayer.ServerCall.ProcessBarterNpcOffer(saleItemsIds, saleItemsCount, buyItemsIds, buyItemsCount);
 }
 
+// Переносит предмет между инвентарём/лутом и соответствующим бартер-оффером: для переноса
+// «в оффер» наращивает стек или добавляет клон, для «из оффера» уменьшает или убирает предмет.
 void BarterTransfer(ident item_id, int collectionTypeFrom, int item_count)
 {
     Collection collectionFrom;
@@ -311,6 +338,8 @@ void BarterTransfer(ident item_id, int collectionTypeFrom, int item_count)
 
 #if SERVER
 
+// Серверный приём бартер-оффера: берёт локи на криттера, торговца и их карты, затем передаёт
+// обработку в Barter. Без полного набора локов выходит, не трогая состояние.
 [[ServerRemoteCall]] [[Async]]
 void ProcessBarterNpcOffer(Player player, ident[] saleItemsIds, int[] saleItemsCount, ident[] buyItemsIds, int[] buyItemsCount)
 {

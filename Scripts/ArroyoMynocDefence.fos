@@ -1,4 +1,8 @@
-namespace ArroyoMynocDefence // Sort 3
+// ArroyoMynocDefence — серверный квест «защита Арройо/Майнока».
+// Обязанности: dialog-demand проверки группы (наличие/уровень/карма/занятость квеста),
+//  две стадии квеста с созданием/удалением лагерей рейдеров, таймаут и провал.
+// Сторона: SERVER. Связи: GlobalmapGroupExtended, Location, Maps, Messaging, Settings.GlobalMap.
+namespace ArroyoMynocDefence
 {
 
 const int STR_RAIDERS_FLED = 3483;
@@ -7,7 +11,7 @@ const int STR_RAIDERS_FLED = 3483;
 
 ///@ Property Game Server synctime ArroyoMynocTimeout Mutable Persistent
 
-// Defines
+// Константы модуля
 const int QUEST_TIMEOUT = 1; // Количество игровых суток, которые даются на выполнение каждой из стадий квеста.
 // Таймаут указывается для каждой стадии квеста. Т.е. при QUEST_TIMEOUT = 1 на выполнение
 // квеста будет дано 2-е суток сутки на выполнение первой стадии и сутки на выполнение второй.
@@ -22,15 +26,20 @@ const int DIALOG_NUM_LVL = 28;    // Переходим на этот диало
 const int DIALOG_QUEST_USED = 29; // Переходим на этот диалог, если квест выполняется другой группой.
 const int DIALOG_NUM_KARMA = 30;  // Переходим на этот диалог, если карма группы слишком низкая для выполнения квеста.
 
+// Координаты Арройо на глобальной карте. От них отсчитываем расположение
+// создаваемых лагерей рейдеров.
 int ArroyoPosX()
 {
     return 4 * Settings.GlobalMap.GlobalMapZoneLength - Settings.GlobalMap.GlobalMapZoneLength / 2;
-} // Координаты Арройо. От них считаем где будет находиться
+}
+
 int ArroyoPosY()
 {
     return 3 * Settings.GlobalMap.GlobalMapZoneLength - Settings.GlobalMap.GlobalMapZoneLength / 2;
-} // локация с рейдерами.
+}
 
+// Проверка, что игрок состоит в группе (помимо него есть ещё хотя бы один спутник).
+// Общая реализация для пары dialog-demand: положительной и отрицательной.
 bool IsGroupExistImpl(Critter player, Critter npc)
 {
     Critter[] group = {};
@@ -61,6 +70,8 @@ bool IsGroupNotExist(Critter player, Critter npc)
     return !IsGroupExistImpl(player, null);
 }
 
+// Проверка соответствия группы по уровню: каждый игрок (НПС пропускаем) должен
+// укладываться в диапазон MIN_LVL..MAX_LVL. Общая реализация для пары dialog-demand.
 bool IsQuestGroupLevelRightImpl(Critter player, Critter npc)
 {
     Critter[] group = {};
@@ -101,6 +112,8 @@ bool IsQuestGroupLevelNotRight(Critter player, Critter npc)
     return !IsQuestGroupLevelRightImpl(player, null);
 }
 
+// Проверка кармы/репутации группы: суммарная карма и репутация в Арройо не должны
+// быть слишком низкими. Общая реализация для пары dialog-demand.
 bool IsQuestGroupHaveGoodKarmaImpl(Critter player, Critter npc)
 {
     Critter[] group = {};
@@ -146,6 +159,7 @@ bool IsQuestGroupHaveBadKarma(Critter player, Critter npc)
     return !IsQuestGroupHaveGoodKarmaImpl(player, null);
 }
 
+// Проверка, занят ли квест другой группой (по таймауту). Общая реализация для пары dialog-demand.
 bool IsQuestActiveImpl(Critter player, Critter npc)
 {
     // Если квест уже взят другой группой - отправляем на вариант диалога DIALOG_QUEST_USED
@@ -206,9 +220,11 @@ int StartStage2(Critter player, Critter npc)
     return 0;
 }
 
-// ===== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ===== \\
+// Вспомогательные функции
 
-// Вспомогательная функция, для запуска квеста, используется в StartQuest
+// Внутренний запуск квеста: формирует группу, удаляет прошлый лагерь, фиксирует состав
+// группы и счётчик рейдеров, создаёт локацию под нужную стадию, проставляет стадию
+// квеста участникам-игрокам и заводит таймаут с отложенным событием провала.
 void StartQuest(Critter player, int stage)
 {
     // Находим группу в которой состоит игрок и лидера группы.
@@ -307,10 +323,11 @@ void StartQuest(Critter player, int stage)
     // Устанавливаем таймаут для квеста.
     Game.ArroyoMynocTimeout = Game.SynchronizedTime + Time::Days(QUEST_TIMEOUT);
 
-    // И создаем событие в котором будем отслеживать не просрочился ли квест. Времени на квест в двое больше если нет других соискателей.
-    Game.StartTimeEvent(Time::Days(QUEST_TIMEOUT * 2), TimeExpired); //SavedDeferredCall
+    // Заводим событие, отслеживающее просрочку квеста. Времени даётся вдвое больше таймаута:
+    // запас на случай, когда других соискателей нет.
+    Game.StartTimeEvent(Time::Days(QUEST_TIMEOUT * 2), TimeExpired); // SavedDeferredCall
 
-    // Если дожили до сюда, то всё в порядке. Возвращаем TRUE.
+    // Сюда дошли — квест успешно запущен.
 }
 
 // Проверка доступности квеста по времени.
@@ -402,13 +419,14 @@ ident GetLeaderId(Critter player)
     }
 }
 
-// Устанавливаем таймер, не успел побить рейдеров - лузер...
+// Обработчик истечения таймаута квеста: если рейдеры не перебиты — проваливаем квест,
+// иначе просто прибираем лагерь, и в любом случае сбрасываем таймаут.
 [[TimeEvent]]
 void TimeExpired()
 {
-    // Stale-timer guard: this event is scheduled at 2x the quest timeout, so a timer from an
-    // earlier quest-taking can fire after the quest was resolved or re-taken. Only tear down the
-    // camp when the CURRENT quest's timeout has actually elapsed.
+    // Защита от устаревшего таймера: событие планируется на удвоенный таймаут квеста, поэтому
+    // таймер от прошлого взятия квеста может сработать уже после того, как квест завершён или
+    // взят заново. Сносим лагерь только если таймаут ТЕКУЩЕГО квеста действительно истёк.
     if (Game.ArroyoMynocTimeout == ZERO_SYNCTIME || Game.SynchronizedTime < Game.ArroyoMynocTimeout) {
         return;
     }

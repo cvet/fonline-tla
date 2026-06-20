@@ -1,22 +1,29 @@
-namespace CaveMobs // Sort 2
+// CaveMobs — генератор содержимого пещерных энкаунтеров.
+// Обязанности: подбор состава мобов по уровню/удаче группы, наполнение сундуков лутом, спавн криттеров у точек входа, агрессия бандитов при появлении игрока.
+// Сторона: SERVER. Связи: Entrance, EnemyStack, NpcPlanes, Mob/EncounterNpc, Content.
+namespace CaveMobs
 {
 
 #if SERVER
 
-// Скрипт генератора мобов в пещерах, аналог оригинальному из Ф2
-
+// Точки входа (Entry) на карте: ENTRY_SPAWN — где появляются мобы, ENTRY_CHEST — где ставятся сундуки
 const int ENTRY_SPAWN = 99;
 const int ENTRY_CHEST = 98;
 
-const int MESSAGE_ATTACK = 32; // Сообщение от игрока "атакуйте меня". Отсылается всем видимым мобам, см. EncounterNpc.fos
+// Сообщение от игрока "атакуйте меня". Отсылается всем видимым мобам, см. EncounterNpc.fos
+const int MESSAGE_ATTACK = 32;
+
+// Дистанция от контрольного гекса до точки установки криттера
 int EntryDistance()
 {
     return Game.Random(2, 5);
-} // Дистанция от контрольного гекса до точки установки Криттера
-const int AI_ROBBERS = Fallout2AIPackets::MercRaider; // Общий аи пакет для рейдеров в пещерах
-const int SEE_PLAYER_FROM = 12020;                    // начало строк "увидел игрока
-const int SEE_PLAYER_TO = 12038;                      // конец строк "увидел игрока"
+}
 
+const int AI_ROBBERS = Fallout2AIPackets::MercRaider; // Общий ai-пакет для рейдеров в пещерах
+const int SEE_PLAYER_FROM = 12020;                    // начало диапазона строк "увидел игрока"
+const int SEE_PLAYER_TO = 12038;                      // конец диапазона строк "увидел игрока"
+
+// Шаблон одного моба: прото, init-скрипт, набор инвентаря (Bag), ai-пакет и команда. Умеет поставить себя на карту.
 class CCaveMobInfo
 {
     hstring Pid;
@@ -34,6 +41,8 @@ class CCaveMobInfo
         Team = team;
     }
 
+    // Пытается поставить моба на свободный гекс на расстоянии EntryDistance() от точки входа в заданном направлении.
+    // Возвращает null, если до точки входа нет пути или гекс непроходим.
     Critter ? TryPlaceMob(Entrance::Entry? entry, Map? map, hdir dir)
     {
         if (entry == null || map == null) {
@@ -43,6 +52,7 @@ class CCaveMobInfo
         auto crHex = entry.Hex;
         map.MoveHexByDir(crHex, dir, EntryDistance());
 
+        // Ставим моба только если до точки входа есть путь и сам гекс проходим
         if (map.GetPathLength(crHex, entry.Hex, 0, null) > 0 && map.IsHexMovable(crHex)) {
             int[] props = {CritterProperty::AiId, AI, CritterProperty::TeamId, Team, CritterProperty::BagId, Bag};
             Critter mob = map.AddCritter(Pid, crHex, Game.GetDirection(crHex, entry.Hex), Tla::GetCritPropsDict(props));
@@ -54,6 +64,7 @@ class CCaveMobInfo
     }
 };
 
+// Шаблон одной позиции лута для сундука: прото и диапазон количества [Min..Max].
 class CCaveItemInfo
 {
     hstring Pid;
@@ -67,6 +78,7 @@ class CCaveItemInfo
         Max = max;
     }
 
+    // Кладёт в сундук случайное количество предмета в пределах [Min..Max]; пустую (num == 0) позицию пропускает.
     void AddToChect(Item? chest)
     {
         if (chest == null) {
@@ -82,6 +94,7 @@ class CCaveItemInfo
     }
 };
 
+// Описание сундука энкаунтера: прото, точка входа, ловушка/замок и список лута для наполнения.
 class CCaveContainerInfo
 {
     hstring Pid;
@@ -99,6 +112,8 @@ class CCaveContainerInfo
         LockerComplexity = lockerCompl;
     }
 
+    // Ставит 2-3 сундука на случайные свободные гексы точек входа ENTRY_CHEST.
+    // Лутом наполняется только первый поставленный сундук (флаг filled), остальные остаются пустыми.
     void PlaceCont(Map? map)
     {
         if (map == null) {
@@ -110,6 +125,7 @@ class CCaveContainerInfo
             bool filled = false;
             int tries = 0;
             int maxChests = Game.Random(2, 3);
+            // Не более 10 попыток найти свободные гексы под нужное число сундуков
             while (maxChests > 0 && tries < 10) {
                 Entrance::Entry ent = entries[Game.Random(0, entries.length() - 1)];
                 if (map.GetItemsOnHex(ent.Hex).isEmpty()) {
@@ -129,6 +145,8 @@ class CCaveContainerInfo
     }
 };
 
+// Полное описание одного пещерного энкаунтера: состав мобов, количество и (для особых энкаунтеров) сундук с лутом.
+// Собирается в SetupMobs/SetupChest, затем применяется к карте через FillMap.
 class CCaveEncounterInfo
 {
     bool IsSpecial;
@@ -142,6 +160,7 @@ class CCaveEncounterInfo
         IsSpecial = false;
     }
 
+    // Добавляет в энкаунтер описание моба (один из вариантов, из которых случайно выбирается при спавне).
     void AddCaveMobInfo(hstring pid, callback_void_Critter_bool script, int bag, int ai, int team)
     {
         Mobs.grow(1);
@@ -149,6 +168,7 @@ class CCaveEncounterInfo
         Mobs.last().Set(pid, script, bag, ai, team);
     }
 
+    // Создаёт описание сундука для энкаунтера (один на энкаунтер).
     void AddCaveChestInfo(hstring pid, int entry, int trapValue, int lockerCompl)
     {
         CCaveContainerInfo container = CCaveContainerInfo();
@@ -156,6 +176,7 @@ class CCaveEncounterInfo
         Container = container;
     }
 
+    // Добавляет позицию лута в сундук энкаунтера; без предварительного AddCaveChestInfo тихо пропускается.
     void AddCaveItemInfo(hstring pid, int min, int max)
     {
         CCaveContainerInfo? container = Container;
@@ -168,6 +189,8 @@ class CCaveEncounterInfo
         container.Items.last().Set(pid, min, max);
     }
 
+    // Применяет энкаунтер к карте: для особых ставит сундук, затем у каждой точки входа ENTRY_SPAWN спавнит MobsNum мобов.
+    // Каждому заспавненному мобу заносит в стек врагов всех живых игроков группы.
     void FillMap(Map? map, Critter[] group)
     {
         if (map == null) {
@@ -184,6 +207,7 @@ class CCaveEncounterInfo
             int tries = 0;
             for (int i = 0; i < entries.length(); i++) {
                 for (int k = 0; k < MobsNum; k++) {
+                    // До 10 попыток подобрать случайный тип моба и свободный гекс у точки входа
                     tries = 10;
                     Critter? mob;
                     while (mob == null && tries > 0) {
@@ -192,6 +216,7 @@ class CCaveEncounterInfo
                         tries--;
                     }
 
+                    // Делаем заспавненного моба враждебным ко всем живым игрокам группы
                     if (mob != null) {
                         for (int j = 0, l = group.length(); j < l; j++) {
                             Critter target = group[j];
@@ -206,11 +231,14 @@ class CCaveEncounterInfo
     }
 };
 
+// Строит описание энкаунтера по характеристикам группы: максимальный уровень задаёт силу мобов,
+// минимальные удача и уровень — щедрость и состав лута.
 CCaveEncounterInfo? SetupEncounterCave(Map map, Critter[] group)
 {
     int maxLevel = 0;
     int minLuck = 10;
     int minLevel = 30;
+    // Собираем агрегаты по группе: макс. уровень, мин. удача, мин. уровень
     for (int i = 0, l = group.length(); i < l; i++) {
         if (group[i].Level > maxLevel) {
             maxLevel = group[i].Level;
@@ -231,6 +259,7 @@ CCaveEncounterInfo? SetupEncounterCave(Map map, Critter[] group)
     return eInfo;
 }
 
+// Пулы лута для сундука по уровням: Low/Mid/High — оружие и броня по силе группы, Ammo — патроны.
 const hstring[] CavePids_TreasureLow = {Content::Item::zip_gun,
                                         Content::Item::_10mm_pistol,
                                         Content::Item::molotov_cocktail,
@@ -268,14 +297,17 @@ const hstring[] CavePids_Ammo = {Content::Item::_7_62mm_ammo,
                                  Content::Item::_10mm_jhp,
                                  Content::Item::_10mm_jhp};
 
+// Наполняет лут сундука для особого энкаунтера: стимпаки, оружие/броня из пулов по уровню,
+// патроны и крышки. Щедрость растёт с минимальной удачей (numSpecial) и минимальным уровнем группы.
 void SetupChest(CCaveEncounterInfo eInfo, int minLuck, int minLevel)
 {
     if (!eInfo.IsSpecial) {
         return;
     }
 
-    int lockCompl = 0; // ToDO
-    int trapVal = 0;   // ToDO
+    // TODO: сложность замка и значение ловушки пока не реализованы
+    int lockCompl = 0;
+    int trapVal = 0;
     int numSpecial = Math::Clamp(int(minLuck / 3), 1, 3);
     eInfo.AddCaveChestInfo(Content::Item::chest, ENTRY_CHEST, trapVal, lockCompl);
 
@@ -283,6 +315,7 @@ void SetupChest(CCaveEncounterInfo eInfo, int minLuck, int minLevel)
         eInfo.AddCaveItemInfo(Content::Item::stimpak, 1, 5);
     }
 
+    // С шансом 1/4 кладём ценный предмет; чем выше минимальный уровень, тем более крутой пул доступен
     if (Game.Random(1, 4) == 1) {
         eInfo.AddCaveItemInfo(CavePids_TreasureLow[Game.Random(0, CavePids_TreasureLow.length() - 1)], 1, 1);
         numSpecial--;
@@ -297,13 +330,17 @@ void SetupChest(CCaveEncounterInfo eInfo, int minLuck, int minLevel)
         }
     }
 
+    // Шанс на патроны растёт с удачей; их количество масштабируется минимальным уровнем
     if (Math::Clamp(Game.Random(1, 11 - minLuck), 1, 2) == 1) {
         eInfo.AddCaveItemInfo(CavePids_Ammo[Game.Random(0, CavePids_Ammo.length() - 1)], minLevel, minLevel * 5);
     }
 
+    // Крышки в сундук кладутся всегда, объём квадратично зависит от удачи
     eInfo.AddCaveItemInfo(Content::Item::bottle_caps, minLuck * 20, minLuck * minLuck * 20);
 }
 
+// Выбирает случайный тип энкаунтера (1-13) и заполняет состав мобов под максимальный уровень группы.
+// Кейсы 1-12 — фауна, кейс 13 — особый энкаунтер с бандитами (IsSpecial) и сундуком.
 void SetupMobs(CCaveEncounterInfo eInfo, int maxLevel)
 {
     int val = Game.Random(1, 13);
@@ -432,6 +469,8 @@ void SetupMobs(CCaveEncounterInfo eInfo, int maxLevel)
     }
 }
 
+// Точка входа подсистемы: генерирует энкаунтер на карте и подписывается на вход криттеров,
+// чтобы при появлении игрока разослать сигнал атаки.
 void GenerateCavernEncounter(Map? map, Critter[] critters)
 {
     if (map == null) {
@@ -445,6 +484,7 @@ void GenerateCavernEncounter(Map? map, Critter[] critters)
     }
 }
 
+// При входе игрока на карту через 8 секунд (даёт время подгрузке) запускаем рассылку сигнала атаки.
 [[Event]]
 void CaveInCritter(Map map, Critter cr)
 {
@@ -453,6 +493,7 @@ void CaveInCritter(Map map, Critter cr)
     }
 }
 
+// Отложенный сигнал: говорит мобам, которые видят игрока и которых видит игрок, атаковать его.
 [[TimeEvent]]
 void PlayerHere(any value)
 {
@@ -463,12 +504,14 @@ void PlayerHere(any value)
     }
 }
 
+// Init-скрипт для бандитов: базовая инициализация NPC плюс подписка на появление чужих криттеров.
 void CaveNpcInit(Critter cr, bool firstTime)
 {
     EncounterNpc::NpcInit(cr, firstTime);
     cr.OnCritterAppeared.Subscribe(CaveNpcShowCritter);
 }
 
+// Реакция бандита на появление игрока: реплика "увидел игрока" и план атаки.
 [[Event]]
 void CaveNpcShowCritter(Critter cr, Critter showCrit)
 {

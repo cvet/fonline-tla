@@ -1,3 +1,6 @@
+// Entrance — серверные утилиты Entry-гексов и геометрии мёртвых зон.
+// Ключевые обязанности: подсчёт/парсинг входов карты, ближайший и свободный гекс рядом со входом, телепорт к случайному входу, проверка точки внутри замкнутой ломаной лучом.
+// Сторона: SERVER. Связи: Game/Map API, Settings.Geometry, Content::Item::Entrance.
 namespace Entrance
 {
 
@@ -9,11 +12,13 @@ class Entry
     mpos Hex;
 };
 
+// Возвращает один вход карты по номеру и индексу пропуска; перегрузка для числового имени.
 Entry? GetEntry(Map map, int entry, int skip)
 {
     return GetEntry(map, ("" + entry).hstr(), skip);
 }
 
+// Собирает Entry по имени и индексу skip; если координаты не найдены — null.
 Entry? GetEntry(Map map, hstring entry, int skip)
 {
     Entry ent = Entry();
@@ -25,11 +30,13 @@ Entry? GetEntry(Map map, hstring entry, int skip)
     return ent;
 }
 
+// Возвращает все входы карты с указанным именем; перегрузка для числового имени.
 Entry[] ParseEntries(Map map, int entry)
 {
     return ParseEntries(map, ("" + entry).hstr());
 }
 
+// Перечисляет все входы с данным именем в массив Entry.
 Entry[] ParseEntries(Map map, hstring entry)
 {
     Entry[] entries = {};
@@ -44,21 +51,22 @@ Entry[] ParseEntries(Map map, hstring entry)
     return entries;
 }
 
+// Ищет проходимый гекс рядом со входом; перегрузка для числового имени.
 bool GetEntryFreeHex(Map map, int entry, mpos& hex)
 {
     return GetEntryFreeHex(map, ("" + entry).hstr(), hex);
 }
 
-// ищет свободный гекс рядом с указанными координатами
-// если найдет - возвращает true
-// иначе - false
-// карта - где ищем гекс
-// радиус на котором нужно искать
-// hex координаты нового гекса
+// Ищет свободный гекс рядом с указанными координатами
+// если найдёт — возвращает true, иначе false
+// map — карта, где ищем гекс
+// radius — радиус, на котором ищем
+// hex — координаты найденного гекса (in/out)
 bool GetFreeHex(Map map, int radius, mpos& hex)
 {
+    // Проверка границ (и нижней, и верхней — чтобы hex +/- radius оставался в пределах карты)
     if (int(hex.x) - radius <= 0 || int(hex.y) - radius <= 0 || hex.x + radius >= int(map.Size.width) || hex.y + radius >= int(map.Size.height)) {
-        return false; // Check borders (both lower and upper, so hex +/- radius stays in bounds)
+        return false;
     }
 
     int numTry = 10; // число попыток найти свободный гекс
@@ -77,29 +85,30 @@ bool GetFreeHex(Map map, int radius, mpos& hex)
     return false;
 }
 
+// Ищет проходимый гекс на самом входе, а если занят — на соседних гексах.
 bool GetEntryFreeHex(Map map, hstring entry, mpos& hex)
 {
     int count = MapCountEntry(map, entry);
 
-    // Fisrt check direct coords
+    // Сначала проверяем прямые координаты входов
     for (int i = 0; i < count; i++) {
         if (MapGetEntryCoords(map, entry, i, hex) && map.IsHexMovable(hex)) {
             return true;
         }
     }
 
-    // Check borders
+    // Проверка границ карты
     if (hex.x == 0 || hex.y == 0 || hex.x >= map.Size.width - 1 || hex.y >= map.Size.height - 1) {
         return false;
     }
 
-    // Second check coords with offsets
+    // Затем проверяем координаты со смещениями (соседние гексы)
     for (int i = 0; i < count; i++) {
         if (MapGetEntryCoords(map, entry, i, hex)) {
             for (int x = -1; x <= 1; x++) {
                 for (int y = -1; y <= 1; y++) {
                     if (x == 0 && y == 0) {
-                        continue; // Skip direct position
+                        continue; // Пропускаем сам гекс входа
                     }
 
                     if (Settings.Geometry.MapHexagonal) {
@@ -124,11 +133,13 @@ bool GetEntryFreeHex(Map map, hstring entry, mpos& hex)
     return false;
 }
 
+// Находит ближайший к hex вход; перегрузка для числового имени.
 bool GetNearEntry(Map map, int entry, mpos& hex)
 {
     return GetNearEntry(map, ("" + entry).hstr(), hex);
 }
 
+// Выбирает вход, ближайший к исходной точке hex (по дистанции), и пишет его координаты в hex.
 bool GetNearEntry(Map map, hstring entry, mpos& hex)
 {
     auto hexBase = hex;
@@ -149,22 +160,20 @@ bool GetNearEntry(Map map, hstring entry, mpos& hex)
     return true;
 }
 
-// * ******************************************* Мертвая зона, заданная EntryHex'ами ******************************************* */
-/*
-   Всякая простая замкнутая ломаная на плоскости разбивает точки плоскости на две области – внутреннюю и внешнюю.
-
-   из координат игрока пускается горизонтальный луч
-   если луч пересекает ломаную закрытой зоны нечетное число раз - он находится во внутренней зоне ломаной, иначе в наружной
-
-   cr - криттер, которого проверяем
-   map - карта, на которой имеется мертвая зона
-   dir - направление луча (лучше использовать горизонталь по х - dir = 0\
-   hexFirst - номер первого из гексов, ограничивающих мертвую зону
-   hexEnd - номер последнего гекса, ограничивающего мертвую зону
-
-   номера гексов должны возрастать для каждой последующей точки.
-   нельзя поставить общий номер всем гексам, иначе для общего случая (невыпуклого многоугольника мертвой зоны) будет найдено множество решений
-*/
+// Мёртвая зона, заданная Entry-гексами.
+//
+// Всякая простая замкнутая ломаная на плоскости разбивает точки плоскости на две области — внутреннюю и внешнюю.
+// Из координат игрока пускается горизонтальный луч: если он пересекает ломаную замкнутой зоны
+// нечётное число раз — точка внутри ломаной, иначе снаружи.
+//
+// cr — криттер, которого проверяем
+// map — карта, на которой задана мёртвая зона
+// dir — направление луча (лучше использовать горизонталь по x — dir = 0)
+// hexFirst — номер первого из гексов, ограничивающих мёртвую зону
+// hexEnd — номер последнего гекса, ограничивающего мёртвую зону
+//
+// Номера гексов должны возрастать для каждой последующей точки. Нельзя задать общий номер всем гексам,
+// иначе для общего случая (невыпуклый многоугольник мёртвой зоны) будет найдено множество решений.
 bool IsCritterInDeadZone(Critter cr, Map map, uint8 dir, int hexFirst, int hexEnd)
 {
     int crossNum = 0; // число пересечений луча и ломанных, ограничивающих многоугольник мертвой зоны
@@ -232,11 +241,13 @@ bool BeamCrossing2Section(Map map, int hexNum1, int hexNum2, mpos beamHex, uint8
     return 0 < crossS && crossS < 1 && 0 < crossB && crossB < 1;
 }
 
+// Считает число входов с данным именем; перегрузка для числового имени.
 int MapCountEntry(Map map, int entry)
 {
     return MapCountEntry(map, ("" + entry).hstr());
 }
 
+// Подсчитывает статические предметы-входы с заданным именем-назначением.
 int MapCountEntry(Map? map, hstring entry)
 {
     int total = 0;
@@ -253,6 +264,8 @@ int MapCountEntry(Map? map, hstring entry)
     return total;
 }
 
+// Проверяет, что статический предмет — это вход-грид с нужным именем назначения.
+// Пустое имя назначения трактуется как вход "0".
 bool EntryMatch(hstring entry, StaticItem? entrance)
 {
     if (entrance != null && entrance.Type == ItemType::Grid && entrance.ProtoId == Content::Item::Entrance) {
@@ -268,11 +281,13 @@ bool EntryMatch(hstring entry, StaticItem? entrance)
     return false;
 }
 
+// Возвращает координаты skip-го входа с данным именем; перегрузка для числового имени.
 bool MapGetEntryCoords(Map map, int entry, int skip, mpos& hex)
 {
     return MapGetEntryCoords(map, ("" + entry).hstr(), skip, hex);
 }
 
+// Находит skip-й по счёту вход с заданным именем и пишет его координаты в hex.
 bool MapGetEntryCoords(Map? map, hstring entry, int skip, mpos& hex)
 {
     if (map != null) {
@@ -294,6 +309,7 @@ bool MapGetEntryCoords(Map? map, hstring entry, int skip, mpos& hex)
     return false;
 }
 
+// Собирает имена назначений всех входов-гридов карты.
 hstring[] MapGetAllEntries(Map? map)
 {
     hstring[] entryNames = {};
@@ -311,6 +327,7 @@ hstring[] MapGetAllEntries(Map? map)
     return entryNames;
 }
 
+// Телепортирует криттера на случайный вход указанной карты со случайным направлением.
 bool CritterTransferToMapEntry(Critter? cr, ident mapId, hstring entry)
 {
     Map? map = Game.GetMap(mapId);

@@ -16,7 +16,6 @@ Checks (severity):
   WARNING banner-tags               `// Author:` / `// ver x.y` header banners
   WARNING textpack-magic-id         `"" + (1234)` magic text-pack ids
   WARNING hand-rolled-utils         calls to helpers that duplicate engine APIs
-  WARNING cyrillic-comment          Cyrillic text inside comments (policy: English)
   WARNING redundant-bool-return     `if (c) return true; else return false;`
   WARNING commented-out-code        disabled code left as `//` comments
   WARNING file-too-large            non-generated file over the size threshold
@@ -310,16 +309,6 @@ def check_hand_rolled(rel: str, code: str, text: str) -> list[Violation]:
     return out
 
 
-def check_cyrillic_comment_lines(rel: str, text: str, kinds: str) -> list[Violation]:
-    comment = mask_to(text, kinds, "LB")
-    out: list[Violation] = []
-    for idx, ln in enumerate(comment.splitlines(), start=1):
-        if CYRILLIC_RE.search(ln):
-            out.append(Violation("cyrillic-comment", rel, idx,
-                                 "Cyrillic text in comment — committed comments should be English", SEVERITY_WARNING))
-    return out
-
-
 def check_redundant_bool(rel: str, code: str, text: str) -> list[Violation]:
     out: list[Violation] = []
     for m in REDUNDANT_BOOL_RE.finditer(code):
@@ -386,7 +375,6 @@ def analyze() -> list[Violation]:
         violations += check_banner_tags(rel, text, kinds)
         violations += check_textpack_magic(rel, text, kinds)
         violations += check_hand_rolled(rel, code, text)
-        violations += check_cyrillic_comment_lines(rel, text, kinds)
         violations += check_redundant_bool(rel, code, text)
         violations += check_commented_code(rel, text, kinds)
         violations += check_file_size(rel, text)

@@ -1,3 +1,6 @@
+// CritterState — переходы состояний криттера (SERVER).
+// Смерть/оживление, нокаут с LineTracer-поиском гекса, авто-подъём по AP, таймер занятости Wait/IsBusy/IsFree.
+// Использует LineTracer, события OnCritterDead/Respawn/Knockout; запускается из ModuleInit.
 namespace CritterState
 {
 
@@ -28,6 +31,7 @@ void OnCritterInit(Critter cr, bool firstTime)
     cr.StartTimeEvent(Time::Milliseconds(Game.Random(0, 1000)), Time::Milliseconds(1000), OnCritterIdle);
 }
 
+// Периодический тик (раз в секунду): пробуем поднять криттера из нокаута по мере восстановления AP.
 [[TimeEvent]] [[Async]]
 void OnCritterIdle(Critter cr)
 {
@@ -40,9 +44,10 @@ void OnCritterIdle(Critter cr)
     }
 }
 
+// Переводит криттера в состояние смерти: сбрасывает скрытность/HP, ставит анимацию и шлёт события смерти/убийства.
 void ToDead(Critter cr, CritterActionAnim actionAnim, Critter? killer)
 {
-    // Already dead
+    // Уже мёртв
     if (cr.IsDead()) {
         return;
     }
@@ -65,9 +70,10 @@ void ToDead(Critter cr, CritterActionAnim actionAnim, Critter? killer)
     }
 }
 
+// Оживляет криттера: из смерти — респавн на текущем гексе (если свободен), из нокаута — попытка встать.
 bool ToAlive(Critter cr)
 {
-    // Already life
+    // Уже жив
     if (cr.IsAlive()) {
         return true;
     }
@@ -107,6 +113,7 @@ bool ToAlive(Critter cr)
     return true;
 }
 
+// Контекст трассировки отлёта при нокауте: ведёт луч по гексам и запоминает последний подходящий гекс (EndHex).
 class KnockoutTracer : LineTracer::ITraceContext
 {
     Critter Cr;
@@ -122,12 +129,12 @@ class KnockoutTracer : LineTracer::ITraceContext
 
     void StartExec(Map map, mpos hex, mpos hexTo, int maxDist) override
     {
-        // Nothing
+        // Ничего не делаем
     }
 
     void FinishExec(Map map, int resultDist) override
     {
-        // Nothing
+        // Ничего не делаем
     }
 
     bool Exec(Map map, mpos hex) override
@@ -136,7 +143,7 @@ class KnockoutTracer : LineTracer::ITraceContext
             return true;
         }
 
-        // Stop before trigger
+        // Останавливаемся перед триггером
         hstring pid = Content::Item::Trigger;
         if (!map.GetStaticItemsInRadius(hex, Multihex, pid).isEmpty()) {
             return true;
@@ -147,8 +154,10 @@ class KnockoutTracer : LineTracer::ITraceContext
     }
 };
 
+// Вводит криттера в нокаут: отбрасывает по лучу от knockHex, ставит анимации и копит потерянные AP (KnockoutAp).
 void ToKnockout(Critter cr, CritterActionAnim actionAnimBegin, CritterActionAnim actionAnimIdle, CritterActionAnim actionAnimEnd, int lostAp, mpos knockHex)
 {
+    // Уже в нокауте — только увеличиваем долг AP
     if (cr.IsKnockout()) {
         cr.KnockoutAp += lostAp;
         return;
@@ -171,12 +180,12 @@ void ToKnockout(Critter cr, CritterActionAnim actionAnimBegin, CritterActionAnim
         cr.InSneakMode = false;
     }
 
-    // Find destination
+    // Подбираем конечный гекс отлёта трассировкой луча от криттера в сторону knockHex
     mdir dir = Game.GetDirection(knockHex, cr.Hex);
     KnockoutTracer tracer = KnockoutTracer(cr);
     LineTracer::LineTracerHex(map, cr.Hex, knockHex, tracer);
 
-    // Move to new place
+    // Перемещаем на найденное место
     cr.TransferToHex(tracer.EndHex, dir);
     cr.KnockoutActionAnim = actionAnimIdle;
     cr.SetCondition(CritterCondition::Knockout, actionAnimBegin, null);
@@ -186,14 +195,15 @@ void ToKnockout(Critter cr, CritterActionAnim actionAnimBegin, CritterActionAnim
     Game.OnCritterKnockout.Fire(cr);
 }
 
+// Пытается поднять криттера из нокаута: гасит долг KnockoutAp накопленными AP и встаёт, когда долг погашен.
 void TryUpOnKnockout(Critter cr)
 {
-    // Critter lie on ground
+    // Криттер лежит на земле
     if (cr.CurrentHp <= 0) {
         return;
     }
 
-    // Subtract knockout ap
+    // Гасим долг AP из нокаута
     if (cr.KnockoutAp > 0) {
         int curAp = cr.CurrentAp;
         if (curAp <= 0) {
@@ -207,16 +217,17 @@ void TryUpOnKnockout(Critter cr)
         }
     }
 
-    // Wait when ap regenerated to zero
+    // Ждём, пока AP восстановятся до нуля
     if (cr.CurrentAp < 0) {
         return;
     }
 
-    // Stand up
+    // Встаём
     cr.SetCondition(CritterCondition::Alive, cr.ActionAnimKnockoutEnd, null);
     CritterState::Wait(cr, Settings.Movement.Breaktime);
 }
 
+// Таймер занятости: ставит криттера в ожидание на ms мс (WaitEndTick) — пауза между действиями.
 void Wait(Critter cr, int ms)
 {
     cr.WaitEndTick = Game.FrameTime + Time::Milliseconds(ms);
@@ -237,6 +248,7 @@ bool IsFree(Critter cr)
     return Game.FrameTime >= cr.WaitEndTick;
 }
 
+// Клиент просит выставить паузу управляемому криттеру.
 [[ServerRemoteCall]]
 void Rpc_Wait(Player player, int ms)
 {

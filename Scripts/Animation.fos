@@ -1,8 +1,12 @@
+// Animation — выбор и подстановка анимаций криттеров (state/action), маппинг в Fallout-индексы, звук анимаций.
+// Ключевые обязанности: инициализация анимаций, генерация имён спрайтов для tactics-моделей, fallback/substitute цепочки, проигрывание SFX.
+// Сторона: CLIENT/MAPPER (звук — только CLIENT). Подписки через InitAnimation на Game.OnCritterAnimation*.
 namespace Animation
 {
 
 #if CLIENT || MAPPER
 
+// Точка входа модуля: подписка на события анимаций криттеров движка.
 [[ModuleInit]]
 void InitAnimation()
 {
@@ -13,6 +17,7 @@ void InitAnimation()
     Game.OnCritterAnimationFallout.Subscribe(OnCritterAnimationFallout);
 }
 
+// State-анимация по текущему оружию криттера: оружие даёт свою стойку, иначе — Unarmed.
 CritterStateAnim GetStateAnim(Critter cr)
 {
     if (cr.Condition == CritterCondition::Alive) {
@@ -23,6 +28,7 @@ CritterStateAnim GetStateAnim(Critter cr)
     return CritterStateAnim::Unarmed;
 }
 
+// Idle-анимация в зависимости от состояния криттера (живой / нокаут / мёртвый), с фолбэком по умолчанию.
 CritterActionAnim GetIdleActionAnim(Critter cr)
 {
     if (cr.Condition == CritterCondition::Alive) {
@@ -38,6 +44,7 @@ CritterActionAnim GetIdleActionAnim(Critter cr)
     throw("Invalid critter condition", cr.Condition);
 }
 
+// Доинициализация анимаций криттера: если state/action не заданы — подставляем значения по контексту/состоянию.
 [[Event]]
 void OnCritterAnimationInit(Critter cr, CritterStateAnim& stateAnim, CritterActionAnim& actionAnim, AbstractItem? contextItem)
 {
@@ -55,6 +62,7 @@ void OnCritterAnimationInit(Critter cr, CritterStateAnim& stateAnim, CritterActi
     }
 }
 
+// Обработка проигрывания анимации: на клиенте воспроизводим звук, кроме обновления (refresh) текущей анимации.
 [[Event]]
 void OnCritterAnimationProcess(Critter cr, CritterStateAnim stateAnim, CritterActionAnim actionAnim, AbstractItem contextItem, bool refreshAnim)
 {
@@ -65,6 +73,7 @@ void OnCritterAnimationProcess(Critter cr, CritterStateAnim stateAnim, CritterAc
 #endif
 }
 
+// Подбор файла спрайта по кадрам анимации: для tactics-моделей строим имя, иначе — пусто (рисует движок).
 [[Event]]
 void OnCritterAnimationFrames(hstring modelName, CritterStateAnim stateAnim, CritterActionAnim actionAnim, int& pass, uint& flags, int& ox, int& oy,
                               string& animation)
@@ -77,37 +86,41 @@ void OnCritterAnimationFrames(hstring modelName, CritterStateAnim stateAnim, Cri
     }
 }
 
+// Строит путь к файлу спрайта tactics-модели по типу криттера, оружию и действию.
+// Имя криттера задаёт каталог и спец-обработку (турель/транспорт/фрик/мозг), цвет — постфиксы [n,R,G,B].
 string ProcessTactics(string crTypeName, int stateAnim, int actionAnim, int& pass, uint& flags, int& ox, int& oy)
 {
     // Todo: Implement overlays
 
+    // breadcrumb миграции: раньше имя типа получали через GetCritterTypeName(crType); теперь это ModelName
     // string@ crTypeName = GetCritterTypeName( crType );//теперь это ModelName
     string animName;
 
-    // Some specific types
+    // Спец-типы криттеров с отдельной логикой имени спрайта
     bool isTurret = false;
     bool isVehicle = false;
     bool isMutantFreak = false;
     bool isBrain = false;
 
+    // Первая буква имени типа кодирует категорию и каталог спрайтов
     string firstLetter = crTypeName[0];
-    if (firstLetter == "C") { // Characters
+    if (firstLetter == "C") { // персонажи (Characters)
 
         animName = "sprites/characters/";
         isMutantFreak = (crTypeName == "CMutantFreak");
         isBrain = (crTypeName == "CBrain");
     }
-    else if (firstLetter == "A") { // Animals
+    else if (firstLetter == "A") { // животные (Animals)
         animName = "sprites/critters/";
     }
-    else if (firstLetter == "R") { // Robots
+    else if (firstLetter == "R") { // роботы (Robots)
         animName = "sprites/robots/";
     }
-    else if (firstLetter == "T") { // Turrets
+    else if (firstLetter == "T") { // турели (Turrets)
         animName = "sprites/robots/RobotTurrets/";
         isTurret = true;
     }
-    else if (firstLetter == "V") { // Vehicles
+    else if (firstLetter == "V") { // транспорт (Vehicles)
         if (crTypeName == "VTankTurret") {
             crTypeName = "VTank Turret";
         }
@@ -122,25 +135,25 @@ string ProcessTactics(string crTypeName, int stateAnim, int actionAnim, int& pas
     animName += crTypeName.substr(1, crTypeName.length() - 1);
     animName += "$";
 
-    // Color offsets
-    // 0 - other
-    // 1 - skin
-    // 2 - hair
-    // 3 - armor
-    // Format: [index,R,G,B]
+    // Смещения цвета (индексы групп):
+    // 0 - прочее
+    // 1 - кожа
+    // 2 - волосы
+    // 3 - броня
+    // Формат: [index,R,G,B]
     const string[] colorOffsets = {
-        //   R   G   B      Index
-        "0,0,0",       // 0  None
-        "30,-30,-30",  // 1  Red
-        "-30,30,-30",  // 2  Green
-        "-30,-30,30",  // 3  Blue
-        "-30,30,30",   // 4  Turquoise
-        "30,-30,30",   // 5  Purple
-        "30,30,-30",   // 6  Yellow
-        "30,30,30",    // 7  Light
-        "60,60,60",    // 8  White
-        "-30,-30,-30", // 9  Dark
-        "-60,-60,-60", // 10 Black
+        //   R   G   B      Индекс
+        "0,0,0",       // 0  без цвета
+        "30,-30,-30",  // 1  красный
+        "-30,30,-30",  // 2  зелёный
+        "-30,-30,30",  // 3  синий
+        "-30,30,30",   // 4  бирюзовый
+        "30,-30,30",   // 5  фиолетовый
+        "30,30,-30",   // 6  жёлтый
+        "30,30,30",    // 7  светлый
+        "60,60,60",    // 8  белый
+        "-30,-30,-30", // 9  тёмный
+        "-60,-60,-60", // 10 чёрный
         "0,0,0",       // 11 ...
         "0,0,0",       // 12 ...
         "0,0,0",       // 13 ...
@@ -148,6 +161,7 @@ string ProcessTactics(string crTypeName, int stateAnim, int actionAnim, int& pas
         "0,0,0"        // 15 ...
     };
 
+    // Цвет кожи/волос/брони упакован в старшие биты stateAnim
     int skinColor = (stateAnim >> 20) & 0xF;
     int hairColor = (stateAnim >> 24) & 0xF;
     int armorColor = (stateAnim >> 28) & 0xF;
@@ -164,29 +178,29 @@ string ProcessTactics(string crTypeName, int stateAnim, int actionAnim, int& pas
         animName += "[3," + colorOffsets[armorColor] + "]";
     }
 
-    // Check flags
+    // Разбор флагов позы из stateAnim (смерть имеет приоритет над присядом и лежанием)
     bool isDead = (actionAnim >= CritterActionAnim::DeadProneFront && actionAnim <= CritterActionAnim::DeadBurnRun);
     bool isCrouch = (!isDead && (stateAnim & AnimHelpers::STATE_ANIM_CROUCH) != 0);
     bool isProne = (!isDead && !isCrouch && (stateAnim & AnimHelpers::STATE_ANIM_PRONE) != 0);
 
-    // Keep only weapon
+    // Оставляем в stateAnim только биты оружия
     stateAnim &= AnimHelpers::STATE_ANIM_WEAPON_MASK;
 
-    // Turret
+    // Турель
     if (isTurret) {
         // Todo:
         animName += "StandArmed.spr";
         return animName;
     }
 
-    // Vehicle
+    // Транспорт
     if (isVehicle) {
         // Todo:
         animName += "Idle.spr";
         return animName;
     }
 
-    // Mutant Freak
+    // Мутант-фрик
     if (isMutantFreak) {
         if (isDead) {
             animName += "Death.spr";
@@ -201,15 +215,15 @@ string ProcessTactics(string crTypeName, int stateAnim, int actionAnim, int& pas
         return animName;
     }
 
-    // Generic critter
+    // Обычный криттер
     if (!isDead) {
-        // Some critters not have Breathe, use Default instead
+        // У части криттеров нет Breathe — используем Default вместо него
         if (pass == 10) {
             animName += "Default.spr";
             return animName;
         }
 
-        // Position
+        // Поза
         if (isCrouch) {
             animName += "Crouch";
         }
@@ -220,6 +234,7 @@ string ProcessTactics(string crTypeName, int stateAnim, int actionAnim, int& pas
             animName += "Stand";
         }
 
+        // Действие -> суффикс имени анимации
         switch (actionAnim) {
         // Todo: Climb, Climbdown, Climbup
         case CritterActionAnim::Walk:
@@ -322,7 +337,7 @@ string ProcessTactics(string crTypeName, int stateAnim, int actionAnim, int& pas
         case CritterActionAnim::Idle:
             animName += "Breathe";
             if (stateAnim == CritterStateAnim::Unarmed) {
-                pass = 10; // Allow another call, see upper
+                pass = 10; // разрешаем повторный вызов, см. ветку выше
             }
 
             break;
@@ -334,7 +349,7 @@ string ProcessTactics(string crTypeName, int stateAnim, int actionAnim, int& pas
         case CritterActionAnim::Steal:
             if (pass == 0) {
                 animName += "Magic";
-                pass++; // Allow another call, see below
+                pass++; // разрешаем повторный вызов, см. ниже
             }
             else {
                 animName += "Magichigh";
@@ -346,6 +361,7 @@ string ProcessTactics(string crTypeName, int stateAnim, int actionAnim, int& pas
             return "";
         }
 
+        // Оружие -> суффикс имени анимации (нет своего спрайта — берём ближайший аналог)
         switch (stateAnim) {
         case CritterStateAnim::Unarmed:
             animName += "";
@@ -358,7 +374,7 @@ string ProcessTactics(string crTypeName, int stateAnim, int actionAnim, int& pas
             break;
         case CritterStateAnim::Hammer:
             animName += "Club";
-            break; // N/A
+            break; // нет своего, используем аналог
         case CritterStateAnim::Spear:
             animName += "Spear";
             break;
@@ -370,7 +386,7 @@ string ProcessTactics(string crTypeName, int stateAnim, int actionAnim, int& pas
             break;
         case CritterStateAnim::Shootgun:
             animName += "Rifle";
-            break; // N/A
+            break; // нет своего, используем аналог
         case CritterStateAnim::HeavyRifle:
             animName += "Heavy";
             break;
@@ -382,27 +398,27 @@ string ProcessTactics(string crTypeName, int stateAnim, int actionAnim, int& pas
             break;
         case CritterStateAnim::Flamer:
             animName += "Heavy";
-            break; // N/A
+            break; // нет своего, используем аналог
         case CritterStateAnim::Rifle:
             animName += "Rifle";
             break;
         case CritterStateAnim::Sword:
             animName += "Knife";
-            break; // N/A
+            break; // нет своего, используем аналог
         case CritterStateAnim::LongSword:
             animName += "Knife";
-            break; // N/A
+            break; // нет своего, используем аналог
         case CritterStateAnim::Axe:
             animName += "Club";
-            break; // N/A
+            break; // нет своего, используем аналог
         case CritterStateAnim::Bow:
             animName += "Spear";
-            break; // N/A
+            break; // нет своего, используем аналог
         default:
             break;
         }
 
-        // Attack
+        // Атака: суффикс зависит от типа удара/оружия
         switch (actionAnim) {
         case CritterActionAnim::PunchRight:
         case CritterActionAnim::PunchLeft:
@@ -429,7 +445,7 @@ string ProcessTactics(string crTypeName, int stateAnim, int actionAnim, int& pas
 
         case CritterActionAnim::Single:
             animName += "Single";
-            break; // RocketSingleOverlay
+            break; // оверлей: RocketSingleOverlay
         case CritterActionAnim::Burst:
             animName += "Burst";
             break;
@@ -453,7 +469,7 @@ string ProcessTactics(string crTypeName, int stateAnim, int actionAnim, int& pas
             else if (stateAnim == CritterStateAnim::Club || stateAnim == CritterStateAnim::Hammer || stateAnim == CritterStateAnim::Axe) {
                 animName += "Swing";
             }
-            else { // Spear
+            else { // копьё (Spear)
                 animName += "Thrust";
             }
 
@@ -464,6 +480,7 @@ string ProcessTactics(string crTypeName, int stateAnim, int actionAnim, int& pas
         }
     }
     else {
+        // Мёртвый криттер: суффикс по типу смерти
         animName += "";
         switch (actionAnim) {
         case CritterActionAnim::DeadProneFront:
@@ -492,22 +509,22 @@ string ProcessTactics(string crTypeName, int stateAnim, int actionAnim, int& pas
             break;
         case CritterActionAnim::DeadPulseDust:
             animName += "DeathElectrify";
-            break; // ElectrifyOverlay
+            break; // оверлей: ElectrifyOverlay
         case CritterActionAnim::DeadLaser:
             animName += "DeathCutinhalf";
             break;
         case CritterActionAnim::DeadFused:
             animName += "DeathMelt";
-            break; // MeltOverlay
+            break; // оверлей: MeltOverlay
         case CritterActionAnim::DeadExplode:
             animName += "DeathExplode";
             break;
         case CritterActionAnim::DeadBurn:
             animName += "DeathFire";
-            break; // FireOverlay
+            break; // оверлей: FireOverlay
         case CritterActionAnim::DeadBurnRun:
             animName += "DeathFire";
-            break; // FireOverlay
+            break; // оверлей: FireOverlay
         default:
             return "";
         }
@@ -517,12 +534,13 @@ string ProcessTactics(string crTypeName, int stateAnim, int actionAnim, int& pas
     return animName;
 }
 
-// Call on animation substitute seeking.
+// Поиск замены анимации: когда у модели нет точной анимации, подбираем ближайшую
+// (модель-алиас, упрощения для Unarmed, затем общие замены действия и оружия).
 [[Event]]
 EventResult OnCritterAnimationSubstitute(hstring modelNameBase, CritterStateAnim stateAnimBase, CritterActionAnim actionAnimBase, hstring& modelName,
                                          CritterStateAnim& stateAnim, CritterActionAnim& actionAnim)
 {
-    // Check model alias
+    // Проверяем алиас модели
     hstring modelNameAlias = CritterAnims::GetCritterAlias(modelNameBase);
 
     if (modelName == modelNameBase && modelName != modelNameAlias) {
@@ -540,7 +558,7 @@ EventResult OnCritterAnimationSubstitute(hstring modelNameBase, CritterStateAnim
 
     modelName = modelNameBase;
 
-    // Check Unarmed specific substitute
+    // Спец-замены для безоружного состояния (Unarmed)
     if ((stateAnim & AnimHelpers::STATE_ANIM_WEAPON_MASK) == CritterStateAnim::Unarmed) {
         bool swapped = true;
         switch (actionAnim) {
@@ -575,7 +593,7 @@ EventResult OnCritterAnimationSubstitute(hstring modelNameBase, CritterStateAnim
         }
     }
 
-    // Check actionAnim substitute
+    // Общие замены действия (actionAnim)
     bool swapped = true;
     switch (actionAnim) {
     case CritterActionAnim::IdleStunned:
@@ -722,12 +740,12 @@ EventResult OnCritterAnimationSubstitute(hstring modelNameBase, CritterStateAnim
         return EventResult::ContinueChain;
     }
 
-    // Restore actionAnim
+    // Восстанавливаем actionAnim
     actionAnim = actionAnimBase;
 
-    // Find stateAnim substitute
-    uint flags = stateAnim & AnimHelpers::STATE_ANIM_FLAGS_MASK;                   // Store flags
-    stateAnim = CritterStateAnim(stateAnim & AnimHelpers::STATE_ANIM_WEAPON_MASK); // Keep only weapon
+    // Ищем замену по оружию (stateAnim)
+    uint flags = stateAnim & AnimHelpers::STATE_ANIM_FLAGS_MASK;                   // сохраняем флаги
+    stateAnim = CritterStateAnim(stateAnim & AnimHelpers::STATE_ANIM_WEAPON_MASK); // оставляем только биты оружия
 
     switch (stateAnim) {
     case CritterStateAnim::Knife:
@@ -782,19 +800,20 @@ EventResult OnCritterAnimationSubstitute(hstring modelNameBase, CritterStateAnim
         return EventResult::StopChain;
     }
 
-    stateAnim = CritterStateAnim(stateAnim | flags); // Merge weapon and flags
+    stateAnim = CritterStateAnim(stateAnim | flags); // объединяем оружие и флаги обратно
 
     return EventResult::ContinueChain;
 }
 
-// Convert from common to fallout specific
+// Преобразование общих state/action в Fallout-специфичные индексы (fStateAnim/fActionAnim и Ex-варианты).
+// Возвращает false, если действие не имеет Fallout-маппинга.
 bool OnCritterAnimationFalloutImpl(hstring modelName, CritterStateAnim stateAnim, CritterActionAnim actionAnim, int& fStateAnim, int& fActionAnim,
                                    int& fStateAnimEx, int& fActionAnimEx, uint& flags)
 {
-    // Still only weapon
+    // По-прежнему интересуют только биты оружия
     stateAnim = CritterStateAnim(stateAnim & AnimHelpers::STATE_ANIM_WEAPON_MASK);
 
-    // Weapon
+    // Оружие -> Fallout-индекс state
     switch (stateAnim) {
     case CritterStateAnim::Unarmed:
         fStateAnim = FalloutAnims1::Unarmed;
@@ -852,7 +871,7 @@ bool OnCritterAnimationFalloutImpl(hstring modelName, CritterStateAnim stateAnim
         break;
     }
 
-    // Action
+    // Действие -> Fallout-индекс action
     switch (actionAnim) {
     case CritterActionAnim::Idle:
         fActionAnim = FalloutAnims2::Stay;
@@ -891,6 +910,7 @@ bool OnCritterAnimationFalloutImpl(hstring modelName, CritterStateAnim stateAnim
     case CritterActionAnim::Fidget:
         fActionAnim = FalloutAnims2::Stay;
         break;
+    // нет Fallout-маппинга для Climbing — оставлено как breadcrumb до реализации
     // case CritterActionAnim::Climbing:
     // fActionAnim = ;
     // break;
@@ -1068,7 +1088,7 @@ bool OnCritterAnimationFalloutImpl(hstring modelName, CritterStateAnim stateAnim
     case CritterActionAnim::DeadBurn:
         fActionAnim = FalloutAnims2Dead::DeadBurn;
         fStateAnim = FalloutAnims1::Dead;
-        break; // FalloutAnims2Dead::DeadBurn2
+        break; // альтернатива: FalloutAnims2Dead::DeadBurn2
     case CritterActionAnim::DeadBurnRun:
         fActionAnim = FalloutAnims2Dead::DeadBurnRun;
         fStateAnim = FalloutAnims1::Dead;
@@ -1096,6 +1116,7 @@ bool OnCritterAnimationFalloutImpl(hstring modelName, CritterStateAnim stateAnim
         fActionAnimEx = FalloutAnims2::TurnoffWeapon;
         break;
 
+    // Действия без Fallout-маппинга (попадают в default -> false); список оставлен как breadcrumb:
     // CritterActionAnim::BeginCombat
     // CritterActionAnim::EndCombat
     // CritterActionAnim::PunchLeft
@@ -1123,6 +1144,7 @@ bool OnCritterAnimationFalloutImpl(hstring modelName, CritterStateAnim stateAnim
     return true;
 }
 
+// Событие движка для маппинга в Fallout-индексы: делегирует реализации и решает продолжать/останавливать цепочку.
 [[Event]]
 EventResult OnCritterAnimationFallout(hstring modelName, CritterStateAnim stateAnim, CritterActionAnim actionAnim, int& fStateAnim, int& fActionAnim,
                                       int& fStateAnimEx, int& fActionAnimEx, uint& flags)
@@ -1137,8 +1159,11 @@ EventResult OnCritterAnimationFallout(hstring modelName, CritterStateAnim stateA
 
 #if CLIENT
 
+// Проигрывает SFX анимации криттера по модели/полу/state/action.
+// Имя файла собирается из звукового имени модели и Fallout-индексов; для людей идёт fallback по полу и маске.
 void PlayAnimSound(hstring modelName, int gender, CritterStateAnim stateAnim, CritterActionAnim actionAnim)
 {
+    // Для перемещений звук не нужен
     if (actionAnim == CritterActionAnim::Walk || actionAnim == CritterActionAnim::Limp || actionAnim == CritterActionAnim::Run ||
         actionAnim == CritterActionAnim::PanicRun || actionAnim == CritterActionAnim::SneakWalk || actionAnim == CritterActionAnim::SneakRun) {
         return;
@@ -1150,14 +1175,14 @@ void PlayAnimSound(hstring modelName, int gender, CritterStateAnim stateAnim, Cr
         return;
     }
 
-    // Convert indicies to fallout specific
+    // Переводим индексы в Fallout-специфичные (звук только для анимаций без флагов)
     int fStateAnim = 0, fActionAnim = 0, fStateAnimEx = 0, fActionAnimEx = 0;
     uint fFlags = 0;
     if (!OnCritterAnimationFalloutImpl(modelName, stateAnim, actionAnim, fStateAnim, fActionAnim, fStateAnimEx, fActionAnimEx, fFlags) || fFlags != 0) {
         return;
     }
 
-    // Make name
+    // Собираем имя: последние два символа кодируют state и action через таблицу abc
     const string abc = "_abcdefghijklmnopqrstuvwxyz0123456789";
     string sound = modelNameSound;
     string fileName = sound;
@@ -1166,14 +1191,14 @@ void PlayAnimSound(hstring modelName, int gender, CritterStateAnim stateAnim, Cr
     sound += " ";
     sound[sound.length() - 1] = abc[fActionAnim];
 
-    // Convert "ha" to "hm" / "hf"
+    // "ha" -> "hm" / "hf" по полу
     if (sound[0] == "h" && sound[1] == "a") {
         sound[1] = (isFemale ? "f" : "m");
     }
 
     fileName = "sound/SFX/" + sound.upper() + ".ACM";
 
-    // Try play
+    // Пытаемся проиграть
     if (Game.PlaySound(fileName)) {
         return;
     }
@@ -1184,9 +1209,9 @@ void PlayAnimSound(hstring modelName, int gender, CritterStateAnim stateAnim, Cr
         return;
     }
 
-    // Find substitutes for humans
+    // Подбор замен для людей
     if (sound[0] == "h") {
-        // Try find by mask (hmxxxxab)
+        // Пробуем найти по маске (hmxxxxab)
         for (int i = 2, j = modelNameSound.length(); i < j; i++) {
             sound[i] = "x";
         }
@@ -1201,7 +1226,7 @@ void PlayAnimSound(hstring modelName, int gender, CritterStateAnim stateAnim, Cr
             return;
         }
 
-        // Convert "hf" to "hm"
+        // "hf" -> "hm"
         if (sound[1] == "f") {
             sound[1] = "m";
             fileName = "sound/SFX/" + sound.upper() + ".ACM";

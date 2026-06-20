@@ -1,14 +1,19 @@
+// FavoriteItem — сервер: поддержание избранной экипировки НПЦ по слотам.
+// Обязанности: периодическая сверка предметов в слотах с FavoriteItemPid, надевание/снятие предметов на idle, get/set пида по индексу слота.
+// Сторона: SERVER. Связи: NpcPlanes, ItemProps (CritterSlot).
 namespace FavoriteItem
 {
 
 #if SERVER
 
+// Точка входа модуля: подписываемся на инициализацию криттеров, чтобы навесить idle-таймер на НПЦ.
 [[ModuleInit]]
 void InitFavoriteItem()
 {
     Game.OnCritterInit.Subscribe(OnCritterInit);
 }
 
+// Только НПЦ получают периодическую сверку экипировки; стартовый разброс задержки разносит нагрузку по тикам.
 [[Event]]
 void OnCritterInit(Critter cr, bool firstTime)
 {
@@ -17,6 +22,7 @@ void OnCritterInit(Critter cr, bool firstTime)
     }
 }
 
+// Раз в тик сверяем фактическую экипировку НПЦ с желаемым набором FavoriteItemPid и за один проход правим один слот.
 [[TimeEvent]]
 void OnCritterIdle(Critter cr)
 {
@@ -27,7 +33,7 @@ void OnCritterIdle(Critter cr)
     hstring[] pids = cr.FavoriteItemPid.clone();
 
     if (pids.length() == 0 && NpcPlanes::IsNoPlanes(cr) && !cr.IsMoving()) {
-        // IF not any favorite item known, remove current weapon from hands on idle
+        // Если избранных предметов нет вовсе — на idle убираем текущее оружие из рук
         auto mainItem = cr.GetItem(ItemProperty::CritterSlot, CritterItemSlot::Main);
         if (mainItem != null) {
             cr.ChangeItemSlot(mainItem.Id, CritterItemSlot::Inventory);
@@ -35,6 +41,7 @@ void OnCritterIdle(Critter cr)
         }
     }
 
+    // Проходим по слотам: лишний предмет снимаем в инвентарь, недостающий избранный — надеваем; за тик правим только первый расхождённый слот.
     for (int i = 1; i < pids.length(); i++) {
         Item? slotItem = cr.GetItem(ItemProperty::CritterSlot, CritterItemSlot(i));
         if (slotItem != null && pids[i] != slotItem.ProtoId) {
@@ -51,6 +58,7 @@ void OnCritterIdle(Critter cr)
     }
 }
 
+// Возвращает пид избранного предмета для слота; вне диапазона — пустой пид.
 hstring GetFavoriteItemPid(Critter cr, int slot)
 {
     hstring[] pids = cr.FavoriteItemPid.clone();
@@ -61,6 +69,7 @@ hstring GetFavoriteItemPid(Critter cr, int slot)
     return EMPTY_HSTRING;
 }
 
+// Задаёт пид избранного предмета для слота, при необходимости расширяя массив до нужной длины.
 void SetFavoriteItemPid(Critter cr, int slot, hstring pid)
 {
     if (slot > 0) {

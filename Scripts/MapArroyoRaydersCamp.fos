@@ -1,3 +1,9 @@
+// MapArroyoRaydersCamp — серверная логика локации «лагерь рейдеров» в квесте обороны Аройо/Майнока.
+// Отвечает за вход/выход игрока с карты лагеря: проверяет стадию квеста, прогоняет опоздавших,
+// а при зачистке всех рейдеров выдаёт опыт всей группе обороны, поднимает репутацию и убирает локацию с карты.
+// Сторона исполнения: SERVER.
+// Связи: Messaging (вывод сообщений игроку), Location (скрытие известной локации); опирается на
+// квестовые Property-поля криттера (ArroyoMynocDefence, ReputationArroyo) и глобальное состояние игры.
 namespace MapArroyoRaydersCamp
 {
 
@@ -7,18 +13,20 @@ const int STR_RAIDERS_FOUND = 3482;
 
 #if SERVER
 
+// Инициализация карты лагеря: подписываемся на вход/выход криттеров для контроля стадии квеста.
 void RaidersCampInit(Map camp, bool firstTime)
 {
     camp.OnCritterIn.Subscribe(CampInCritter);
     camp.OnCritterOut.Subscribe(CampOutCritter);
 }
 
+// Вход на карту: пускаем только тех, кто реально взял квест обороны; остальных отправляем на глобалку.
 [[Event]]
 void CampInCritter(Map camp, Critter player)
 {
-    // Сразу проверим игрок ли криттер
+    // Логика касается только живых игроков, NPC игнорируем.
     if (player.ControlledByPlayer) {
-        // Если игрок не взял квест (например прицепился к группе позже), гоним его.
+        // Если игрок не взял квест (например, прицепился к группе позже), гоним его обратно.
         if (player.ArroyoMynocDefence == 0) {
             Messaging::Info(player, TextPackKey(TextPackName::Text, "" + (STR_FELL_BEHIND)));
             player.TransferToGlobal();
@@ -29,16 +37,17 @@ void CampInCritter(Map camp, Critter player)
     }
 }
 
+// Выход с карты: если лагерь зачищен, начисляем награду за оборону и сворачиваем локацию.
 [[Event]]
 void CampOutCritter(Map camp, Critter player)
 {
-    // Сразу проверим игрок ли криттер
+    // Логика касается только живых игроков, NPC игнорируем.
     if (player.ControlledByPlayer) {
         if (Game.ArroyoRaidersCount <= 0) {
-            // Если все рейдеры убиты, даем опыт и устанавливаем значение квестовой переменной.
+            // Все рейдеры убиты — выдаём опыт и продвигаем квестовую переменную на следующую стадию.
             if (player.ArroyoMynocDefence == 1) {
                 player.ArroyoMynocDefence = 2;
-                // Делим опыт на всю банду.
+                // Опыт делится на всю группу обороны.
                 int Exp = 6000 / Game.ArroyoLastDefenceGroup.length();
                 if (Exp % 10 <= 5) {
                     player.Experience = player.Experience + (int(Exp / 10) * 10);
@@ -53,7 +62,7 @@ void CampOutCritter(Map camp, Critter player)
             }
             else if (player.ArroyoMynocDefence == 3) {
                 player.ArroyoMynocDefence = 6;
-                // Делим опыт на всю банду.
+                // Опыт делится на всю группу обороны.
                 int Exp = 9000 / Game.ArroyoLastDefenceGroup.length();
                 if (Exp % 10 <= 5) {
                     player.Experience = player.Experience + (int(Exp / 10) * 10);
@@ -67,7 +76,7 @@ void CampOutCritter(Map camp, Critter player)
                 player.ReputationArroyo += 3;
             }
 
-            // Теперь уберём локацию с карты игрока. Нечего ему здесь больше делать.
+            // Квест завершён — убираем локацию с карты игрока, делать ему тут больше нечего.
             if (Game.ArroyoMynocMap != ZERO_IDENT) {
                 Location::UnsetKnownLoc(player, Game.GetLocation(Game.ArroyoMynocMap));
             }

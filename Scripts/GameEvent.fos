@@ -1,4 +1,7 @@
-namespace GameEvent // Sort 2
+// GameEvent — менеджер глобальных таймерных игровых событий.
+// Ключевые обязанности: объявление событий и условий, persist-сериализация, проверка возможности запуска и диспетчер обработчиков по имени.
+// Сторона: SERVER. Связи: GameEventRacing, GameEventStorehouse, GameEventCaches, Purgatory, GameEventReplicator, Serializator.
+namespace GameEvent
 {
 
 #if SERVER
@@ -24,25 +27,30 @@ const int EVENT_PURGATORY_END = 10;
 const int EVENT_ZOMBIE = 11;
 const int EVENT_ZOMBIE_STOP = 12;
 
+// Игровой месяц как 30 дней — единая мера интервалов между событиями.
 timespan GameMonth(int mon)
 {
     return Time::GameDays(mon * 30);
 }
 
+// Лог с префиксом "GE:" для трассировки диспетчера событий.
 void DebugLog(string s)
 {
     Game.Log("GE: " + s);
 }
+// breadcrumb миграции: прежний макрос DebugLog, оставлен как ориентир
 // #define DebugLog                      # ( s )
 
 funcdef void CallFunc();
 
+// Условие запуска события: требуемый статус другого события из таблицы.
 class GameEventOccurCondition
 {
     int GameEventIndex;
     int Status;
 };
 
+// Одно игровое событие: его состояние, условия запуска, привязка к обработчику и persist через GameEventData.
 class GameEvent
 {
     int DataIndex;                                  // Индекс события в таблице
@@ -66,6 +74,7 @@ class GameEvent
         Load();
     }
 
+    // Добавляет условие запуска без дублей (по паре событие+статус).
     void AddCondition(int eventIndex, int status)
     {
         for (int i = 0; i < OccurConditions.length(); i++) {
@@ -80,6 +89,7 @@ class GameEvent
         OccurConditions.insertLast(condition);
     }
 
+    // Сериализует событие в GameEventData по его DataIndex (persist-свойство Game).
     void Save()
     {
         auto save = Serializator::Serializator();
@@ -103,6 +113,7 @@ class GameEvent
         Game.GameEventData = gameEventData;
     }
 
+    // Восстанавливает событие из GameEventData; пустые данные оставляют поля по умолчанию.
     void Load()
     {
         auto load = Serializator::Serializator();
@@ -135,12 +146,15 @@ class GameEvent
                ";RunningEventId: " + RunningEventId;
     }
 
+    // Запускает событие по его собственному интервалу TimeOccur.
     void Run()
     {
+        // breadcrumb миграции: расчёт абсолютного времени запуска
         // int time = (TimeIsAbsolute ? TimeOccur : Game.SynchronizedTime +  TimeOccur);
         Run(TimeOccur);
     }
 
+    // Планирует таймерное событие ProcessGameEvent через интервал и переводит статус в RUNNING.
     void Run(timespan time)
     {
         /* Нужны доработки
@@ -149,11 +163,12 @@ class GameEvent
             Game.Log("Cannot run event (id=" + DataIndex + "). Time is lost:" + time);
             return;
         }*/
-        RunningEventId = Game.StartTimeEvent(time, ProcessGameEvent, DataIndex); //SavedDeferredCall
+        RunningEventId = Game.StartTimeEvent(time, ProcessGameEvent, DataIndex); // SavedDeferredCall
         Status = STATUS_RUNNING;
         Save();
     }
 
+    // Останавливает запущенное событие и снимает таймер; неактивные события игнорирует.
     void Stop()
     {
         if (Status != STATUS_RUNNING) {
@@ -170,10 +185,12 @@ class GameEvent
     }
 };
 
+// Реестр всех объявленных событий: хранит список их индексов и управляет проверкой/запуском/остановкой.
 class GameEventManager
 {
     int[] GameEventsIndexes = {};
 
+    // Сохраняет список индексов событий в persist-свойство GameEventManagerData.
     void Save()
     {
         auto save = Serializator::Serializator();
@@ -181,6 +198,7 @@ class GameEventManager
         Game.GameEventManagerData = save.GetData();
     }
 
+    // Загружает список индексов событий из GameEventManagerData.
     void Load()
     {
         GameEventsIndexes.clear();
@@ -190,6 +208,7 @@ class GameEventManager
         }
     }
 
+    // Создаёт объект события по индексу и подгружает его состояние из persist.
     GameEvent? GetGameEventByIndex(int index)
     {
         GameEvent event = GameEvent(index);
@@ -197,7 +216,7 @@ class GameEventManager
         return event;
     }
 
-    // Проверяет, можно ли создать событие, если да, запускает его
+    // Перебирает все события и запускает те, чьи условия уже выполнены.
     void CheckEventsCanOccure()
     {
         for (int i = 0, l = GameEventsIndexes.length(); i < l; i++) {
@@ -208,6 +227,7 @@ class GameEventManager
         }
     }
 
+    // Решает, может ли событие сейчас стартовать: учитывает текущий статус, признак первого запуска и все условия-зависимости.
     bool CanOccure(GameEvent? event)
     {
         if (event != null) {
@@ -238,6 +258,7 @@ class GameEventManager
         return false;
     }
 
+    // Запускает событие по индексу через заданный интервал.
     void RunEvent(int idx, timespan time)
     {
         GameEvent? event = GetGameEventByIndex(idx);
@@ -246,6 +267,7 @@ class GameEventManager
         }
     }
 
+    // Запускает событие по индексу через его собственный интервал TimeOccur.
     void RunEvent(int idx)
     {
         GameEvent? event = GetGameEventByIndex(idx);
@@ -254,6 +276,7 @@ class GameEventManager
         }
     }
 
+    // Останавливает событие и сразу пере-проверяет, не освободились ли зависимые события.
     void StopEvent(int idx)
     {
         GameEvent? event = GetGameEventByIndex(idx);
@@ -264,6 +287,8 @@ class GameEventManager
     }
 };
 
+// Срабатывание таймера события: помечает событие как OCCURED, запускает следующее по цепочке (или пере-проверяет реестр),
+// вызывает обработчик по имени HandlerFunction и выставляет финальный статус (повтор RUNNING для самозацикленных или ENDED).
 [[TimeEvent]]
 void ProcessGameEvent(any value)
 {
@@ -286,6 +311,8 @@ void ProcessGameEvent(any value)
             mng.CheckEventsCanOccure();
         }
 
+        // Сопоставление имени обработчика из persist с реальной функцией: AngelScript не умеет хранить указатель на функцию в данных,
+        // поэтому диспетчеризуем по строковому имени HandlerFunction.
         CallFunc? func;
         if (event.HandlerFunction == "GameEventRacing::RunPreparePhase") {
             func = GameEventRacing::RunPreparePhase;
@@ -331,6 +358,7 @@ void ProcessGameEvent(any value)
             DebugLog("No handler matched for event " + event.DataIndex + " (" + event.HandlerFunction + ")");
         }
 
+        // Самозацикленное событие (следующее = оно само) остаётся RUNNING для нового цикла, иначе завершается.
         if (event.NextEventIndex == event.DataIndex && nextEvent != null) {
             event.Status = STATUS_RUNNING;
         }
@@ -344,8 +372,10 @@ void ProcessGameEvent(any value)
     mng.Save();
 }
 
+// Объявляет полный граф игровых событий: интервалы запуска, цепочки next и условия-зависимости между фазами.
 void DeclareEvents()
 {
+    // справка по сигнатурам ниже:
     // void DeclareEvent(int idx, string handler, int timeOccure, bool timeAbsolute, bool defaultStart, int nextEventIdx)
     // void DeclareCondition(int idx, int eventCondition, int status)
 
@@ -373,6 +403,7 @@ void DeclareEvents()
     DeclareEvent(EVENT_ZOMBIE_STOP, "GameEventReplicator::StopEvent", GameMonth(1), false, false, EVENT_ZOMBIE);
 }
 
+// Добавляет событию-idx условие-зависимость (требуемый статус другого события) и сохраняет его.
 void DeclareCondition(int idx, int eventCondition, int status)
 {
     GameEventManager mng;
@@ -384,6 +415,7 @@ void DeclareCondition(int idx, int eventCondition, int status)
     }
 }
 
+// Регистрирует новое событие в реестре (идемпотентно: уже объявленное пропускается) и сохраняет его параметры.
 void DeclareEvent(int idx, string handler, timespan timeOccure, bool timeAbsolute, bool defaultStart, int nextEventIdx)
 {
     GameEventManager mng;
@@ -406,6 +438,7 @@ void DeclareEvent(int idx, string handler, timespan timeOccure, bool timeAbsolut
     mng.Save();
 }
 
+// Проверяет, находится ли событие в заданном статусе.
 bool CheckEventStatus(int idx, int status)
 {
     GameEventManager mng;
@@ -418,6 +451,7 @@ bool CheckEventStatus(int idx, int status)
     return false;
 }
 
+// Возвращает запланированное серверное время срабатывания запущенного события; ZERO_SYNCTIME, если не запущено.
 synctime GetEventOccurenceTime(int idx)
 {
     GameEventManager mng;
@@ -430,6 +464,7 @@ synctime GetEventOccurenceTime(int idx)
     return ZERO_SYNCTIME;
 }
 
+// Внешняя точка входа: пере-проверить весь реестр и запустить созревшие события.
 void CheckAllGameEvents()
 {
     GameEventManager mng;
@@ -437,6 +472,7 @@ void CheckAllGameEvents()
     mng.CheckEventsCanOccure();
 }
 
+// Внешний запуск события через заданный интервал.
 void RunGameEvent(int idx, timespan time)
 {
     GameEventManager mng;
@@ -444,6 +480,7 @@ void RunGameEvent(int idx, timespan time)
     mng.RunEvent(idx, time);
 }
 
+// Внешний запуск события через его собственный интервал TimeOccur.
 void RunGameEvent(int idx)
 {
     GameEventManager mng;
@@ -451,6 +488,7 @@ void RunGameEvent(int idx)
     mng.RunEvent(idx);
 }
 
+// Внешняя остановка события.
 void StopGameEvent(int idx)
 {
     GameEventManager mng;
@@ -458,6 +496,7 @@ void StopGameEvent(int idx)
     mng.StopEvent(idx);
 }
 
+// Демэнд диалога: ветка доступна, когда событие idx находится в статусе status.
 [[DialogDemand]]
 bool GameEventStatus(Critter player, Critter npc, any idx, any status)
 {

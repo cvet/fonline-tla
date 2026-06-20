@@ -1,3 +1,6 @@
+// Car — серверная логика транспорта.
+// Ключевое: заправка по типу топлива и октану, осмотр/ремонт/взлом замка, выезд на глобальную карту с переносом машины в инвентарь, проверка ключа замка.
+// Сторона: SERVER. Связи: Messaging, Time, GameTime, Scores, Lockers, ItemMovement, Content.
 namespace Car
 {
 
@@ -8,14 +11,17 @@ const int STR_CAR_INFO = 2100;
 ///@ Property Item Server bool CarIsBioEngine Mutable Persistent
 ///@ Property Item Server bool CarIsNoLockpick Mutable Persistent
 
+// Цена машины растёт с числом таких машин в мире (дефицит дороже).
 int GetCarCost(hstring protoCar)
 {
-    // Todo: GetWorldItemCount
-    int count = 10; // Game.GetWorldItemCount(protoCar);
+    // TODO: вернуть подсчёт через GetWorldItemCount
+    int count = 10; // заглушка до домиграции: Game.GetWorldItemCount(protoCar);
     ProtoItem car = Game.GetProtoItem(protoCar);
     return car.Cost + car.Cost * count;
 }
 
+// Заправка машины предметом: энергоячейки и био-топливо.
+// Октан задаёт «плотность» топлива; на био-двигатель льётся только спиртное.
 bool UseItemOnCar(Critter cr, Item car, Item item)
 {
     hstring pid = item.ProtoId;
@@ -43,9 +49,10 @@ bool UseItemOnCar(Critter cr, Item car, Item item)
         octane = 150;
     }
     else {
-        octane = 70; // Bio energy
+        octane = 70; // био-энергия
     }
 
+    // Сколько заряда не хватает до полного бака и сколько даст это топливо.
     int need = int(car.Car_TankVolume) - car.Charge;
     int count = item.Count * octane;
     if (count > need) {
@@ -71,13 +78,15 @@ bool UseItemOnCar(Critter cr, Item car, Item item)
     return true;
 }
 
+// Применение навыка к машине: сесть за руль (есть ключ), осмотр (Science),
+// ремонт (Repair) и взлом замка (Lockpick). Возврат true означает, что действие обработано.
 bool UseSkillOnCar(Critter cr, Item car, CritterProperty skill)
 {
     if (skill == CritterProperty::SpecialSkillPickOnGround) {
         if (not Lockers::IsKeyAvailable(cr, car.LockerId)) {
             Messaging::Info(cr, TextPackKey(TextPackName::Game, "" + (MsgStr::StrItemLockerNeedKey)));
         }
-        else if (cr.GetMap() != null) // Critter on local map
+        else if (cr.GetMap() != null) // криттер на локальной карте
         {
             if (Time::IsTimeoutActive(cr.TimeoutTransfer)) {
                 Messaging::Info(cr, TextPackKey(TextPackName::Game, "" + (MsgStr::StrTimeoutTransferWait)));
@@ -176,9 +185,11 @@ bool UseSkillOnCar(Critter cr, Item car, CritterProperty skill)
     return true;
 }
 
+// Выезд на глобальную карту: машина прячется и кладётся в инвентарь, криттер уходит в глобал.
 void DriveToGlobal(Critter cr, Item car, bool requestGroup)
 {
-    // Place car and bags to inventory
+    // Кладём машину (и сумки) в инвентарь.
+    // breadcrumb: перенос сумок отключён до домиграции вложенных предметов машины.
     /*for( int i = 0; i < 3; i++ )
        {
         Item bag = car.GetChild( i );

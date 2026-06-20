@@ -1,4 +1,16 @@
-namespace GameEventReplicator // Sort 3
+// GameEventReplicator — серверный игровой эвент «Репликатор»: заброшенная станция репликации,
+// где из чанов плодятся безумные гули (зомби), а игроки пробиваются к чанам и подрывают их.
+// Зона ответственности:
+//  - запуск/остановка эвента: расстановка хабологов-нпц и укреплений из мешков, спавн чанов;
+//  - подземная карта: периодический спавн зомби, их пошаговое продвижение к выходу на поверхность;
+//  - логика чана-репликатора: подрыв взрывчаткой по активному квесту, выдача награды;
+//  - поведение зомби под землёй и на поверхности: агро по тревоге, респаун, уход на глобал;
+//  - уведомления игрока о квесте через хабологов-торговцев и отладочные команды Run/Stop.
+// Сторона исполнения: SERVER (весь модуль под директивой SERVER).
+// Связи: GameEvent (статусы фаз эвента), Entrance (точки входа/свободные гексы), NpcPlanes (боевые планы
+//  и проверки занятости НПЦ), Messaging/SendMessage/MapText (реплики и тревога), Explode/SmokeGrenade
+//  (взрыв и газ), Sync (локи для async-колбэков), Tla/Content (прото-id, словари свойств, хеши точек).
+namespace GameEventReplicator
 {
 
 #if SERVER
@@ -12,10 +24,12 @@ namespace GameEventReplicator // Sort 3
 ///@ Property Critter Server synctime GEReplLastOrder Mutable Persistent
 ///@ Property Critter Server bool GEReplIsAddedAttackPlane Mutable Persistent
 
+// Фазы эвента (сверяются через GameEvent::CheckEventStatus)
 const int PHASE_NOT_STARTED = 0;
 const int PHASE_STATE_RUNNING = 1;
 const int PHASE_STOPPED = 2;
 
+// Номера точек входа (Entry) на картах станции репликации
 const int ENTRY_0 = 0;
 const int ENTRY_QGIVER = 140;
 const int ENTRY_GUARD = 141;
@@ -39,19 +53,22 @@ const int ENTRY_WARIOR = 303;
 const int ENTRY_LOOK_TO = 304;
 const int NPC_ROLE_DEF = 304; // Роль для всех временных нпц на поверхности
 
-const timespan TIME_MOVE = Time::Minutes(1); // Время, после которого гули меняют свое положение
+const timespan TIME_MOVE = Time::Minutes(1); // Время, после которого гули меняют своё положение
 
 const int MSG_ALARM = 300; // Номер сообщения, на которое зомби реагируют
 
 const int EVENT_ZOMBIE = 11;
 const int ROLE_ZOMBIE = 123;
 
+// Отладочный лог эвента с единым префиксом
 void DebugLog(string s)
 {
     Game.Log("GE: " + s);
 }
+// breadcrumb миграции: прежний макрос-вариант DebugLog (оставлен как ссылка на старый формат)
 // #define DebugLog                     # ( s )
 
+// Палитра подсветки чанов-репликаторов (мигание, чтобы было видно какой подрывать)
 const ucolor[] colorsReplicator = {ucolor(0xFF, 0x63, 0x00),
                                    ucolor(0x9C, 0x63, 0x00),
                                    ucolor(0x99, 0xFF, 0x00),
@@ -60,27 +77,30 @@ const ucolor[] colorsReplicator = {ucolor(0xFF, 0x63, 0x00),
                                    ucolor(0xFF, 0x99, 0x99),
                                    ucolor(0x66, 0xCC, 0x00)};
 
+// Диапазоны точек входа для линий мешков с песком (пары «от-до» для каждой баррикады)
 const int[][] entriesSandbags = {{149, 158}, {158, 162}, {163, 167}, {170, 177}};
 
-// GameEvent
+// Точки входа эвента «Репликатор» для системы GameEvent: запуск
 void BeginEvent()
 {
     SetReplicationAbandoned();
 }
 
+// Точка остановки эвента для системы GameEvent
 void StopEvent()
 {
-    // Остановка эвента
     StopReplicationEvent();
 }
 
+// Разворачивает заброшенную станцию: баррикады из мешков, хабологи-нпц, чаны-репликаторы.
+// Выставляет глобальный флаг GEReplStationStatus, открывающий доступ игрокам.
 void SetReplicationAbandoned()
 {
     Game.GEReplStationStatus = true;
     Location? loc = Game.GetLocation(Content::Location::replication_4);
     if (loc != null) {
         Map map = loc.GetMapByIndex(0);
-        // Расположение укреплений из мешков
+        // Выставляем укрепления из мешков по парам точек входа
         for (int i = 0, l = entriesSandbags.length(); i < l; i++) {
             for (int j = entriesSandbags[i][0], k = entriesSandbags[i][1]; j <= k; j++) {
                 if (j > entriesSandbags[i][0]) {
@@ -89,11 +109,11 @@ void SetReplicationAbandoned()
             }
         }
 
-        // Расстановка нпц
-        // Смоллет
+        // Расстановка нпц. hexC — точка, на которую все они смотрят
         mpos hexC;
         Entrance::GetEntryFreeHex(map, ENTRY_LOOK_TO, hexC);
 
+        // Смоллет (ключевой нпц-квестодатель)
         mpos hex;
         if (Entrance::GetEntryFreeHex(map, ENTRY_SMOLETT, hex)) {
             int[] props = {CritterProperty::ReplicationTime,
@@ -167,6 +187,8 @@ void SetReplicationAbandoned()
     }
 }
 
+// Раскладывает мешки с песком линией от точки eFrom к точке eTo.
+// sandbagCount задаёт «высоту» баррикады, выбирая прото-id мешка (1..5), иначе пустой мешок.
 void PlaceSandbags(Map map, int eFrom, int eTo, int sandbagCount)
 {
     Entrance::Entry? entryFrom = Entrance::GetEntry(map, eFrom, 0);
@@ -200,6 +222,7 @@ void PlaceSandbags(Map map, int eFrom, int eTo, int sandbagCount)
     }
 }
 
+// Заменяет «сломанные» чаны-репликаторы на рабочие (подрываемые) и навешивает им скрипт
 void PlaceReplicatorTanks(Map map)
 {
     Item[] items = map.GetItems(Content::Item::replicator_tank_broken);
@@ -211,7 +234,7 @@ void PlaceReplicatorTanks(Map map)
     }
 }
 
-// Остановка эвента
+// Останавливает эвент: закрывает доступ, через час сносит мешки, чистит зомби и тайм-эвенты карты
 void StopReplicationEvent()
 {
     Game.GEReplStationStatus = false;
@@ -219,10 +242,12 @@ void StopReplicationEvent()
     Location? loc = Game.GetLocation(Content::Location::replication_4);
     if (loc != null) {
         Map map = loc.GetMapByIndex(0);
+        // Отложенный снос баррикад и эвакуация игроков (SavedDeferredCall — переживает рестарт)
         Game.StartTimeEvent(Time::GameHours(1), DeleteSandbags, map.Id); //SavedDeferredCall
 
         map = loc.GetMapByIndex(2);
 
+        // Зачистка всех зомби-нпц на подземной карте
         Critter[] zombies = map.GetCritters(CritterFindType::Npc);
         for (int i = 0; i < zombies.length(); i++) {
             Critter cr = zombies[i];
@@ -232,11 +257,13 @@ void StopReplicationEvent()
         }
 
         map.StopTimeEvent(MapLoop);
-        map.StopTimeEvent(MapLoop);
+        map.StopTimeEvent(MapLoop2);
         map.StopTimeEvent(MapLoopEx1);
     }
 }
 
+// Отложенная зачистка наземной карты после остановки эвента:
+// эвакуирует игроков на глобал, сносит мешки и удаляет временных нпц (зомби и хабологов)
 [[TimeEvent]]
 void DeleteSandbags(any value)
 {
@@ -251,7 +278,7 @@ void DeleteSandbags(any value)
             }
         }
 
-        // удаление мешков
+        // Удаление мешков всех уровней «высоты»
         Item[] items = {};
         items.insertLast(map.GetItems(Content::Item::sandbag_1));
         items.insertLast(map.GetItems(Content::Item::sandbag_2));
@@ -260,8 +287,7 @@ void DeleteSandbags(any value)
         items.insertLast(map.GetItems(Content::Item::sandbag_5));
         Game.DestroyItems(items);
 
-        // удаление зомби
-        // удаление хабологов
+        // Удаление временных нпц: зомби и хабологов
         critters = map.GetCritters(CritterFindType::Npc);
         for (int i = 0; i < critters.length(); i++) {
             Critter npc = critters[i];
@@ -272,7 +298,7 @@ void DeleteSandbags(any value)
     }
 }
 
-// Скрипт люка
+// Триггер люка: спускает игрока на подземную карту (индекс 2), пока эвент активен
 [[ItemTrigger]]
 void ReplDoorTrigger(Critter player, StaticItem trigger, bool entered, mdir dir)
 {
@@ -292,6 +318,7 @@ void ReplDoorTrigger(Critter player, StaticItem trigger, bool entered, mdir dir)
     }
 }
 
+// Триггер агро: при входе игрока натравливает на него ближайших зомби (радиус 20)
 [[ItemTrigger]]
 void Attack(Critter player, StaticItem trigger, bool entered, mdir dir)
 {
@@ -312,6 +339,7 @@ void Attack(Critter player, StaticItem trigger, bool entered, mdir dir)
     }
 }
 
+// Применение навыка на люк: альтернативный спуск игрока вниз, пока эвент активен
 bool ReplDoorSkillUse(Critter player, Item scenery, CritterProperty skill, Item item)
 {
     if (Game.GEReplStationStatus) {
@@ -333,7 +361,7 @@ bool ReplDoorSkillUse(Critter player, Item scenery, CritterProperty skill, Item 
     return false;
 }
 
-// Скрипт карты
+// Инициализация подземной карты: запуск периодических циклов подсветки, спавна и продвижения зомби
 void MapInit(Map map, bool firstTime)
 {
     map.StartTimeEvent(Time::Milliseconds(0), Time::Milliseconds(5000), MapLoop);
@@ -362,6 +390,7 @@ void MapLoop(Map map)
 void MapLoop2(Map map)
 {
     if (!GameEvent::CheckEventStatus(EVENT_ZOMBIE, PHASE_STATE_RUNNING)) {
+        // breadcrumb: ранний выход по статусу эвента отключён до домиграции проверки фаз
         // DebugLog("loop 1---- убрать");
         // return;
     }
@@ -369,7 +398,7 @@ void MapLoop2(Map map)
     if (map.GetCritters(Content::Critter::Zombie, CritterFindType::NonDeadNpc).length() < 20) {
         Item[] replicators = map.GetItems(Content::Item::replicator_tank);
         if (replicators.isEmpty()) {
-            // Остановка события
+            // Все чаны подорваны — завершаем эвент и снимаем скрипт карты
             GameEvent::RunGameEvent(EVENT_ZOMBIE_STOP);
             map.SetupScript(null);
         }
@@ -423,7 +452,7 @@ void MapLoopEx1(Map map)
             hex = cr.Hex;
             switch (entry) {
             case ENTRY_ZOMBIE_EXIT:
-                // TODO:// Здесь нужно переключить счетчик сбежавших омбей
+                // TODO: здесь нужно увеличить счётчик сбежавших зомби
                 Game.DestroyCritter(cr);
                 return;
             case ENTRY_ZOMBIE_0:
@@ -452,26 +481,28 @@ void MapLoopEx1(Map map)
     }
 }
 
-// Cкрипт репликатора. Если у игрока взят квест, при применении взрывчатки на репликатор устанавливается таймер на взрыв.
-
+// Скрипт чана-репликатора: при активном квесте применение взрывчатки на чан ставит таймер до подрыва.
+// Значения STATUS_QVAR_* соответствуют этапам квеста (тексты — отображаемые подсказки игроку).
 const int STATUS_QVAR_ACTIVE = 1; // Взорвите репликационный чан, который вышел из строя.
 const int STATUS_QVAR_SETUP = 2;  // Взрывчатка установлена. Уносите ноги, пока пластид не разнес к чертям все вокруг!
 const int STATUS_QVAR_EXECUTED =
     3; // Вы взорвали один из репликационных чанов, производящих полчища безумных гулей. Возвращайтесь на поверхность и требуйте награду.
 const timespan TOUT_EXPLODE = Time::Seconds(5); // Время до взрыва после установки взрывчатки
 
+// Навешивает на чан подписку «применение предмета на меня»
 void ReplTankInit(Item item, bool firstTime)
 {
     item.OnCritterUseOnSelf.Subscribe(ReplTankUseOnMe);
 }
 
+// Реакция чана на применённый предмет: пластид по активному квесту запускает таймер подрыва
 [[Event]]
 EventResult ReplTankUseOnMe(Item item, Critter cr, Item usedItem, int param)
 {
     if ((usedItem.ProtoId == Content::Item::plastic_explosives || usedItem.ProtoId == Content::Item::active_plastic_explosive) &&
         cr.GEReplExplodeTank == STATUS_QVAR_ACTIVE) {
         Game.DestroyItem(usedItem);
-        // Создаем событие взрыва и сообщаем игроку о том, что надо убегать
+        // Запускаем отложенный взрыв и переводим квест в статус «убегай»
         cr.GEReplExplodeTank = STATUS_QVAR_SETUP;
         ident mapId;
         Map? map = cr.GetMap();
@@ -480,6 +511,7 @@ EventResult ReplTankUseOnMe(Item item, Critter cr, Item usedItem, int param)
         }
 
         any[] values = {cr.Id, item.Id, mapId};
+        // SavedDeferredCall — отложенный подрыв переживает рестарт сервера
         Game.StartTimeEvent(TOUT_EXPLODE, ExplodeReplTank, values); //SavedDeferredCall
         return EventResult::StopChain;
     }
@@ -487,6 +519,7 @@ EventResult ReplTankUseOnMe(Item item, Critter cr, Item usedItem, int param)
     return EventResult::StopChain;
 }
 
+// Отложенный подрыв чана: засчитывает квест, взрывает чан, оставляет «сломанный» чан и пускает газ
 [[TimeEvent]]
 void ExplodeReplTank(any[] values)
 {
@@ -503,7 +536,7 @@ void ExplodeReplTank(any[] values)
 
     if (cr != null && item != null) {
         if (cr.GEReplExplodeTank == STATUS_QVAR_SETUP) {
-            // Сообщение о выполнении квеста
+            // Засчитываем выполнение квеста и поднимаем навык ловушек
             cr.GEReplExplodeTank = STATUS_QVAR_EXECUTED;
             Stdlib::SkillUp(cr, CritterProperty::SkillTraps);
         }
@@ -517,18 +550,19 @@ void ExplodeReplTank(any[] values)
     }
 }
 
-// Скрипт зомби на поверхности
+// Инициализация зомби, вышедшего на поверхность: подписки на смерть/атаку/сообщения и idle-цикл
 void ZombieOutInit(Critter cr, bool firstTime)
 {
     cr.ReplicationTime = -1;
     cr.OnDead.Subscribe(OnZombieDead);
-    // При атаке на зомби, все остальные тоже сходят с ума
+    // При атаке на зомби все остальные тоже сходят с ума
     cr.OnAttacked.Subscribe(OnZombieAttackedGround);
     cr.OnMessage.Subscribe(OnZombieMessage);
     cr.StartTimeEvent(Time::Asap(), Time::Seconds(1), OnZombieIdleGround);
     cr.OnNpcPlaneEnd.Subscribe(OnZombiePlaneEnd);
 }
 
+// Реакция наземного зомби на атаку: поднимает тревогу и (один раз) агрит на всех чужих
 [[Event]]
 EventResult OnZombieAttackedGround(Critter cr, Critter attacker)
 {
@@ -559,6 +593,7 @@ EventResult OnZombieAttackedGround(Critter cr, Critter attacker)
     return EventResult::StopChain;
 }
 
+// Idle-цикл наземного зомби: ведёт его к точке выхода и снимает с карты у самого выхода
 [[TimeEvent]] [[Async]]
 void OnZombieIdleGround(Critter cr)
 {
@@ -578,7 +613,7 @@ void OnZombieIdleGround(Critter cr)
     mpos hex = cr.Hex;
     if (Entrance::GetEntryFreeHex(map, ENTRY_ZOMBIE_EXIT, hex)) {
         if (Game.GetDistance(cr.Hex, hex) < 6) {
-            // Выход на глобал
+            // Дошёл до выхода — уходит на глобал
             Game.DestroyCritter(cr);
             return;
         }
@@ -595,25 +630,26 @@ void OnZombieIdleGround(Critter cr)
     }
 }
 
-// Скрипт зомби в подземелье
+// Инициализация подземного зомби: подписки на смерть/атаку/сообщения и idle-цикл блужданий
 void ZombieInit(Critter cr, bool firstTime)
 {
     cr.ReplicationTime = -1;
     cr.OnDead.Subscribe(OnZombieDead);
-    // При атаке на зомби, все остальные тоже сходят с ума
+    // При атаке на зомби все остальные тоже сходят с ума
     cr.OnAttacked.Subscribe(OnZombieAttacked);
     cr.OnMessage.Subscribe(OnZombieMessage);
     cr.StartTimeEvent(Time::Asap(), Time::Seconds(1), OnZombieIdle);
     cr.OnNpcPlaneEnd.Subscribe(OnZombiePlaneEnd);
 }
 
+// Завершение боевого плана зомби: если он застрял на пути к «дому», перевыбираем целевой гекс
 [[Event]]
 EventResult OnZombiePlaneEnd(Critter cr, int planeId, int reason, Critter someCr, Item someItem)
 {
     NpcPlanes::NpcPlane? plane = NpcPlanes::GetCritterPlane(cr, planeId);
 
     if (reason != NpcPlanes::REASON_SUCCESS && cr.IsAlive()) {
-        // Проверяем, не домой ли он шел
+        // Проверяем, не домой ли он шёл
         Map? map = cr.GetMap();
         if (plane == null || map == null) {
             return EventResult::StopChain;
@@ -621,7 +657,7 @@ EventResult OnZombiePlaneEnd(Critter cr, int planeId, int reason, Critter someCr
 
         if (plane.Type == NpcPlanes::AI_PLANE_WALK && plane.Walk_Hex == cr.HomeHex && plane.Walk_Dir == int(cr.HomeDir) &&
             map.GetPathLength(cr.Hex, cr.HomeHex, 0, null) == 0) {
-            // Застрял
+            // Путь до дома недостижим — зомби застрял, выбираем новый гекс у текущей точки
             DebugLog("Homepos gag");
             mpos hex;
             if (Entrance::GetEntryFreeHex(map, Tla::EntryHash(cr.GEReplEntryZombie), hex) && Entrance::GetFreeHex(map, 7, hex)) {
@@ -639,6 +675,8 @@ EventResult OnZombiePlaneEnd(Critter cr, int planeId, int reason, Critter someCr
 
 const int STR_IDLE = 4002;
 const int RADIUS_ATTACK = 10;
+
+// Idle-цикл подземного зомби: случайно агрит на близких игроков, иначе бродит вокруг точки
 [[TimeEvent]] [[Async]]
 void OnZombieIdle(Critter cr)
 {
@@ -673,6 +711,7 @@ void OnZombieIdle(Critter cr)
     }
 }
 
+// Зомби услышал тревогу (MSG_ALARM) и, будучи свободным, агрит на указанную цель
 [[Event]]
 void OnZombieMessage(Critter cr, Critter fromCr, int message, any value)
 {
@@ -685,9 +724,11 @@ void OnZombieMessage(Critter cr, Critter fromCr, int message, any value)
     }
 }
 
+// Подземный зомби под атакой поднимает тревогу для всех на карте
 [[Event]]
 EventResult OnZombieAttacked(Critter cr, Critter attacker)
 {
+    // breadcrumb: раньше тревога слалась только при атаке игроком; гард оставлен на случай возврата
     // if(attacker.ControlledByPlayer)
     // {
     SendMessage::ToAllOnMap(cr, MSG_ALARM, attacker.Id);
@@ -695,6 +736,7 @@ EventResult OnZombieAttacked(Critter cr, Critter attacker)
     return EventResult::StopChain;
 }
 
+// Смерть зомби: уведомляет квестового убийцу и ставит отложенный респаун (через 30..90 сек)
 [[Event]]
 void OnZombieDead(Critter cr, Critter? killer)
 {
@@ -707,10 +749,12 @@ void OnZombieDead(Critter cr, Critter? killer)
     }
 
     cr.StartTimeEvent(Time::Seconds(Game.Random(30, 90)), RespawnZombie, killerId);
-    // TODO: добавить счетчик убитых зомби сюда
+    // TODO: добавить счётчик убитых зомби сюда
 }
 
 const int STR_RESPAWN = 4000;
+
+// Отложенный респаун зомби: «свежий» труп оживает на половине HP; иначе — засчитывается убийце по квесту
 [[TimeEvent]] [[Async]]
 void RespawnZombie(Critter cr, any identifier)
 {
@@ -755,8 +799,7 @@ void RespawnZombie(Critter cr, any identifier)
     return;
 }
 
-// Хабологи-торговцы на репл. станциях
-
+// Хабологи-торговцы на репл. станциях: подсказывают игроку про эвент (ограниченное число раз)
 [[ItemTrigger]]
 void Notify(Critter player, StaticItem trigger, bool entered, mdir dir)
 {
@@ -780,7 +823,7 @@ void Notify(Critter player, StaticItem trigger, bool entered, mdir dir)
     }
 }
 
-// debug
+// Отладочные команды консоли для ручного запуска/остановки эвента. Примеры вызова:
 // ~run debug ToMapEntry 224 0 3
 // ~run GameEventReplicator Stop 0 0 0
 void Run(Critter cr, int, int, int)

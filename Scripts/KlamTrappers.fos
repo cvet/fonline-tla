@@ -1,21 +1,28 @@
-namespace KlamTrappers // Sort 2
+// KlamTrappers — переселение трапперов Кламата (Майк, Брайан) и Эммы после завершения квеста.
+// SERVER: по таймеру/триггеру входа переносит NPC в Кламат, переставляет их домашние позиции,
+//   роли и диалоги на пост-квестовые.
+// Связи: Entrance (перенос между картами и поиск свободного гекса по энтайри), Tla::EntryHash,
+//   Content::Location/Map/Dialog, GameTime (отсчёт задержки переселения).
+namespace KlamTrappers
 {
 
 #if SERVER
 
-// Author: Cracker
+// Энтайри, на который идут трапперы при возвращении домой.
+const hstring ENTRY_MOVE_EXIT_TRAP = ("" + 301).hstr();
+const int MIKE_ROLE_ID = 30;  // Роль Майка.
+const int BRIAN_ROLE_ID = 31; // Роль Брайна.
 
-const hstring ENTRY_MOVE_EXIT_TRAP = ("" + 301).hstr(); // Ентайри на который идут трапперы при возвращении домой
-const int MIKE_ROLE_ID = 30;                            // Роль Майка.
-const int BRIAN_ROLE_ID = 31;                           // Роль Брайна.
+// Энтайри, по которым определяются домашние позиции NPC в Кламате.
+const hstring MIKE_ENTRY_HOME = ("" + 40).hstr();       // Домашняя позиция Майка.
+const hstring BRIAN_ENTRY_HOME = ("" + 41).hstr();      // Домашняя позиция Брайна.
+const hstring EMMA_ENTRY_START_HOME = ("" + 29).hstr(); // Где Эмма стоит изначально.
+const hstring EMMA_ENTRY_END_HOME = ("" + 39).hstr();   // Куда Эмма уходит после квеста.
 
-const hstring MIKE_ENTRY_HOME = ("" + 40).hstr();       // Номер энтайри по которому определятся домашняя позиция Майка в Кламате.
-const hstring BRIAN_ENTRY_HOME = ("" + 41).hstr();      // Номер энтайри по которому определятся домашняя позиция Брайна в Кламате.
-const hstring EMMA_ENTRY_START_HOME = ("" + 29).hstr(); // Номер энтайри на котором стоит Эмма в Кламате.
-const hstring EMMA_ENTRY_END_HOME = ("" + 39).hstr();   // Номер энтайри на который уходит Эмма.
+// Задержка, через которую трапперы отправляются в Кламат.
+const int START_MOVE_TIME = 60 * 60 * 24 * 30;
 
-const int START_MOVE_TIME = 60 * 60 * 24 * 30; // через это время трапперы пойдут в Кламат.
-
+// Назначает Майку и Брайану на текущей карте домашнюю точку у выхода-ловушки (возврат домой).
 void Move(Critter npc, int p0, int p1, int p2)
 {
     Map? map = npc.GetMap();
@@ -36,6 +43,8 @@ void Move(Critter npc, int p0, int p1, int p2)
     }
 }
 
+// Триггер входа траппера на первую карту Кламата: перебрасывает Майка/Брайана,
+// проставляет их пост-квестовые дом, диалог и инвентарь, а заодно переводит Эмму в пост-квестовое состояние.
 [[ItemTrigger]]
 void Transit(Critter cr, StaticItem entry, bool entered, mdir dir)
 {
@@ -45,6 +54,7 @@ void Transit(Critter cr, StaticItem entry, bool entered, mdir dir)
             return;
         }
 
+        // Переносим траппера на карту Кламата и закрепляем за ним домашнюю точку, направление и диалог.
         Map map = klamath.GetMapByIndex(0);
         Entrance::CritterTransferToMapEntry(cr, map.Id, Tla::EntryHash(1));
         mpos hex;
@@ -56,6 +66,7 @@ void Transit(Critter cr, StaticItem entry, bool entered, mdir dir)
         cr.BagId = 51;
         Entrance::GetEntryFreeHex(map, EMMA_ENTRY_START_HOME, hex);
 
+        // Среди криттеров рядом со стартовой точкой Эммы переключаем её на пост-квестовый диалог и новый дом.
         Critter[] critters = map.GetCrittersInRadius(hex, 100, CritterFindType::Any);
         for (int i = 0; i < critters.length(); i++) {
             if (critters[i].DialogId == Content::Dialog::klam_emma) {
@@ -71,6 +82,7 @@ void Transit(Critter cr, StaticItem entry, bool entered, mdir dir)
     return;
 }
 
+// Триггер входа на вторую карту Кламата: только Майк, закрепляет его финальную домашнюю точку.
 [[ItemTrigger]]
 void TransitMike(Critter cr, StaticItem entry, bool entered, mdir dir)
 {
@@ -90,12 +102,14 @@ void TransitMike(Critter cr, StaticItem entry, bool entered, mdir dir)
     }
 }
 
+// Результат диалога: ставит отложенное событие переселения траппера через START_MOVE_TIME.
 [[DialogResult]]
 void StartMove(Critter player, Critter npc)
 {
     Game.StartTimeEvent(GameTime::GameSeconds(START_MOVE_TIME), Move, npc.Id);
 }
 
+// Отложенное событие переселения: находит траппера по id и обновляет его домашнюю точку.
 [[TimeEvent]]
 void Move(any value)
 {

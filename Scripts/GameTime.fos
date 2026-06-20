@@ -1,8 +1,16 @@
+// GameTime — работа с игровым временем и таймаутами действий.
+// Распаковка синхронизированного игрового времени (год/месяц/день/час/минута/секунда),
+// форматирование времени в строку, расчёт таймаутов навыков и боя, вычисление
+// ближайшего наступления заданной даты/времени и предикаты времени суток.
+// COMMON: общие хелперы; геттеры компонентов времени доступны на SERVER и CLIENT,
+// расчёты таймаутов опираются на свойства криттера и настройки мира/боя/движения.
 namespace GameTime
 {
 
 #if SERVER || CLIENT
 
+// Геттеры отдельных компонентов текущего игрового времени: каждый распаковывает
+// синхронизированное время и возвращает нужную составляющую.
 int GetHour()
 {
     int year = 0, month = 0, day = 0, hour = 0, minute = 0, second = 0, milisecond = 0;
@@ -63,7 +71,8 @@ string SynchronizedTimeToString(synctime gameTime)
 
 #endif
 
-// Timeouts in real seconds, generic values
+// Таймауты действий навыков и боя в реальных секундах от текущего игрового времени.
+// Чем выше профильный навык криттера, тем короче таймаут; часть значений фиксирована.
 synctime FirstAidTimeout(Critter cr)
 {
     return Game.SynchronizedTime + Time::Seconds(100 / ((cr.SkillFirstAid > 3 ? cr.SkillFirstAid : 3) * 100 / Tla::MaxSkillValue()));
@@ -124,9 +133,10 @@ synctime HealingTimeout(Critter cr)
     return Game.SynchronizedTime + Time::Minutes(2);
 }
 
-// Timeouts in real seconds, generic values
+// Верхняя граница допустимого таймаута: значения свыше считаются некорректными.
 const timespan MAXIMUM_TIMEOUT = Time::Hours(5);
 
+// Классификация времени суток по часу: ночь задана через переход через полночь.
 bool IsMorning(int hour)
 {
     return (hour) >= 7 && (hour) <= 11;
@@ -142,6 +152,7 @@ bool IsNight(int hour)
     return (hour) >= 22 || (hour) <= 6;
 }
 
+// Ссылки на исходные строки старого скрипта (breadcrumb миграции, не удалять):
 // 671
 // 672
 // возможно это уже не потребуется
@@ -155,9 +166,12 @@ timespan GameSeconds(int value)
     return timespan(value / Settings.WorldTime.Multiplier, 3);
 }
 
+// Возвращает ближайшее будущее наступление заданного момента времени.
+// Нулевые год/месяц/день означают "любой/повторяющийся": берётся текущее значение,
+// а jump задаёт шаг перебора (год/месяц/день) для поиска ближайшего наступления.
 synctime GetNearSynchronizedTime(int year, int month, int day, int hour, int minute, int second)
 {
-    int jump = 0; // 1 - years, 2 - months, 3 - days
+    int jump = 0; // шаг перебора: 1 - годы, 2 - месяцы, 3 - дни
     int gameYear = 0;
     int gameMonth = 0;
     int gameDay = 0;
@@ -188,7 +202,7 @@ synctime GetNearSynchronizedTime(int year, int month, int day, int hour, int min
     while (time <= Game.SynchronizedTime) {
         switch (jump) {
         case 0:
-            return Game.SynchronizedTime + Time::Milliseconds(1); // Time expired, call faster
+            return Game.SynchronizedTime + Time::Milliseconds(1); // время уже прошло — вызвать как можно скорее
         case 1:
             year++;
             break;
@@ -225,6 +239,7 @@ synctime GetNearSynchronizedTime(int year, int month, int day, int hour, int min
     return time;
 }
 
+// Число дней в месяце с учётом високосного года (григорианское правило для февраля).
 int GetDaysInMonth(int year, int month)
 {
     switch (month) {

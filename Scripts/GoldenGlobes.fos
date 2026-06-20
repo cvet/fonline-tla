@@ -1,16 +1,23 @@
+// GoldenGlobes — мини-сценарий «съёмки» на локации Golden Globes.
+// SERVER: ведёт единственную активную сессию записи (один игрок за раз):
+// старт/стоп через диалог, таймаут по игровому времени, учёт «дублей» и выдача
+// karma-перка при использовании кровати под камерой.
+// Связи: Effects (затемнение экрана), диалоги локации (демонды/результаты).
 namespace GoldenGlobes
 {
 
 #if SERVER
 
-const int REC_MAX_TIME = 10; // In game minutes
+const int REC_MAX_TIME = 10; // в игровых минутах
 const int FORCE_DIALOG_REC_SUCC = 3;
 const int FORCE_DIALOG_REC_FAIL = 4;
 
+// Состояние единственной активной сессии записи (один игрок одновременно).
 ident RecPlayerId;
 synctime RecBeginTime = ZERO_SYNCTIME;
 int FuckCount = 0;
 
+// Авто-завершение сессии по истечении лимита игрового времени.
 void CheckTime()
 {
     if (RecPlayerId != ZERO_IDENT && Game.SynchronizedTime - RecBeginTime > Time::GameMinutes(REC_MAX_TIME)) {
@@ -18,12 +25,14 @@ void CheckTime()
     }
 }
 
+// Идёт ли сейчас запись (с предварительной проверкой таймаута).
 bool RecInAir()
 {
     CheckTime();
     return RecPlayerId != ZERO_IDENT;
 }
 
+// Старт сессии записи для указанного игрока.
 void BeginRec(Critter cr)
 {
     RecPlayerId = cr.Id;
@@ -31,6 +40,7 @@ void BeginRec(Critter cr)
     FuckCount = 0;
 }
 
+// Сброс состояния сессии записи.
 void EndRec()
 {
     RecPlayerId = ZERO_IDENT;
@@ -38,18 +48,19 @@ void EndRec()
     FuckCount = 0;
 }
 
-// ************************************************************************/
-// * Scenery                                                              */
-// ************************************************************************/
+// Обработчики статичных объектов сцены (камера, кровать).
 
-// bool Camera( Critter cr, StaticItem camera, CritterProperty skill, Item item )
+// Камера-декорация: взаимодействие ничего не делает, просто разрешено.
+// Старая сигнатура (до миграции движка): bool Camera( Critter cr, StaticItem camera, CritterProperty skill, Item item )
 [[ItemStatic]]
 bool Camera(Critter cr, StaticItem camera, Item item, any skill)
 {
     return true;
 }
 
-// bool Bed( Critter cr, StaticItem bed, CritterProperty skill, Item item )
+// Кровать: засчитывает «дубль» и выдаёт перк, если на ней работает активный
+// записываемый игрок (взаимодействие без предмета через навык подбора с земли).
+// Старая сигнатура (до миграции движка): bool Bed( Critter cr, StaticItem bed, CritterProperty skill, Item item )
 [[ItemStatic]]
 bool Bed(Critter cr, StaticItem bed, Item? item, any skill)
 {
@@ -69,16 +80,16 @@ bool Bed(Critter cr, StaticItem bed, Item? item, any skill)
     return true;
 }
 
-// ************************************************************************/
-// * Demands                                                              */
-// ************************************************************************/
+// Диалоговые демонды: проверки доступности и статуса записи.
 
+// Можно ли начать запись (нет активной сессии).
 bool IsCanRec(Critter player, Critter npc, int val)
 {
     CheckTime();
     return not RecInAir();
 }
 
+// Этот игрок записывается и уже сделал хотя бы один «дубль».
 [[DialogDemand]]
 bool IsFucked(Critter player, Critter npc, any val)
 {
@@ -86,6 +97,7 @@ bool IsFucked(Critter player, Critter npc, any val)
     return player.Id == RecPlayerId && FuckCount > 0;
 }
 
+// Этот игрок — текущий записываемый.
 [[DialogDemand]]
 bool IsRec(Critter player, Critter npc, any val)
 {
@@ -93,6 +105,7 @@ bool IsRec(Critter player, Critter npc, any val)
     return player.Id == RecPlayerId;
 }
 
+// Этот игрок не является текущим записываемым.
 [[DialogDemand]]
 bool IsNotRec(Critter player, Critter npc, any val)
 {
@@ -100,10 +113,9 @@ bool IsNotRec(Critter player, Critter npc, any val)
     return player.Id != RecPlayerId;
 }
 
-// ************************************************************************/
-// * Results                                                              */
-// ************************************************************************/
+// Диалоговые результаты: управление сессией записи.
 
+// Попытка старта записи: при успехе ведёт к ветке успеха, иначе — к ветке отказа.
 [[DialogResult]]
 int TryRec(Critter player, Critter npc, any val)
 {
@@ -115,20 +127,18 @@ int TryRec(Critter player, Critter npc, any val)
     return FORCE_DIALOG_REC_FAIL;
 }
 
+// Безусловный старт записи для игрока (перегрузка под сигнатуру диалога).
 void BeginRec(Critter player, Critter npc, int val)
 {
     BeginRec(player);
 }
 
+// Завершение записи из диалога.
 [[DialogResult]]
 void EndRec(Critter player, Critter npc, any val)
 {
     EndRec();
 }
-
-// ************************************************************************/
-// *                                                                      */
-// ************************************************************************/
 
 #endif
 

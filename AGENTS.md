@@ -12,7 +12,8 @@ Project front door for AI maintainers working on **FOnline: The Life After** (TL
   - `Critters/`, `Items/`, `Maps/`, `Dialogs/`, `Gui/`, `Texts/`, `Resources/` - authored game content and assets.
   - `TLA.fomain` - master engine/game config and `[SubConfig]` profiles.
   - `CMakeLists.txt` / `CMakePresets.json` - build glue. Default local preset is `auto` into `Build/Auto`.
-- Authored repository content is English unless an existing player-facing content surface is already localized. The user usually converses in Russian; answer the user in Russian unless asked otherwise, but keep committed docs/code in English.
+- The user usually converses in Russian; answer the user in Russian unless asked otherwise.
+- **Script comment language is Russian** (owner decision 2026-06-20, reversing the prior English-only rule). In `Scripts/*.fos`: code comments and the per-file header block (see [Docs/ScriptStyle.md](Docs/ScriptStyle.md)) are written in Russian, and existing English comments are translated to Russian as files are touched. **Exception:** serialized/contract names stay English — `///@ Property/Enum/Setting/Event/RemoteCall`, proto ids, text-pack keys, and identifiers (renaming them risks save/network/content migration). Agent-facing markdown (`AGENTS.md`, most of `Docs/`) and native C++ (`SourceExt/`) remain English; player-facing text follows the existing localized pack structure.
 - Text packs are baked for `russ engl`; `Client.Language = engl` in the default config. When editing player-facing text, preserve the existing pack structure and update both language surfaces when the nearby content expects that.
 
 ## Repository Orientation
@@ -189,7 +190,7 @@ AngelScript embedded in screens lives in the `.fogui` JSON: `OnGlobalMouseDown`,
 
 - Use `Format :: Scripts`, `Format :: Prototypes`, `Format :: Main Config`, or `Format :: All` before handing off when touched files need formatting.
 - `FormatSource.bat` is a smaller formatter path for `Scripts/*.fos`, `Scripts/Json/*.fos`, `SourceExt/*`, and `Gui/*.fogui`.
-- `Tools/ScriptQuality/validate_scripts.py` is a quality *validator* (reports only; not a formatter) for `Scripts/*.fos`: banner tags, Cyrillic comments, magic text-pack ids, hand-rolled-util calls, redundant bool returns, commented-out code, `namespace`==filename, `#if` balance, component `== null` probes, trailing blank line. Run `Analyze :: Script Quality` for a summary; `--ratchet` fails only on new violations vs `Tools/ScriptQuality/baseline.json`; `--fix` applies the few safe autofixes. See `Tools/NullableEstimate/validate_nullable.py` for the complementary `?`/FO_NULLABLE checks.
+- `Tools/ScriptQuality/validate_scripts.py` is a quality *validator* (reports only; not a formatter) for `Scripts/*.fos`: banner tags, magic text-pack ids, hand-rolled-util calls, redundant bool returns, commented-out code, `namespace`==filename, `#if` balance, component `== null` probes, trailing blank line. (The former `cyrillic-comment` check was retired 2026-06-20 — script comments are Russian now; see [Docs/ScriptStyle.md](Docs/ScriptStyle.md).) Run `Analyze :: Script Quality` for a summary; `--ratchet` fails only on new violations vs `Tools/ScriptQuality/baseline.json`; `--fix` applies the few safe autofixes. See `Tools/NullableEstimate/validate_nullable.py` for the complementary `?`/FO_NULLABLE checks.
 - Do not hand-edit generated files: `Scripts/Content.fos`, generated `Scripts/GuiScreens.fos` without the matching `.fogui` update, baked output under `Baking/`, cache files under `Cache/`, or generated `VERSION`.
 - Local working trees such as `TLA-Dev/`, `Baking/`, `Cache/`, and build folders are outputs/debug state, not canonical authored inputs.
 

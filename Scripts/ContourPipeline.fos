@@ -1,3 +1,7 @@
+// ContourPipeline — клиентская подсветка контуром критеров и предметов.
+// Обязанности: кэш подсвеченных сущностей по свойству Contour, дорисовка офскрин-эффектом,
+//  реакция на вход/выход/смену свойства.
+// Сторона: CLIENT. Связи: Game render hooks, Settings.Render.Contour*.
 namespace ContourPipeline
 {
 
@@ -9,11 +13,14 @@ namespace ContourPipeline
 
 #if CLIENT
 
+// Подтип офскрин-эффекта, под которым регистрируется и рисуется контур.
 const int ContourEffectSubtype = 2;
 
+// Кэш сущностей с активным контуром: чтобы каждый кадр не сканировать всю карту.
 Critter[] HighlightedCritters = {};
 Item[] HighlightedItems = {};
 
+// Точка входа модуля: при выключенной подсветке не подписываемся ни на что.
 [[ModuleInit]]
 void ModuleInit()
 {
@@ -24,9 +31,11 @@ void ModuleInit()
     verify(!Settings.Render.ContourEffect.isEmpty(), "Assertion failed");
     verify(Settings.Render.ContourPadding >= 0, "Assertion failed");
 
+    // Перестраиваем кэш при любой смене свойства Contour у критера/предмета.
     Game.AddPropertySetter(CritterProperty::Contour, OnCritterContourChanged);
     Game.AddPropertySetter(ItemProperty::Contour, OnItemContourChanged);
 
+    // Держим кэш в актуальном состоянии по появлению/исчезновению сущностей и рисуем после спрайтов.
     Game.OnStart.Subscribe(OnStart);
     Game.OnCritterIn.Subscribe(OnCritterIn);
     Game.OnCritterOut.Subscribe(OnCritterOut);
@@ -35,6 +44,7 @@ void ModuleInit()
     Game.OnRenderMap_AfterSprites.Subscribe(OnRenderMapAfterSprites);
 }
 
+// Регистрируем офскрин-эффект контура при старте клиента.
 [[Event]]
 void OnStart()
 {
@@ -77,6 +87,8 @@ void OnItemContourChanged(Item item)
     RefreshItemContourCache(item);
 }
 
+// Дорисовка контуров поверх спрайтов карты. Идём по кэшу с конца, чтобы безопасно
+// выкидывать протухшие записи (уничтожен/сменил владельца/сброшен контур) прямо в цикле.
 [[Event]]
 void OnRenderMapAfterSprites(Map map, irect drawArea)
 {
@@ -118,6 +130,8 @@ void OnRenderMapAfterSprites(Map map, irect drawArea)
     }
 }
 
+// Синхронизируем кэш критеров с текущим состоянием: вне карты или без контура — убираем,
+// иначе добавляем (без дублей).
 void RefreshCritterContourCache(Critter cr)
 {
     if (cr.MapId == ZERO_IDENT || cr.Contour == ZERO_UCOLOR) {
@@ -128,6 +142,7 @@ void RefreshCritterContourCache(Critter cr)
     }
 }
 
+// То же для предметов: подсвечиваем только лежащие на гексе карты с заданным контуром.
 void RefreshItemContourCache(Item item)
 {
     if (item.Ownership != ItemOwnership::MapHex || item.MapId == ZERO_IDENT || item.Contour == ZERO_UCOLOR) {
@@ -154,12 +169,14 @@ void RemoveHighlightedItem(Item item)
     }
 }
 
+// Полный сброс кэша (например, при смене карты/сцены).
 void ClearHighlightedEntities()
 {
     HighlightedCritters = {};
     HighlightedItems = {};
 }
 
+// Привязываем выбранный шейдер контура к нашему подтипу офскрин-эффекта.
 void RegisterContourEffect()
 {
     Game.SetEffect(EffectType::Offscreen, ContourEffectSubtype, Settings.Render.ContourEffect);

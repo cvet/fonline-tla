@@ -1,9 +1,12 @@
-namespace DenBarBekkyBoy // Sort 2
+// DenBarBekkyBoy — серверный NPC-мальчик в баре Den.
+// Обязанности: периодические реплики, реакция на воровство, выдача Хаммера+ключа за 10000 крышек, выдача рации при респавне.
+// Сторона: SERVER. Связи: GameTime, Messaging.
+namespace DenBarBekkyBoy
 {
 
 #if SERVER
 
-// Строки
+// Ключи строк текст-пака для реплик мальчика
 const int STR_STEAL_FAIL = 1100;
 const int STR_RADIO = 1101;
 const int STR_MORNING = 1102;
@@ -13,33 +16,34 @@ void BoyInit(Critter boy, bool firstTime)
 {
     boy.OnStealing.Subscribe(BoyStealing);
     boy.OnRespawn.Subscribe(BoyRespawn);
-    // Создаем событие, где мальчик зазывает покупать у него рации
+    // Запускаем событие зазывания: мальчик предлагает купить у него рации
     Game.StartTimeEvent(Time::GameMinutes(Game.Random(10, 50)), Announcement, boy.Id);
-    // Создаем событие, где мальчик приветсвует с добрым утром
+    // Запускаем событие утреннего приветствия (привязано к 08:00 игрового времени)
     Game.StartTimeEvent((GameTime::GetNearSynchronizedTime(0, 0, 0, 8, 0, 0) - Game.SynchronizedTime), AnnouncementMorning, boy.Id);
 }
 
-// Предопределенная функция, срабатывает, когда у нпц воруют
+// Реакция на попытку воровства у мальчика (предопределённое событие движка).
+// Изредка мальчик подаёт реплику, отмечая факт кражи.
 [[Event]]
 void BoyStealing(Critter boy, Critter thief, Item item, int count)
 {
-    // Иногда при удачном воровстве мальчик говорит Хмм
+    // Иногда при удачном воровстве мальчик что-то бурчит
     if (Game.Random(0, 5) == 0) {
         Messaging::SayOnHead(boy, TextPackKey(TextPackName::Text, "" + (STR_STEAL_FAIL)));
     }
 }
 
-// Событие 1
+// Периодическое зазывание купить рацию. Сам себя перезапускает по таймеру.
 [[TimeEvent]]
 void Announcement(any value)
 {
-    // Ночью не говорим, ждем до утра.
+    // Ночью не зазываем — переносим следующую попытку на утро
     if (GameTime::GetHour() > 20 || GameTime::GetHour() < 8) {
         Game.StartTimeEvent((GameTime::GetNearSynchronizedTime(0, 0, 0, 8, Game.Random(20, 40), 0) - Game.SynchronizedTime), Announcement, value);
         return;
     }
 
-    // Зазываем.
+    // Выдаём реплику-зазывание
     Critter? boy = Game.GetCritter(value);
     if (boy != null) {
         Messaging::SayOnHead(boy, TextPackKey(TextPackName::Text, "" + (STR_RADIO)));
@@ -48,7 +52,7 @@ void Announcement(any value)
     Game.StartTimeEvent(Time::GameMinutes(Game.Random(50, 70)), Announcement, value);
 }
 
-// Событие 2
+// Ежедневное утреннее приветствие. Перезапускается на следующие сутки.
 [[TimeEvent]]
 void AnnouncementMorning(any value)
 {
@@ -60,16 +64,14 @@ void AnnouncementMorning(any value)
     Game.StartTimeEvent(Time::GameDays(1), AnnouncementMorning, value);
 }
 
-// Создание Хаммера. Ключ вручаем игроку.
-// Вызывается из диалога, в Результате.
-// При ошибке создания Хаммера диалоговая ветка отводится на №9.
-// master - игрок
-// slave - нпц
-// Обойдемся одним игроком.
+// Создание Хаммера за 10000 крышек. Ключ от машины вручаем игроку.
+// Вызывается из диалога (в блоке Result).
+// При ошибке (нет карты) диалоговая ветка уводится на узел №9.
+// master — игрок, slave — нпц.
 [[DialogResult]]
 int CreateHummer(Critter player, Critter boy)
 {
-    // Берем карту на которой находится игрок с нпц
+    // Берём карту, на которой находится игрок (там же и нпц)
     Map? map = player.GetMap();
     if (map == null) {
         Game.Log("Map nullptr.");
@@ -80,28 +82,29 @@ int CreateHummer(Critter player, Critter boy)
     int[] x = {252, 250, 251, 250, 255};
     int[] y = {182, 186, 192, 195, 192};
 
-    int keyId = Game.Random(10000, 50000); // Генерация номера ключа
+    int keyId = Game.Random(10000, 50000); // Случайный номер замка/ключа
 
-    // Хаммер, комплексное создание всесте с багажником
+    // Создаём машину (Хаммер) и привязываем к ней номер замка
     Item car = map.AddItem(mpos(x[pos], y[pos]), Content::Item::hummer, 1);
     car.LockerId = keyId;
 
-    // Устанавливаем на багажник номер замка
+    // breadcrumb миграции: код привязки номера замка к багажнику машины, не удалять до домиграции багажника
     /* Item bag = car.GetChild( 0 );
        if(  bag  != null )
          bag.LockerId = keyId;
        else
          Game.Log( "Bag not created." );
     */
-    // Ключ
+    // Выдаём игроку ключ с тем же номером замка
     Item key = player.AddItem(Content::Item::key, 1);
     key.LockerId = keyId;
 
-    // Удаляем 10000 монет
+    // Списываем оплату — 10000 крышек
     player.DestroyItem(Content::Item::bottle_caps, 10000);
     return 0;
 }
 
+// При респавне гарантируем наличие рации в инвентаре (нужна для зазывания/торговли)
 [[Event]]
 void BoyRespawn(Critter boy)
 {

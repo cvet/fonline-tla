@@ -1,9 +1,12 @@
+// FighterPattern — настраиваемый боевой AI команд NPC на карте (SERVER).
+// Класс FighterPattern задаёт дистанцию атаки, радиус подмоги, пороги тревоги, само-хил и форс брони.
+// Опирается на NpcPlanes, EnemyStack, SendMessage, Drugs, AnimHelpers.
 namespace FighterPattern
 {
 
 #if SERVER
 
-// специализированный инструмент для настройки поведения нпц в команде на конкретной карте
+// Специализированный инструмент для настройки поведения NPC в команде на конкретной карте.
 
 ///@ Property Critter Server int32 FighterPatternCanGenStim Mutable Persistent
 ///@ Property Critter Server int32 FighterPatternAllyAssistRadius Mutable Persistent
@@ -16,11 +19,12 @@ namespace FighterPattern
 
 const int MSG_KILLEM = 17; // код сообщения "убить гада"
 
+// Заглушка отладочного лога: тело пустое, чтобы отладочные вызовы не засоряли журнал в релизе.
 void DebugLog(string s)
 {
 }
 
-// счетчик убитых напарников (с тем же TeamID)
+// Счётчик убитых напарников (с тем же TeamId).
 int DeadAllyCounter(Critter cr)
 {
     Map? map = cr.GetMap();
@@ -39,6 +43,7 @@ int DeadAllyCounter(Critter cr)
     return map.FighterPatternDeadAllies.get(cr.TeamId, 0);
 }
 
+// Увеличивает счётчик погибших напарников команды на карте (учитываются только NPC с ненулевым TeamId).
 void AddDeadAlly(Critter cr)
 {
     Map? map = cr.GetMap();
@@ -59,15 +64,16 @@ void AddDeadAlly(Critter cr)
     map.FighterPatternDeadAllies = deadAllies;
 }
 
-// map карта с мобами
-// teamId - номер команды моббов
-// aDist - дистанция атаки видимого игрока
-// alRadius - радиус реакции нпц на нападение моба из группы
-// alNum - число мобов, которые подключаются к атаке
-// hLvl - значение здоровья, при котором моб будет лечиться стимпаками
-// locAlarm - число смертей мобов после которого остальные подходят к нападающему
-// globAlarm - число смертей мобов, после которого все мобы на карте присоединяются к бою
-// fArmLvl - коэффициент усиления брони и резистов моба
+// Применяет единый боевой шаблон ко всем NPC указанной команды на карте и подписывает карту на смерть криттеров.
+// map      — карта с мобами
+// teamId   — номер команды мобов
+// aDist    — дистанция атаки видимого игрока
+// alRadius — радиус реакции NPC на нападение на моба из группы
+// alNum    — число мобов, которые подключаются к атаке
+// hLvl     — порог здоровья (в процентах), при котором моб начинает лечиться стимпаками
+// locAlarm — число смертей мобов, после которого на помощь подходят остальные видящие нападающего
+// globAlarm — число смертей мобов, после которого в бой включаются все мобы на карте
+// fArmLvl  — коэффициент усиления брони и резистов моба
 void SetMapMobsTemplate(Map map, int teamId, int aDist, int alRadius, int alNum, int hLvl, int locAlarm, int globAlarm, int fArmLvl)
 {
     FighterPattern fp = FighterPattern();
@@ -91,6 +97,7 @@ void SetMapMobsTemplate(Map map, int teamId, int aDist, int alRadius, int alNum,
     map.OnCritterDead.Subscribe(OnMapCritterDead);
 }
 
+// Параметры боевого шаблона команды: переносятся в свойства каждого криттера через InitPattern.
 class FighterPattern
 {
     int AttackDist;       // расстояние, на котором начинается атака
@@ -101,16 +108,17 @@ class FighterPattern
     int GlobalAlarmDeads; // число смертей, после которых призыв о помощи пойдет по всей карте
     int ForceArmourLvl;   // уровень усиления брони и резистов криттера 0 - базовый
 
+    // Записывает параметры шаблона в свойства криттера, подписывает его события и при необходимости усиливает броню.
     void InitPattern(Critter cr)
     {
         cr.ShowCritterDist1 = AttackDist;
-        // DebugLog("cr,GlobAl" +cr.FighterPatternGlobalAlarmDeads);
+        // отладка: DebugLog("cr,GlobAl" +cr.FighterPatternGlobalAlarmDeads);
         cr.FighterPatternAllyAssistRadius = AllyAssistRadius;
         cr.FighterPatternAssistAlliesNum = AssistAlliesNum;
         cr.FighterPatternMustHealLvl = MustHealLvl;
         cr.FighterPatternLocalAlarmDeads = LocalAlarmDeads;
         cr.FighterPatternGlobalAlarmDeads = GlobalAlarmDeads;
-        // DebugLog("GlobalAlarmDeads;" + GlobalAlarmDeads+"cr,GlobAl" +cr.FighterPatternGlobalAlarmDeads);
+        // отладка: DebugLog("GlobalAlarmDeads;" + GlobalAlarmDeads+"cr,GlobAl" +cr.FighterPatternGlobalAlarmDeads);
 
         SetOnDeadEvents(cr);
         SetOnAttackedEvents(cr);
@@ -122,10 +130,11 @@ class FighterPattern
         ForceCritterArmour(cr);
     }
 
+    // Принудительно усиливает резисты, макс. HP и (на высоких уровнях) перк/статы криттера по ForceArmourLvl.
     void ForceCritterArmour(Critter cr)
     {
         if (ForceArmourLvl <= 0) {
-            return; // base level: no forced armour/resists (also avoids Game.Random(1, 0))
+            return; // базовый уровень: брони/резистов не навешиваем (заодно избегаем Game.Random(1, 0))
         }
 
         if (ForceArmourLvl > 3 && Game.Random(1, 3) == 1) {
@@ -147,38 +156,48 @@ class FighterPattern
         cr.CurrentHp = Math::Clamp(cr.CurrentHp + ForceArmourLvl * 30, 50, 250);
     }
 
+    // Задаёт случайный лимит само-генерации стимпаков и подписывает реакцию на получение урона.
     void SetOnAttackedEvents(Critter cr)
     {
         cr.FighterPatternCanGenStim = Game.Random(1, 5);
         cr.OnAttacked.Subscribe(CritterAttacked);
     }
 
+    // Подписывает реакцию на появление криттера в радиусе атаки.
     void SetSeeEnemyEvents(Critter cr)
     {
         cr.OnCritterAppearedDist1.Subscribe(ShowCritter1);
     }
 
+    // Зарезервировано: реакция на выброшенный предмет (пока не используется).
     void SetOnItemDroppedEvents(Critter cr)
     {
     }
 
+    // Зарезервировано: реакция на смерть. Подписки отключены до домиграции этих событий.
     void SetOnDeadEvents(Critter cr)
     {
+        // отключено до домиграции событий смерти:
         // cr.OnDead.Subscribe(e_CritterDead);
         // cr.OnSomeCritterDead.Subscribe(e_CritterSmthDead);
     }
 
+    // Подписывает обработку входящих внутрикомандных сообщений (тревога/наводка на цель).
     void SetOnMessageEvents(Critter cr)
     {
         cr.OnMessage.Subscribe(CritterMessage);
     }
 
+    // Зарезервировано: реакция на простой (пока не используется).
     void SetOnIddleEvents(Critter cr)
     {
     }
 };
 
-/************************Обработка событий*************************/
+// Обработка событий.
+
+// При смерти криттера на карте: сбрасывает флаг тревоги, если погибли все игроки, иначе копит счётчик
+// погибших напарников и поднимает локальную/глобальную тревогу против убийцы-игрока.
 [[Event]]
 void OnMapCritterDead(Map map, Critter cr, Critter? killer)
 {
@@ -212,6 +231,7 @@ void OnMapCritterDead(Map map, Critter cr, Critter? killer)
     }
 }
 
+// Первый заметивший игрока NPC поднимает тревогу по карте и наводит соседей по группе на цель.
 [[Event]]
 void ShowCritter1(Critter cr, Critter showCrit)
 {
@@ -224,15 +244,15 @@ void ShowCritter1(Critter cr, Critter showCrit)
         return;
     }
 
-    // DebugLog("see player");
-    // на появление игроков реагируют только первые заметивщие
+    // отладка: DebugLog("see player");
+    // на появление игроков реагируют только первые заметившие
     if (map.FighterPatternEnemySpotted) {
         return;
     }
 
     map.FighterPatternEnemySpotted = true;
 
-    // DebugLog("See Critter mydist"+cr.ShowCritterDist1 + " and dist "+ Game.GetDistance(cr, showCrit));
+    // отладка: DebugLog("See Critter mydist"+cr.ShowCritterDist1 + " and dist "+ Game.GetDistance(cr, showCrit));
     if (!showCrit.IsAlive()) {
         return;
     }
@@ -241,7 +261,7 @@ void ShowCritter1(Critter cr, Critter showCrit)
         return;
     }
 
-    // DebugLog("will attack Critter");
+    // отладка: DebugLog("will attack Critter");
     CritterMessageImpl(cr, cr, MSG_KILLEM, showCrit.Id);
     int dist = Game.GetDistance(cr, showCrit);
     if (cr.ShowCritterDist1 >= dist) {
@@ -256,6 +276,7 @@ void ShowCritter1(Critter cr, Critter showCrit)
     }
 }
 
+// При получении урона: если HP упало ниже порога MustHealLvl, пытается полечиться. Цепочка останавливается всегда.
 [[Event]]
 EventResult CritterAttacked(Critter cr, Critter attacker)
 {
@@ -269,6 +290,7 @@ EventResult CritterAttacked(Critter cr, Critter attacker)
     return EventResult::StopChain;
 }
 
+// Обрабатывает внутрикомандное сообщение: по MSG_KILLEM добавляет цель во вражеский стек, если отправитель свой.
 void CritterMessageImpl(Critter cr, Critter fromCr, int message, any value)
 {
     switch (message) {
@@ -297,14 +319,16 @@ void CritterMessageImpl(Critter cr, Critter fromCr, int message, any value)
     }
 }
 
+// Обёртка-обработчик события OnMessage: делегирует общей реализации.
 [[Event]]
 void CritterMessage(Critter cr, Critter fromCr, int message, any value)
 {
     CritterMessageImpl(cr, fromCr, message, value);
 }
 
-/********************Вспомогательные функции***********************/
-// попытка полечиться, если криттер жив и есть стимпаки
+// Вспомогательные функции.
+
+// Попытка полечиться: при нехватке стимпаков с шансом догенерирует их (по запасу CanGenStim), затем применяет.
 bool TryHeal(Critter cr)
 {
     if (!cr.IsAlive()) {
@@ -342,7 +366,7 @@ bool TryHeal(Critter cr)
     return false;
 }
 
-// признак = это свой (та же группа)
+// Свои ли криттеры: одна ненулевая команда (TeamId).
 bool IsAlly(Critter cr1, Critter cr2)
 {
     return cr1.TeamId != 0 && cr1.TeamId == cr2.TeamId;

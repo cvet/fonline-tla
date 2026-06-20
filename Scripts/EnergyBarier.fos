@@ -1,4 +1,7 @@
-namespace EnergyBarier // Sort 2
+// EnergyBarier — серверная логика силовых энергобарьеров.
+// Ключевое: построение блокираторов/триггеров вокруг итема барьера, смена режимов сети барьеров, урон криттерам, терминал (взлом Science / карта доступа), охрана и диалоги.
+// Сторона: SERVER. Связи: Stdlib, Combat, Messaging, Dialogs, NpcPlanes, GameTime, Time, Content.
+namespace EnergyBarier
 {
 
 #if SERVER
@@ -17,45 +20,57 @@ namespace EnergyBarier // Sort 2
 ///@ Property Map Server int32=>any[] EnergyBarierTerminal Mutable Persistent
 ///@ Property Map Server int32=>any[] EnergyBarierTerminalInfo Mutable Persistent
 
+// Отладочный лог отключён в проде: пустое тело глушит вызовы по всему модулю.
 void DebugLog(string str)
 {
 }
+// breadcrumb: для отладки заменить тело на лог через макрос (исторический вариант движка)
 // #define DebugLog #(str) Game.Log(str)
 
+// Состояния сети барьеров (включена / временно выключена / выключена навсегда).
 const int BS_ON = 0;
 const int BS_OFF_TIMED = 1;
 const int BS_OFF_PERMA = 2;
 
+// Способ взаимодействия с терминалом: обычный осмотр, взлом Science, использование карты доступа.
 const int MODE_STANDART = 1;
 const int MODE_HACK = 2;
 const int MODE_USE_CARD = 3;
 
+// Флаг автовключения сети: по умолчанию (по настройке итема), принудительно вкл, принудительно выкл.
 const int AE_DEFAULT = 0;
 const int AE_ON = 1;
 const int AE_OFF = 2;
 
+// Режим работы отдельного барьера: включён, выключен, половина мощности, выключен без охраны.
 const int BM_OFF = 1;
 const int BM_ON = 0;
 const int BM_HALF_ON = 2;
 const int BM_OFF_NO_GUARD = 3;
 
+// Игровые тайминги барьеров: срок годности карты доступа, длительность поломки терминала,
+// длительность блокировки доступа после критпровала взлома, окно открытого барьера до автовозврата.
 timespan CardValidTime()
 {
     return Time::GameDays(1);
 }
+
 timespan BrokenTime()
 {
     return Time::GameHours(3);
 }
+
 timespan NoAccessTime()
 {
     return Time::GameHours(3);
 }
+
 timespan BarrierOpenTime()
 {
     return Time::GameMinutes(5);
 }
 
+// Идентификаторы веток (узлов) диалога терминала — возвращаются из DialogResult-функций.
 const int FD_NORMAL = 2;
 const int FD_HACK_NOT_SUCC = 5;
 const int FD_HACK_SUCC = 6;
@@ -66,9 +81,11 @@ const int FD_NOT_VALID_CARD = 10;
 const int FD_BARIER_OPEN = 12;
 const int FD_DISABLED = 12;
 
+// Индексы координат в таблицах смещений эмиттера.
 const int COORD_X = 0;
 const int COORD_Y = 1;
 
+// Диапазоны урона: при использовании на половинной/полной мощности и при проходе сквозь барьер.
 const int MIN_DMG_USE_LOW = 5;
 const int MAX_DMG_USE_LOW = 15;
 const int MIN_DMG_USE_HI = 10;
@@ -77,6 +94,7 @@ const int MIN_DMG_SPATIAL = 15;
 const int MAX_DMG_SPATIAL = 30;
 const DamageTypes DAMAGE_TYPE = DamageTypes::Electricity;
 
+// Ключи текст-пака для сообщений игроку (удар, ремонт, взлом терминала).
 const int MSG_SHOCK_PAIN_FIELD_USE = 5300;
 const int MSG_SHOCK_FULL_FIELD_USE = 5301;
 const int MSG_REPAIR_FAIL_OFF = 5302;
@@ -86,17 +104,25 @@ const int MSG_REPAIR_WIN_ON = 5304;
 const int MSG_FIELD_SCIENCE_USE_WIN = 5308;
 const int MSG_FIELD_SCIENCE_USE_FAIL = 5309;
 
+// Опыт за отключение поля и модификаторы скилла: базовый штраф Science и бонусы от инструментов.
 const int EXP_DISABLE_FORCE_FIELD = 50;
 const int SCIENCE_PENALTY = -40;
 const int TOOL_BONUS = SCIENCE_PENALTY + 20;
 const int SUPER_TOOL_BONUS = SCIENCE_PENALTY + 40;
+
+// Бросок скилла против цели: true при успехе.
 bool IsSkillSuccess(Critter cr, CritterProperty sk, int bonus)
 {
     return Stdlib::IsSuccessRvS(Stdlib::RollVsSkill(cr, sk, bonus));
 }
 
+// Радиус поиска охранников вокруг игрока (в гексах).
 const int RADIUS = 10;
 
+// Таблицы геометрии барьеров (выровнены вручную, форматтер отключён).
+// EBHalfOnMode: пары прото «полная мощность» -> «половина мощности» (красный вариант).
+// EBBlockers/EBTriggers/EBEmitterCoords: смещения по направлениям для расстановки блокираторов,
+// триггеров прохода и точки эмиттера относительно базового гекса барьера.
 // clang-format off
 
 const hstring[][] EBHalfOnMode = {
@@ -136,11 +162,14 @@ const int[][] EBEmitterCoords = {
 
 // clang-format on
 
+// Ключ терминала в словарях карты: пакуем координаты гекса в одно число и добавляем номер сети.
 int MakeTerminalKey(mpos hex, int num = 0)
 {
     return ((hex.x << 16) | hex.y) + num;
 }
 
+// Строит барьер вокруг базового итема: по типу прото подбирает блокираторы/триггеры/направления
+// и охрану, затем создаёт CBarier. Если карта ещё не привязана — откладывает инициализацию на тик.
 void InitBariers(Item barier)
 {
     int[][] blockers = {{}};
@@ -244,12 +273,14 @@ void InitBariers(Item barier)
     CBarier(barier, blockers, triggers, trigDir, trigDest, guarded, haveHalfOnMode);
 }
 
+// Подписывает эмиттер на применение скилла (ремонт) и использование предмета (инструмента) на нём.
 void InitEmitter(Item emitter)
 {
     emitter.OnCritterUseSkill.Subscribe(UseEmitter);
     emitter.OnCritterUseOnSelf.Subscribe(UseOnEmitter);
 }
 
+// Смещение базового гекса барьера относительно эмиттера в зависимости от его ориентации (гор/верт).
 int GetFieldCoord(int coord, hstring proto, int type)
 {
     if (proto == Content::Item::eb_emitter_hor1 || proto == Content::Item::eb_emitter_hor2 || proto == Content::Item::eb_emitter_hor3) {
@@ -262,6 +293,7 @@ int GetFieldCoord(int coord, hstring proto, int type)
     return 0;
 }
 
+// Один барьер: основной итем + его блокираторы и триггеры, режим работы и наличие половинной мощности.
 class CBarier
 {
     Item Barier;            // Ссылка на итем, отображающий сам барьер
@@ -364,6 +396,8 @@ class CBarier
         net.AddBarier(this);
     }
 
+    // Переключает режим барьера: меняет прото-изображение (полный/половинный), видимость и проходимость
+    // блокираторов, а также подписку на урон при проходе в режиме половинной мощности.
     void ChangeMode(int mode)
     {
         FieldMode = mode;
@@ -425,6 +459,7 @@ class CBarier
         return Barier.Val3;
     }
 
+    // По текущему (возможно половинному) прото возвращает прото полной мощности; иначе пустой hstring.
     hstring GetMainProto()
     {
         for (int i = 0; i < EBHalfOnMode[1].length(); i++) {
@@ -443,6 +478,7 @@ class CBarier
     }
 };
 
+// Сеть связанных барьеров одной локации: переключаются вместе как единое целое.
 class CBariersNet
 {
     CBarier[] Bariers = {};
@@ -464,6 +500,8 @@ class CBariersNet
         Bariers.insertLast(barier);
     }
 
+    // Переключает режим всей сети. Если барьер настроен на автовозврат (Val4/Val5) или включён AE_ON,
+    // планирует отложенное автовключение через BarrierOpenTime.
     void ChangeNetMode(int mode, int autoEnable)
     {
         CBarier barier;
@@ -478,7 +516,7 @@ class CBariersNet
                 values.insertLast(any(LocId));
                 values.insertLast(any(NetNum));
                 values.insertLast(any(BM_ON));
-                Game.StartTimeEvent(BarrierOpenTime(), TurnOnBariers, values); //SavedDeferredCall
+                Game.StartTimeEvent(BarrierOpenTime(), TurnOnBariers, values); // SavedDeferredCall
             }
 
             barier.ChangeMode(mode);
@@ -487,8 +525,10 @@ class CBariersNet
     }
 };
 
+// Глобальный реестр всех сетей барьеров на сервере.
 CBariersNet[] BariersNets = {};
 
+// Ищет сеть по номеру и локации; null, если такой ещё нет.
 CBariersNet? GetBariersNet(int netNum, ident locId)
 {
     for (int i = 0; i < BariersNets.length(); i++) {
@@ -500,6 +540,7 @@ CBariersNet? GetBariersNet(int netNum, ident locId)
     return null;
 }
 
+// Ищет барьер по id его основного итема по всем сетям.
 CBarier? GetBarier(ident mainItemId)
 {
     for (int i = 0; i < BariersNets.length(); i++) {
@@ -515,6 +556,7 @@ CBarier? GetBarier(ident mainItemId)
     return null;
 }
 
+// Дописывает элементы target в конец arr (конкатенация массивов).
 void PushBackArray(int[] arr, int[] target)
 {
     for (int i = 0; i < target.length(); i++) {
@@ -522,6 +564,8 @@ void PushBackArray(int[] arr, int[] target)
     }
 }
 
+// Приводит блокираторы к стартовому режиму барьера (по Val2 основного итема) и синхронизирует
+// номер сети на всех вспомогательных блокираторах.
 void InitBlockers(CBarier barier)
 {
     if (barier.Blockers[0].Val2 == BM_ON) {
@@ -555,6 +599,7 @@ void InitBlockers(CBarier barier)
     }
 }
 
+// true, если у криттера в инвентаре есть хотя бы одна действующая карта доступа.
 bool CheckInven(Critter master)
 {
     Item[] items = master.GetItems(Content::Item::energy_barier_access_card);
@@ -567,6 +612,7 @@ bool CheckInven(Critter master)
     return false;
 }
 
+// Карта действительна, если не просрочена (Val4 — время выдачи) и принадлежит этому криттеру (Val5).
 bool CheckCard(Item card, Critter master)
 {
     if ((card.Val4 < Game.SynchronizedTime - CardValidTime()) || (card.Val5 != master.Id)) {
@@ -577,12 +623,14 @@ bool CheckCard(Item card, Critter master)
     }
 }
 
+// Бросок Science на взлом терминала с учётом штрафа и бонуса взлома конкретного терминала.
 int HackRoll(Critter master)
 {
     int res = Stdlib::RollVsSkill(master, CritterProperty::SkillScience, SCIENCE_PENALTY + master.EnergyBarierHackBonus);
     return res;
 }
 
+// true, если сеть барьеров игрока сейчас выключена (барьер открыт).
 bool BarierOpen(Critter master)
 {
     Map? map = master.GetMap();
@@ -599,6 +647,7 @@ bool BarierOpen(Critter master)
     }
 }
 
+// Отложенная инициализация барьера (когда на момент создания итем ещё не был привязан к карте).
 [[TimeEvent]]
 void InitBarier(any value)
 {
@@ -611,6 +660,7 @@ void InitBarier(any value)
     }
 }
 
+// Подписывает триггеры прохода на вход криттера и прописывает им номер охраны, id и номер барьера.
 void InitTriggers(CBarier barier)
 {
     DebugLog("Инициализация триггеров. Количество: " + barier.Triggers.length());
@@ -622,6 +672,8 @@ void InitTriggers(CBarier barier)
     }
 }
 
+// При входе игрока на триггер проверяет его право прохода; если права нет — ищет рядом охрану,
+// останавливает игрока и запускает диалог с одним из охранников.
 [[Event]]
 void WalkOnTrigg(Item item, Critter cr, bool entered, mdir dir) // TODO
 {
@@ -667,6 +719,7 @@ void WalkOnTrigg(Item item, Critter cr, bool entered, mdir dir) // TODO
 
         if (not g.CritIsAccessible(cr)) {
             CritterState::Wait(cr, 0);
+            // breadcrumb: ранее отбрасывали игрока назад от триггера; оставлено до решения по поведению
             // cr.MoveToDir((cr.Dir+3)%6);
             int i = Game.Random(0, npcs.length() - 1);
             Dialogs::RunDialog(cr, Content::Dialog::all_energy_barier_guards, npcs[i], true);
@@ -674,6 +727,7 @@ void WalkOnTrigg(Item item, Critter cr, bool entered, mdir dir) // TODO
     }
 }
 
+// Удаляет с карты все блокираторы и триггеры указанной сети (перед переинициализацией барьеров).
 void DeleteBlockersAndTriggers(Map map, int netNum)
 {
     Item[] items = map.GetItems(Content::Item::eb_blocker);
@@ -691,11 +745,13 @@ void DeleteBlockersAndTriggers(Map map, int netNum)
     }
 }
 
+// Право прохода криттера по умолчанию: наличие действующей карты доступа.
 bool CritIsAccessible(Critter cr)
 {
     return CheckInven(cr);
 }
 
+// Текущее состояние сети (режим); 0, если сеть не найдена.
 int GetNetState(ident locId, int netNum)
 {
     CBariersNet? net = GetBariersNet(netNum, locId);
@@ -706,6 +762,7 @@ int GetNetState(ident locId, int netNum)
     return 0;
 }
 
+// Урон криттеру при проходе сквозь барьер на половинной мощности (заходит в гекс блокиратора).
 [[Event]]
 void DamageCritter(Item item, Critter cr, bool entered, mdir dir)
 {
@@ -715,6 +772,8 @@ void DamageCritter(Item item, Critter cr, bool entered, mdir dir)
     }
 }
 
+// Реакция барьера на применение скилла напрямую: при провале Science (или другом скилле) бьёт током
+// и шлёт сообщение, при успехе Science — только информирует. Урон зависит от режима (половина/полная).
 [[Event]]
 EventResult DamageCritterUse(Item item, Critter cr, CritterProperty skill)
 {
@@ -761,6 +820,8 @@ EventResult DamageCritterUse(Item item, Critter cr, CritterProperty skill)
     return EventResult::StopChain;
 }
 
+// Применение скилла Repair на эмиттере: при успехе переключает барьер (вкл<->выкл) и даёт опыт,
+// при провале — сообщение; в любом случае ставит таймаут на использование скилла.
 [[Event]]
 EventResult UseEmitter(Item item, Critter cr, CritterProperty skill)
 {
@@ -786,7 +847,7 @@ EventResult UseEmitter(Item item, Critter cr, CritterProperty skill)
                     DebugLog("Автовключение");
                     any[] values = {};
                     values.insertLast(field.Blockers[0].Id);
-                    Game.StartTimeEvent(BarrierOpenTime(), TurnOnBarier, values); //SavedDeferredCall
+                    Game.StartTimeEvent(BarrierOpenTime(), TurnOnBarier, values); // SavedDeferredCall
                 }
 
                 field.ChangeMode(BM_OFF);
@@ -823,6 +884,8 @@ EventResult UseEmitter(Item item, Critter cr, CritterProperty skill)
     return EventResult::StopChain;
 }
 
+// Использование предмета на эмиттере: только инструменты (multi_tool/super_tool_kit) запускают
+// взлом барьера через ObjectUse, остальное прерывает цепочку.
 [[Event]]
 EventResult UseOnEmitter(Item item, Critter cr, Item? usedItem, int param)
 {
@@ -838,11 +901,14 @@ EventResult UseOnEmitter(Item item, Critter cr, Item? usedItem, int param)
     }
 }
 
+// Заглушка: учёт того, что игрок уже получал опыт за этот барьер (пока всегда false). // TODO
 bool GaveExp(Critter cr, ident itemId) // TODO
 {
     return false;
 }
 
+// Взлом барьера инструментом по Science (бонус зависит от инструмента): при успехе переключает
+// барьер и даёт опыт, при провале — сообщение; всегда ставит таймаут Science.
 bool ObjectUse(Critter cr, Item item, hstring proto)
 {
     CBarier? field;
@@ -874,7 +940,7 @@ bool ObjectUse(Critter cr, Item item, hstring proto)
                 DebugLog("Автовключение");
                 any[] values = {};
                 values.insertLast(field.Blockers[0].Id);
-                Game.StartTimeEvent(BarrierOpenTime(), TurnOnBarier, values); //SavedDeferredCall
+                Game.StartTimeEvent(BarrierOpenTime(), TurnOnBarier, values); // SavedDeferredCall
             }
 
             field.ChangeMode(BM_OFF);
@@ -909,6 +975,7 @@ bool ObjectUse(Critter cr, Item item, hstring proto)
     return true;
 }
 
+// Режим барьера, привязанного к эмиттеру по координатам; 0, если барьер не найден.
 int GetFieldMode(Item item)
 {
     CBarier? field = GetBarier(item.Hex.x, item.Hex.y, item.ProtoId);
@@ -919,6 +986,7 @@ int GetFieldMode(Item item)
     return 0;
 }
 
+// Ищет барьер по координатам эмиттера: к гексу эмиттера прибавляется смещение по его ориентации.
 CBarier? GetBarier(int hexX, int hexY, hstring proto)
 {
     CBarier barier;
@@ -937,16 +1005,20 @@ CBarier? GetBarier(int hexX, int hexY, hstring proto)
     return null;
 }
 
+// Точка входа инициализации барьера от движка (на старте и при загрузке итема).
 void BarierInit(Item barier, bool firstTime)
 {
     InitBariers(barier);
 }
 
+// Точка входа инициализации эмиттера от движка.
 void EmitterInit(Item emitter, bool firstTime)
 {
     InitEmitter(emitter);
 }
 
+// Обработка взаимодействия с терминалом: определяет режим (осмотр/взлом/карта), сохраняет параметры
+// сети на игроке и состояние терминала на карте, затем открывает диалог терминала.
 bool TerminalImpl(Critter player, StaticItem terminal, Item? item, any skill)
 {
     Map? map = player.GetMap();
@@ -1008,12 +1080,14 @@ bool TerminalImpl(Critter player, StaticItem terminal, Item? item, any skill)
     return true;
 }
 
+// Хук статического итема-терминала: проксирует в TerminalImpl.
 [[ItemStatic]]
 bool Terminal(Critter player, StaticItem terminal, Item item, any skill)
 {
     return TerminalImpl(player, terminal, item, skill);
 }
 
+// Результат диалога: выдаёт игроку карту доступа и помечает её временем выдачи и владельцем.
 [[DialogResult]]
 void GetAccessCard(Critter master, Critter slave)
 {
@@ -1022,6 +1096,8 @@ void GetAccessCard(Critter master, Critter slave)
     item.Val5 = master.Id;
 }
 
+// Входной узел диалога терминала: по сохранённому состоянию терминала и карты выбирает ветку
+// (поломан / нет доступа / уже открыт / норма / отключить по карте / взлом).
 [[DialogResult]]
 int Start(Critter master, Critter slave)
 {
@@ -1088,12 +1164,15 @@ int Start(Critter master, Critter slave)
     return 0;
 }
 
+// Результат диалога: запуск взлома по сохранённому на игроке гексу терминала.
 [[DialogResult]]
 int DoHack(Critter master, Critter slave)
 {
     return doHack(master, master.EnergyBarierTerminalHex.x, master.EnergyBarierTerminalHex.y);
 }
 
+// Попытка взлома терминала: поднимает охрану в атаку при отсутствии доступа, затем кидает Science.
+// При критпровале блокирует доступ на NoAccessTime; иначе возвращает обычный успех/провал.
 int doHack(Critter master, int hexX, int hexY)
 {
     Map? map = master.GetMap();
@@ -1156,6 +1235,7 @@ int doHack(Critter master, int hexX, int hexY)
     return FD_HACK_SUCC;
 }
 
+// Результат диалога: выключает сеть барьеров игрока (после успешного взлома/доступа).
 [[DialogResult]]
 int TurnOfBarier(Critter master, Critter slave)
 {
@@ -1175,12 +1255,14 @@ int TurnOfBarier(Critter master, Critter slave)
     return FD_TURN_OFF_FIELD;
 }
 
+// Результат диалога: проверка удара (пока не реализована).
 [[DialogResult]]
 void CheckHit(Critter master, Critter slave)
 {
     // TODO
 }
 
+// Результат диалога: при наличии действующей карты выключает сеть барьеров игрока.
 [[DialogResult]]
 int CheckAccessCard(Critter master, Critter slave)
 {
@@ -1202,6 +1284,7 @@ int CheckAccessCard(Critter master, Critter slave)
     return FD_TURN_OFF_FIELD;
 }
 
+// Отложенное автовключение всей сети (values: locId, netNum, режим). Парный к ChangeNetMode.
 [[TimeEvent]]
 void TurnOnBariers(any[] values)
 {
@@ -1211,6 +1294,7 @@ void TurnOnBariers(any[] values)
     }
 }
 
+// Отложенное автовключение одиночного барьера по id его основного итема (values[0]).
 [[TimeEvent]]
 void TurnOnBarier(any[] values)
 {
@@ -1224,12 +1308,14 @@ void TurnOnBarier(any[] values)
     }
 }
 
+// Результат диалога с охранником (пока не реализован).
 [[DialogResult]]
 void StartGuard(Critter master, Critter npc)
 {
     // TODO
 }
 
+// Переводит сеть барьеров игрока в режим половинной мощности.
 void HalfOn(Critter master, Critter npc)
 {
     Map? map = master.GetMap();
@@ -1246,6 +1332,7 @@ void HalfOn(Critter master, Critter npc)
     }
 }
 
+// Отключает силовое поле без охраны (values: netNum, locId); автовозврат запрещён (AE_OFF).
 [[TimeEvent]]
 void DisableForceField(any[] values)
 {
@@ -1255,6 +1342,7 @@ void DisableForceField(any[] values)
     }
 }
 
+// Отключает силовое поле, оставляя охрану активной; автовозврат запрещён (AE_OFF).
 void DisableForceFieldWithGuards(any[] values)
 {
     CBariersNet? net = GetBariersNet(values[0], values[1]);
@@ -1263,6 +1351,7 @@ void DisableForceFieldWithGuards(any[] values)
     }
 }
 
+// Включает силовое поле; автовозврат запрещён (AE_OFF).
 [[TimeEvent]]
 void EnableForceField(any[] values)
 {
@@ -1272,7 +1361,7 @@ void EnableForceField(any[] values)
     }
 }
 
-// реализация охранников
+// Подбор реализации охраны: по прото локации выбирается особый вариант или базовый.
 CGuards? GetGuards(Critter[] guards, int netNum, int barierId)
 {
     if (guards.length() == 0) {
@@ -1304,6 +1393,7 @@ CGuards? GetGuards(Critter[] guards, int netNum, int barierId)
     return g;
 }
 
+// Базовая охрана: пропускает только тех, у кого есть действующая карта доступа.
 class CGuards
 {
     bool CritIsAccessible(Critter cr)
@@ -1312,6 +1402,7 @@ class CGuards
     }
 }
 
+// Особая охрана города гекконов: пропускает всех (карта не требуется).
 class CGuards_GeckCity : CGuards
 {
     bool CritIsAccessible(Critter cr)

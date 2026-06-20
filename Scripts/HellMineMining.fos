@@ -1,3 +1,8 @@
+// HellMineMining — добыча ресурсов в локации "адская шахта" по нажатию на статичный объект.
+// SERVER: обработчики добычи (золото/уран) с проверкой инструмента, броском на успех,
+// выдачей предмета и таймаутом-передышкой между попытками.
+// Связи: Messaging (сообщения игроку), Effects (анимация удара), Content (прото-id предметов),
+// Time (расчёт таймаута), тексты — через TextPackName::Text.
 namespace HellMineMining
 {
 
@@ -5,7 +10,8 @@ namespace HellMineMining
 
 ///@ Property Critter Server synctime HellMineTimeoutEnd Mutable Persistent
 
-const int BASE_TIMEOUT = 11; // real seconds
+// время в реальных секундах
+const int BASE_TIMEOUT = 11;
 
 const int STR_NEED_REST = 2201;
 const int STR_MINE_URANIUM = 3035;
@@ -24,7 +30,7 @@ bool MgImpl(Critter cr, StaticItem sc, Item item, any skill)
     }
 
     if (not IsTimeoutExpired(cr)) {
-        // critter need a rest
+        // криттеру нужна передышка
         Messaging::Info(cr, TextPackKey(TextPackName::Text, "" + (STR_NEED_REST)));
         return true;
     }
@@ -49,8 +55,9 @@ bool MgImpl(Critter cr, StaticItem sc, Item item, any skill)
     return true;
 }
 
+// добыча золота (Mine Gold), точка входа по нажатию на статичный объект
 [[ItemStatic]]
-bool Mg(Critter cr, StaticItem sc, Item item, any skill) // Mine Gold
+bool Mg(Critter cr, StaticItem sc, Item item, any skill)
 {
     return MgImpl(cr, sc, item, skill);
 }
@@ -62,9 +69,10 @@ bool Mine(Critter cr, StaticItem sc, Item item, any skill)
     }
 
     if (not IsTimeoutExpired(cr)) {
-        // critter need a rest
+        // криттеру нужна передышка
         Messaging::Info(cr, TextPackKey(TextPackName::Text, "" + (STR_NEED_REST)));
 
+        // breadcrumb миграции: прежний вызов анимации простоя, оставлен до домиграции API
         // cr.Animate(0xFF, STATE_ANIM_EMPTY, 0, 0xFF, 0, true, true, true);
 
         return true;
@@ -77,13 +85,15 @@ bool Mine(Critter cr, StaticItem sc, Item item, any skill)
     successChance = Math::Clamp(successChance, 10, 95);
     int roll = Game.Random(1, 100);
 
-    // шанс выбить простой камень
+    // успех — выдаём урановую руду, провал — простой камень
     if (roll <= successChance) {
         cr.AddItem(Content::Item::uranium_ore, 1);
+        // breadcrumb отладки: вывод броска и шанса
         // Messaging::Info(cr, "Success. Roll/Chance = " + roll + "/" + successChance);
         Messaging::Info(cr, TextPackKey(TextPackName::Text, "" + (STR_MINE_URANIUM)));
     }
     else {
+        // breadcrumb отладки: вывод броска и шанса
         // Messaging::Info(cr, "Fail. Roll/Chance = " + roll + "/" + successChance);
         Messaging::Info(cr, TextPackKey(TextPackName::Text, "" + (STR_MINE_STONE)));
         // r17 091228>
@@ -96,9 +106,7 @@ bool Mine(Critter cr, StaticItem sc, Item item, any skill)
     return true;
 }
 
-/*
-   Determines whether given item is appropriate for mining
- */
+// Подходит ли предмет в качестве инструмента для добычи (кувалда / супер-кувалда).
 bool IsMiningTool(Item? item)
 {
     if (item == null) {
@@ -109,9 +117,7 @@ bool IsMiningTool(Item? item)
     return pid == Content::Item::sledgehammer || pid == Content::Item::super_sledge;
 }
 
-/*
-   Checks whether mining timeout for given critter is expired
- */
+// Истёк ли таймаут-передышка после прошлой добычи; иначе шлёт игроку остаток времени.
 bool IsTimeoutExpired(Critter cr)
 {
     if (Game.SynchronizedTime >= cr.HellMineTimeoutEnd) {
@@ -122,14 +128,12 @@ bool IsTimeoutExpired(Critter cr)
     return false;
 }
 
-/*
-   Sets mining timeout for given critter
- */
+// Устанавливает таймаут до следующей добычи: чем выше выносливость, тем короче передышка.
 void SetTimeout(Critter cr)
 {
-    // basic formula for timeout time in real seconds
+    // базовая формула длительности таймаута в реальных секундах
     int timeoutTime = (BASE_TIMEOUT - cr.Endurance);
-    // set timeout end timestamp
+    // запоминаем момент окончания таймаута
     cr.HellMineTimeoutEnd = Game.SynchronizedTime + Time::Seconds(timeoutTime);
     Messaging::Info(cr, "Setting timeout, seconds: " + (cr.HellMineTimeoutEnd - Game.SynchronizedTime).seconds);
 }

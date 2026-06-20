@@ -1,10 +1,12 @@
+// EncounterNpc — обобщённый ИИ НПЦ случайных встреч (энкаунтеров).
+// Обязанности: реакция на взрывчатку/кражу, сбор и лутинг трупов через планы,
+//  начисление фракционной лояльности убийце.
+// Сторона: SERVER. Связи: NpcPlanes, SendMessage, ItemMovement, FavoriteItem,
+//  GameEventStorehouse, Repair.
 namespace EncounterNpc
 {
 
 #if SERVER
-
-// Generic encounter npc script
-// Author: cvet, rifleman17, Dagnir
 
 const int MESSAGE_COLLECT_NPC = 30;
 const int MESSAGE_ATTACK_HIM = 31;
@@ -14,6 +16,8 @@ const int PLANE_LOOT = 30;
 ident LastDeadId;
 ident[] CollectedNpcIds = {};
 
+// Настройка НПЦ встречи: подписки на боевые/лутинг-события и инициализация инвентаря
+// (только для гуманоидных типов тел, способных вести себя как разумный противник).
 void NpcInit(Critter npc, bool firstTime)
 {
     int bt = npc.BodyType;
@@ -27,6 +31,8 @@ void NpcInit(Critter npc, bool firstTime)
         npc.OnSomeCritterUseItem.Subscribe(NpcSmthUseItem);
         npc.OnSomeCritterDropItem.Subscribe(NpcSmthDropItem);
 
+        // Изнашиваем всё снаряжение и помечаем первое оружие как «любимое»,
+        // чтобы НПЦ предпочитал его в бою.
         bool favrtAmmoSet = false;
         bool favrtWpnSet = false;
         Item[] items = npc.GetItems();
@@ -37,6 +43,7 @@ void NpcInit(Critter npc, bool firstTime)
                 favrtWpnSet = true;
             }
 
+            // breadcrumb миграции: выбор «любимого» патрона — до домиграции API SetFavoriteItem
             /*	if(items[i].Type == ItemType::Ammo && !favrtAmmoSet)
                     {
                             npc.SetFavoriteItem(CritterItemSlot::Secondary, items[i].ProtoId);
@@ -47,13 +54,15 @@ void NpcInit(Critter npc, bool firstTime)
     }
 }
 
+// Выбирает НПЦ-сборщика для лутинга трупа: опрашивает всех, кто видит цель,
+// и предпочитает свободного (без активного плана лутинга), иначе берёт случайного.
 Critter? GetCritterForLooting(Critter lootCr)
 {
-    // Collect npc
+    // Собираем кандидатов: рассылка заставит видящих НПЦ записать себя в CollectedNpcIds
     Critter? result = null;
     SendMessage::ToWhoSeesMe(lootCr, MESSAGE_COLLECT_NPC, 0);
     if (CollectedNpcIds.length() > 0) {
-        // Find better looter
+        // Ищем более подходящего сборщика — того, кто ещё не занят лутингом
         for (int i = 0, j = CollectedNpcIds.length(); i < j; i++) {
             Critter? cr = Game.GetCritter(CollectedNpcIds[i]);
             if (NpcPlanes::GetPlanes(cr, PLANE_LOOT, null) == 0) {
@@ -62,18 +71,19 @@ Critter? GetCritterForLooting(Critter lootCr)
             }
         }
 
-        // Get random npc
+        // Свободных нет — берём случайного из собранных
         if (result == null) {
             result = Game.GetCritter(CollectedNpcIds[Game.Random(0, CollectedNpcIds.length() - 1)]);
         }
 
-        // Free handles
+        // Сбрасываем накопленный список кандидатов
         CollectedNpcIds.clear();
     }
 
     return result;
 }
 
+// Игрок применил взрывное устройство рядом — НПЦ воспринимает это как угрозу и атакует
 [[Event]]
 void NpcSmthUseItem(Critter npc, Critter fromCr, Item item, Critter onCritter, Item onItem, StaticItem onScenery, int param)
 {
@@ -86,6 +96,7 @@ void NpcSmthUseItem(Critter npc, Critter fromCr, Item item, Critter onCritter, I
     }
 }
 
+// Игрок бросил взведённую взрывчатку рядом — НПЦ воспринимает это как угрозу и атакует
 [[Event]]
 void NpcSmthDropItem(Critter npc, Critter fromCr, Item item)
 {
@@ -98,6 +109,8 @@ void NpcSmthDropItem(Critter npc, Critter fromCr, Item item)
     }
 }
 
+// Обработка внутренних сообщений между НПЦ: запись себя в сборщики лутинга
+// и переадресация приказов атаковать цель союзникам.
 void NpcMessageImpl(Critter npc, Critter fromCr, int message, any value)
 {
     if (message == MESSAGE_COLLECT_NPC) {
@@ -127,21 +140,23 @@ void NpcMessage(Critter npc, Critter fromCr, int message, any value)
     NpcMessageImpl(npc, fromCr, message, value);
 }
 
+// Смерть НПЦ встречи: передаём его планы лутинга другому сборщику и начисляем
+// убийце-игроку очко фракционной лояльности соответствующей команды энкаунтера.
 void NpcDeadImpl(Critter npc, Critter? killer)
 {
-    // Loot
+    // Передаём незавершённые планы лутинга свободному сборщику
     NpcPlanes::NpcPlane[] planes = {};
     if (NpcPlanes::GetPlanes(npc, PLANE_LOOT, planes) > 0) {
         Critter? cr = GetCritterForLooting(npc);
         if (cr != null) {
-            // Copy planes
+            // Копируем планы выбранному сборщику
             for (int i = 0, j = planes.length(); i < j; i++) {
                 NpcPlanes::AddPlane(cr, planes[i]);
             }
         }
     }
 
-    // Encounters loyality
+    // Лояльность энкаунтеров: выбираем свойство по команде НПЦ
     if (killer != null && killer.ControlledByPlayer) {
         CritterProperty prop = CritterProperty::None;
         switch (npc.TeamId) {
@@ -205,6 +220,8 @@ int GetCritterItemsCount(Critter npc)
     return npc.GetItems().length();
 }
 
+// Кто-то умер в поле зрения НПЦ: если у трупа есть что лутить, ставим сборщику
+// план дойти и обобрать тело. LastDeadId защищает от повторной реакции на ту же смерть.
 [[Event]]
 void NpcSmthDead(Critter npc, Critter fromCrit, Critter killer)
 {
@@ -220,6 +237,8 @@ void NpcSmthDead(Critter npc, Critter fromCrit, Critter killer)
     }
 }
 
+// Кто-то лутит или обкрадывает труп, который НПЦ застолбил под лутинг —
+// реагируем приоритетной атакой на вора/конкурента.
 [[Event]]
 void NpcSmthUseSkill(Critter npc, Critter fromCr, CritterProperty skill, Critter? onCritter, Item onItem, StaticItem onScenery)
 {
@@ -229,6 +248,9 @@ void NpcSmthUseSkill(Critter npc, Critter fromCr, CritterProperty skill, Critter
     }
 }
 
+// Завершение плана НПЦ: при успешном завершении плана лутинга собираем ценные
+// предметы с трупа и пола, перекладываем НПЦ, сохраняем добычу на склад фракции.
+// Возвращает false, чтобы остановить глобальную обработку плана, true — продолжить.
 bool NpcPlaneEndImpl(Critter npc, int planeId, int reason, Critter someCr, Item someItem)
 {
     NpcPlanes::NpcPlane? plane = NpcPlanes::GetCritterPlane(npc, planeId);
@@ -244,12 +266,14 @@ bool NpcPlaneEndImpl(Critter npc, int planeId, int reason, Critter someCr, Item 
                 return true;
             }
 
+            // Собираем все предметы трупа (инвентарь, оба боевых слота) и упавшие на гекс
             Item[] items = {};
             items.insertLast(cr.GetItems(ItemProperty::CritterSlot, CritterItemSlot::Inventory));
             items.insertLast(cr.GetItems(ItemProperty::CritterSlot, CritterItemSlot::Main));
             items.insertLast(cr.GetItems(ItemProperty::CritterSlot, CritterItemSlot::Secondary));
             items.insertLast(map.GetItemsOnHex(cr.Hex));
 
+            // Отбираем только ценные типы предметов для лутинга
             Item[] loot = {};
             for (int i = 0; i < items.length(); i++) {
                 int type = items[i].Type;
@@ -264,10 +288,10 @@ bool NpcPlaneEndImpl(Critter npc, int planeId, int reason, Critter someCr, Item 
             CritterState::Wait(npc, Settings.Movement.Breaktime);
         }
 
-        return false; // Skip global and end plane
+        return false; // пропустить глобальную обработку и завершить план
     }
 
-    return true; // Run global
+    return true; // выполнить глобальную обработку
 }
 
 [[Event]]
@@ -276,6 +300,7 @@ EventResult NpcPlaneEnd(Critter npc, int planeId, int reason, Critter someCr, It
     return (NpcPlaneEndImpl(npc, planeId, reason, someCr, someItem)) ? EventResult::ContinueChain : EventResult::StopChain;
 }
 
+// Попытка кражи у НПЦ всегда замечается: НПЦ атакует вора и зовёт всех на карте на помощь
 [[Event]]
 void NpcStealing(Critter npc, Critter thief, Item item, int count)
 {

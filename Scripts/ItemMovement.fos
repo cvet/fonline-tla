@@ -1,3 +1,7 @@
+// ItemMovement — перемещение предметов между криттерами, контейнерами и картой с проверками доступности слотов.
+// SERVER + CLIENT: общие проверки на возможность переноса предмета и смены слота криттера (события OnItemCheckMove / OnCritterCheckMoveItem).
+// SERVER: реакция на состоявшийся перенос — подбор модели брони, авто-снаряжение оружия, рассылка событий очевидцам.
+// Связи: CritterAnims (анимации криттера), ItemSorting (сортировка инвентаря), Tla (id моделей криттеров).
 namespace ItemMovement
 {
 
@@ -26,28 +30,30 @@ void InitItemMovement()
 #endif
 }
 
+// Базовая проверка переноса предмета: по умолчанию разрешаем, точку расширения держим для других модулей.
 [[Event]]
 EventResult OnItemCheckMove(Item item, int count, Entity from, Entity to)
 {
     return EventResult::ContinueChain;
 }
 
+// Проверка, можно ли криттеру положить предмет в указанный слот (анимации оружия/брони, ограничения кастомных слотов).
 [[Event]]
 EventResult OnCritterCheckMoveItem(Critter cr, Item item, CritterItemSlot toSlot)
 {
     CritterItemSlot fromSlot = item.CritterSlot;
 
-    // Drop
+    // Выбрасывание (наружу) разрешаем без дополнительных проверок
     if (toSlot == CritterItemSlot::Outside) {
         return EventResult::ContinueChain;
     }
 
-    // If busy, then allow only hands item swapping
+    // Если криттер занят — разрешать только обмен предметами в руках
     // bool handsSwap = ( ( fromSlot == CritterItemSlot::Main && toSlot == CritterItemSlot::Secondary ) || ( fromSlot == CritterItemSlot::Secondary && toSlot == CritterItemSlot::Main ) );
     // if(  itemSwap  != null  !handsSwap )
     //    return EventResult::StopChain;
 
-    // Weapon animation
+    // Оружие в активный слот: модель криттера должна поддерживать анимацию этого оружия
     if (toSlot == CritterItemSlot::Main) {
         if (item.Type == ItemType::Weapon && !CritterAnims::IsCritterStateAnim(cr, int(item.Weapon_StateAnim))) {
             Game.Log("Can not use weapon: Critter " + cr.ModelName + "; anim: " + item.Weapon_StateAnim);
@@ -55,7 +61,7 @@ EventResult OnCritterCheckMoveItem(Critter cr, Item item, CritterItemSlot toSlot
         }
     }
 
-    // Armor animation
+    // Слот брони: только предмет-броня, только из инвентаря и только если криттеру вообще разрешена броня
     if (toSlot == CritterItemSlot::Armor) {
         if (item.Type != ItemType::Armor) {
             return EventResult::StopChain;
@@ -70,32 +76,33 @@ EventResult OnCritterCheckMoveItem(Critter cr, Item item, CritterItemSlot toSlot
         }
     }
 
-    // Custom slot checks
+    // Кастомные слоты (выше брони): предмет должен уже принадлежать именно этому слоту
     if (toSlot > CritterItemSlot::Armor) {
         if (toSlot != item.CritterSlot) {
             return EventResult::StopChain;
         }
     }
 
-    // Allow moving
+    // Перенос разрешён
     return EventResult::ContinueChain;
 }
 
 #if SERVER
 
+// Реакция на состоявшийся перенос предмета: подбор модели криттера под броню, авто-снаряжение оружия и рассылка событий.
 [[Event]]
 void OnCritterItemMoved(Critter cr, Item item, CritterItemSlot fromSlot)
 {
     if (item.Ownership == ItemOwnership::Nowhere) {
-        // Destroying item.
+        // Предмет уничтожается — обрабатывать нечего
         return;
     }
 
     CritterItemSlot toSlot = item.CritterSlot;
 
-    // Armor changing
+    // Смена брони (надели или сняли) — пересчитываем визуальную модель криттера
     if (item.Type == ItemType::Armor && (fromSlot == CritterItemSlot::Armor || toSlot == CritterItemSlot::Armor)) {
-        // Default dude
+        // Базовая модель «голого» персонажа по полу
         bool isMale = cr.Gender == GenderType::Male;
         hstring crModel = cr.ModelNameBase;
 
@@ -108,7 +115,7 @@ void OnCritterItemMoved(Critter cr, Item item, CritterItemSlot fromSlot)
             crModel = (name + "aa.frm").hstr();
         }
 
-        // Long hair dude redirects
+        // Длинноволосый мужской персонаж: подменяем модели брони на варианты под эту причёску
         if (cr.ModelNameBase == Tla::CRTYPE_LHD_JUMPSUIT && isMale) {
             crModel = Tla::CRTYPE_LHD_JUMPSUIT;
 
@@ -132,10 +139,11 @@ void OnCritterItemMoved(Critter cr, Item item, CritterItemSlot fromSlot)
             cr.ModelName = crModel;
         }
 
-        // Armor modifier
+        // Модификатор от брони: активен только пока броня надета
         cr.CurrentArmorPerk = toSlot == CritterItemSlot::Armor ? item.Armor_Perk : 0;
     }
 
+    // Оружие подняли с земли (извне): автоматически снаряжаем боезапасом по умолчанию
     if (item.Type == ItemType::Weapon && fromSlot == CritterItemSlot::Outside) {
         if (item.Weapon_MaxAmmoCount > 0 && item.AmmoCount == 0) {
             if (item.AmmoPid == EMPTY_HSTRING) {
@@ -146,13 +154,13 @@ void OnCritterItemMoved(Critter cr, Item item, CritterItemSlot fromSlot)
         }
     }
 
-    // Todo: Slot modifiers, Armor_Perk
+    // Todo: модификаторы слотов, Armor_Perk
     // SLOT_PERK_MIRROR_SHADES // +1 charisma
     // SLOT_PERK_COSMETIC_CASE // +1 charisma to female
     // SLOT_PERK_MOTION_SENSOR // +20 outdoorsman
     // SLOT_PERK_STEALTH_BOY   // +20 sneak
 
-    // Callbacks
+    // Рассылка событий о перемещении/выбрасывании предмета владельцу, самому предмету и окружающим очевидцам
     bool isDrop = item.CritterId == ZERO_IDENT;
     Critter[] other = cr.GetCritters(CritterSeeType::WhoSeeMe, CritterFindType::Any);
 
@@ -180,6 +188,8 @@ void OnCritterItemMoved(Critter cr, Item item, CritterItemSlot fromSlot)
     }
 }
 
+// Перенос предмета в инвентарь криттера через все проверки (снятие у текущего владельца, приём получателем, общая проверка).
+// При успехе раскладывает предмет в инвентаре игрока или сбрасывает сортировку для NPC.
 void MoveItem(Item item, int count, Critter toCr)
 {
     Entity holder = GetItemHolder(item);
@@ -207,6 +217,7 @@ void MoveItem(Item item, int count, Critter toCr)
     Game.MoveItem(item, count, toCr);
 }
 
+// Перенос предмета в контейнер через проверки снятия у владельца и общую проверку переноса.
 void MoveItem(Item item, int count, Item toCont, any stack)
 {
     Entity holder = GetItemHolder(item);
@@ -223,6 +234,7 @@ void MoveItem(Item item, int count, Item toCont, any stack)
     Game.MoveItem(item, count, toCont, stack);
 }
 
+// Сброс предмета на карту (в гекс) через проверки снятия у владельца и общую проверку переноса.
 void MoveItem(Item item, int count, Map toMap, mpos hex)
 {
     Entity holder = GetItemHolder(item);
@@ -239,6 +251,7 @@ void MoveItem(Item item, int count, Map toMap, mpos hex)
     Game.MoveItem(item, count, toMap, hex);
 }
 
+// Пакетный перенос списка предметов криттеру целыми стопками.
 void MoveItems(Item[] items, Critter toCr)
 {
     for (int i = 0; i < items.length(); i++) {
@@ -246,6 +259,7 @@ void MoveItems(Item[] items, Critter toCr)
     }
 }
 
+// Пакетный перенос списка предметов в контейнер целыми стопками.
 void MoveItems(Item[] items, Item toCont, any stack)
 {
     for (int i = 0; i < items.length(); i++) {
@@ -253,6 +267,7 @@ void MoveItems(Item[] items, Item toCont, any stack)
     }
 }
 
+// Пакетный сброс списка предметов на карту целыми стопками.
 void MoveItems(Item[] items, Map toMap, mpos hex)
 {
     for (int i = 0; i < items.length(); i++) {
@@ -260,6 +275,7 @@ void MoveItems(Item[] items, Map toMap, mpos hex)
     }
 }
 
+// Возвращает текущего владельца предмета (криттер, карта или контейнер) по типу его принадлежности.
 Entity GetItemHolder(Item item)
 {
     Entity? holder = null;

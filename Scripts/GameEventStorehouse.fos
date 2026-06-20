@@ -1,33 +1,43 @@
-namespace GameEventStorehouse // Sort 3
+// GameEventStorehouse — серверный игровой ивент «склад» на глобальной карте: создаёт
+// скрытую локацию-хранилище, куда складывается отобранный у игроков и НПЦ лут.
+// SERVER: создание локации в случайном регионе, наполнение охраной (бандиты-«шакалы»),
+//   перенос лута в контейнер и отложенное уничтожение переполненного склада.
+// Связи: Location/Map/Entrance (поиск и создание локаций, входы), EncounterNpc и
+//   EnemyStack (инициализация и агрессия охраны), ItemMovement (перенос предметов),
+//   Tla (служебные хелперы), Content (прото-id локации, карты, предметов, криттеров).
+namespace GameEventStorehouse
 {
 
 #if SERVER
 
-// Хранилище отобранных у игроков и других нпц предметов на глобальной карте
-
 ///@ Property Location Server ident StorehouseContId Mutable Persistent
 
+// Разброс (радиус) случайного смещения точки установки локации от базовых координат региона
 int LocationDelta()
 {
     return int(3 * Settings.GlobalMap.GlobalMapZoneLength);
-} // Радиус установки локации
+}
+
+// Радиус поиска уже существующего склада рядом с координатами региона
 int LocationSearchRadius()
 {
     return 6 * Settings.GlobalMap.GlobalMapZoneLength;
-} // Радиус поиска локации
+}
+
 const int ENTRY_GUARD = 177;
 const int ENTRY_DIR = 178;
 const int MAX_CONTAINER_ITEMS = 200;
 
+// Базовые точки регионов глобальной карты, рядом с которыми может появиться склад
 const int[][] GlobalCoords = {{668, 1121}, {375, 709}, {274, 367}, {685, 218}, {1224, 632}, {1073, 1181}, {1019, 119}};
 
-// GameEvent
+// Точка входа игрового ивента: разово создаёт склад в случайном регионе, если его там ещё нет
 void CreateStoreHouse()
 {
-    // Выбираем случайные координаты
+    // Выбираем случайный регион из заданного списка
     int idx = Game.Random(0, GlobalCoords.length() - 1);
 
-    // Ищем склад
+    // Если рядом с выбранным регионом склад уже существует — выходим
     Location[] locations = Location::GetLocationsInRadius(ipos(GlobalCoords[idx][0], GlobalCoords[idx][1]), LocationSearchRadius());
     if (locations.length() > 0) {
         for (int i = 0, l = locations.length(); i < l; i++) {
@@ -38,6 +48,7 @@ void CreateStoreHouse()
         }
     }
 
+    // Случайно смещаем точку от центра региона и отбрасываем координаты у самого края карты
     int locX = GlobalCoords[idx][0] + Game.Random(-1 * LocationDelta(), LocationDelta());
     int locY = GlobalCoords[idx][1] + Game.Random(-1 * LocationDelta(), LocationDelta());
     if (locX < Settings.GlobalMap.GlobalMapZoneLength || locY < Settings.GlobalMap.GlobalMapZoneLength ||
@@ -47,12 +58,13 @@ void CreateStoreHouse()
         return;
     }
 
-    // Не найдена локация в данной области
+    // Создаём скрытую локацию-склад в выбранной точке
     Location loc = Location::CreateLocation(Content::Location::desert_12, ipos(locX, locY), null);
     loc.AutoGarbage = false;
     loc.Hidden = true;
     Map map = loc.GetMapByIndex(0);
     map.SetupScript(MapInit);
+    // Запоминаем контейнер-склад (сундук на карте) и расставляем у входов охрану-«шакалов»
     Item[] items = map.GetItems(Content::Item::footlocker_clean_left);
     if (items.length() > 0) {
         loc.StorehouseContId = items[0].Id;
@@ -78,11 +90,13 @@ void CreateStoreHouse()
     }
 }
 
+// Инициализация карты склада: подписываемся на вход криттеров, чтобы натравить охрану
 void MapInit(Map map, bool firstTime)
 {
     map.OnCritterIn.Subscribe(MapInCritter);
 }
 
+// При входе игрока на карту склада все охранники-«шакалы» получают его как цель
 [[Event]]
 void MapInCritter(Map map, Critter cr)
 {
@@ -97,9 +111,10 @@ void MapInCritter(Map map, Critter cr)
     }
 }
 
+// Складывает переданный лут в ближайший склад; при переполнении запускает его уничтожение
 void SaveLoot2Storehouse(int WorldX, int WorldY, Item[] items)
 {
-    // Ищем локацию
+    // Ищем рядом с указанными мировыми координатами локацию-склад
     Location[] locations = Location::GetLocationsInRadius(ipos(WorldX, WorldY), LocationSearchRadius());
     Location? storeHouse;
     if (locations.length() > 0) {
@@ -112,6 +127,7 @@ void SaveLoot2Storehouse(int WorldX, int WorldY, Item[] items)
         }
     }
 
+    // Переносим лут в контейнер; при переполнении раскрываем склад и через 4 дня уничтожаем
     if (storeHouse != null && storeHouse.Hidden && storeHouse.StorehouseContId != ZERO_IDENT) {
         Item? container = Game.GetItem(storeHouse.StorehouseContId);
         if (container != null) {
@@ -126,6 +142,7 @@ void SaveLoot2Storehouse(int WorldX, int WorldY, Item[] items)
     }
 }
 
+// Считает «вес» содержимого склада: штабелируемое (оружие/броня/химия) — по Count, прочее — поштучно
 int CountContainerItems(Item container)
 {
     int count = 0;
@@ -143,6 +160,7 @@ int CountContainerItems(Item container)
     return count;
 }
 
+// Отложенное (по таймеру) уничтожение переполненного склада, если он ещё существует
 [[TimeEvent]]
 void DeferredDestroyLocation(any value)
 {

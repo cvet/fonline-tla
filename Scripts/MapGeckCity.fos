@@ -1,14 +1,21 @@
-namespace MapGeckCity // Sort 2
+// MapGeckCity — город, который игроки строят, применив ГЕКК на пустынном энкаунтере.
+// Зона ответственности: создание локации города, списки жителей/лидера и их доступы,
+// найм НПЦ для города, энергобарьер на входе и его подпитка батареями,
+// диалоговые предикаты и результаты для терминалов/двери штабквартиры, торговля и репликатор.
+// Сторона исполнения: SERVER (весь модуль под #if SERVER).
+// Связи: EnergyBarier (барьер на входе), Entrance (гексы входов), Dialogs/Messaging (диалоги и сообщения),
+// PlayerRegistration (имена/поиск игроков), GlobalmapGroupExtended (группа на глобалке),
+// Entry-гексы и свойства локации/карты/криттера объявлены через Property-декларации ниже.
+namespace MapGeckCity
 {
 
 const int STR_GOT_EXPERIENCE = 3480;
 
 #if SERVER
 
-// Скрипты для города, который можно построить, использовав ГЕКК.
-// ГЭКК нужно использовать на пустынном энкаунтере (Content::Location::desert_1..Content::Location::desert_12)
+// ГЕКК применяется на пустынном энкаунтере (Content::Location::desert_1..Content::Location::desert_12).
 
-// Свойство, по которому будет проверяться, житель ли это города из ГЕКК или нет
+// Свойство, по которому проверяется, житель ли криттер города из ГЕКК.
 ///@ Property Critter Server ident GCityCitizen Mutable Persistent
 ///@ Property Critter Server int32 MapGeckCityTraderSkillBarter Mutable Persistent
 ///@ Property Location Server ident[] GeckCityMembers Mutable Persistent
@@ -31,38 +38,41 @@ const int STR_GENERATOR_CHARGED = 5509;    // Генератор заряжен,
 const int STR_CONSOLE_OUT_OF_ORDER = 5510; // Терминал не функционирует. Система перезагружается.
 const int STR_BRAKE_CONSOLE = 5511;        // Посмотрим, что здесь можно сделать...
 const hstring LOC_PID_GECK_CITY = Content::Location::geck_city;
-const timespan CLOSE_DOOR_TIME = Time::Minutes(1); // Время в игровых секундах до автоматического закрытия двери. (одна реальная минута
-// В этой переменной сохраняется Id локации с городом из Гекка
-const int HOMEPOS_RADIUS = 10;               // Радиус, в котором от домашней позиции должен находиться НПЦ, чтобы считалось, что он добрался до места.
-const int XP_CREATE_CITY = 25000;            // Опыт за создание города
-const int FORCE_DIALOG_PLAYER_NOTFOUND = 10; // Номер строки диалога с главным компьютером города, в котором пишется, что игрок не найден
-const int FORCE_DIALOG_PLAYER_ADDED = 7;     // Номер строки диалога с главным компьютером города, в котором пишется, что игрок добавлен в списки жителей города
-const int FORCE_DIALOG_PLAYER_REMOVED = 8;   // Номер строки диалога с главным компьютером города, в котором пишется, что игрок удален из списков жителей города
-const int FORCE_DIALOG_ERROR = 9;            // Неизвестная ошибка
-const int ENTRY_CITYHALL = 17;               // Номер гекса на который перемещается житель при входе в город.
-const int ENTRY_DOCTOR = 18;                 // Номер гекса клиники, в которую можно привести доктора.
-const int ENTRY_TRADER = 19;                 // Номер гекса магазина, в него можно привести торговца.
-const int ENTRY_OUTER_TERMINAL = 20;         // Гекс рядом с внешним терминалом
-const int ENTRY_GUARD = 21;                  // Гекс для размещения наемных охранников
-const int ENTRY_BARMAN = 22;                 // Кафе. Гекс для  бармена
-const int ENTRY_BAR = 23;                    // Кафе. Гекс для посетителей
-const int ENTRY_CELLAR_ENTRANCE = 24;        // Штабквартира. Гекс перед входом
-const int ENTRY_CITIZEN_CAR = 100;           // Два гекса для машин жителей
-const int ENTANCE_CITYHALL = 1;              // Порядковый номер входа "штабквартира"
-const int ENTRY_CITIZEN_EXIT = 2;            // Специальный закрытый выход для жителей
-const int ENTRY_REPLICATOR_TANK = 30;        // Номер гекса, на котором устанавливается репликатор
+const timespan CLOSE_DOOR_TIME = Time::Minutes(1); // Время до автоматического закрытия двери (одна реальная минута).
+const int HOMEPOS_RADIUS = 10;                     // Радиус, в котором от домашней позиции должен находиться НПЦ, чтобы считалось, что он добрался до места.
+const int XP_CREATE_CITY = 25000;                  // Опыт за создание города
+const int FORCE_DIALOG_PLAYER_NOTFOUND = 10;       // Номер строки диалога с главным компьютером города, в котором пишется, что игрок не найден
+const int FORCE_DIALOG_PLAYER_ADDED = 7;   // Номер строки диалога с главным компьютером города, в котором пишется, что игрок добавлен в списки жителей города
+const int FORCE_DIALOG_PLAYER_REMOVED = 8; // Номер строки диалога с главным компьютером города, в котором пишется, что игрок удален из списков жителей города
+const int FORCE_DIALOG_ERROR = 9;          // Неизвестная ошибка
+const int ENTRY_CITYHALL = 17;             // Номер гекса на который перемещается житель при входе в город.
+const int ENTRY_DOCTOR = 18;               // Номер гекса клиники, в которую можно привести доктора.
+const int ENTRY_TRADER = 19;               // Номер гекса магазина, в него можно привести торговца.
+const int ENTRY_OUTER_TERMINAL = 20;       // Гекс рядом с внешним терминалом
+const int ENTRY_GUARD = 21;                // Гекс для размещения наемных охранников
+const int ENTRY_BARMAN = 22;               // Кафе. Гекс для  бармена
+const int ENTRY_BAR = 23;                  // Кафе. Гекс для посетителей
+const int ENTRY_CELLAR_ENTRANCE = 24;      // Штабквартира. Гекс перед входом
+const int ENTRY_CITIZEN_CAR = 100;         // Два гекса для машин жителей
+const int ENTANCE_CITYHALL = 1;            // Порядковый номер входа "штабквартира"
+const int ENTRY_CITIZEN_EXIT = 2;          // Специальный закрытый выход для жителей
+const int ENTRY_REPLICATOR_TANK = 30;      // Номер гекса, на котором устанавливается репликатор
 const hstring ENTRY_REPLICATOR_SPAWN = "31".hstr(); // Номер гекса, на котором появляется возрожденный игрок
 const int MAPLOOP_0 = 65000;                        // Период, на который тратится 1 батарейка в генераторе, при расчете: активен барьер на входе или нет
+
+// Примерное время бесперебойной работы барьера в часах по числу зарядов.
 int GetChargeUptime(int charges)
 {
     return int(charges * (MAPLOOP_0 / 1000) / 3600);
 }
+
 const int CHARGES_MFC = 10;            // Число зарядов генератора c одного реактора
 const int CHARGES_CEC = 1;             // Число зарядов генератора c одной малой батареи
 const int MAX_CELLS = 100;             // Максимальное число батареек за раз, которые можно загрузить в генератор
 const int GATES_NET_NUM = 1;           // Номер сети для барьера на входе.
 const int CITIZENS_TRADING_SKILL = 10; // Навык бартера для нпц-торговца в ГизГ
-// energy_barrier.fos
+
+// Режимы энергобарьера (значения согласованы с модулем energy_barrier.fos).
 const int BM_OFF = 1;
 const int BM_ON = 0;
 const int BM_HALF_ON = 2;
@@ -74,6 +84,7 @@ void InitMapGeckCity()
     Game.OnGlobalMapCheckEntranceAllowed.Subscribe(EntranceGeck);
 }
 
+// Вход в штабквартиру (ENTANCE_CITYHALL) разрешён только жителям города; иначе вход блокируется.
 [[Event]]
 EventResult EntranceGeck(Location geck, Critter[] critters, int entrance)
 {
@@ -99,12 +110,14 @@ void GiveGeck(Critter cr, Critter npc)
     geck.SetupScript(GeckInit);
 }
 
+// Инициализация предмета ГЕКК: разрешаем использование и вешаем обработчик применения.
 void GeckInit(Item geck, bool firstTime)
 {
     geck.IsCanUse = true;
     geck.OnCritterUse.Subscribe(GeckUse);
 }
 
+// Применение ГЕКК: разрешено только на подходящем пустынном энкаунтере, иначе сообщаем игроку об ошибке.
 [[Event]]
 EventResult GeckUse(Item geck, Critter cr, int param)
 {
@@ -127,6 +140,8 @@ EventResult GeckUse(Item geck, Critter cr, int param)
     return EventResult::StopChain;
 }
 
+// Создание локации города: вся группа лидера становится жителями, лидеру/членам начисляется опыт,
+// игрок получает использованный ГЕКК, лидер записывается в свойства локации.
 void CreateCity(Critter player, Item geck)
 {
     Game.DestroyItem(geck);
@@ -189,6 +204,7 @@ bool IsPlayerCitizen(Critter? cr)
     return IsPlayerCitizen(cr, loc);
 }
 
+// Проверка вхождения криттера в список жителей конкретной локации города.
 bool IsPlayerCitizen(Critter? cr, Location? loc)
 {
     if (cr == null || loc == null) {
@@ -299,7 +315,7 @@ void ClearCitizens(Critter? leader)
     loc.GeckCityMembers = acceptedPlayers;
 }
 
-// Работа со списком жителей города
+// Диалоговые обёртки управления списком жителей: добавить/исключить/очистить через терминал лидера.
 [[DialogDemand]]
 bool IsPlayerLeader(Critter player, Critter none)
 {
@@ -364,8 +380,9 @@ void ClearCitizens(Critter player, Critter none)
     ClearCitizens(player);
 }
 
-// Двери центрального здания (Штабквартиры)
-// К штабквартире имеют доступ только граждане города. Гражданами считаются те, кто был в группе, установившей ГЕКК, а также добавленные лидером позже.
+// Двери центрального здания (Штабквартиры).
+// Доступ только у граждан города: те, кто был в группе при установке ГЕКК, плюс добавленные лидером позже.
+// Старая сигнатура хука (breadcrumb миграции, не удалять):
 // bool UseDoorComputer( Critter player, StaticItem scenery, CritterProperty skill, Item item )
 [[ItemStatic]]
 bool UseDoorComputer(Critter player, StaticItem scenery, Item? item, any skill)
@@ -378,6 +395,7 @@ bool UseDoorComputer(Critter player, StaticItem scenery, Item? item, any skill)
     return true;
 }
 
+// Диалоговые предикаты «гражданин/не гражданин» поверх общей проверки жителя текущего города.
 bool IsCitizenImpl(Critter player, Critter npc)
 {
     return IsPlayerCitizen(player);
@@ -395,6 +413,7 @@ bool NotCitizen(Critter player, Critter npc)
     return !IsCitizenImpl(player, npc);
 }
 
+// Инициализация двери штабквартиры: запоминаем её на карте и вешаем обработчик попыток вскрытия.
 void DoorInit(Item door, bool firstTime)
 {
     Map? map = Game.GetMap(door.MapId);
@@ -405,6 +424,7 @@ void DoorInit(Item door, bool firstTime)
     door.OnCritterUseSkill.Subscribe(DoorSkill);
 }
 
+// Попытка вскрыть закрытую дверь навыком блокируется: дверь открывается только через диалог терминала.
 [[Event]]
 EventResult DoorSkill(Item door, Critter cr, CritterProperty skill)
 {
@@ -416,6 +436,7 @@ EventResult DoorSkill(Item door, Critter cr, CritterProperty skill)
     return EventResult::StopChain;
 }
 
+// Открытие двери штабквартиры из диалога с авто-закрытием через CLOSE_DOOR_TIME.
 [[DialogResult]]
 void OpenDoor(Critter player, Critter none)
 {
@@ -425,9 +446,10 @@ void OpenDoor(Critter player, Critter none)
     }
 
     Lockers::SwitchLocker(door, true);
-    Game.StartTimeEvent(CLOSE_DOOR_TIME, Item::AutoCloseDoor, door.Id); //SavedDeferredCall
+    Game.StartTimeEvent(CLOSE_DOOR_TIME, Item::AutoCloseDoor, door.Id); // SavedDeferredCall
 }
 
+// Закрытие двери штабквартиры из диалога.
 [[DialogResult]]
 void CloseDoor(Critter player, Critter none)
 {
@@ -439,6 +461,7 @@ void CloseDoor(Critter player, Critter none)
     Lockers::SwitchLocker(door, false);
 }
 
+// Дверь штабквартиры по ссылке из свойства карты (или null, если карты/двери нет).
 Item? GetGeckDoor(Map? map)
 {
     if (map == null) {
@@ -448,9 +471,7 @@ Item? GetGeckDoor(Map? map)
     return Game.GetItem(map.GeckCityDoor);
 }
 
-// Найм НПЦ для службы в своем городе из ГЕККа.
-// Нанимать можно только одного НПЦ за раз.
-// НПЦ будет следовать за игроком, пока тот не приведет его к месту назначения
+// Локация города, гражданином которого числится игрок (или null).
 Location? GetGeckLocation(Critter? player)
 {
     if (player == null || player.GCityCitizen == ZERO_IDENT) {
@@ -460,10 +481,10 @@ Location? GetGeckLocation(Critter? player)
     return Game.GetLocation(player.GCityCitizen);
 }
 
-// Проверка, может ли игрок нанять НПЦ для службы в своем городе
-// npcPid - прототип НПЦ
-// maxNum - максимальное число НПЦ такого типа на карте
-// homeEntry - номер гекса с домашней позицией НПЦ
+// Найм НПЦ для службы в своём городе из ГЕККа.
+// Нанимать можно только одного НПЦ за раз; НПЦ следует за игроком, пока тот не приведёт его к месту назначения.
+// Проверка, может ли игрок нанять НПЦ данного типа:
+// npcPidHash - прототип НПЦ; maxNum - максимум НПЦ такого типа на карте; homeEntry - гекс с домашней позицией НПЦ.
 bool CanHireNpcImpl(Critter player, Critter npc, hstring npcPidHash, int maxNum, int homeEntry)
 {
     if (maxNum < 1) {
@@ -499,6 +520,7 @@ bool CanNotHireNpc(Critter player, Critter npc, any npcPidHash, any maxNum, any 
     return !CanHireNpcImpl(player, npc, npcPidHash, maxNum, homeEntry);
 }
 
+// Вариант проверки найма, когда тип НПЦ берётся из прототипа самого собеседника-НПЦ.
 bool CanHireNpc2Impl(Critter player, Critter? npc, int maxNum, int homeEntry)
 {
     if (npc == null) {
@@ -591,13 +613,14 @@ void SetNewHome(Critter player, Critter? npc, any homeEntry)
     }
 }
 
-// Скрипт карты
+// Инициализация карты города: подписка на вход криттеров и запуск периодического тика расхода заряда.
 void MapInit(Map map, bool firstTime)
 {
     map.OnCritterIn.Subscribe(GeckMapInCritter);
     map.StartTimeEvent(Time::Milliseconds(0), Time::Milliseconds(MAPLOOP_0), GeckMapLoop);
 }
 
+// Периодический тик: пока барьер включён, тратим один заряд; когда зарядов нет — отключаем барьер.
 [[TimeEvent]] [[Async]]
 void GeckMapLoop(Map map)
 {
@@ -619,15 +642,15 @@ void GeckMapLoop(Map map)
     }
 }
 
-// Жители сразу попадают в штабквартиру, если заходят на карту города из ГЕККа
-// Отменено, теперь попадание на карту зависит определяется функцией входа
-// Оставлено на будущее, возможно будет логика для автомобилей
+// Раньше жители при входе на карту города сразу телепортировались в штабквартиру.
+// Отменено: попадание на карту теперь определяется функцией входа (EntranceGeck).
+// Оставлено на будущее — возможно, появится логика для автомобилей жителей.
 [[Event]]
-void GeckMapInCritter(Map map, Critter cr) // obsolete
+void GeckMapInCritter(Map map, Critter cr) // устаревший обработчик, тело фактически не срабатывает
 {
     if (cr.ControlledByPlayer && !cr.ControlledByPlayer) {
         if (IsPlayerCitizen(cr)) {
-            // Проверка, что игрок ближе к обычному гексу, чем к выходу для граждан
+            // Проверка, что игрок ближе к обычному гексу, чем к выходу для граждан.
             mpos hex;
             int distDefault = 0;
             int distCitizen = 0;
@@ -651,10 +674,11 @@ void GeckMapInCritter(Map map, Critter cr) // obsolete
     }
 }
 
-// Отключено до момента, когда будет решена проблема с багажниками
+// Отключено до решения проблемы с багажниками.
 void TryMoveCar(Critter cr, Map map)
 {
-    Item[] items = {}; // cr.GetItems(ItemProperty::Type, ItemType::Key);
+    // Источник ключей отключён до домиграции (breadcrumb, не удалять): cr.GetItems(ItemProperty::Type, ItemType::Key)
+    Item[] items = {};
     for (int k = 0; k < items.length(); k++) {
         Item key = items[k];
         Entrance::Entry[] entries = {};
@@ -665,7 +689,7 @@ void TryMoveCar(Critter cr, Map map)
             if (car != null && car.LockerId == key.LockerId) {
                 Entrance::Entry[] entries2 = Entrance::ParseEntries(map, ENTRY_CITIZEN_CAR);
                 for (int j = 0; j < entries2.length(); j++) {
-                    Entrance::Entry ent = entries[j];
+                    Entrance::Entry ent = entries2[j];
                     if (map.CheckPlaceForItem(ent.Hex, car.ProtoId)) {
                         ItemMovement::MoveItem(car, 1, map, ent.Hex);
                         return;
@@ -699,6 +723,8 @@ bool NoGeneratoreCharges(Critter player, Critter npc)
     return map.GeckCityCharges < 1;
 }
 
+// Внешний терминал управления барьером: пока терминал «сломан» НПЦ, выдаём сообщение, иначе передаём обработку EnergyBarier.
+// Старая сигнатура хука (breadcrumb миграции, не удалять):
 // bool TerminalOuter( Critter player, StaticItem terminal, CritterProperty skill, Item item )
 [[ItemStatic]]
 bool TerminalOuter(Critter player, StaticItem terminal, Item item, any skill)
@@ -712,6 +738,7 @@ bool TerminalOuter(Critter player, StaticItem terminal, Item item, any skill)
     return EnergyBarier::TerminalImpl(player, terminal, item, skill);
 }
 
+// Терминал считается сломанным, пока не истёк срок поломки, записанный в свойстве карты.
 bool IsTerminalBrokenImpl(Critter player, Critter npc)
 {
     Map? map = player.GetMap();
@@ -755,6 +782,7 @@ void BrakeTerminal(Critter player, Critter? npc)
     }
 }
 
+// Шаг плана НПЦ у терминала: реплика и пометка терминала сломанным на 16 игровых часов.
 void Brake(Critter npc)
 {
     Messaging::Say(npc, TextPackKey(TextPackName::Text, "" + (STR_BRAKE_CONSOLE)));
@@ -764,7 +792,8 @@ void Brake(Critter npc)
     }
 }
 
-// Использование батарей на генератор
+// Загрузка батарей в генератор: малые батареи и реакторы дают разное число зарядов, лишние батареи не тратятся.
+// Старая сигнатура хука (breadcrumb миграции, не удалять):
 // bool UseGenerator( Critter cr, StaticItem scen, CritterProperty skill, Item item )
 [[ItemStatic]]
 bool UseGenerator(Critter cr, StaticItem scen, Item? item, any skill)
@@ -799,6 +828,7 @@ bool UseGenerator(Critter cr, StaticItem scen, Item? item, any skill)
     return true;
 }
 
+// Диалоговые предикаты и переключатель состояния входного барьера через сеть GATES_NET_NUM.
 [[DialogDemand]]
 bool BarrierOn(Critter player, Critter npc)
 {
@@ -826,6 +856,7 @@ bool BarrierOff(Critter player, Critter npc)
     return (state == BM_OFF || state == BM_OFF_NO_GUARD);
 }
 
+// Включение или отключение входного барьера из диалога (отложенным вызовом EnergyBarier).
 [[DialogResult]]
 void SwitchBarrierMode(Critter player, Critter npc, any mode)
 {
@@ -900,6 +931,7 @@ bool NotItemExist(Critter player, Critter npc, any pidItem)
     return !ItemExistImpl(player, npc, pidItem);
 }
 
+// Установка бака репликатора на гекс ENTRY_REPLICATOR_TANK, если его там ещё нет.
 [[DialogResult]]
 void AddReplicator(Critter player, Critter npc)
 {
@@ -908,7 +940,6 @@ void AddReplicator(Critter player, Critter npc)
         return;
     }
 
-    // ENTRY_REPLICATOR_TANK
     for (int i = 0, l = loc.GetMapCount(); i < l; i++) {
         Map map = loc.GetMapByIndex(i);
         Entrance::Entry? entry = Entrance::GetEntry(map, ENTRY_REPLICATOR_TANK, 0);
@@ -919,6 +950,7 @@ void AddReplicator(Critter player, Critter npc)
     }
 }
 
+// Назначение городу точки возрождения игрока (карта и гекс ENTRY_REPLICATOR_SPAWN).
 [[DialogResult]]
 void SetGeckReplication(Critter player, Critter npc)
 {
@@ -940,6 +972,7 @@ void SetGeckReplication(Critter player, Critter npc)
     }
 }
 
+// Служебная выдача ГЕКК криттеру (например, из консоли/триггера) с привязкой скрипта предмета.
 void AddGeck(Critter cr, int, int, int)
 {
     Item geck = cr.AddItem(Content::Item::geck, 1);

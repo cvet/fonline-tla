@@ -1,8 +1,15 @@
+// CritterActions — серверная обработка действий криттера в реальном времени (RT). Ключевые обязанности:
+// списание AP (ProcessAp), подбор/выброс/перенос предметов, операции с контейнерами/бартер/кража,
+// перезарядка оружия, использование умений/предметов, атака. Сторона: SERVER.
+// Связи: Tla (AP_DIVIDER), CritterState, ItemMovement, Combat, Parameters, WeaponHelpers, Messaging, MsgStr.
 namespace CritterActions
 {
 
 #if SERVER
 
+// Пытается списать ap очков действия. Если очков не хватает — ставит криттера в ожидание
+// до момента, когда регенерация доберёт недостающее, и возвращает false (действие не выполняем).
+// При успехе списывает AP, взводит тик регенерации и брейктайм, возвращает true.
 bool ProcessAp(Critter cr, int ap)
 {
     if (cr.CurrentAp / Tla::AP_DIVIDER < int(ap)) {
@@ -22,9 +29,11 @@ bool ProcessAp(Critter cr, int ap)
     return true;
 }
 
+// Обыск (лут) мёртвого криттера. Списывает AP, проверяет дистанцию и состояние цели,
+// затем поднимает событие навыка лута.
 void PickCritter(Critter cr, Critter pickCr)
 {
-    // Spend ap
+    // Списываем AP
     if (!ProcessAp(cr, Settings.Movement.RtApCostPickCritter)) {
         return;
     }
@@ -59,9 +68,11 @@ void PickCritter(Critter cr, Critter pickCr)
     (Game.OnCritterUseSkill.Fire(cr, CritterProperty::SpecialSkillLootCritter, pickCr, null, null) == EventResult::ContinueChain);
 }
 
+// Подбор предмета с гекса. Различает обычный предмет на земле, сценерий и стену:
+// для предмета/сценерия поднимает событие навыка подбора, для стены — сообщение «нечем взять».
 void PickItem(Critter cr, mpos hex, hstring pid)
 {
-    // Spend ap
+    // Списываем AP
     if (!ProcessAp(cr, Settings.Movement.RtApCostPickItem)) {
         return;
     }
@@ -115,19 +126,21 @@ void PickItem(Critter cr, mpos hex, hstring pid)
     }
 }
 
+// Выброс предмета из инвентаря. На карте кладёт предмет на гекс криттера; на глобалке —
+// либо уменьшает стак, либо уничтожает предмет (положить некуда).
 void DropInvItem(Critter cr, ident itemId, int count)
 {
-    // Spend ap
+    // Списываем AP
     if (!ProcessAp(cr, Settings.Movement.RtApCostDropItem)) {
         return;
     }
 
-    // Critter checks
+    // Проверки криттера
     if (!cr.IsAlive()) {
         throw("Critter is not alive", cr);
     }
 
-    // Get item
+    // Берём предмет
     Item? item = cr.GetItem(itemId);
     if (item == null) {
         throw("Item not found", cr, itemId);
@@ -141,10 +154,10 @@ void DropInvItem(Critter cr, ident itemId, int count)
         throw("Invalid count", cr, item, count);
     }
 
-    // Animation
+    // Анимация
     cr.Action(CritterAction::DropItem, -1, item);
 
-    // Drop
+    // Выбрасываем
     Map? map = cr.GetMap();
     if (map != null) {
         ItemMovement::MoveItem(item, count, map, cr.Hex);
@@ -157,13 +170,15 @@ void DropInvItem(Critter cr, ident itemId, int count)
     }
 }
 
+// Применение навыка к цели: криттеру, предмету на карте или сценерию. Резолвит цель по id/pid,
+// проверяет видимость и дистанцию, затем поднимает событие применения навыка.
 void UseSkill(Critter cr, CritterProperty skill, ident targetCrId, ident targetItemId, hstring sceneryPid, int hx, int hy)
 {
     if (!cr.IsAlive()) {
         throw("Client is not alive", cr);
     }
 
-    // Spend ap
+    // Списываем AP
     int ap = Settings.Movement.RtApCostUseSkill;
     if (!ProcessAp(cr, ap)) {
         return;
@@ -191,7 +206,7 @@ void UseSkill(Critter cr, CritterProperty skill, ident targetCrId, ident targetI
                 }
             }
             else {
-                // need realization
+                // нужна реализация
                 throw("Target critter not found in global group", cr, targetCrId);
             }
         }
@@ -237,41 +252,47 @@ void UseSkill(Critter cr, CritterProperty skill, ident targetCrId, ident targetI
         }
     }
 
-    // Send action
+    // Запускаем действие
     cr.Action(CritterAction::UseSkill, 0, null);
 
     (Game.OnCritterUseSkill.Fire(cr, skill, targetCr, targetItem, targetScen) == EventResult::ContinueChain);
 }
 
+// Перемещение предмета между слотами инвентаря криттера. Перекладка между основным
+// и вторым слотом руки бесплатна (apCost = 0), остальное стоит AP.
 void MoveInvItem(Critter cr, ident itemId, CritterItemSlot slot)
 {
-    // Get item
+    // Берём предмет
     Item? item = cr.GetItem(itemId);
     if (item == null) {
         throw("Item not found", cr, itemId);
     }
 
-    // Calculate move cost
+    // Считаем стоимость перемещения
     int apCost = Settings.Movement.RtApCostMoveItemInventory;
     if ((item.CritterSlot == CritterItemSlot::Main && slot == CritterItemSlot::Secondary) ||
         (item.CritterSlot == CritterItemSlot::Secondary && slot == CritterItemSlot::Main)) {
         apCost = 0;
     }
 
-    // Spend ap
+    // Списываем AP
     if (!ProcessAp(cr, apCost)) {
         return;
     }
 
-    // Critter checks
+    // Проверки криттера
     if (!cr.IsAlive()) {
         throw("Critter is not alive", cr);
     }
 
-    // Move
+    // Перемещаем
     cr.ChangeItemSlot(item.Id, slot);
 }
 
+// Универсальная операция перекладки предметов через активный TransferType криттера:
+// лут/кража с криттера, бартер, контейнеры на гексе/в инвентаре/дальние. take — забираем или кладём,
+// all — все предметы или один (itemId/itemCount). Резолвит источник/приёмник, фильтрует NoLoot/NoSteal,
+// проверяет перевес, двигает предметы и обновляет окно контейнера у клиента.
 void OperateContainer(Critter cr, bool take, bool all, ident itemId, int itemCount)
 {
     if (!cr.IsAlive()) {
@@ -295,7 +316,7 @@ void OperateContainer(Critter cr, bool take, bool all, ident itemId, int itemCou
         throw("Can't operate with stealing with all items", cr);
     }
 
-    // Get container
+    // Резолвим контейнер (предмет-контейнер или криттер-контейнер)
     Item? itemCont;
     Critter? crCont;
     if (transferType == TransferTypes::HexContUp || transferType == TransferTypes::HexContDown || transferType == TransferTypes::SelfCont ||
@@ -367,6 +388,7 @@ void OperateContainer(Critter cr, bool take, bool all, ident itemId, int itemCou
             throw("Critter container marked as NoSteal", cr, crCont);
         }
 
+        // breadcrumb миграции: запрет кражи у атакующего NPC (ждёт восстановления Ai::IsAttacking)
         //     if( transferType == TransferTypes::CritSteal && !crCont.ControlledByPlayer && Ai::IsAttacking( crCont ) )
         //         throw( "Critter container is in battle", cr, crCont );
         if (transferType == TransferTypes::CritLoot && !crCont.IsDead()) {
@@ -377,7 +399,7 @@ void OperateContainer(Critter cr, bool take, bool all, ident itemId, int itemCou
         verify(false, "Assertion failed");
     }
 
-    // Get item(s)
+    // Собираем список предметов для перекладки
     Item[] items;
     if (take) {
         if (itemCont != null) {
@@ -451,7 +473,7 @@ void OperateContainer(Critter cr, bool take, bool all, ident itemId, int itemCou
         }
     }
 
-    // Filter
+    // Фильтр: при луте/краже выкидываем помеченные NoLoot/NoSteal
     if (take && (transferType == TransferTypes::CritLoot || transferType == TransferTypes::CritSteal)) {
         for (int i = 0; i < items.length();) {
             if ((transferType == TransferTypes::CritLoot && items[i].IsNoLoot) || (transferType == TransferTypes::CritSteal && items[i].IsNoSteal)) {
@@ -467,7 +489,7 @@ void OperateContainer(Critter cr, bool take, bool all, ident itemId, int itemCou
         return;
     }
 
-    // Check ability
+    // Проверка перевеса у приёмника
     int weight = 0;
     for (int i = 0; i < items.length(); i++) {
         weight += items[i].Weight * (all ? items[i].Count : itemCount);
@@ -481,10 +503,10 @@ void OperateContainer(Critter cr, bool take, bool all, ident itemId, int itemCou
         }
     }
 
-    // Animation
+    // Анимация
     cr.Action(CritterAction::OperateContainer, transferType, !all ? items[0] : null);
 
-    // Moving
+    // Перемещение
     if (transferType == TransferTypes::CritSteal) {
         if ((Game.OnCritterStealing.Fire(crCont, cr, items[0], itemCount) == EventResult::ContinueChain)) {
             ItemMovement::MoveItem(items[0], itemCount, cr);
@@ -526,13 +548,13 @@ void OperateContainer(Critter cr, bool take, bool all, ident itemId, int itemCou
         }
     }
 
-    // Events
+    // События по каждому перемещённому предмету
     Entity cont = (itemCont != null ? cast<Entity>(itemCont) : cast<Entity>(crCont));
     for (int i = 0; i < items.length(); i++) {
         (Game.OnClientOperateContainer.Fire(cr, cont, items[i], take) == EventResult::ContinueChain);
     }
 
-    // Refresh container info
+    // Обновляем содержимое контейнера у клиента
     Item[] curItems;
     if (itemCont != null) {
         curItems = itemCont.GetItems(Tla::RootContainerStack());
@@ -546,13 +568,15 @@ void OperateContainer(Critter cr, bool take, bool all, ident itemId, int itemCou
     cr.SendItems(curItems, false, false, 1);
 }
 
+// Перезарядка оружия. Если новый патрон не совпадает с заряженным (или патрон не указан) —
+// сначала выгружает текущий боезапас обратно в инвентарь, затем досыпает новый до максимума.
 void ReloadWeapon(Critter cr, ident weaponId, ident ammoId)
 {
     if (!cr.IsAlive()) {
         throw("Client is not alive", cr);
     }
 
-    // Get weapon
+    // Берём оружие
     Item? weapon = cr.GetItem(weaponId);
     if (weapon == null) {
         throw("Unable to find weapon", cr, weaponId);
@@ -570,13 +594,13 @@ void ReloadWeapon(Critter cr, ident weaponId, ident ammoId)
         throw("Weapon doesn't have ammo holder", cr, weapon);
     }
 
-    // Spend ap
+    // Списываем AP
     int ap = Settings.Movement.RtApCostReloadWeapon;
     if (!ProcessAp(cr, ap)) {
         return;
     }
 
-    // Get ammo
+    // Берём патроны
     Item? ammo = (ammoId != ZERO_IDENT ? cr.GetItem(ammoId) : null);
     if (ammoId != ZERO_IDENT && ammo == null) {
         throw("Ammo not found", cr, weapon, ammoId);
@@ -586,7 +610,7 @@ void ReloadWeapon(Critter cr, ident weaponId, ident ammoId)
         throw("Weapon is full", cr, weapon, ammo);
     }
 
-    // Unload
+    // Выгрузка текущего боезапаса
     if (ammo == null || (weapon.AmmoCount > 0 && weapon.AmmoPid != ammo.ProtoId)) {
         if (weapon.AmmoPid != EMPTY_HSTRING) {
             Item? existAmmo = cr.GetItem(weapon.AmmoPid);
@@ -601,7 +625,7 @@ void ReloadWeapon(Critter cr, ident weaponId, ident ammoId)
         weapon.AmmoCount = 0;
     }
 
-    // Load
+    // Загрузка нового боезапаса
     if (ammo != null) {
         int count = Math::Min(ammo.Count, weapon.Weapon_MaxAmmoCount - weapon.AmmoCount);
         weapon.AmmoCount += count;
@@ -618,10 +642,14 @@ void ReloadWeapon(Critter cr, ident weaponId, ident ammoId)
     cr.Action(CritterAction::ReloadWeapon, 0, weapon);
 }
 
+// Атака цели оружием. mode упаковывает режим использования (младшие 4 бита) и зону прицеливания
+// (старшие биты). Проверяет руки/двуручность, прицел, дистанцию и трассу до цели, наличие патрона,
+// взводит таймаут агрессора и передаёт удар в Combat::CombatAttack.
 void Attack(Critter cr, ident targetId, int mode)
 {
     Critter? target = Game.GetCritter(targetId);
 
+    // Распаковываем режим использования и зону прицеливания из mode
     int use = mode & 0xF;
     int aim = mode >> 4;
 
@@ -652,7 +680,7 @@ void Attack(Critter cr, ident targetId, int mode)
         }
     }
 
-    // Spend ap
+    // Списываем AP
     int ap = Parameters::GetItemUseApCost(cr, weapon, mode);
     if (!ProcessAp(cr, ap)) {
         return;
@@ -677,7 +705,7 @@ void Attack(Critter cr, ident targetId, int mode)
         }
     }
     else {
-        // TODO: hex attack
+        // TODO: атака по гексу
         throw("Target == null for critter", cr);
     }
 
@@ -701,7 +729,7 @@ void Attack(Critter cr, ident targetId, int mode)
         throw("Target blocked", cr, weapon, use, targetHex.x, targetHex.y);
     }
 
-    // Ammo
+    // Патрон: берём заряженный, иначе дефолтный из прото оружия
     ProtoItem? ammo = null;
 
     if (weapon.Weapon_Caliber != 0 && weapon.Weapon_MaxAmmoCount > 0) {
@@ -725,11 +753,13 @@ void Attack(Critter cr, ident targetId, int mode)
         }
     }
 
-    // Raise attack event
+    // Помечаем криттера агрессором и проводим удар
     cr.TimeoutAggressor = Game.SynchronizedTime + Time::Minutes(1);
     Combat::CombatAttack(cr, attackTarget, weapon, mode, ammo);
 }
 
+// Применение предмета на цель: криттера, предмет на карте или сценерий. Резолвит используемый
+// предмет и цель, проверяет видимость и дистанцию, затем поднимает событие применения предмета.
 void UseItemOn(Critter cr, ident usedItemId, ident targetCrId, ident targetItemId, hstring sceneryPid, int hx, int hy, int timer)
 {
     if (!cr.IsAlive()) {
@@ -772,7 +802,7 @@ void UseItemOn(Critter cr, ident usedItemId, ident targetCrId, ident targetItemI
                 }
             }
             else {
-                // need realization
+                // нужна реализация
                 throw("Target critter not found in global group", cr, targetCrId);
             }
         }
@@ -815,7 +845,7 @@ void UseItemOn(Critter cr, ident usedItemId, ident targetCrId, ident targetItemI
         }
     }
 
-    // Send action
+    // Запускаем действие
     cr.Action(CritterAction::UseItem, 0, null);
     (Game.OnCritterUseItemOn.Fire(cr, usedItem, targetCr, targetItem, targetScen, timer) == EventResult::ContinueChain);
 }

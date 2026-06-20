@@ -1,8 +1,18 @@
+// MainPlanes — серверная реализация AI-планов NPC: начало/конец/выполнение боевых и
+// перемещенческих планов.
+// SERVER: подписывается на движковые события планов (OnNpcPlaneBegin/End/Run) и решает,
+// как NPC реагирует на ситуацию — куда идти, чем и как атаковать, целиться, прицельные удары.
+// Ключевые обязанности: выбор боевого оружия по навыкам, расчёт дистанций атаки и стоимости
+// AP, выбор зоны прицеливания, трассировка линии огня для очередей, обработка причин
+// прерывания плана (застрял, дверь, побег и т.п.).
+// Связи: NpcPlanes (типы/создание планов), WeaponHelpers/Combat (боевые расчёты),
+// AiSettings (настройки AI), CritterState/GameTime (тайминги), Lockers/Repair (двери, ремонт).
 namespace MainPlanes
 {
 
 #if SERVER
 
+// Точка входа модуля: подписка на движковые события жизненного цикла AI-планов.
 [[ModuleInit]]
 void InitMainPlanes()
 {
@@ -11,11 +21,11 @@ void InitMainPlanes()
     Game.OnNpcPlaneRun.Subscribe(NpcPlaneRun);
 }
 
-// Called on some plane added.
-// Return true to allow plane, false to disallow.
+// Вызывается при добавлении плана.
+// Возврат true разрешает план, false запрещает.
 // REASON_GO_HOME
-// REASON_FOUND_IN_ENEMY_STACK   someCr as Enemy
-// REASON_FROM_DIALOG            someCr as Player
+// REASON_FOUND_IN_ENEMY_STACK   someCr как враг
+// REASON_FROM_DIALOG            someCr как игрок
 // REASON_FROM_SCRIPT
 // REASON_RUN_AWAY
 [[Event]]
@@ -26,8 +36,8 @@ EventResult NpcPlaneBegin(Critter npc, int planeId, int reason, Critter someCr, 
     return EventResult::StopChain;
 }
 
-// Called on some plane ended.
-// Return true to erase plane, false to wait (set this plane to next priority of planes sequence).
+// Вызывается при завершении плана.
+// Возврат true стирает план, false откладывает (план переходит к следующему приоритету в очереди).
 // REASON_SUCCESS
 // REASON_HEX_TOO_FAR
 // REASON_HEX_BUSY
@@ -37,10 +47,10 @@ EventResult NpcPlaneBegin(Critter npc, int planeId, int reason, Critter someCr, 
 // REASON_POSITION_NOT_FOUND
 // REASON_FIND_PATH_ERROR
 // REASON_CANT_WALK
-// REASON_TARGET_DISAPPEARED     someCr as Enemy
+// REASON_TARGET_DISAPPEARED     someCr как враг
 // REASON_USE_ITEM_NOT_FOUND
-// REASON_GAG_CRITTER            someCr as Enemy
-// REASON_GAG_ITEM               someItem as Item
+// REASON_GAG_CRITTER            someCr как враг
+// REASON_GAG_ITEM               someItem как предмет
 // REASON_NO_UNARMED
 [[Event]]
 EventResult NpcPlaneEnd(Critter npc, int planeId, int reason, Critter? someCr, Item? someItem)
@@ -70,7 +80,7 @@ EventResult NpcPlaneEnd(Critter npc, int planeId, int reason, Critter? someCr, I
             child.Run = plane.Run;
             child.Walk_Cut = npc.LookDistance / 2;
             plane.SetChild(child);
-            return EventResult::StopChain; // Cancel deleting
+            return EventResult::StopChain; // отменяем удаление плана
         }
     }
     else if (reason == NpcPlanes::REASON_GAG_CRITTER) {
@@ -87,10 +97,10 @@ EventResult NpcPlaneEnd(Critter npc, int planeId, int reason, Critter? someCr, I
             plane.SetChild(child);
         }
         else {
-            CritterState::Wait(npc, Game.Random(1000, 2000)); // Wait 1-2 second
+            CritterState::Wait(npc, Game.Random(1000, 2000)); // ждём 1-2 секунды
         }
 
-        return EventResult::StopChain; // Cancel deleting
+        return EventResult::StopChain; // отменяем удаление плана
     }
     else if (reason == NpcPlanes::REASON_GAG_ITEM) {
         if (someItem != null) {
@@ -105,7 +115,7 @@ EventResult NpcPlaneEnd(Critter npc, int planeId, int reason, Critter? someCr, I
                 child.Pick_ToOpen = true;
                 child.Run = plane.Run;
                 plane.SetChild(child);
-                return EventResult::StopChain; // Cancel deleting
+                return EventResult::StopChain; // отменяем удаление плана
             }
             else if (someItem.Type != ItemType::Door) {
                 NpcPlanes::NpcPlane child = NpcPlanes::CreatePlane();
@@ -115,7 +125,7 @@ EventResult NpcPlaneEnd(Critter npc, int planeId, int reason, Critter? someCr, I
                 child.Pick_Pid = someItem.ProtoId;
                 child.Run = plane.Run;
                 plane.SetChild(child);
-                return EventResult::StopChain; // Cancel deleting
+                return EventResult::StopChain; // отменяем удаление плана
             }
         }
     }
@@ -124,7 +134,7 @@ EventResult NpcPlaneEnd(Critter npc, int planeId, int reason, Critter? someCr, I
         Critter? cr = Game.GetCritter(plane.Attack_TargId);
         if (map != null && cr != null) {
             mdir awayDir = Game.GetDirection(cr.Hex, npc.Hex);
-            int awayDist = Game.Random(30, 50); // Todo: resolve correct distantion
+            int awayDist = Game.Random(30, 50); // Todo: подобрать корректную дистанцию отступления
             mpos hexBase = npc.Hex;
             map.MoveHexByDir(hexBase, awayDir, 1);
 
@@ -150,7 +160,7 @@ EventResult NpcPlaneEnd(Critter npc, int planeId, int reason, Critter? someCr, I
         }
     }
     else if (reason == NpcPlanes::REASON_NO_UNARMED) {
-        // Repair first broken weapon
+        // чиним первое сломанное оружие
         Item[] items = npc.GetItems(ItemProperty::Type, ItemType::Weapon);
         for (int i = 0; i < items.length(); i++) {
             Item item = items[i];
@@ -166,23 +176,24 @@ EventResult NpcPlaneEnd(Critter npc, int planeId, int reason, Critter? someCr, I
     return EventResult::ContinueChain;
 }
 
-// Called on some plane runs, to manuality some steps.
+// Вызывается при выполнении плана — позволяет вручную скорректировать отдельные шаги.
+// Параметры r0/r1/r2 — каналы ввода/вывода (any), смысл зависит от reason.
 // REASON_ATTACK_WEAPON
-//  In: r0 target id, r1 0, r2 0
-//  Out: r0 weapon id, r1 use index, r2 proto id of unarmed attack (if r0==0)
+//  Вход: r0 id цели, r1 0, r2 0
+//  Выход: r0 id оружия, r1 индекс использования, r2 прото-id безоружной атаки (если r0==0)
 // REASON_ATTACK_DISTANTION
-//  In: r0 target id, r1 0, r2 0
-//  Out: r0 best dist, r1 min dist, r2 max dist (if == 0 than run away)
+//  Вход: r0 id цели, r1 0, r2 0
+//  Выход: r0 лучшая дист., r1 мин. дист., r2 макс. дист. (если == 0, то отступаем)
 // REASON_ATTACK_USE_AIM
-//  In: r0 target id, r1 0, r2 0
-//  Out: r0 use, r1 aim, r2 disable attack and wait this time (in ms)
+//  Вход: r0 id цели, r1 0, r2 0
+//  Выход: r0 режим, r1 прицел, r2 отключить атаку и ждать это время (в мс)
 [[Event]]
 EventResult NpcPlaneRun(Critter npc, int planeId, int reason, any& r0, any& r1, any& r2)
 {
     NpcPlanes::NpcPlane? plane = NpcPlanes::GetCritterPlane(npc, planeId);
 
     if (reason == NpcPlanes::REASON_ATTACK_WEAPON) {
-        // Special weapons
+        // особое оружие отдельных видов NPC
         hstring npcPid = npc.ProtoId;
         if (npcPid == Content::Critter::FireGecko || npcPid == Content::Critter::ToughFireGecko) {
             Item? weap = npc.GetItem(Content::Item::fire_gecko_flame_weapon);
@@ -204,25 +215,25 @@ EventResult NpcPlaneRun(Critter npc, int planeId, int reason, any& r0, any& r1, 
             }
         }
 
-        // Default weapons
-        r0 = 0; // Use unarmed by default
+        // оружие по умолчанию
+        r0 = 0; // по умолчанию атакуем безоружно
         r1 = 0;
         r2 = (Game.Random(0, 4) == 0 ? Content::Item::default_weapon.hash : Content::Item::unarmed_kick.hash);
 
-        // Damaged two arms
+        // обе руки повреждены — остаёмся с безоружной атакой
         if (npc.IsDamagedLeftArm && npc.IsDamagedRightArm) {
             return EventResult::ContinueChain;
         }
 
-        // No use weapon
+        // этому AI запрещено использовать оружие
         int aiId = npc.AiId;
         int bestWeapon = AiSettings::AiBestWeapon(aiId);
         if (bestWeapon == BestWeap::Never) {
             return EventResult::ContinueChain;
         }
 
-        // Get last battle weapon
-        if (npc.LastWeaponId == ZERO_IDENT && npc.LastWeaponNotFound) // Previous seek not give result
+        // берём оружие из прошлого боя
+        if (npc.LastWeaponId == ZERO_IDENT && npc.LastWeaponNotFound) // прошлый поиск не дал результата
         {
             r0 = 0;
             return EventResult::ContinueChain;
@@ -239,14 +250,14 @@ EventResult NpcPlaneRun(Critter npc, int planeId, int reason, any& r0, any& r1, 
             return EventResult::ContinueChain;
         }
 
-        // Find new battle weapon
+        // ищем новое боевое оружие
         npc.LastWeaponId = ZERO_IDENT;
         npc.LastWeaponNotFound = true;
         npc.LastWeaponUse = 0;
         r0 = 0;
         r1 = 0;
 
-        // Sort skills
+        // сортируем навыки по предпочтению NPC
         CritterProperty[] skills = {CritterProperty::SkillSmallGuns,
                                     CritterProperty::SkillBigGuns,
                                     CritterProperty::SkillEnergyWeapons,
@@ -256,7 +267,7 @@ EventResult NpcPlaneRun(Critter npc, int planeId, int reason, any& r0, any& r1, 
         int skillsCount = skills.length();
         SkillsSort(npc, skills, 0, skillsCount);
 
-        // Advanced sort
+        // дополнительная сортировка под предпочтение типа оружия
         switch (bestWeapon) {
         case BestWeap::NoPref:
             break;
@@ -282,8 +293,8 @@ EventResult NpcPlaneRun(Critter npc, int planeId, int reason, any& r0, any& r1, 
             SkillToBegin(skills, CritterProperty::SkillEnergyWeapons); // 2
             SkillToBegin(skills, CritterProperty::SkillBigGuns);       // 1
             SkillToBegin(skills, CritterProperty::SkillSmallGuns);     // 0
-            SkillsSort(npc, skills, 0, 4);                             // Sort 0, 1, 2, 3
-            SkillsSort(npc, skills, 4, 2);                             // Sort 4, 5
+            SkillsSort(npc, skills, 0, 4);                             // сортируем 0, 1, 2, 3
+            SkillsSort(npc, skills, 4, 2);                             // сортируем 4, 5
             break;
         case BestWeap::MeleeOvRanged:
             SkillToBegin(skills, CritterProperty::SkillThrowing);      // 5
@@ -292,8 +303,8 @@ EventResult NpcPlaneRun(Critter npc, int planeId, int reason, any& r0, any& r1, 
             SkillToBegin(skills, CritterProperty::SkillSmallGuns);     // 2
             SkillToBegin(skills, CritterProperty::SkillUnarmed);       // 1
             SkillToBegin(skills, CritterProperty::SkillMeleeWeapons);  // 0
-            SkillsSort(npc, skills, 0, 2);                             // Sort 0, 1
-            SkillsSort(npc, skills, 2, 4);                             // Sort 2, 3, 4, 5
+            SkillsSort(npc, skills, 0, 2);                             // сортируем 0, 1
+            SkillsSort(npc, skills, 2, 4);                             // сортируем 2, 3, 4, 5
             break;
         case BestWeap::UnarmOvThrown:
             SkillToBegin(skills, CritterProperty::SkillThrowing); // 1
@@ -303,7 +314,7 @@ EventResult NpcPlaneRun(Critter npc, int planeId, int reason, any& r0, any& r1, 
             break;
         }
 
-        // Get all weapons and check it
+        // собираем всё оружие и отсеиваем непригодное для боя (помечая null)
         Item[] allWeapons = npc.GetItems(ItemProperty::Type, ItemType::Weapon);
         for (int i = 0; i < allWeapons.length(); i++) {
             if (not CheckBattleWeapon(npc, allWeapons[i])) {
@@ -311,7 +322,7 @@ EventResult NpcPlaneRun(Critter npc, int planeId, int reason, any& r0, any& r1, 
             }
         }
 
-        // Choose one weapon
+        // выбираем одно оружие — по навыкам в порядке предпочтения
         for (int i = 0; i < skillsCount; i++) {
             CritterProperty skill = skills[i];
 
@@ -332,13 +343,13 @@ EventResult NpcPlaneRun(Critter npc, int planeId, int reason, any& r0, any& r1, 
                         npc.LastWeaponUse = u;
                         r0 = weapon.Id;
                         r1 = u;
-                        return EventResult::ContinueChain; // Done, weapon founded
+                        return EventResult::ContinueChain; // готово, оружие найдено
                     }
                 }
             }
         }
 
-        // Not found, hands used
+        // оружие не найдено — используем руки
         return EventResult::ContinueChain;
     }
     else if (reason == NpcPlanes::REASON_ATTACK_DISTANTION) {
@@ -372,7 +383,7 @@ EventResult NpcPlaneRun(Critter npc, int planeId, int reason, any& r0, any& r1, 
             return EventResult::ContinueChain;
         }
 
-        // non-ranged weapons:
+        // оружие ближнего боя:
         CritterProperty skill = WeaponHelpers::WeaponSkill(weapon, use);
         if (skill == CritterProperty::SkillUnarmed || skill == CritterProperty::SkillMeleeWeapons) {
             int base = npc.GetAsInt(skill) - Math::Max(0, target.ArmorClass + (ammo != null ? ammo.Ammo_AcMod : 0)) + (target.IsKnockout() ? 40 : 0) -
@@ -405,7 +416,7 @@ EventResult NpcPlaneRun(Critter npc, int planeId, int reason, any& r0, any& r1, 
             return EventResult::ContinueChain;
         }
         else
-        // ranged weapons:
+        // дальнобойное оружие:
         {
             if (skill == CritterProperty::SkillThrowing) {
                 if (npc.Strength * 3 < wpnDist) {
@@ -413,7 +424,7 @@ EventResult NpcPlaneRun(Critter npc, int planeId, int reason, any& r0, any& r1, 
                 }
             }
 
-            // set the minimum safe distance, 3 for grenades, 4 for rockets:
+            // задаём минимальную безопасную дистанцию: 3 для гранат, 4 для ракет
             r1 = 0;
             if (skill == CritterProperty::SkillThrowing) {
                 DamageTypes dmgType = WeaponHelpers::WeaponDamageType(weapon, use);
@@ -501,16 +512,16 @@ EventResult NpcPlaneRun(Critter npc, int planeId, int reason, any& r0, any& r1, 
                 }
             }
 
-            // left clamp:
+            // ограничение слева:
             if (int(r0) < int(r1)) {
                 r0 = r1;
             }
 
             if (int(r2) < int(r0)) {
-                r2 = r0; // this can be deleted under assumption that ai_min is always <= 95, which should be true
+                r2 = r0; // можно удалить, если ai_min всегда <= 95 (что должно быть верно)
             }
 
-            // right clamp
+            // ограничение справа
             if (wpnDist < int(r2)) {
                 r2 = WeaponHelpers::WeaponMaxDistance(weapon, use);
                 if (int(r0) > int(r2)) {
@@ -533,7 +544,7 @@ EventResult NpcPlaneRun(Critter npc, int planeId, int reason, any& r0, any& r1, 
             r1 = aim;
         }
         else {
-            r0 = 0; // Primary attack
+            r0 = 0; // основная атака
             r1 = (!npc.IsNoAim && Game.Random(0, 5) == 0 ? Game.Random(HitLocations::LocationHead, HitLocations::LocationGroin) : 0);
         }
 
@@ -577,10 +588,13 @@ EventResult NpcPlaneRun(Critter npc, int planeId, int reason, any& r0, any& r1, 
     return EventResult::StopChain;
 }
 
-bool CogitateFiring(Critter cr, ident targetId, int& mode, int& aim) // in: targetId, 0; out: mode, aim
+// Решает за NPC, как стрелять: режим оружия (одиночный/очередь) и зону прицеливания.
+// Чем тупее NPC, тем чаще он вообще не «думает» и стреляет навскидку.
+// Вход: targetId, mode/aim=0; выход: подобранные mode и aim.
+bool CogitateFiring(Critter cr, ident targetId, int& mode, int& aim)
 {
     if (Game.Random(1, 10) > cr.Intellect) {
-        return false; // too stupid to think about this
+        return false; // слишком туп, чтобы об этом задумываться
     }
 
     Critter? target = Game.GetCritter(targetId);
@@ -590,7 +604,7 @@ bool CogitateFiring(Critter cr, ident targetId, int& mode, int& aim) // in: targ
 
     Item? weapon = cr.GetItem(ItemProperty::CritterSlot, CritterItemSlot::Main);
 
-    if (weapon == null) // true unarmed
+    if (weapon == null) // действительно безоружный
     {
         mode = 0;
         if (!cr.IsNoAim) {
@@ -612,7 +626,8 @@ bool CogitateFiring(Critter cr, ident targetId, int& mode, int& aim) // in: targ
         protoAmmo = Game.GetProtoItem(weapon.AmmoPid);
     }
 
-    if (weapon.Weapon_Skill_0 == CritterProperty::SkillUnarmed || weapon.Weapon_Skill_0 == CritterProperty::SkillMeleeWeapons) // assuming all modes melee
+    if (weapon.Weapon_Skill_0 == CritterProperty::SkillUnarmed ||
+        weapon.Weapon_Skill_0 == CritterProperty::SkillMeleeWeapons) // считаем все режимы ближнего боя
     {
         mode = 0;
         if (!cr.IsNoAim) {
@@ -624,8 +639,9 @@ bool CogitateFiring(Critter cr, ident targetId, int& mode, int& aim) // in: targ
 
         return true;
     }
-    else // assuming all modes ranged
+    else // считаем все режимы дальнобойными
     {
+        // отладочные Messaging::Say оставлены как breadcrumb для трассировки выбора режима стрельбы
         bool forceBurst = false;
         if (weapon.Weapon_Round_0 > 1) {
             // Messaging::Say(cr, "Burst is the only mode");
@@ -666,6 +682,9 @@ bool CogitateFiring(Critter cr, ident targetId, int& mode, int& aim) // in: targ
     }
 }
 
+// Выбирает зону прицельного выстрела: для каждой зоны считает «ценность» (шанс попадания,
+// взвешенный на множитель зоны и делённый на стоимость AP), затем берёт лучшую, иногда
+// (с шансом 1/3) — вторую по ценности.
 int ChooseAim(Critter cr, Critter target, Item? weapon, int mode, ProtoItem ammo)
 {
     int tohit = Combat::RawToHit(cr, target, weapon, mode, ammo);
@@ -678,7 +697,7 @@ int ChooseAim(Critter cr, Critter target, Item? weapon, int mode, ProtoItem ammo
     int pendiv = weapon != null ? (skill == CritterProperty::SkillMeleeWeapons || skill == CritterProperty::SkillUnarmed ? 2 : 1) : 2;
     int maxap = cr.ActionPoints;
 
-    int[] val = array<int>(6); // none, eyes, groin, head, arms, legs
+    int[] val = array<int>(6); // нет прицела, глаза, пах, голова, руки, ноги
 
     int th = tohit;
     int aps = ap;
@@ -710,7 +729,7 @@ int ChooseAim(Critter cr, Critter target, Item? weapon, int mode, ProtoItem ammo
     val[5] = aps <= maxap ? 1300 * Math::Clamp(th, 5, 95) : 0;
     val[5] /= aps;
 
-    // find best shot, with 1/3 chance for taking second-best shot
+    // ищем лучший выстрел, с шансом 1/3 берём второй по ценности
     int max = 0, next = 0;
     for (int i = 1; i < 6; i++) {
         if (val[i] >= val[max]) {
@@ -728,6 +747,7 @@ int ChooseAim(Critter cr, Critter target, Item? weapon, int mode, ProtoItem ammo
         max = next;
     }
 
+    // отладочный вывод выбранной зоны оставлен как breadcrumb
     // Messaging::Say(cr, "Aimed shot: "+max);
 
     switch (max) {
@@ -757,6 +777,8 @@ int ChooseAim(Critter cr, Critter target, Item? weapon, int mode, ProtoItem ammo
     return HitLocations::LocationUncalled;
 }
 
+// Контекст трассировки линии: находит первого живого криттера на луче не ближе MinDist
+// от GHex. Используется для проверки, не перекрывает ли кто-то линию очереди.
 class CTraceFirstCritter : LineTracer::ITraceContext
 {
     Critter? Cr;
@@ -791,15 +813,16 @@ class CTraceFirstCritter : LineTracer::ITraceContext
 
     void StartExec(Map map, mpos hexFrom, mpos hexTo, int maxDist) override
     {
-        // Nothing
+        // ничего не делаем
     }
 
     void FinishExec(Map map, int resultDist) override
     {
-        // Nothing
+        // ничего не делаем
     }
 };
 
+// Запускает трассировку луча и возвращает первого подходящего криттера на пути (или null).
 Critter? TraceFirstCritter(mpos hexFrom, mpos hexTo, Map& map, int dist, mpos hexCr, int mindist)
 {
     CTraceFirstCritter Tracer = CTraceFirstCritter(hexCr, mindist);
@@ -807,6 +830,8 @@ Critter? TraceFirstCritter(mpos hexFrom, mpos hexTo, Map& map, int dist, mpos he
     return Tracer.Cr;
 }
 
+// Проверяет, является ли цель текущим врагом криттера: либо она во вражеском стеке,
+// либо есть активный план атаки на неё.
 bool IsCurrentEnemy(Critter crit, ident targetId)
 {
     Critter? cr = Game.GetCritter(crit.Id);
@@ -815,7 +840,8 @@ bool IsCurrentEnemy(Critter crit, ident targetId)
     }
 
     array<NpcPlanes::NpcPlane> plans = {};
-    NpcPlanes::GetPlanes(cr, plans); // cr.GetPlanesByType(AI_PLANE_ATTACK, plans);
+    // breadcrumb прежнего API: cr.GetPlanesByType(AI_PLANE_ATTACK, plans)
+    NpcPlanes::GetPlanes(cr, plans);
     for (int i = 0, j = plans.length(); i < j; i++) {
         if (plans[i].Type == NpcPlanes::AI_PLANE_ATTACK && plans[i].Attack_TargId == targetId) {
             return true;
@@ -825,10 +851,13 @@ bool IsCurrentEnemy(Critter crit, ident targetId)
     return false;
 }
 
+// Решает, безопасна ли очередь: проверяет, что центральная и две боковые линии огня не
+// перекрыты не-врагами (своими/нейтралами). Закомментированные Messaging::Say — отладочные
+// breadcrumb'ы для трассировки блокировок.
 bool ValidateBurst(Critter cr, Critter target, AbstractItem weapon, int mode)
 {
     if (Game.Random(0, 2) == 0) {
-        return false; // force normal shot, for a little diversity
+        return false; // иногда принудительно одиночный выстрел — для разнообразия
     }
 
     Map? map = cr.GetMap();
@@ -876,6 +905,8 @@ bool ValidateBurst(Critter cr, Critter target, AbstractItem weapon, int mode)
     return true;
 }
 
+// Сортировка выбором: упорядочивает диапазон [first, first+count) навыков по убыванию их
+// значения у NPC (самый прокачанный — в начало диапазона).
 void SkillsSort(Critter npc, CritterProperty[] skills, int first, int count)
 {
     for (int i = first, j = first + count; i < j; i++) {
@@ -894,6 +925,7 @@ void SkillsSort(Critter npc, CritterProperty[] skills, int first, int count)
     }
 }
 
+// Перемещает указанный навык в начало массива со сдвигом остальных (сохраняя их порядок).
 void SkillToBegin(CritterProperty[] skills, CritterProperty skill)
 {
     for (int i = 1, j = skills.length(); i < j; i++) {
@@ -908,6 +940,8 @@ void SkillToBegin(CritterProperty[] skills, CritterProperty skill)
     }
 }
 
+// Проверяет, пригодно ли оружие для боя: это оружие, есть анимация для NPC, не сломано,
+// двуручное при целых руках, и есть боеприпасы (или они не нужны/бесконечны).
 bool CheckBattleWeapon(Critter npc, Item weapon)
 {
     if (weapon.Type != ItemType::Weapon) {
@@ -933,6 +967,8 @@ bool CheckBattleWeapon(Critter npc, Item weapon)
     return true;
 }
 
+// Есть ли у NPC подходящий боеприпас к оружию: по AmmoPid, по дефолтному патрону или по
+// совпадению калибра среди имеющихся патронов.
 bool IsAmmoForWeapon(Critter npc, Item weapon)
 {
     if (npc.CountItem(weapon.AmmoPid) > 0) {

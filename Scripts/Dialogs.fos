@@ -1,3 +1,8 @@
+// Dialogs — ядро диалоговой системы (демоды/результаты ответов, контекст разговора).
+// SERVER: RunDialog/SpeechAnswer/CloseDialog, проверка демандов (CheckAnswerDemands)
+//  и применение результатов (UseAnswerResults), таймаут через ProcessDialog.
+// CLIENT: приём контекста и показ экрана Dialog.
+// Связи: Barter, Messaging, Gui, движковые DialogPack/DialogSpeech/DialogAnswer.
 namespace Dialogs
 {
 
@@ -33,6 +38,8 @@ namespace Dialogs
 ///@ RemoteCall Server SpeechAnswer(int32 answerIndex)
 ///@ RemoteCall Client ReceiveDialogContext(hstring dialogId, ident talkerId, hstring textId, hstring[] answerTextIds, string textArgs, timespan duration)
 
+// Подписки на серверные события жизненного цикла криттера: при выходе из строя
+// (нокаут/смерть/выход из игры) активный диалог нужно корректно закрыть.
 [[ModuleInit]]
 void InitDialogs()
 {
@@ -46,6 +53,8 @@ void InitDialogs()
 
 #if SERVER
 
+// Запуск диалога с конкретным собеседником: берём его DialogId и проверяем,
+// что разговор сейчас вообще возможен (живы, рядом, видят друг друга).
 void RunDialog(Critter cr, Critter talker, bool ignoreDistance)
 {
     if (talker.DialogId == EMPTY_HSTRING) {
@@ -59,11 +68,14 @@ void RunDialog(Critter cr, Critter talker, bool ignoreDistance)
     RunDialog(cr, talker.DialogId, talker, ignoreDistance);
 }
 
+// Запуск диалога по идентификатору пакета без собеседника (например, скриптовый разговор).
 void RunDialog(Critter cr, hstring dialogId, bool ignoreDistance)
 {
     RunDialog(cr, dialogId, null, ignoreDistance);
 }
 
+// Базовая реализация: проходим стартовую реплику, применяем её результаты,
+// затем разворачиваем первую видимую реплику с ответами и собираем контекст диалога.
 void RunDialog(Critter cr, hstring dialogId, Critter? talker, bool ignoreDistance)
 {
     if (!cr.HasDialogContext) {
@@ -145,6 +157,8 @@ void RunDialog(Critter cr, hstring dialogId, Critter? talker, bool ignoreDistanc
     Game.OnCritterTalk.Fire(cr);
 }
 
+// Игрок выбрал ответ: валидируем индекс, перепроверяем демоды ответа (анти-чит),
+// применяем результаты и переходим к следующей реплике либо закрываем/бартер/атака.
 [[ServerRemoteCall]] [[Async]]
 void SpeechAnswer(Player player, int answerIndex)
 {
@@ -278,6 +292,8 @@ void SpeechAnswer(Player player, int answerIndex)
     SendDialogContext(cr);
 }
 
+// Завершение диалога: снимаем таймер таймаута, сбрасываем флаг разговора
+// и шлём клиенту пустой контекст (он скроет экран Dialog).
 void CloseDialog(Critter cr)
 {
     if (cr.HasDialogContext && cr.DialogContext.Talking) {
@@ -288,6 +304,7 @@ void CloseDialog(Critter cr)
     }
 }
 
+// Продление диалога: сбрасываем отсчёт таймаута, чтобы разговор не оборвался.
 void RefreshDialogTime(Critter cr)
 {
     if (cr.HasDialogContext && cr.DialogContext.Talking) {
@@ -295,6 +312,8 @@ void RefreshDialogTime(Critter cr)
     }
 }
 
+// Занят ли криттер разговором: либо сам ведёт диалог, либо является собеседником
+// у кого-то из видимых вокруг криттеров.
 bool IsTalking(Critter cr)
 {
     if (cr.HasDialogContext && cr.DialogContext.Talking) {
@@ -314,6 +333,8 @@ bool IsTalking(Critter cr)
     return false;
 }
 
+// Периодический таймер диалога: закрывает разговор, когда тот больше не валиден
+// (таймаут, уход с дистанции, движение, потеря собеседника).
 [[TimeEvent]]
 void ProcessDialog(Critter cr)
 {
@@ -322,6 +343,9 @@ void ProcessDialog(Critter cr)
     }
 }
 
+// Условия, при которых диалог обязан закрыться: нет контекста/не разговаривает,
+// криттер двинулся, истёк таймаут, либо (если дистанция учитывается) собеседник
+// недоступен или ушёл за пределы дистанции разговора.
 bool IsDialogMustBeClosed(Critter cr)
 {
     if (!cr.HasDialogContext || !cr.DialogContext.Talking) {
@@ -358,6 +382,8 @@ bool IsDialogMustBeClosed(Critter cr)
     return false;
 }
 
+// Могут ли двое начать/продолжить разговор: оба живы, на одной карте,
+// в пределах дистанции разговора и видят друг друга.
 bool IsCrittersCanTalk(Critter cr, Critter talker)
 {
     if (!cr.IsAlive() || !talker.IsAlive()) {
@@ -379,6 +405,8 @@ bool IsCrittersCanTalk(Critter cr, Critter talker)
     return true;
 }
 
+// Переподключение/реинициализация клиента: если разговор активен, переотправляем
+// текущий контекст, чтобы клиент восстановил экран Dialog.
 [[Event]]
 void OnCritterSendInitialInfo(Critter cr)
 {
@@ -387,6 +415,7 @@ void OnCritterSendInitialInfo(Critter cr)
     }
 }
 
+// Выход криттера из строя закрывает активный диалог.
 [[Event]]
 void OnCritterKnockout(Critter cr)
 {
@@ -405,6 +434,8 @@ void OnCritterFinish(Critter cr)
     CloseDialog(cr);
 }
 
+// Отправка текущего состояния диалога клиенту: текст реплики, тексты ответов
+// и остаток времени до таймаута. Если диалог не активен — отправляем пустой контекст.
 void SendDialogContext(Critter cr)
 {
     verify(cr.HasDialogContext, "Assertion failed");
@@ -439,6 +470,8 @@ void SendDialogContext(Critter cr)
     }
 }
 
+// Собирает индексы ответов реплики, прошедших проверку демандов. recheck — повторная
+// проверка (анти-чит) только демандов с флагом NoRecheck; findFirst — остановиться на первом.
 int[] GetSpeechAnswers(Critter cr, Critter? talker, DialogPack dialogPack, int speechIndex, bool recheck = false, bool findFirst = false)
 {
     DialogSpeech speech = dialogPack.GetSpeech(speechIndex);
@@ -460,6 +493,9 @@ int[] GetSpeechAnswers(Critter cr, Critter? talker, DialogPack dialogPack, int s
     return answerIndices;
 }
 
+// Типы демандов/результатов диалога (DR_* — legacy-формат данных диалогов Fallout2):
+// над чем проверка/действие (свойство глобала/криттера/предмета/локации/карты, предмет,
+// скрипт) и кто адресат (DR_WHO_*). Имена сериализуемые — не переименовывать.
 const uint8 DR_NONE = 0;
 const uint8 DR_PROP_GLOBAL = 1;
 const uint8 DR_PROP_CRITTER = 2;
@@ -475,6 +511,9 @@ const uint8 DR_WHO_NONE = 0;
 const uint8 DR_WHO_PLAYER = 1;
 const uint8 DR_WHO_NPC = 2;
 
+// Проверка всех демандов ответа. Демоды объединяются по И, но группы могут связываться
+// через DR_OR: при провале деманда ищем следующий DR_OR — если он есть, провал «прощается»
+// (группа ИЛИ), иначе ответ недоступен.
 bool CheckAnswerDemands(Critter cr, Critter talker, DialogAnswer answer, bool recheck)
 {
     for (int i = 0; i < answer.DemandsCount; i++) {
@@ -546,6 +585,8 @@ bool CheckAnswerDemands(Critter cr, Critter talker, DialogAnswer answer, bool re
                 value = map.GetAsInt(MapProperty(demand.ParamIndex));
             }
 
+            // continue = деманд выполнен (переходим к следующему); провал падает
+            // на общую обработку DR_OR ниже по телу цикла.
             switch (demand.Op) {
             case '>':
                 if (value > demand.Value) {
@@ -648,6 +689,8 @@ bool CheckAnswerDemands(Critter cr, Critter talker, DialogAnswer answer, bool re
         }
         }
 
+        // Деманд провален: если впереди есть DR_OR, провал «прощается» (группа ИЛИ),
+        // иначе ответ недоступен.
         bool orMod = false;
 
         for (; i < answer.DemandsCount; ++i) {
@@ -665,6 +708,9 @@ bool CheckAnswerDemands(Critter cr, Critter talker, DialogAnswer answer, bool re
     return true;
 }
 
+// Применение результатов выбранного ответа: меняет свойства/предметы и запускает
+// скрипты результата. Возвращает id следующей реплики (ссылка ответа либо
+// переопределённая скриптом-результатом через DR_SCRIPT).
 int UseAnswerResults(Critter cr, Critter? talker, DialogAnswer answer)
 {
     int linkId = answer.Link;
@@ -841,6 +887,7 @@ int UseAnswerResults(Critter cr, Critter? talker, DialogAnswer answer)
     return linkId;
 }
 
+// Поиск индекса реплики в пакете по её id; -1, если id отрицателен или не найден.
 int FindSpeech(DialogPack dialogPack, int speechId)
 {
     if (speechId < 0) {
@@ -862,6 +909,8 @@ int FindSpeech(DialogPack dialogPack, int speechId)
 
 #if CLIENT
 
+// Приём контекста диалога с сервера: разворачиваем тексты из текст-пака, подставляем
+// теги и показываем экран Dialog. Пустой dialogId означает «диалог закрыт» — прячем экран.
 [[ClientRemoteCall]]
 void ReceiveDialogContext(hstring dialogId, ident talkerId, hstring textId, hstring[] answerTextIds, string textArgs, timespan duration)
 {

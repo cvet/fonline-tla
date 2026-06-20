@@ -1,22 +1,25 @@
-namespace GameEventCaches // Sort 3
+// GameEventCaches — игровое событие «тайники» (карта сокровищ).
+// Обязанности: выдача карты с кодом, проверка локации энкаунтера, наполнение контейнера лутом по таблице Parameters.
+// Сторона: SERVER. Зависит от ElectronicLock, PidsGroups, MsgStr.
+namespace GameEventCaches
 {
 
 const int STR_CACHE_HINT = 7115;
 
 #if SERVER
 
-// Энкаунтер квест, периодически доступный. В караванах попадается охранник, который за деньги продает карту с координатами запертого ящика.
+// Энкаунтер-квест, периодически доступный. В караванах попадается охранник, который за деньги продаёт карту с координатами запертого ящика.
 
 ///@ Property Item Server int32 GECachesNumParameters Mutable Persistent
 ///@ Property Location Server bool GECachesCacheChecked Mutable Persistent
 
-// Game event
+// Включает доступность игрового события (флаг проверяется системой событий)
 void StatusOn()
 {
     Game.GameEventCaches = true;
 }
 
-// Выдача карты
+// Выдаёт игроку карту сокровищ: генерирует код замка, выбирает случайную запись Parameters и подставляет название локации и код в подпись предмета
 [[DialogResult]]
 void GiveCart(Critter player, Critter npc)
 {
@@ -30,17 +33,20 @@ void GiveCart(Critter player, Critter npc)
     item.IsQuestItem = true;
 }
 
+// Инициализация предмета-карты: подписка на событие завершения скрипта предмета
 void TreasureMapInit(Item item, bool firstTime)
 {
     item.OnFinish.Subscribe(TreasureMapFinish);
 }
 
+// Обработчик завершения скрипта карты (пока без логики)
 [[Event]]
 void TreasureMapFinish(Item item)
 {
     //
 }
 
+// Прото-id контейнеров, которые годятся под тайник: лут кладётся только в один из них
 const hstring[] ContainerPids = {Content::Item::fridge,
                                  Content::Item::ice_chest_left,
                                  Content::Item::ice_chest_right,
@@ -62,6 +68,7 @@ const hstring[] ContainerPids = {Content::Item::fridge,
                                  Content::Item::locker_7,
                                  Content::Item::locker_8};
 
+// Коды групп случайного лута: третий элемент записи Parameters ссылается на одну из этих групп PidsGroups
 const int aPids_WeaponSmallGuns = 1;
 const int aPids_WeaponPistols = 2;
 const int aPids_WeaponRifles = 3;
@@ -70,6 +77,8 @@ const int aPids_ArmorMedium = 5;
 const int aPids_AmmoOther = 6;
 const int aPids_Drugs = 7;
 
+// Наполняет контейнер тайника лутом, когда криттер с подходящей картой вошёл в локацию энкаунтера.
+// Тайник срабатывает один раз на локацию: проверяет совпадение целевой локации, дистанцию и наличие контейнера из списка.
 void PlaceLoot2Container(Map map, Critter cr)
 {
     Location loc = map.GetLocation();
@@ -85,14 +94,16 @@ void PlaceLoot2Container(Map map, Critter cr)
                 Location? locWhere = Game.GetLocation(hstring(Parameters[item.GECachesNumParameters][0][0]));
                 if (container != null && locWhere != null && GlobalDistance(locWhere, loc) < Settings.GlobalMap.GlobalMapZoneLength * 2) {
                     item.IsQuestItem = false;
-                    Game.StartTimeEvent(Time::Hours(1), DeferredDestroyItem, item.Id); //SavedDeferredCall
+                    Game.StartTimeEvent(Time::Hours(1), DeferredDestroyItem, item.Id); // SavedDeferredCall: отложенное удаление, должно переживать рестарт
                     container.SetupScript(ElectronicLock::LockedInit);
+                    // Гарантированный лут: пары (прото-id, количество) из второго элемента записи
                     for (int i2 = 0; i2 < Parameters[item.GECachesNumParameters][1].length(); i2 += 2) {
                         container.AddItem(hstring(Parameters[item.GECachesNumParameters][1][i2]),
                                           int(Parameters[item.GECachesNumParameters][1][i2 + 1]),
                                           Tla::RootContainerStack());
                     }
 
+                    // Опциональный бонус: случайный предмет из группы PidsGroups в количестве из диапазона (min, max)
                     if (Parameters[item.GECachesNumParameters].length() > 2) {
                         if (Parameters[item.GECachesNumParameters][2].length() >= 3) {
                             hstring pid;
@@ -129,6 +140,7 @@ void PlaceLoot2Container(Map map, Critter cr)
                         }
                     }
 
+                    // Подсказка игроку, что тайник найден и наполнен
                     Messaging::Info(cr, TextPackKey(TextPackName::Text, "" + (STR_CACHE_HINT)));
                 }
 
@@ -138,6 +150,7 @@ void PlaceLoot2Container(Map map, Critter cr)
     }
 }
 
+// Дистанция между двумя локациями на глобальной карте; 0, если любая из локаций отсутствует
 int GlobalDistance(Location? loc1, Location? loc2)
 {
     if (loc1 == null || loc2 == null) {
@@ -147,6 +160,7 @@ int GlobalDistance(Location? loc1, Location? loc2)
     return int(Tla::Distance(loc1.WorldPos.x, loc1.WorldPos.y, loc2.WorldPos.x, loc2.WorldPos.y));
 }
 
+// Отложенное удаление карты по таймеру (чтобы предмет не висел вечно после срабатывания тайника)
 [[TimeEvent]]
 void DeferredDestroyItem(any value)
 {
@@ -156,6 +170,7 @@ void DeferredDestroyItem(any value)
     }
 }
 
+// Выбирает случайный подходящий контейнер на локации (тип Container и прото-id из ContainerPids); null, если таких нет
 Item? GetValidContainer(Location loc)
 {
     Item[] containers = {};
@@ -178,6 +193,8 @@ Item? GetValidContainer(Location loc)
     return validContainers[Game.Random(0, validContainers.length() - 1)];
 }
 
+// Таблица вариантов тайника: [целевая локация], [гарантированный лут: прото-id, количество, ...], [группа бонуса, min, max].
+// Случайная запись выбирается в GiveCart; индекс хранится в свойстве карты GECachesNumParameters.
 // clang-format off
 
 any[][][] Parameters =

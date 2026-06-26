@@ -26,7 +26,8 @@ Project front door for AI maintainers working on **FOnline: The Life After** (TL
 - `Gui/*.fogui` - GUI definitions and embedded screen script code.
 - `SourceExt/CommonExtension.cpp` - SHA helpers shared by client/server.
 - `SourceExt/ServerExtension.cpp` - server image checks, dialog plumbing, visibility hooks, critter busy/free stubs.
-- `SourceExt/ClientExtension.cpp` - `Game.FormatTags` and client critter busy/free stubs.
+- `SourceExt/ClientExtension.cpp` / `SourceExt/ClientExtension.h` - `Game.FormatTags`, client critter busy/free stubs, `ClientInitHook` + `ClientExtData` (holds the AI control bridge state and embedded-client index).
+- `SourceExt/ClientAiBridge.cpp` - localhost TCP line protocol for the AI control bridge (client-side test/automation). Pairs with `Scripts/AiControl.fos` and `Tools/AiControlMcp/`. See [Docs/AiControl.md](Docs/AiControl.md).
 - `SourceExt/BakerExtension.cpp`, `SourceExt/DialogBaker.*`, `SourceExt/Dialogs.*` - dialog bake/runtime support.
 - `SourceExt/ContentMigration.cpp` - TLA-specific content/data migrations.
 - `SourceExt/SHA/` - bundled SHA implementation wrapped as a static library.
@@ -217,6 +218,7 @@ Pick the boundary before reaching for a heavy interactive session:
 ## Quick Reference
 
 - `README.md` - repo-root overview.
+- `Docs/AiControl.md` - AI control bridge (client-side TCP test/automation) + the `Tools/AiControlMcp/` MCP adapter for observing/controlling a real client to test mechanics and quests.
 - `Docs/Refactoring.md` - Scripts/*.fos refactoring plan, phases, and running status.
 - `TLA.fomain` - main config and subconfigs (`LocalTest`, `PublicGame`, resource baking subconfigs).
 - `.vscode/tasks.json` - authoritative build/generate/format/launch tasks.

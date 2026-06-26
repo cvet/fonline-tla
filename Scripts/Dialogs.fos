@@ -117,10 +117,10 @@ void RunDialog(Critter cr, hstring dialogId, Critter? talker, bool ignoreDistanc
     // Нет ответов, просто текст над головой
     if (firstAnswerIndices.isEmpty()) {
         if (talker != null) {
-            Messaging::Say(talker, TextPackKey(TextPackName::Dialogs, "" + (firstSpeech.TextId)));
+            Messaging::Say(talker, TextPackKey(TextPackName::Dialogs, dialogId, firstSpeech.TextId));
         }
         else {
-            Messaging::Info(cr, TextPackKey(TextPackName::Dialogs, "" + (firstSpeech.TextId)));
+            Messaging::Info(cr, TextPackKey(TextPackName::Dialogs, dialogId, firstSpeech.TextId));
         }
 
         return;
@@ -915,19 +915,23 @@ int FindSpeech(DialogPack dialogPack, int speechId)
 void ReceiveDialogContext(hstring dialogId, ident talkerId, hstring textId, hstring[] answerTextIds, string textArgs, timespan duration)
 {
     if (dialogId != EMPTY_HSTRING) {
-        string text = Game.GetText(TextPackKey(TextPackName::Dialogs, "" + (textId)));
+        string text = Game.GetText(TextPackKey(TextPackName::Dialogs, dialogId, textId));
         Critter? talker = talkerId != ZERO_IDENT ? Game.GetCritter(talkerId) : null;
         text = Game.FormatTags(text, textArgs, talker);
 
         string answersOneLine;
 
         for (int i = 0; i < answerTextIds.length(); i++) {
-            string answerText = Game.GetText(TextPackKey(TextPackName::Dialogs, "" + (answerTextIds[i])));
+            string answerText = Game.GetText(TextPackKey(TextPackName::Dialogs, dialogId, answerTextIds[i]));
             answerText = Game.FormatTags(answerText, textArgs, talker);
 
             answersOneLine += answerText;
             answersOneLine += i < answerTextIds.length() - 1 ? "\n" : "";
         }
+
+        // Прокидываем контекст диалога в AI-мост до показа экрана: params внутри ShowScreen
+        // опустошается, поэтому захватываем текст/ответы из источника.
+        AiControl::SetDialogState(dialogId, talkerId, text, answersOneLine);
 
         dict<string, any> params = {};
         params["TalkerIsNpc"] = talkerId != ZERO_IDENT;
@@ -939,6 +943,7 @@ void ReceiveDialogContext(hstring dialogId, ident talkerId, hstring textId, hstr
         Gui::ShowScreen(GuiScreen::Dialog, params);
     }
     else {
+        AiControl::ClearDialogState();
         Gui::HideScreen(GuiScreen::Dialog);
     }
 }

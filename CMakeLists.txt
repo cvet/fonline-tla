@@ -66,6 +66,8 @@ AddStaticThirdPartyLibrary(SHA
     APPEND_TO FO_COMMON_LIBS)
 DisableLibWarnings(SHA)
 
+AddIncludeDirectories("Engine/ThirdParty/Asio/include")
+
 # ---------------------------------------------------------------------------
 # Stage 4: EngineSources — register native extensions before the engine
 # aggregates the source lists.

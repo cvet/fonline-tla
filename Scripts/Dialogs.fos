@@ -335,9 +335,13 @@ bool IsTalking(Critter cr)
 
 // Периодический таймер диалога: закрывает разговор, когда тот больше не валиден
 // (таймаут, уход с дистанции, движение, потеря собеседника).
-[[TimeEvent]]
+[[TimeEvent]] [[Async]]
 void ProcessDialog(Critter cr)
 {
+    if (!Sync::LockCritterWithMap(cr)) {
+        return;
+    }
+
     if (IsDialogMustBeClosed(cr)) {
         CloseDialog(cr);
     }
@@ -346,6 +350,7 @@ void ProcessDialog(Critter cr)
 // Условия, при которых диалог обязан закрыться: нет контекста/не разговаривает,
 // криттер двинулся, истёк таймаут, либо (если дистанция учитывается) собеседник
 // недоступен или ушёл за пределы дистанции разговора.
+[[Async]]
 bool IsDialogMustBeClosed(Critter cr)
 {
     if (!cr.HasDialogContext || !cr.DialogContext.Talking) {
@@ -365,6 +370,16 @@ bool IsDialogMustBeClosed(Critter cr)
     if (!cr.DialogContext.IgnoreDistance) {
         if (cr.DialogContext.TalkerId != ZERO_IDENT) {
             Critter? talker = Game.GetCritter(cr.DialogContext.TalkerId);
+
+            // talker — вторая сущность вне cr+map-набора вызывающего; расширяем sync-набор на неё перед
+            // чтением её свойств в IsCrittersCanTalk (Game.Sync ЗАМЕНЯЕТ набор, поэтому включаем и cr, и карту).
+            if (talker != null) {
+                Map? crMap = cr.GetMap();
+                bool locked = crMap != null ? Sync::Lock(cr, crMap, talker) : Sync::Lock(cr, talker);
+                if (!locked) {
+                    return true;
+                }
+            }
 
             if (talker == null || !IsCrittersCanTalk(cr, talker)) {
                 return true;

@@ -1,3 +1,8 @@
+// MapAtoll — серверная логика локации «Атолл»: инициализация карты и торговцев.
+// Зона ответственности: настройка NPC-торговцев и периодическое обновление их
+// ассортимента по таблице лута atollLoot (товары выдаются группами, что позволяет
+// согласовать оружие с подходящими патронами).
+// Сторона исполнения: SERVER.
 namespace MapAtoll
 {
 
@@ -8,6 +13,8 @@ namespace MapAtoll
 
 const int CTE_REFRESH = 17;
 
+// При входе на карту настраиваем NPC: задаём время репликации и для торговцев Атолла
+// включаем расчёт только за наличные.
 void MapInit(Map map, bool firstTime)
 {
     Critter[] critters = map.GetCritters(CritterFindType::NonDeadNpc);
@@ -91,6 +98,8 @@ any[][][] atollLoot =
 
 // clang-format on
 
+// Инициализация торговца Атолла: фиксируем бартерные/защитные флаги (предметы не теряются,
+// не подбираются, не воруются) и запускаем периодическое обновление ассортимента.
 void AtollTraderInit(Critter cr, bool firstTime)
 {
     cr.SkillBarter = 200;
@@ -106,9 +115,16 @@ void AtollTraderInit(Critter cr, bool firstTime)
     }
 }
 
-[[TimeEvent]]
+// Периодическое обновление ассортимента торговца: выбираем случайную группу из таблицы,
+// уничтожаем текущие предметы и добавляем новые по шансу/диапазону количества, затем
+// перепланируем событие на указанное в группе время.
+[[TimeEvent]] [[Async]]
 void RefreshBag(Critter cr, TimeEventContext event)
 {
+    if (!Sync::LockCritterWithMap(cr)) {
+        return;
+    }
+
     int idx = Game.Random(0, atollLoot.length() - 1);
     int timeNext = int(atollLoot[idx][0][0]);
     int chance = 0;

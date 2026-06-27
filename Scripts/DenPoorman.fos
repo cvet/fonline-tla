@@ -1,3 +1,6 @@
+// DenPoorman — сервер: НПЦ-бедняк, подбирающий еду с земли.
+// Обязанности: отслеживание еды на карте, план подбора, поедание и реакция на чужой перехват.
+// Сторона: SERVER. Связи: NpcPlanes, Messaging, CritterState, Tla.
 namespace DenPoorman
 {
 
@@ -5,6 +8,7 @@ namespace DenPoorman
 
 ///@ Property Critter Server ident DenPoormanItemId Mutable Persistent
 
+// Перечень прото-id съедобных предметов, которые бедняк готов подбирать с земли.
 const hstring[] EatPid = {Content::Item::mutated_fruit,
                           Content::Item::iguana_on_a_stick,
                           Content::Item::meat_on_a_stick,
@@ -17,26 +21,29 @@ const hstring[] EatPid = {Content::Item::mutated_fruit,
                           Content::Item::smitty_meal,
                           Content::Item::meat};
 
+// Инициализация бедняка: подписки на появление/исчезновение предметов и сброс цели.
 void PoormanInit(Critter poorman, bool firstTime)
 {
     poorman.OnItemOnMapAppeared.Subscribe(PoormanShowItemOnMap);
     poorman.OnItemOnMapDisappeared.Subscribe(PoormanHideItemOnMap);
-    poorman.DenPoormanItemId = ZERO_IDENT; // Тут будет хранится Id итема, который мы хотим съесть.
+    poorman.DenPoormanItemId = ZERO_IDENT; // Здесь хранится Id предмета, который бедняк хочет съесть.
 }
 
+// Появилась еда на карте: если бедняк свободен, ставим план подбора и запоминаем цель.
 [[Event]]
 void PoormanShowItemOnMap(Critter poorman, Item item, Critter dropper)
 {
-    // Можем ли мы сейчас подойти.
+    // Уже есть цель — не отвлекаемся.
     if (poorman.DenPoormanItemId != ZERO_IDENT) {
         return;
     }
 
+    // Заняты другим планом — игнорируем.
     if (not NpcPlanes::IsNoPlanes(poorman)) {
         return;
     }
 
-    // Смотрим, съедобен ли итем.
+    // Проверяем, входит ли предмет в список съедобного.
     for (int i = 0; i < EatPid.length(); i++) {
         if (item.ProtoId != EatPid[i]) {
             continue;
@@ -48,10 +55,11 @@ void PoormanShowItemOnMap(Critter poorman, Item item, Critter dropper)
     }
 }
 
+// Еда исчезла с карты: если это была наша цель — реагируем (сами съели или кто-то перехватил).
 [[Event]]
 void PoormanHideItemOnMap(Critter poorman, Item item, Critter? picker)
 {
-    // Проверим, может кто-то поднял нашу еду.
+    // Реагируем только на исчезновение именно нашей цели.
     if (poorman.DenPoormanItemId != item.Id) {
         return;
     }
@@ -62,14 +70,14 @@ void PoormanHideItemOnMap(Critter poorman, Item item, Critter? picker)
         return;
     }
 
-    // Ругаем поднявшего.
+    // Цель подобрал кто-то другой — отменяем планы подбора и возмущаемся.
     if (picker.Id != poorman.Id) {
         Tla::EraseNpcAllPickPlanes(poorman);
         CritterState::Wait(poorman, 3000);
         Messaging::SayOnHead(poorman, "Подлец.");
     }
 
-    // Это мы сами подняли, едим.
+    // Цель подобрали мы сами — съедаем и довольны.
     else {
         poorman.DestroyItem(item.ProtoId, item.Count);
         Messaging::SayOnHead(poorman, "Ммм, вкусно!");

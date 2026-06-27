@@ -66,6 +66,8 @@ AddStaticThirdPartyLibrary(SHA
     APPEND_TO FO_COMMON_LIBS)
 DisableLibWarnings(SHA)
 
+AddIncludeDirectories("Engine/ThirdParty/Asio/include")
+
 # ---------------------------------------------------------------------------
 # Stage 4: EngineSources — register native extensions before the engine
 # aggregates the source lists.
@@ -78,6 +80,7 @@ AddEngineSources(
     COMMON SourceExt/Dialogs.cpp
     SERVER SourceExt/ServerExtension.cpp
     CLIENT SourceExt/ClientExtension.cpp
+    CLIENT SourceExt/ClientAiBridge.cpp
     BAKER SourceExt/BakerExtension.cpp
     BAKER SourceExt/DialogBaker.h
     BAKER SourceExt/DialogBaker.cpp)

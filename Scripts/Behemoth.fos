@@ -1,11 +1,12 @@
-namespace Behemoth // Sort 2
+// Behemoth — радиоуправляемые НПЦ (приказы по радиоканалу).
+// SERVER: парсинг команд (BehemothCommand), приказы SetOrder/RunOrder* (маршрут, камера, сообщение, ход, патруль, атака), события глобалки/боя.
+// Связи: Radio, NpcPlanes, Entrance, Location, MsgStr, PlayerRegistration.
+namespace Behemoth
 {
 
 #if SERVER
 
-// Радиоуправляемые НПЦ
-
-///@ Property Critter Server ident BehemothOwner Mutable Persistent // Переменная в которой хранится Id владельца
+///@ Property Critter Server ident BehemothOwner Mutable Persistent // Id владельца бегемота
 ///@ Property Critter Server int32 BehemothRadio Mutable Persistent // Переменная в которой хранится номер радиоканала
 ///@ Property Critter Server synctime BehemothLastComand Mutable Persistent // Переменная в которой хранится время последней команды.
 ///@ Property Critter Server int32 BehemothOrderType Mutable Persistent // Тип приказа выполняемого нпц
@@ -57,13 +58,16 @@ string[] commands =
 ident[] behemoths = {};
 int[] listenedChannels = {};
 
+// Отладочный лог приказов/каналов; вынесен в одну точку, чтобы легко глушить.
 void DebugLog(string s)
 {
     Game.Log(s);
 }
+// макрос-заглушка из исходного скрипта (breadcrumb миграции — оставлено как ориентир)
 // #define DebugLog#(s)
 // todo: сделать периодическую очистку планов если они не выполнены длительное время
 
+// Возвращает радиоканал бегемота по id; бросает, если бегемот не найден.
 int GetRadioChannel(ident crId)
 {
     Critter? cr = Game.GetCritter(crId);
@@ -74,40 +78,49 @@ int GetRadioChannel(ident crId)
     return cr.BehemothRadio;
 }
 
+// Распознавание ключевого слова команды: на каждую команду — пара (русское/английское) из массива commands.
 bool IsRouteCommand(string cmdText)
 {
     return cmdText == commands[0] || cmdText == commands[1];
 }
+
 bool IsCameraCommand(string cmdText)
 {
     return cmdText == commands[2] || cmdText == commands[3];
 }
+
 bool IsMessageCommand(string cmdText)
 {
     return cmdText == commands[4] || cmdText == commands[5];
 }
+
 bool IsMoveCommand(string cmdText)
 {
     return cmdText == commands[6] || cmdText == commands[7];
 }
+
 bool IsPatrolCommand(string cmdText)
 {
     return cmdText == commands[8] || cmdText == commands[9];
 }
+
 bool IsChannelCommand(string cmdText)
 {
     return cmdText == commands[10] || cmdText == commands[11];
 }
+
 bool IsAttackCommand(string cmdText)
 {
     return cmdText == commands[12] || cmdText == commands[13];
 }
 
+// Целевая локация приказа "маршрут" (из BehemothParam_1); иначе null.
 Location? GetLocationTo(Critter cr)
 {
     return cr.BehemothOrderType == TYPE_ORDER_ROUTE ? Game.GetLocation(ident(cr.BehemothParam_1)) : null;
 }
 
+// Регистрирует бегемота и его радиоканал в локальных реестрах, чтобы слушать команды по этому каналу.
 void RememberBehemoth(Critter cr)
 {
     if (behemoths.find(cr.Id) < 0) {
@@ -123,6 +136,7 @@ void RememberBehemoth(Critter cr)
     }
 }
 
+// Меняет радиоканал бегемота и снимает прослушку с каналов, которыми больше никто не пользуется.
 void ChangeChannel(Critter cr, int newChannel)
 {
     DebugLog("change channel");
@@ -150,6 +164,7 @@ void ChangeChannel(Critter cr, int newChannel)
     }
 }
 
+// Обработчик радиокоманды от игрока: находит его бегемота на нужном канале и (с антифлуд-задержкой 5с) выполняет команду.
 void Behemoth(Critter player, string text)
 {
     for (int i = 0; i < behemoths.length(); i++) {
@@ -167,6 +182,7 @@ void Behemoth(Critter player, string text)
     }
 }
 
+// Разбирает текст команды (первое слово — ключевое) и запускает соответствующий приказ.
 void BehemothCommand(ident behemothId, string cmd)
 {
     Critter? behemoth = Game.GetCritter(behemothId);
@@ -196,7 +212,7 @@ void BehemothCommand(ident behemothId, string cmd)
                             SetOrder(behemothId, TYPE_ORDER_ROUTE, loc.Id, 0);
                             Radio::SendChannelRadioMessage(radioChannel,
                                                            TextPackKey(TextPackName::Text, "" + (STR_ROUTE_CONFIRMED)),
-                                                           "|where:@text Locations " + MsgStr::LocNameTextId(loc.ProtoId) + "@");
+                                                           "|where:" + MsgStr::LocNameTag(loc.ProtoId));
                             RunOrder(behemothId, TYPE_ORDER_ROUTE);
                             return;
                         }
@@ -244,8 +260,9 @@ void BehemothCommand(ident behemothId, string cmd)
     }
 }
 
-// Orders
+// Приказы: установка/отмена текущего приказа и диспетчеризация его выполнения.
 
+// Запоминает текущий приказ бегемота в его свойствах (тип и до двух параметров).
 void SetOrder(ident crId, int orderType, any orderParam, any orderParam2)
 {
     Critter? cr = Game.GetCritter(crId);
@@ -259,6 +276,7 @@ void SetOrder(ident crId, int orderType, any orderParam, any orderParam2)
     cr.BehemothParam_2 = orderParam2;
 }
 
+// Сбрасывает текущий приказ; при noMessage == false шлёт по радио уведомление об отмене.
 void CancelOrder(ident crId, bool noMessage)
 {
     Critter? cr = Game.GetCritter(crId);
@@ -276,6 +294,7 @@ void CancelOrder(ident crId, bool noMessage)
     }
 }
 
+// Запуск приказа со строковым параметром (вариант для приказа "сообщение").
 void RunOrder(ident crId, int orderType, string param)
 {
     Critter? cr = Game.GetCritter(crId);
@@ -290,6 +309,7 @@ void RunOrder(ident crId, int orderType, string param)
     }
 }
 
+// Запуск приказа без строкового параметра: маршрут/камера/ход/патруль/атака.
 void RunOrder(ident crId, int orderType)
 {
     DebugLog("RunOrder " + orderType + "; beh " + crId);
@@ -318,7 +338,7 @@ void RunOrder(ident crId, int orderType)
     }
 }
 
-// Скрипт бегемота
+// Инициализация бегемота: регистрация и подписка на события глобалки, простоя, завершения планов, боя и взаимодействий.
 void BehemothInit(Critter cr, bool firstTime)
 {
     RememberBehemoth(cr);
@@ -333,6 +353,7 @@ void BehemothInit(Critter cr, bool firstTime)
     cr.OnSomeUseSkillOnMe.Subscribe(BehemothUseSkillOnMe);
 }
 
+// Ведёт бегемота по глобальной карте к цели приказа "маршрут": правит направление/скорость, по прибытии заводит на локацию.
 [[Event]]
 EventResult BehemothOnGlobal(Critter cr, int type, Item car, float x, float y, float toX, float toY, float speed, int encounterDescriptor, bool waitForAnswer)
 {
@@ -351,7 +372,7 @@ EventResult BehemothOnGlobal(Critter cr, int type, Item car, float x, float y, f
                     cr.HomeDir = cr.Dir.hex.value;
                     Radio::SendChannelRadioMessage(cr.BehemothRadio,
                                                    TextPackKey(TextPackName::Text, "" + (STR_ROUTE_DONE)),
-                                                   "|where:@text Locations " + MsgStr::LocNameTextId(locTo.ProtoId) + "@|x:" + cr.Hex.x + "|y:" + cr.Hex.y);
+                                                   "|where:" + MsgStr::LocNameTag(locTo.ProtoId) + "|x:" + cr.Hex.x + "|y:" + cr.Hex.y);
                 }
 
                 CancelOrder(cr.Id, true);
@@ -381,6 +402,7 @@ EventResult BehemothOnGlobal(Critter cr, int type, Item car, float x, float y, f
     return EventResult::StopChain;
 }
 
+// Периодическая проверка простоя: при активном приказе "маршрут" дотягивает бегемота до целевой локации или отменяет приказ.
 [[TimeEvent]] [[Async]]
 void BehemothIdle(Critter cr)
 {
@@ -432,6 +454,7 @@ void BehemothIdle(Critter cr)
     }
 }
 
+// Завершение AI-плана: после выполнения хода (PLANE_MOVE) фиксирует новую "домашнюю" позицию и рапортует о выполнении.
 [[Event]]
 EventResult BehemothPlaneEnd(Critter cr, int planeId, int reason, Critter someCr, Item someItem)
 {
@@ -450,6 +473,7 @@ EventResult BehemothPlaneEnd(Critter cr, int planeId, int reason, Critter someCr
     return EventResult::StopChain;
 }
 
+// Режим патруля: при появлении живого игрока в зоне видимости сообщает его ник по радио.
 [[Event]]
 void BehemothShowCritter1(Critter cr, Critter showCrit)
 {
@@ -463,6 +487,7 @@ void BehemothShowCritter1(Critter cr, Critter showCrit)
     }
 }
 
+// При убийстве игрока бегемотом — рапорт об уничтожении цели по радио.
 [[Event]]
 void BehemothKill(Critter cr, Critter victim)
 {
@@ -473,6 +498,7 @@ void BehemothKill(Critter cr, Critter victim)
     }
 }
 
+// При атаке по бегемоту — рапорт об агрессоре по радио, не чаще раза в минуту (антифлуд BehemothLastReport).
 [[Event]]
 EventResult BehemothAttacked(Critter cr, Critter attacker)
 {
@@ -483,10 +509,10 @@ EventResult BehemothAttacked(Critter cr, Critter attacker)
         }
         else {
             if (attacker.DialogId == EMPTY_HSTRING) {
-                attackerName = "@text Critters " + MsgStr::NpcProtoNameTextId(attacker.ProtoId) + "@";
+                attackerName = MsgStr::NpcProtoNameTag(attacker.ProtoId);
             }
             else {
-                attackerName = "@text Dialogs " + MsgStr::NpcNameDlgTextId(attacker.DialogId) + "@";
+                attackerName = MsgStr::NpcNameTag(attacker.DialogId);
             }
         }
 
@@ -496,6 +522,7 @@ EventResult BehemothAttacked(Critter cr, Critter attacker)
     return EventResult::StopChain;
 }
 
+// Починка бегемота супернабором инструментов: восстанавливает HP по навыку Repair и начисляет опыт; иначе — "ничего не происходит".
 [[Event]]
 EventResult BehemothUseItemOnMe(Critter cr, Critter whoUse, Item item, int param)
 {
@@ -519,6 +546,7 @@ EventResult BehemothUseItemOnMe(Critter cr, Critter whoUse, Item item, int param
     return EventResult::StopChain;
 }
 
+// Применение навыка по бегемоту не даёт эффекта — сообщение "ничего не происходит".
 [[Event]]
 EventResult BehemothUseSkillOnMe(Critter cr, Critter whoUse, CritterProperty skill)
 {
@@ -526,7 +554,7 @@ EventResult BehemothUseSkillOnMe(Critter cr, Critter whoUse, CritterProperty ski
     return EventResult::StopChain;
 }
 
-// Маршрут/Route
+// Приказ "маршрут": если бегемот на локации — выводит его к выходу и через 5с отправляет на глобальную карту.
 void RunOrderRoute(Critter cr)
 {
     Map? map = cr.GetMap();
@@ -540,12 +568,13 @@ void RunOrderRoute(Critter cr)
     }
 }
 
+// Перевод бегемота на глобальную карту (вызывается отложенным misc-планом из RunOrderRoute).
 void ToGlobal(Critter cr)
 {
     cr.TransferToGlobal();
 }
 
-// Камера
+// Приказ "камера": через 2с показывает владельцу обзор местности, где стоит бегемот.
 void RunOrderCamera(Critter cr)
 {
     Map? map = cr.GetMap();
@@ -560,6 +589,7 @@ void RunOrderCamera(Critter cr)
     }
 }
 
+// Отложенный показ обзора карты владельцу: values = {ownerId, mapId, hexX, hexY, dir}.
 [[TimeEvent]]
 void ShowCamera(any[] values)
 {
@@ -572,13 +602,13 @@ void ShowCamera(any[] values)
     }
 }
 
-// Сообщение
+// Приказ "сообщение": бегемот произносит переданную реплику игрока.
 void RunOrderMessage(Critter cr, string message)
 {
     Messaging::Say(cr, message);
 }
 
-// Движение
+// Приказ "ход": сдвигает бегемота на указанное число гексов в заданном направлении (с ограничениями).
 void RunOrderMove(Critter cr)
 {
     Map? map = cr.GetMap();
@@ -600,7 +630,7 @@ void RunOrderMove(Critter cr)
     NpcPlanes::AddWalkPlane(cr, NpcPlanes::AI_PLANE_WALK_PRIORITY, PLANE_MOVE, Game.SynchronizedTime, hex, dir, false, 0);
 }
 
-// Атака
+// Приказ "атака": ставит планы атаки на всех живых НПЦ на карте бегемота.
 void RunOrderAttack(Critter cr)
 {
     Map? map = cr.GetMap();
@@ -621,7 +651,7 @@ void RunOrderAttack(Critter cr)
     }
 }
 
-// Патруль
+// Приказ "патруль": включает радиус видимости (ShowCritterDist1), при появлении игроков рапортует их ники.
 void RunOrderPatrol(Critter cr)
 {
     DebugLog("patrol, radius =" + cr.ShowCritterDist1);
@@ -629,8 +659,9 @@ void RunOrderPatrol(Critter cr)
     Radio::SendChannelRadioMessage(cr.BehemothRadio, TextPackKey(TextPackName::Text, "" + (STR_PATROL_BEGIN)));
 }
 
-// Utils
+// Вспомогательные функции и отладочные команды.
 
+// Безопасно читает целое из слова команды по индексу; при отсутствии/ошибке возвращает defaultValue.
 int GetIntValue(string[] values, int idx, int defaultValue)
 {
     int value = defaultValue;
@@ -641,6 +672,7 @@ int GetIntValue(string[] values, int idx, int defaultValue)
     return value;
 }
 
+// Временный хелпер отправки радиосообщения по номеру строки (для пакета Text формирует тег вручную).
 void RadioMessageMsgTmp(int channel, TextPackName textMsg, int strNum, string& textArgs)
 {
     if (textMsg == TextPackName::Text) {
@@ -651,7 +683,7 @@ void RadioMessageMsgTmp(int channel, TextPackName textMsg, int strNum, string& t
     }
 }
 
-// debug 528 ~run Behemoth::AddBehemoth 1 0 0
+// Отладка: спавнит бегемота рядом с игроком и привязывает его к владельцу. Пример вызова: ~run Behemoth::AddBehemoth 1 0 0
 void AddBehemoth(Critter cr)
 {
     Map? map = cr.GetMap();
@@ -667,6 +699,7 @@ void AddBehemoth(Critter cr)
     item.HolodiskNum = 110;
 }
 
+// Отладка: выводит игроку глобальные координаты НПЦ по его id.
 void WhereNpc(Critter cr, any id)
 {
     Critter? npc = Game.GetCritter(id);

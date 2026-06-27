@@ -1,13 +1,22 @@
+// MapBarterGround — логика «торговой площадки»: безопасная зона обмена под охраной NPC.
+// SERVER: охранники неуязвимы и максимально прокачаны, реагируют на преступления игроков
+// (кража, атака, сброс/применение взрывчатки) и на пронос запрещённых предметов на карту.
+// Также охранники собирают лут с трупов через AI-планы (walk -> loot).
+// Связи: NpcPlanes (AI-планы), SendMessage/Messaging (оповещения), ItemMovement (перенос
+// предметов), CritterState/AnimHelpers (анимация и пауза), Tla (правила дропа с трупа).
 namespace MapBarterGround
 {
 
 #if SERVER
 
-const int MSG_IM_HAVE_ILLEGAL_ITEMS = 129; // Номер сообщения, отсылаемого игроком, если у него в инвентаре есть запрещенные предметы
-const int MSG_CANCEL_PICKUP = 500;
-const int STR_NO_ILLEGAL_ITEMS = 5200; // Номер строки "ты зачем принес сюда это!"
-const int PLANE_LOOT = 30;
+// Идентификаторы сообщений и строк, которыми обмениваются игрок, карта и охранники.
+const int MSG_IM_HAVE_ILLEGAL_ITEMS = 129; // сообщение игрока о наличии запрещённых предметов в инвентаре
+const int MSG_CANCEL_PICKUP = 500;         // сообщение об отмене плана подбора лута охранником
+const int STR_NO_ILLEGAL_ITEMS = 5200;     // строка-возглас охранника «зачем принёс сюда это!»
+const int PLANE_LOOT = 30;                 // идентификатор AI-плана сбора лута с трупа
 
+// При старте карты подписываемся на вход криттеров и максимально прокачиваем всех NPC-охранников,
+// чтобы их нельзя было убить или ограбить и они всегда побеждали нарушителя.
 void MapInit(Map map, bool firstTime)
 {
     map.OnCritterIn.Subscribe(MapInCritter);
@@ -35,6 +44,7 @@ void MapInit(Map map, bool firstTime)
     }
 }
 
+// Вошедший на карту криттер с запрещёнными предметами провоцирует реакцию всех охранников.
 [[Event]]
 void MapInCritter(Map map, Critter cr)
 {
@@ -43,6 +53,8 @@ void MapInCritter(Map map, Critter cr)
     }
 }
 
+// Инициализация охранника-NPC: те же буфы неуязвимости, что и в MapInit, плюс подписки на
+// преступления игроков и события AI-планов (реакция на кражу/атаку/применение/сброс/смерть).
 void GuardInit(Critter cr, bool firstTime)
 {
     cr.ReplicationTime = 1;
@@ -71,12 +83,16 @@ void GuardInit(Critter cr, bool firstTime)
     cr.OnNpcPlaneEnd.Subscribe(NpcPlaneEnd);
 }
 
+// Инициализация «чужого» (Alien) NPC: без буфов охранника, но реагирует на кражу и атаку.
 void AlienInit(Critter cr, bool firstTime)
 {
     cr.OnSomeCritterStealing.Subscribe(GuardSmthStealing);
     cr.OnSomeCritterAttack.Subscribe(GuardSmthAttack);
 }
 
+// Обработка сообщений, адресованных охраннику.
+// MSG_IM_HAVE_ILLEGAL_ITEMS: ставим план атаки на нарушителя и изредка выкрикиваем реплику.
+// MSG_CANCEL_PICKUP: снимаем планы сбора лута данного трупа (например, другой охранник уже забрал).
 [[Event]]
 void GuardMessage(Critter cr, Critter fromCr, int message, any value)
 {
@@ -92,6 +108,7 @@ void GuardMessage(Critter cr, Critter fromCr, int message, any value)
             return;
         }
 
+        // Реплику-возглас произносим не всегда, чтобы охранники не галдели хором.
         if (Game.Random(0, 4) == 1) {
             Messaging::SayShout(cr, TextPackKey(TextPackName::Text, "" + (STR_NO_ILLEGAL_ITEMS)), PlayerRegistration::GetPlayerName(value));
         }
@@ -103,6 +120,7 @@ void GuardMessage(Critter cr, Critter fromCr, int message, any value)
                 return;
             }
 
+            // Удаляем планы лута по индексу со сдвигом, так как ErasePlane меняет нумерацию.
             int erased = 0;
             for (int i = 0; i < count; i++) {
                 if (planes[i].Identifier == PLANE_LOOT && planes[i].IdentifierExt == int(value) && NpcPlanes::ErasePlane(cr, i - erased)) {
@@ -110,6 +128,7 @@ void GuardMessage(Critter cr, Critter fromCr, int message, any value)
                 }
             }
 
+            // Подчищаем остаток планов лута того же трупа, если они ещё остались.
             if (NpcPlanes::GetPlanes(cr, PLANE_LOOT, value, planes) != 0) {
                 for (int i = 0; i < planes.length(); i++) {
                     NpcPlanes::ErasePlane(cr, i);
@@ -119,6 +138,7 @@ void GuardMessage(Critter cr, Critter fromCr, int message, any value)
     }
 }
 
+// Кража на глазах живого охранника -> план атаки на вора-игрока.
 [[Event]]
 void GuardSmthStealing(Critter guard, Critter thief, Critter fromCr, Item, int)
 {
@@ -127,6 +147,7 @@ void GuardSmthStealing(Critter guard, Critter thief, Critter fromCr, Item, int)
     }
 }
 
+// Атака со стороны игрока -> охранник берёт его в цель.
 [[Event]]
 void GuardSmthAttack(Critter guard, Critter attacker, Critter target, Item weapon, int weaponMode, ProtoItem ammo)
 {
@@ -135,6 +156,8 @@ void GuardSmthAttack(Critter guard, Critter attacker, Critter target, Item weapo
     }
 }
 
+// Сброс предмета игроком: если это активированная взрывчатка — атакуем; любой запрещённый
+// предмет на земле охранник старается подобрать (план подбора с приоритетом атаки).
 [[Event]]
 void GuardSmthDropItem(Critter npc, Critter fromCr, Item item)
 {
@@ -156,6 +179,7 @@ void GuardSmthDropItem(Critter npc, Critter fromCr, Item item)
     NpcPlanes::AddPickPlane(npc, NpcPlanes::AI_PLANE_ATTACK_PRIORITY, item, ZERO_IDENT, true);
 }
 
+// Применение игроком взрывчатки/детонаторов (заложить мину, рвануть динамит и т.п.) -> атака.
 [[Event]]
 void GuardSmthUseItem(Critter npc, Critter fromCr, Item item, Critter onCritter, Item onItem, StaticItem onScenery, int param)
 {
@@ -168,6 +192,8 @@ void GuardSmthUseItem(Critter npc, Critter fromCr, Item item, Critter onCritter,
     }
 }
 
+// Когда рядом кто-то погиб и с трупа можно собрать вещи, охранник идёт к телу за лутом
+// (план ходьбы с целью PLANE_LOOT; дальнейший сбор — в NpcPlaneEnd).
 [[Event]]
 void NpcSmthDead(Critter npc, Critter fromCrit, Critter killer)
 {
@@ -176,13 +202,13 @@ void NpcSmthDead(Critter npc, Critter fromCrit, Critter killer)
     }
 }
 
-// Illegal items list and checks
-
+// Список запрещённых на площадке предметов (активированная взрывчатка, детонатор) и проверки.
 const hstring[] Pids_IllegalItems = {Content::Item::active_dynamite,
                                      Content::Item::active_plastic_explosive,
                                      Content::Item::active_mine,
                                      Content::Item::toggle_switch};
 
+// Есть ли у криттера хотя бы один запрещённый предмет в инвентаре.
 bool HasIllegalItems(Critter cr)
 {
     Item[] items = cr.GetItems();
@@ -195,6 +221,7 @@ bool HasIllegalItems(Critter cr)
     return false;
 }
 
+// Является ли предмет запрещённым по его прото-id (null трактуем как «не запрещён»).
 bool CheckItemIsIllegal(Item? item)
 {
     if (item == null) {
@@ -204,6 +231,9 @@ bool CheckItemIsIllegal(Item? item)
     return Pids_IllegalItems.exists(item.ProtoId);
 }
 
+// Завершение AI-плана охранника. Для успешно завершённого плана лута (PLANE_LOOT) собираем
+// с трупа вещи разрешённых типов (от Armor до Key), переносим их охраннику, оповещаем карту
+// об отмене подбора и проигрываем анимацию с паузой.
 [[Event]]
 EventResult NpcPlaneEnd(Critter npc, int planeId, int reason, Critter someCr, Item someItem)
 {
@@ -220,12 +250,14 @@ EventResult NpcPlaneEnd(Critter npc, int planeId, int reason, Critter someCr, It
                 return EventResult::StopChain;
             }
 
+            // Собираем вещи из всех слотов трупа и с гекса под ним.
             Item[] items = {};
             items.insertLast(cr.GetItems(ItemProperty::CritterSlot, CritterItemSlot::Inventory));
             items.insertLast(cr.GetItems(ItemProperty::CritterSlot, CritterItemSlot::Main));
             items.insertLast(cr.GetItems(ItemProperty::CritterSlot, CritterItemSlot::Secondary));
             items.insertLast(map.GetItemsOnHex(cr.Hex));
 
+            // Отсеиваем предметы вне разрешённого диапазона типов (берём только от Armor до Key).
             for (int i = 0; i < items.length(); i++) {
                 auto type = items[i].Type;
                 if (type < ItemType::Armor || type > ItemType::Key) {
@@ -240,10 +272,10 @@ EventResult NpcPlaneEnd(Critter npc, int planeId, int reason, Critter someCr, It
             CritterState::Wait(npc, Settings.Movement.Breaktime);
         }
 
-        return EventResult::StopChain; // Skip global and end plane
+        return EventResult::StopChain; // пропустить глобальный обработчик и завершить план
     }
 
-    return EventResult::StopChain; // Run global
+    return EventResult::StopChain; // запустить глобальный обработчик
 }
 
 #endif

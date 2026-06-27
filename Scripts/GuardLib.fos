@@ -1,9 +1,15 @@
+// GuardLib — прототип системы городской охраны: слежение за нарушителями и реакция NPC-охранников.
+// Ключевые обязанности: наблюдение за вооружёнными/нарушающими порядок игроками, накопление
+// уровня тревоги, словесные предупреждения и переход к атаке через планы NpcPlanes.
+// Сторона исполнения: только SERVER (всё тело модуля под директивой SERVER).
+// Связи: NpcPlanes (планы охранника), Messaging (реплики над головой), Tla (предмет в руке),
+// PidsGroups/Content (классификация запрещённых предметов), SendMessage (оповещение охраны на карте).
+// Статус: во многом прототип — часть подсистем и классов помечена как НЕ РЕАЛИЗОВАНО,
+// внизу файла оставлен закомментированный init-блок подписок как breadcrumb к доработке.
 namespace GuardLib
 {
 
 #if SERVER
-
-// Прототип скриптов охраны
 
 /*
         Todo:
@@ -23,7 +29,7 @@ namespace GuardLib
         Content::Item::fake_citizenship - Фальшивое удостоверение Гражданина
  */
 
-// for guard searching script / для обыска
+// Номера сообщений-зон для скрипта обыска (расстояния-триггеры реакции охраны)
 // зона предупреждение игрока
 const int MessagePlayerOnWarningHex = 1;
 // зона обыскивание игрока
@@ -77,8 +83,6 @@ timespan ObservationPeriod()
 const int PERCEPTION_ADD = 7;
 const int MaxAlert = 10;
 const int ATACK_MINUS_HP = 10;
-
-// //////////////////////////////////////////////////////////////////
 
 // НЕ РЕАЛИЗОВАННО
 class TPlayerCard
@@ -194,7 +198,7 @@ class CGuardsManager
         string tmp = MaxAlert;
         // нужна проверка на AlertType
         if (alertLevel > MaxAlert) {
-            Messaging::SayShoutOnHead(npc, TextPackKey(TextPackName::Dialogs, "" + (MsgStr::DialogTextId(npc.DialogId, 3))));
+            Messaging::SayShoutOnHead(npc, MsgStr::DialogTextKey(npc.DialogId, 3));
             int minhp = bastard.CurrentHp - AtackMinusHp;
             if (minhp < 0) {
                 minhp = 0;
@@ -203,14 +207,14 @@ class CGuardsManager
             NpcPlanes::AddAttackPlane(npc, 0, bastard, minhp);
         }
         else if (alertLevel > MaxAlert / 2) {
-            Messaging::SayOnHead(npc, TextPackKey(TextPackName::Dialogs, "" + (MsgStr::DialogTextId(npc.DialogId, 2))));
+            Messaging::SayOnHead(npc, MsgStr::DialogTextKey(npc.DialogId, 2));
             if (NpcPlanes::IsNoPlanes(npc)) {
                 NpcPlanes::AddWalkPlane(npc, 0, bastard.Hex, Game.GetDirection(npc.Hex, bastard.Hex), false, 3);
             }
         }
         else {
             npc.SetDir(Game.GetDirection(npc.Hex, bastard.Hex));
-            Messaging::SayOnHead(npc, TextPackKey(TextPackName::Dialogs, "" + (MsgStr::DialogTextId(npc.DialogId, 1))));
+            Messaging::SayOnHead(npc, MsgStr::DialogTextKey(npc.DialogId, 1));
         }
     }
 
@@ -274,7 +278,7 @@ class CGuardsManager
         return false;
     }
 
-    // EVENT section
+    // Секция обработчиков событий охранника
 
     // Вызывается, когда в поле зрения NPC появляется криттер.
     void EventOnAddCritter(Critter guard, Critter player)
@@ -323,7 +327,7 @@ class CGuardsManager
     // Вызывается если криттер освободился от задания
     void EventEndPlane(Critter guard)
     {
-        // if reason!!!
+        // todo: учесть причину завершения плана (reason)
         if (not guard.IsAlive()) {
             return;
         }
@@ -349,13 +353,12 @@ class CGuardsManager
 
         Item? whatInHand = Tla::GetCritterHandItem(player);
         if (whatInHand != null && GuardItemTest(whatInHand)) // если достал пушку
-
         {
             // замечаем пукалку  =)
             if (Game.GetDistance(guard, player) < Settings.Look.LookMinimum * 2) {
                 if (whatInHand.ProtoId == Content::Item::red_ryder_bb_gun || whatInHand.ProtoId == Content::Item::zip_gun) {
                     // на близком растоянии охранник замечает стремное оружие
-                    Messaging::SayOnHead(guard, TextPackKey(TextPackName::Dialogs, "" + (MsgStr::DialogTextId(guard.DialogId, 7))));
+                    Messaging::SayOnHead(guard, MsgStr::DialogTextKey(guard.DialogId, 7));
                     return;
                 }
             }
@@ -377,7 +380,7 @@ class CGuardsManager
                         if ((AlertCount[i] > MaxAlert) && (AlertType[i] == ALERT_TYPE_SHOWGUN)) {
                             // AlertCount[i]=MaxAlert; // перестаем атаковать игрока
                             AlertCount[i]--;
-                            Messaging::SayOnHead(guard, TextPackKey(TextPackName::Dialogs, "" + (MsgStr::DialogTextId(guard.DialogId, 4))));
+                            Messaging::SayOnHead(guard, MsgStr::DialogTextKey(guard.DialogId, 4));
                         }
                     }
                 }
@@ -418,7 +421,7 @@ class CGuardsManager
             switch (itemType) {
             case (ItemType::Drug):
                 if (PidsGroups::Pids_DrugsAlcohol.find(item.ProtoId) != -1) {
-                    Messaging::SayOnHead(guard, TextPackKey(TextPackName::Dialogs, "" + (MsgStr::DialogTextId(guard.DialogId, 5))));
+                    Messaging::SayOnHead(guard, MsgStr::DialogTextKey(guard.DialogId, 5));
                     // Messaging::SayOnHead(guard, "Эх счаз бы тоже пивка наебнуть");
                     int index = AddObserving(player);
                     AlertCount[index]++;
@@ -429,7 +432,7 @@ class CGuardsManager
                 }
 
                 if (PidsGroups::Pids_Drugs.find(item.ProtoId) != -1) {
-                    Messaging::SayOnHead(guard, TextPackKey(TextPackName::Dialogs, "" + (MsgStr::DialogTextId(guard.DialogId, 6))));
+                    Messaging::SayOnHead(guard, MsgStr::DialogTextKey(guard.DialogId, 6));
                     // Messaging::SayOnHead(guard, "Ну как? Нормально торкнуло?");
                     int index = AddObserving(player);
                     AlertCount[index] = AlertCount[index] + MaxAlert;
@@ -493,7 +496,7 @@ class CGuardsManager
                 if ((AlertCount[index] == 0) && (not isDead)) // если это превое нарушение и объект не умер
                 {
                     guard.SetDir(Game.GetDirection(guard.Hex, player.Hex));
-                    Messaging::SayShoutOnHead(guard, TextPackKey(TextPackName::Dialogs, "" + (MsgStr::DialogTextId(guard.DialogId, 8))));
+                    Messaging::SayShoutOnHead(guard, MsgStr::DialogTextKey(guard.DialogId, 8));
                     AlertCount[index]++;
                 }
                 else {
@@ -513,10 +516,12 @@ class CGuardsManager
     void EventStealing(Critter guard, Critter fromCrit, Critter thief, bool success, Item item, int count)
     {
         // воришку надо бить (даже если это не игрок)
+        // breadcrumb: задумка реагировать на кражу с учётом удачи вора (success + thief.luck)
         /*
            if success and random thief.luck ...
          */
         NpcPlanes::AddAttackPlane(guard, 0, thief, thief.MaxLife / 2);
+        // breadcrumb: альтернатива через накопление тревоги и предупреждение вместо прямой атаки
         /*
            int index=grd.AddObserving(fromCrit);
            grd.AlertCount[index]=+MaxAlert;
@@ -565,13 +570,14 @@ class CGuardsManager
     }
 
 } // CGuardsManager
-// //////////////
 
-// обыск
+// обыск (НЕ РЕАЛИЗОВАНО)
 class CGuardSearching
 {
 } // CGuardsSearching
-// //////////////
+
+// Breadcrumb к доработке: оригинальная привязка обработчиков охранника к событиям NPC.
+// Оставлено как ориентир для миграции подписок на актуальный API движка; не удалять.
 /*
    // Инициализация нпц. происходит при вводе нпц в игру
    void GuardInit( Critter npc, bool firstTime )

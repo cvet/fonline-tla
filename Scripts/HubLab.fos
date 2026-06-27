@@ -1,9 +1,15 @@
+// HubLab — серверная логика квеста "Секретная лаборатория хабологов".
+// Отвечает за: проводника Хономера (спавн, сопровождение игрока на глобалке,
+// поведение в лаборатории, открытие/закрытие двери, починку компьютера),
+// охрану и лаборантов локации, проверки/результаты диалогов квеста,
+// триггеры карты (атака игрока без робы, авто-закрытие двери, старт сцены).
+// Сторона: только SERVER.
+// Связи: NpcDialog, NpcPlanes, NpcRevenge, EnemyStack, Entrance, Lockers,
+// GlobalmapGroupExtended, AnimHelpers, Messaging, Tla.
 namespace HubLab
 {
 
 #if SERVER
-
-// Скрипты для квестовой локации "лаборатория хабологов".
 
 ///@ Property Critter Common uint8 SFAhs7Escort Mutable OwnerSync Persistent Group = Quests Quest = 4434 Max = 3
 ///@ Property Critter Server ident SFHonomerPlayerId Mutable Persistent
@@ -30,12 +36,14 @@ const int STR_OPEN = 8031;
 const int MSG_OPEN = 4024;
 const hstring ENTRY_HELL = ("" + 242).hstr();
 
+// Заглушка отладочного лога; рабочая реализация — закомментированный макрос ниже
+// (breadcrumb со времён переноса на текущий движок, включается при отладке).
 // #define DebugLog #(s) (Game.Log("" + s))
 void DebugLog(string s)
 {
 }
 
-// Квест "Секретная лаборатория хабологов".
+// Хономер рядом, если на карте игрока есть живой НПЦ с диалогом проводника.
 bool IsHonomerNearImpl(Critter player, Critter npc)
 {
     Map? map = player.GetMap();
@@ -84,6 +92,8 @@ void AddNewHonomer()
     }
 }
 
+// Инициализация проводника: подписка на нужные события и запуск idle-таймера,
+// который удерживает дом криттера на текущей карте.
 void HonomerInit(Critter cr, bool firstTime)
 {
     cr.OnGlobalMapProcess.Subscribe(HonomerGlobalProcess);
@@ -102,6 +112,9 @@ void HonomerMessage(Critter cr, Critter fromCr, int message, any value)
     }
 }
 
+// По завершении плана НПЦ в лаборатории ведём Хономера: у двери — открыть её и
+// перенацелить дом на место ремонта; у места ремонта — начать диалог или анимировать
+// использование (имитация починки).
 [[Event]]
 EventResult HonomerPlaneEnd(Critter cr, int planeId, int reason, Critter someCr, Item someItem)
 {
@@ -118,7 +131,7 @@ EventResult HonomerPlaneEnd(Critter cr, int planeId, int reason, Critter someCr,
                 Item? door = map.GetItemOnHex(hex, Content::Item::door_2019);
                 if (door != null) {
                     Lockers::SwitchLocker(door, true);
-                    Game.StartTimeEvent(Time::Seconds(1), Item::AutoCloseDoor, door.Id); //SavedDeferredCall
+                    Game.StartTimeEvent(Time::Seconds(1), Item::AutoCloseDoor, door.Id); // SavedDeferredCall
                 }
 
                 if (Entrance::MapGetEntryCoords(map, ENTRY_REPAIR, 0, hex)) {
@@ -154,6 +167,9 @@ void HonomerDead(Critter cr, Critter killer)
     HonomerIdleImpl(cr);
 }
 
+// Сопровождение игрока по глобальной карте: если игрок покинул группу — убираем НПЦ;
+// иначе ведём проводника к локации лаборатории и по прибытии переносим внутрь,
+// засчитываем шаг квеста и опыт, запускаем диалог охранника.
 [[Event]]
 EventResult HonomerGlobalProcess(Critter cr, int type, Item car, float x, float y, float toX, float toY, float speed, int encounterDescriptor,
                                  bool waitForAnswer)
@@ -217,6 +233,7 @@ EventResult HonomerGlobalProcess(Critter cr, int type, Item car, float x, float 
     return EventResult::StopChain;
 }
 
+// Привязываем дом криттера к текущей карте, чтобы НПЦ не пытался уйти на прежнюю.
 void HonomerIdleImpl(Critter cr)
 {
     Map? map = cr.GetMap();
@@ -227,19 +244,25 @@ void HonomerIdleImpl(Critter cr)
     }
 }
 
-[[TimeEvent]]
+[[TimeEvent]] [[Async]]
 void HonomerIdle(Critter cr, TimeEventContext event)
 {
+    if (!Sync::LockCritterWithMap(cr)) {
+        return;
+    }
+
     HonomerIdleImpl(cr);
     event.Stop();
 }
 
+// Когда текущий проводник выгружается, восстанавливаем его на стартовой карте.
 [[Event]]
 void HonomerFinish(Critter cr)
 {
     AddNewHonomer();
 }
 
+// НПЦ находится внутри локации лаборатории хабологов.
 bool HonomerInLabImpl(Critter player, Critter npc)
 {
     Map? map = npc.GetMap();
@@ -258,6 +281,7 @@ bool NotHonomerInLab(Critter player, Critter npc)
     return !HonomerInLabImpl(player, npc);
 }
 
+// НПЦ закреплён за этим игроком как проводник.
 bool IsMyFollowerImpl(Critter player, Critter? npc)
 {
     return npc != null && npc.SFHonomerPlayerId == player.Id;
@@ -275,6 +299,7 @@ bool NotMyFollower(Critter player, Critter npc)
     return !IsMyFollowerImpl(player, npc);
 }
 
+// Закрепляем проводника за игроком; через игровой день привязка сбрасывается.
 [[DialogResult]]
 void SetFollower(Critter player, Critter? npc)
 {
@@ -291,13 +316,19 @@ void SetFollower(Critter player, Critter? npc)
     npc.StartTimeEvent(Time::GameDays(1), ClearFollower, 0);
 }
 
-[[TimeEvent]]
+[[TimeEvent]] [[Async]]
 void ClearFollower(Critter cr, any rate)
 {
+    if (!Sync::LockCritterWithMap(cr)) {
+        return;
+    }
+
     cr.SFHonomerPlayerId = ZERO_IDENT;
     return;
 }
 
+// Старт сопровождения: создаём (или переиспользуем) скрытую локацию лаборатории,
+// запоминаем её на игроке и НПЦ и выводим обоих на глобальную карту одной группой.
 [[DialogResult]]
 void Travel(Critter player, Critter npc)
 {
@@ -328,6 +359,8 @@ void Travel(Critter player, Critter npc)
     npc.TransferToGlobalWithGroup(grp);
 }
 
+// Поднимаем тревогу по всей локации: все локальные НПЦ на всех картах берут цель
+// во враги и получают план на атаку.
 void AttackPlayer(Critter target)
 {
     Map? map = target.GetMap();
@@ -365,6 +398,7 @@ EventResult HubAttacked(Critter cr, Critter attacker)
     return EventResult::StopChain;
 }
 
+// По завершении диалога с охранником сдвигаем дом собеседника к гексу перед дверью.
 [[Event]]
 void DoorGuardMessage(Critter cr, Critter fromCr, int message, any value)
 {
@@ -386,6 +420,7 @@ void DoorInit(Item item, bool firstTime)
     item.OnCritterUseSkill.Subscribe(DoorSkill);
 }
 
+// Игрок не в стелсе не может взломать дверь штатным применением навыка.
 [[Event]]
 EventResult DoorSkill(Item item, Critter cr, CritterProperty skill)
 {
@@ -481,6 +516,7 @@ void Attack(Critter cr, StaticItem trigger, bool entered, mdir dir)
     }
 }
 
+// Игрок одет в одну из роб хабологов (пропуск-маскировка для лаборатории).
 bool InRobeImpl(Critter cr, Critter npc)
 {
     hstring pid;
@@ -504,6 +540,7 @@ bool NotRobe(Critter player, Critter npc)
     return !InRobeImpl(player, npc);
 }
 
+// Показываем игроку кат-сцену "ада" через камеру на отдельной карте.
 [[DialogResult]]
 void ShowHell(Critter player, Critter npc)
 {

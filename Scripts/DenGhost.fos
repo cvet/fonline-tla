@@ -1,29 +1,31 @@
-namespace DenGhost // Sort 2
+// DenGhost — квестовый призрак Дена.
+// SERVER. Неуязвим вне квеста (реген HP + крик), смерть только через диалог KillGhost; авто-воскрешение и наказание за кражу.
+// Связи: CritterState, Messaging, Dialogs, GameTime, MsgStr, Content.
+namespace DenGhost
 {
 
 #if SERVER
 
 ///@ Property Game Server bool DenGhostIsDead Mutable Persistent
 
-// dialog string numbers
+// Номера строк в диалоге den_ghost (крик / провал кражи / провал кражи с травмой)
 const int STRNUM_SCREAM = 1;
 const int STRNUM_STEAL = 2;
 const int STRNUM_STEAL_INJURE = 3;
 
-/*
-   Critter initialization
- */
+// Инициализация призрака: при первом запуске задаём неуязвимые параметры,
+// затем синхронизируем фактическое состояние (жив/мёртв) со значением переменной квеста.
 void GhostInit(Critter ghost, bool firstTime)
 {
     if (firstTime) {
-        // set max possible HP
+        // Максимально возможное HP, чтобы призрак был неуязвим вне квеста
         ghost.MaxLifeBase = 9999;
         ghost.CurrentHp = 9999;
-        // and armor class
+        // И запредельный класс брони
         ghost.ArmorClassBase = 90;
     }
 
-    // syncronize ghost actual state with var value
+    // Приводим реальное состояние призрака в соответствие с флагом квеста
     if (ghost.Condition == CritterCondition::Dead && !Game.DenGhostIsDead) {
         CritterState::ToAlive(ghost);
     }
@@ -37,29 +39,29 @@ void GhostInit(Critter ghost, bool firstTime)
     ghost.OnStealing.Subscribe(GhostStealing);
 }
 
-//
-// Event Handlers
-//
+// Обработчики событий
 
+// Призрак неуязвим: любая атака мгновенно восстанавливает HP, и он лишь пугает игрока криком.
 [[Event]]
 EventResult GhostAttacked(Critter ghost, Critter attacker)
 {
-    // regenerate HP
+    // Полностью восстанавливаем HP
     ghost.CurrentHp = ghost.MaxLife;
 
-    // scream to scary player
-    Messaging::SayShoutOnHead(ghost, TextPackKey(TextPackName::Dialogs, "" + (MsgStr::DialogTextId(Content::Dialog::den_ghost, STRNUM_SCREAM))));
+    // Кричим, чтобы напугать игрока
+    Messaging::SayShoutOnHead(ghost, MsgStr::DialogTextKey(Content::Dialog::den_ghost, STRNUM_SCREAM));
 
-    // do nothing after attack
+    // Атака ни к чему не приводит — прерываем цепочку
     return EventResult::StopChain;
 }
 
+// Если призрак умер не через квестовый диалог, он автоматически воскресает.
 [[Event]]
 void GhostDead(Critter ghost, Critter killeer)
 {
-    // ghost killed not through quest dialog
+    // Призрак убит не через квестовый диалог
     if (!Game.DenGhostIsDead) {
-        // ressurect ghost
+        // Воскрешаем призрака
         Game.StartTimeEvent(GameTime::GameSeconds(60), RessurectGhost, ghost.Id);
     }
 }
@@ -70,10 +72,8 @@ void GhostRespawn(Critter ghost)
     Game.DenGhostIsDead = false;
 }
 
-/*
-   Handles stealing from ghost.
-   Stealing attempt fails in any case with a chance for player to cripple right hand.
- */
+// Обработка кражи у призрака.
+// Попытка кражи в любом случае проваливается, при этом есть шанс повредить вору правую руку.
 [[Event]]
 void GhostStealing(Critter ghost, Critter thief, Item item, int count)
 {
@@ -83,39 +83,31 @@ void GhostStealing(Critter ghost, Critter thief, Item item, int count)
 
         if (injureHandRoll <= injureHandChance) {
             thief.IsDamagedRightArm = true;
-            Messaging::Info(thief, TextPackKey(TextPackName::Dialogs, "" + (MsgStr::DialogTextId(Content::Dialog::den_ghost, STRNUM_STEAL_INJURE))));
+            Messaging::Info(thief, MsgStr::DialogTextKey(Content::Dialog::den_ghost, STRNUM_STEAL_INJURE));
         }
         else {
-            Messaging::Info(thief, TextPackKey(TextPackName::Dialogs, "" + (MsgStr::DialogTextId(Content::Dialog::den_ghost, STRNUM_STEAL))));
+            Messaging::Info(thief, MsgStr::DialogTextKey(Content::Dialog::den_ghost, STRNUM_STEAL));
         }
     }
 }
 
-//
-// Dialog
-//
+// Диалог
 
-/*
-   Instantly kills ghost
- */
+// Мгновенно убивает призрака (единственный легитимный способ его смерти — через квест).
 [[DialogResult]]
 void KillGhost(Critter player, Critter ghost, any val)
 {
-    // confirm that ghost killed through quest dialog
+    // Фиксируем, что призрак убит через квестовый диалог
     Game.DenGhostIsDead = true;
-    // kill ghost
+    // Убиваем призрака
     CritterState::ToDead(ghost, CritterActionAnim::DeadBurnRun, null);
-    // run new dialog through time event
+    // С задержкой запускаем диалог о проклятом сокровище
     Game.StartTimeEvent(GameTime::GameSeconds(60), RunTreasureDialog, player.Id);
 }
 
-//
-// Time Event Handlers
-//
+// Обработчики отложенных событий
 
-/*
-   Ressurects ghost
- */
+// Воскрешает призрака.
 [[TimeEvent]]
 void RessurectGhost(any value)
 {
@@ -124,8 +116,9 @@ void RessurectGhost(any value)
         return;
     }
 
-    // try to ressurect ghost; ToAlive throws if the corpse hexes are busy, so
-    // pre-check movability and retry later instead of relying on a false return
+    // Пробуем воскресить призрака; ToAlive бросает исключение, если гексы трупа заняты,
+    // поэтому заранее проверяем проходимость и при занятости повторяем позже,
+    // а не полагаемся на ложное возвращаемое значение
     Map? map = ghost.GetMap();
     if (map != null && map.IsHexesMovable(ghost.Hex, ghost.Multihex)) {
         CritterState::ToAlive(ghost);
@@ -135,9 +128,7 @@ void RessurectGhost(any value)
     }
 }
 
-/*
-   Runs dialog about cursed treasure
- */
+// Запускает диалог о проклятом сокровище.
 [[TimeEvent]]
 void RunTreasureDialog(any value)
 {

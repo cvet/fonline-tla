@@ -1,3 +1,6 @@
+// DropMenuHandler — контекстное drop-меню действий над целью.
+// Ключевые обязанности: CLIENT — кнопки меню и Can*/Do* предикаты/действия; SERVER — ServerRemoteCall StartDialog/UseSkillOnItem.
+// Сторона: MIXED. Связи: TlaFixedDropMenu, ChosenActions, Gui, Tla, Lockers, Dialogs, Sync.
 namespace DropMenuHandler
 {
 
@@ -6,6 +9,7 @@ namespace DropMenuHandler
 
 #if CLIENT
 
+// Регистрируем фиксированное drop-меню: набор кнопок с парами предикат/действие (Can*/Do*) и иконками.
 [[ModuleInit]]
 void InitDropMenuHandler()
 {
@@ -23,11 +27,12 @@ void InitDropMenuHandler()
     dropMenu.AddButton(80, CanFollowGroup, DoFollowGroup, "lmenu_gmfollow_up.png", "lmenu_gmfollow_dn.png");
     dropMenu.AddButton(100, CanCloseMenu, CloseMenu, "CANCELN.FRM", "CANCELH.FRM");
 
-    // INVENH/N - инвентарь кнопка PUSHH/PUSHN - толчок; ROTATEH/ROTATEN - поворот.USEGETH/N - рука использования/LOOKH|LOOKN - просмотр подробный
+    // Справка по иконкам: INVENH/N — инвентарь; PUSHH/PUSHN — толчок; ROTATEH/ROTATEN — поворот; USEGETH/N — использование рукой; LOOKH/LOOKN — подробный осмотр.
 
     Gui::SetDropMenu(dropMenu);
 }
 
+// Следовать за группой: доступно только для живого онлайн-игрока, кроме самого Chosen.
 bool CanFollowGroup(Critter? cr, Item? item)
 {
     return cr != null && !cr.IsChosen && cr.IsAlive() && cr.ControlledByPlayer && !cr.IsPlayerOffline;
@@ -50,6 +55,7 @@ bool CanUseSkill(Critter? cr, Item? item)
     return (cr != null || item != null);
 }
 
+// Использовать навык: открываем SkillBox по цели — предмет имеет приоритет над криттером.
 void DoUseSkill(Critter? cr, Item? item)
 {
     ident itemId;
@@ -89,9 +95,10 @@ void DoUseItemFromInventory(Critter? cr, Item? item)
     Gui::ShowScreen(GuiScreen::Use, dict<string, any> = {{"TargetCritterId", critterId}, {"TargetItemId", itemId}});
 }
 
+// Диалог: с живым NPC (не игроком) у которого задан DialogId и разрешён разговор.
 bool CanDialog(Critter? cr, Item? item)
 {
-    // ToDo - диалог с предметами
+    // ToDo — диалог с предметами
     return cr != null && IsChosenAlive() && !cr.ControlledByPlayer && cr.IsAlive() && cr.DialogId != EMPTY_HSTRING && !cr.IsNoTalk;
 }
 
@@ -100,6 +107,7 @@ void Dialog(Critter? cr, Item? item)
     if (cr == null) {
         return;
     }
+    // оставлено для истории миграции: прежний прямой серверный вызов
     // CurPlayer.ServerCall.StartDialog( cr.Id );
     ChosenActions::SetChosenActions({Tla::ChosenTalkNpc, cr.Id, 0, 0, 0, 0, 0});
 }
@@ -109,7 +117,7 @@ bool IsChosenAlive()
     return Chosen.IsAlive();
 }
 
-// Close menu
+// Закрыть меню
 bool CanCloseMenu(Critter? cr, Item? item)
 {
     return (cr != null || item != null);
@@ -117,10 +125,10 @@ bool CanCloseMenu(Critter? cr, Item? item)
 
 void CloseMenu(Critter? cr, Item? item)
 {
-    //
+    // действий не требуется — закрытие меню обрабатывается самим drop-меню
 }
 
-// Look
+// Осмотр: показать описание предмета либо криттера.
 bool CanLook(Critter? cr, Item? item)
 {
     return (cr != null || item != null);
@@ -136,9 +144,10 @@ void Look(Critter? cr, Item? item)
     }
 }
 
+// Использовать: обыск трупа, либо предмет на земле/в инвентаре Chosen, пригодный к применению.
 bool CanUse(Critter? cr, Item? item)
 {
-    // Loot critter
+    // Обыск трупа криттера
     if (cr != null && IsChosenAlive() && !cr.IsChosen && cr.IsDead() && !cr.IsNoLoot) {
         return true;
     }
@@ -157,9 +166,11 @@ bool CanUse(Critter? cr, Item? item)
 
 void Use(Critter? cr, Item? item)
 {
+    // оставлено для истории миграции: прежний ранний выход по принадлежности предмета
     // if(item.Ownership != ItemOwnership::MapHex )
     //    return;
     if (item != null && item.Ownership == ItemOwnership::MapHex) {
+        // оставлено для истории миграции: прежний прямой серверный вызов навыка по предмету
         // CurPlayer.ServerCall.UseSkillOnItem( item.Id, CritterProperty::SpecialSkillPickOnGround );
         ChosenActions::SetChosenActions({Tla::ChosenPickItem, item.ProtoId, item.Hex.x, item.Hex.y, item.Id, 0, 0});
     }
@@ -175,16 +186,19 @@ void Use(Critter? cr, Item? item)
     }
 }
 
+// Выбросить: только предмет из инвентаря живого Chosen.
 bool CanDrop(Critter? cr, Item? item)
 {
     return item != null && IsChosenAlive() && IsChosenItem(item);
 }
 
+// Принадлежит ли предмет инвентарю Chosen.
 bool IsChosenItem(Item item)
 {
     return item.Ownership == ItemOwnership::CritterInventory && item.CritterId == Chosen.Id;
 }
 
+// Стекуемый предмет выбрасываем через окно дробления, иначе кладём наружу одним действием.
 void Drop(Critter? cr, Item? item)
 {
     if (item == null) {
@@ -198,6 +212,7 @@ void Drop(Critter? cr, Item? item)
     }
 }
 
+// Поворот: доступен только живому Chosen (меняет направление взгляда).
 bool CanRotate(Critter? cr, Item? item)
 {
     return cr != null && cr.IsChosen && cr.IsAlive();
@@ -208,6 +223,7 @@ void Rotate(Critter? cr, Item? item)
     ChosenActions::SetChosenActions({Tla::ChosenDir, 0, 0, 0, 0, 0, 0});
 }
 
+// Разрядить: оружие с патронами из инвентаря живого Chosen.
 bool CanUnload(Critter? cr, Item? item)
 {
     return item != null && item.Type == ItemType::Weapon && IsChosenAlive() && IsChosenItem(item) && item.AmmoCount > 0;
@@ -225,6 +241,7 @@ void DoUnload(Critter? cr, Item? item)
 
 #if SERVER
 
+// Серверный запуск диалога: под локом проверяем, что оба криттера живы и NPC разрешает разговор.
 [[ServerRemoteCall]] [[Async]]
 void StartDialog(Player player, ident npcId)
 {
@@ -235,6 +252,7 @@ void StartDialog(Player player, ident npcId)
     }
 }
 
+// Серверное применение навыка к предмету: для контейнеров/дверей передаём в Lockers.
 [[ServerRemoteCall]] [[Async]]
 void UseSkillOnItem(Player player, ident itemId, CritterProperty skill)
 {

@@ -1,4 +1,10 @@
-namespace MapModoc // Sort 2
+// MapModoc — серверная логика города Модок: вход в локацию и его квесты.
+// SERVER: гейт прохода на глобальной карте по навыку аутдорсмена, квест
+//   "Вредители на ферме" (спавн и убийство гигантской осы, прогресс ModJoeGiantWasp),
+//   а также диалоговые помощники квеста "Морозко" (подсчёт и сдача бутылок).
+// Связи: Entrance (поиск свободного входа), SendMessage (рассылка по карте),
+//   EnemyStack (агро осы), Location/Time (создание скрытой локации и таймер сброса).
+namespace MapModoc
 {
 
 #if SERVER
@@ -18,6 +24,7 @@ void InitMapModoc()
     Game.OnGlobalMapCheckEntranceAllowed.Subscribe(EntranceModoc);
 }
 
+// Северный вход в Модок открыт только если у лидера группы аутдорсмен не ниже 50
 [[Event]]
 EventResult EntranceModoc(Location modoc, Critter[] critters, int entrance)
 {
@@ -46,12 +53,14 @@ void FarmInit(Map map, bool firstTime)
     map.OnCritterIn.Subscribe(FarmInCritter);
 }
 
+// Вошедший на ферму получает сообщение-цель: указание убить осу
 [[Event]]
 void FarmInCritter(Map map, Critter cr)
 {
     SendMessage::ToAllOnMap(cr, MESSAGE_KILL, cr.Id);
 }
 
+// Настройка осы при спавне: реакция на смерть и сообщения, отключение репликации
 void WaspInit(Critter wasp, bool firstTime)
 {
     wasp.OnDead.Subscribe(WaspDead);
@@ -59,6 +68,7 @@ void WaspInit(Critter wasp, bool firstTime)
     wasp.ReplicationTime = -1;
 }
 
+// Смерть осы продвигает квест у всех игроков на карте и помечает локацию под уборку
 [[Event]]
 void WaspDead(Critter cr, Critter killer)
 {
@@ -78,6 +88,7 @@ void WaspDead(Critter cr, Critter killer)
     loc.AutoGarbage = true;
 }
 
+// По сообщению-цели оса берёт отправителя в стек врагов (начинает агро)
 [[Event]]
 void WaspMessage(Critter cr, Critter fromCr, int message, any value)
 {
@@ -86,6 +97,8 @@ void WaspMessage(Critter cr, Critter fromCr, int message, any value)
     }
 }
 
+// Мэр выдаёт квест: создаёт скрытую локацию фермы, помечает её известной игроку
+// и через 2 игровых дня сбрасывает её и прогресс, если квест не выполнен
 [[DialogResult]]
 void ShowMap(Critter player, Critter npc)
 {
@@ -96,9 +109,11 @@ void ShowMap(Critter player, Critter npc)
     Location::SetKnownLoc(player, loc);
 
     any[] values = {loc.Id, player.Id};
-    Game.StartTimeEvent(Time::GameDays(2), ResetWaspLoc, values); //SavedDeferredCall
+    // Отложенный вызов переживает рестарт сервера (сохраняемое таймер-событие)
+    Game.StartTimeEvent(Time::GameDays(2), ResetWaspLoc, values);
 }
 
+// Таймаут квеста: убирает ферму и откатывает прогресс игрока, если оса ещё не убита
 [[TimeEvent]]
 void ResetWaspLoc(any[] values)
 {
@@ -113,7 +128,7 @@ void ResetWaspLoc(any[] values)
     }
 }
 
-// Квест "Морозко"
+// Квест "Морозко": подставляет в реплику число имеющихся у игрока бутылок аммиака
 void CountBottles(Critter player, Critter npc, string& textArgs)
 {
     if (Tla::IsDialogEnd(textArgs) or Tla::IsDialogSayMode(textArgs)) {
@@ -123,6 +138,7 @@ void CountBottles(Critter player, Critter npc, string& textArgs)
     textArgs = "|count:" + player.CountItem(Content::Item::bottle_ammiak);
 }
 
+// Сдача всех бутылок аммиака: даёт опыт и крышки по 400 за каждую
 [[DialogResult]]
 void AllBottles(Critter player, Critter npc)
 {

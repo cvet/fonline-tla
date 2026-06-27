@@ -1,10 +1,15 @@
 #include "Common.h"
 
 #include "Client.h"
+#include "ClientExtension.h"
 
 FO_USING_NAMESPACE();
 
 FO_BEGIN_NAMESPACE
+///@ EngineHook
+FO_SCRIPT_API void ClientInitHook(ClientEngine* client);
+///@ ExportMethod
+FO_SCRIPT_API int32_t Client_Game_GetEmbeddedClientIndex(ClientEngine* client);
 ///@ ExportMethod
 FO_SCRIPT_API string Client_Game_FormatTags(ClientEngine* client, string_view text, string_view textArgs);
 ///@ ExportMethod
@@ -16,6 +21,29 @@ FO_SCRIPT_API bool Client_Critter_IsBusy(CritterView* self);
 ///@ ExportMethod
 FO_SCRIPT_API void Client_Critter_Wait(CritterView* self, int32_t ms);
 FO_END_NAMESPACE
+
+static std::atomic<int32_t> ClientEngineSpawnCounter {};
+
+void FO_NAMESPACE ClientInitHook(ClientEngine* client)
+{
+    FO_STACK_TRACE_ENTRY();
+
+    if (!client->UserData) {
+        client->UserData = unique_del_ptr<uint8_t>(reinterpret_cast<uint8_t*>(SafeAlloc::MakeRaw<ClientExtData>()), [](const uint8_t* ptr) FO_DEFERRED {
+            const auto* ext_data_ptr = reinterpret_cast<const ClientExtData*>(ptr);
+            delete ext_data_ptr;
+        });
+
+        GetClientExtData(client).EmbeddedClientIndex = ClientEngineSpawnCounter.fetch_add(1, std::memory_order_relaxed) + 1;
+    }
+}
+
+int32_t FO_NAMESPACE Client_Game_GetEmbeddedClientIndex(ClientEngine* client)
+{
+    FO_STACK_TRACE_ENTRY();
+
+    return GetClientExtData(client).EmbeddedClientIndex;
+}
 
 static auto ResolveTextArg(string_view name, string_view text_args) -> string;
 
@@ -137,14 +165,20 @@ static auto FormatTags(ClientEngine* client, string_view text, string_view text_
 
                 istringstream itag(tag);
                 string pack_name_str;
-                string key_name;
+                string key1;
+                string key2;
 
-                if (itag >> pack_name_str >> key_name) {
-                    const auto text_key = TextPackKey::FromPack(client->Hashes, pack_name_str, key_name);
+                if (itag >> pack_name_str >> key1) {
+                    // Two forms: `@text <pack> <key>@` (collection + single key) and the three-token
+                    // `@text <pack> <subkey> <key>@` (collection + two keys) needed for dialog text, which
+                    // the baker stores under [Dialogs, <dialogName>, <key>]. The second key is optional, so
+                    // existing two-token tags keep their exact behaviour.
+                    const bool has_key2 = static_cast<bool>(itag >> key2);
+                    const auto text_key = has_key2 ? TextPackKey::FromPack(client->Hashes, pack_name_str, key1, key2) : TextPackKey::FromPack(client->Hashes, pack_name_str, key1);
                     const auto& text_pack = client->GetCurLang();
 
                     if (text_pack.GetStrCount(text_key) == 0) {
-                        tag = key_name;
+                        tag = has_key2 ? key2 : key1;
                     }
                     else {
                         tag = text_pack.GetStr(text_key);

@@ -1,9 +1,12 @@
+// Jukebox — музыкальные автоматы: проигрывание мелодий за монетки и продажа автомата квестовому игроку.
+// SERVER: реакция на использование монеток на автомате (проигрыш случайного трека окружающим игрокам),
+//         а также демонды/результаты диалога для установки автомата на склад игрока в Нью-Рено.
+// Связи: Messaging (сообщения игроку), Media (воспроизведение музыки), QuestWarehouse (локация склада),
+//        Entrance (точки входа карты), Content (прото-id предметов/карт).
 namespace Jukebox
 {
 
 #if SERVER
-
-// Музыкальный автомат. В предмет бросается монетка, он проигрывает одну случайную мелодию
 
 const timespan SILENCE_TIME = Time::Minutes(3);
 const int STR_OUTOFORDER = 25;
@@ -13,11 +16,14 @@ const int PRICE = 10;
 
 const string[] trackList = {"akiss.acm", "Maybe.ogg", "ccboogie.ogg", "ppmamma.ogg"};
 
+// Подписываем автомат на использование предмета на нём, чтобы реагировать на брошенные монетки.
 void JukeBoxInit(Item item, bool firstTime)
 {
     item.OnCritterUseOnSelf.Subscribe(UseOnJukeBox);
 }
 
+// За монетку проигрываем случайный трек игрокам в радиусе: берём оплату, выдерживаем паузу
+// тишины между запусками и не позволяем оплатить меньше цены.
 [[Event]]
 EventResult UseOnJukeBox(Item item, Critter cr, Item? usedItem, int param)
 {
@@ -39,7 +45,8 @@ EventResult UseOnJukeBox(Item item, Critter cr, Item? usedItem, int param)
                 Map? map = item.GetMapPosition(hex);
                 if (map != null) {
                     item.IsShowAnim = true;
-                    Game.StartTimeEvent(Time::Seconds(30), OffJukeBox, item.Id); //SavedDeferredCall
+                    // Отложенный вызов сохраняется в стейте: анимация выключится даже после рестарта сервера.
+                    Game.StartTimeEvent(Time::Seconds(30), OffJukeBox, item.Id);
                     Critter[] critters = map.GetCrittersInRadius(hex, PLAY_RADIUS, CritterFindType::Players);
                     Game.DestroyItem(usedItem, 10);
                     item.LastUsedTime = Game.SynchronizedTime;
@@ -56,6 +63,7 @@ EventResult UseOnJukeBox(Item item, Critter cr, Item? usedItem, int param)
     return EventResult::StopChain;
 }
 
+// Отложенно гасим анимацию автомата по окончании проигрывания трека.
 [[TimeEvent]]
 void OffJukeBox(any value)
 {
@@ -65,10 +73,13 @@ void OffJukeBox(any value)
     }
 }
 
-// Покупка автоматов в Нью-Рено
+// Покупка и установка автомата в Нью-Рено: демонды диалога торговца и результат продажи.
+// Витринный (выключенный) автомат стоит на карте newr_eld, рабочий ставится на квестовый склад игрока.
 
+// Номер точки входа на карте склада, куда ставится автомат.
 const int ENTRY_JB = 142;
 
+// Есть ли в продаже выставочный автомат на карте Нью-Рено.
 bool JukeboxesCheckImpl(Critter player, Critter npc)
 {
     Map? map = Game.GetMap(Content::Map::newr_eld);
@@ -93,6 +104,7 @@ bool NotJukeboxesCheck(Critter player, Critter npc)
     return !JukeboxesCheckImpl(player, npc);
 }
 
+// Можно ли поставить автомат: на складе есть точка входа и там ещё не стоит выключенный автомат.
 bool CanPlaceJukeBoxImpl(Critter player, Critter npc)
 {
     Location? loc = Game.GetLocation(QuestWarehouse::GetLocId(player));
@@ -119,6 +131,7 @@ bool CanNotPlaceJukeBox(Critter player, Critter npc)
     return !CanPlaceJukeBoxImpl(player, npc);
 }
 
+// Уже ли стоит рабочий автомат на складе игрока.
 [[DialogDemand]]
 bool AlreadyHasJukeBox(Critter player, Critter npc)
 {
@@ -135,6 +148,7 @@ bool AlreadyHasJukeBox(Critter player, Critter npc)
     return false;
 }
 
+// Продажа автомата: ставим рабочий автомат на склад игрока и убираем выставочный экземпляр из Нью-Рено.
 [[DialogResult]]
 void SellJukeBox(Critter player, Critter npc)
 {

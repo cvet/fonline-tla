@@ -1,9 +1,10 @@
-namespace Explode // Sort 2
+// Explode — серверная логика взрывчатки и мин.
+// Активация/обезвреживание динамита, пластида и мин, отложенный и контактный взрыв, урон по радиусу, респаун маппер-мин.
+// Сторона: SERVER. Связи: GameTime, Combat, Effects, EnemyStack, Math, Tla.
+namespace Explode
 {
 
 #if SERVER
-
-// Author: cvet, rifleman17
 
 ///@ Property Item Server int32 ExplodeInvokeId Mutable Persistent
 ///@ Property Item Server ident ExplodeSwitcherExplodeId Mutable Persistent
@@ -12,17 +13,18 @@ namespace Explode // Sort 2
 ///@ Property Item Server int32 ExplodeBonusRadius Mutable Persistent
 ///@ Property Item Server int32 ExplodeTimeRespawnMine Mutable Persistent
 
+// Сложность обнаружения ловушки: чем выше навык сапёра, тем труднее её снять.
 int TrapHideValue(int traps)
 {
     return (traps) / 5 + 10;
 }
 const int EXPLODE_CLEARANCE_EXPERIENCE = 50;
 
-// Timer
+// Границы таймера обратного отсчёта, в игровых минутах.
 const int TIMER_MIN_VALUE = 1;
 const int TIMER_MAX_VALUE = 599;
 
-// Global on use, export
+// Глобальная точка входа на использование взрывчатки игроком.
 bool OnUseExplode(Critter cr, Item explode, Critter? targetCr, Item? targetItem, StaticItem? targetScen, int timer)
 {
     if (targetCr != null || targetItem != null || targetScen != null) {
@@ -50,9 +52,9 @@ bool OnUseExplode(Critter cr, Item explode, Critter? targetCr, Item? targetItem,
         timer = TIMER_MAX_VALUE;
     }
 
-    timer *= 60; // Convert to game seconds
+    timer *= 60; // перевод минут в игровые секунды
 
-    // Activate dynamite explosion
+    // Активация динамита: запускаем отложенный взрыв по таймеру.
     if (pid == Content::Item::dynamite) {
         Item activateExpl = cr.AddItem(Content::Item::active_dynamite, 1);
 
@@ -72,7 +74,7 @@ bool OnUseExplode(Critter cr, Item explode, Critter? targetCr, Item? targetItem,
         }
     }
 
-    // Activate plastic explosion
+    // Активация пластида: выдаём активный заряд и пульт-переключатель, привязанные по частоте.
     else if (pid == Content::Item::plastic_explosives) {
         Item expl = cr.AddItem(Content::Item::active_plastic_explosive, 1);
         Item explSwitch = cr.AddItem(Content::Item::toggle_switch, 1);
@@ -90,7 +92,7 @@ bool OnUseExplode(Critter cr, Item explode, Critter? targetCr, Item? targetItem,
         explSwitch.TextArgs = TextFormatting::TextArg("frequency", "" + expl.Id);
     }
 
-    // Explode plastic explosion
+    // Подрыв пластида с пульта: находим связанный заряд и взрываем его.
     else if (pid == Content::Item::toggle_switch) {
         Item? expl = Game.GetItem(explode.ExplodeSwitcherExplodeId);
         if (expl != null) {
@@ -102,7 +104,7 @@ bool OnUseExplode(Critter cr, Item explode, Critter? targetCr, Item? targetItem,
         }
     }
 
-    // Activate mine
+    // Активация мины: срабатывает по контакту через скрипт ExplodeInit.
     else if (pid == Content::Item::mine) {
         Item mine = cr.AddItem(Content::Item::active_mine, 1);
 
@@ -114,16 +116,16 @@ bool OnUseExplode(Critter cr, Item explode, Critter? targetCr, Item? targetItem,
         mine.SetupScript(ExplodeInit);
     }
 
-    // Deactivate dynamite explosion, plastic explosion or mine
+    // Обезвреживание активного динамита, пластида или мины: шанс зависит от навыка и того, свой ли это заряд.
     else if (pid == Content::Item::active_dynamite || pid == Content::Item::active_plastic_explosive || pid == Content::Item::active_mine) {
         if (pid == Content::Item::active_dynamite) {
-            Game.StopTimeEvent(explode.ExplodeInvokeId); // cancel only THIS dynamite's pending explosion
+            Game.StopTimeEvent(explode.ExplodeInvokeId); // отменяем отложенный взрыв именно ЭТОГО динамита
         }
 
         int chance = cr.SkillTraps - (explode.TrapValue - 10) * (cr.Id == explode.ExplodeOwnerId ? 5 : 10);
         chance = Math::Clamp(chance, 5, 90) + cr.Luck;
 
-        // Success
+        // Успех: возвращаем неактивную взрывчатку и даём опыт за обезвреживание.
         if (chance > Game.Random(1, 100)) {
             if (pid == Content::Item::active_dynamite) {
                 cr.AddItem(Content::Item::dynamite, 1);
@@ -138,7 +140,7 @@ bool OnUseExplode(Critter cr, Item explode, Critter? targetCr, Item? targetItem,
             cr.Experience += EXPLODE_CLEARANCE_EXPERIENCE;
         }
 
-        // Fail
+        // Провал: заряд срабатывает прямо в руках обезвреживающего.
         else {
             Map? map = cr.GetMap();
             Explode(map, cr.Hex, cr, pid, explode.ExplodeOwnerId, explode.ExplodeBonusDamage, explode.ExplodeBonusRadius);
@@ -149,7 +151,7 @@ bool OnUseExplode(Critter cr, Item explode, Critter? targetCr, Item? targetItem,
     return true;
 }
 
-// Explosions initialisation
+// Инициализация скрипта мины: подписка на проход криттера для контактного подрыва.
 void ExplodeInit(Item item, bool firstTime)
 {
     if (item.ProtoId == Content::Item::active_mine) {
@@ -158,7 +160,7 @@ void ExplodeInit(Item item, bool firstTime)
     }
 }
 
-// Item walk event
+// Контактный подрыв мины при проходе криттера; летающие и с перком LightStep могут пройти безопасно.
 [[Event]]
 void MineWalk(Item mine, Critter cr, bool entered, mdir dir)
 {
@@ -167,7 +169,7 @@ void MineWalk(Item mine, Critter cr, bool entered, mdir dir)
     }
 }
 
-// Time event
+// Отложенный взрыв по таймеру: подрывает заряд на карте либо на глобалке (в инвентаре криттера).
 [[TimeEvent]]
 void DeferredExplode(any value)
 {
@@ -187,7 +189,7 @@ void DeferredExplode(any value)
     if (map != null) {
         Explode(map, hex, null, explodePid, ownerId, bonusDamage, bonusRadius);
     }
-    else if (item.Ownership == ItemOwnership::CritterInventory) // Global map
+    else if (item.Ownership == ItemOwnership::CritterInventory) // глобальная карта
     {
         Critter? cr = Game.GetCritter(item.CritterId);
         if (cr != null) {
@@ -196,6 +198,7 @@ void DeferredExplode(any value)
     }
 }
 
+// Расчёт параметров взрыва по типу заряда и нанесение урона: по радиусу на карте либо одному криттеру на глобалке.
 void Explode(Map? map, mpos hex, Critter? cr, hstring explodePid, ident ownerId, int bonusDamage, int bonusRadius)
 {
     hstring effectPid;
@@ -248,6 +251,7 @@ void Explode(Map? map, mpos hex, Critter? cr, hstring explodePid, ident ownerId,
     }
 }
 
+// Сам взрыв на карте: визуал/звук/тряска экрана и урон всем живым в радиусе с занесением стрелка в их список врагов.
 void ExplodeEx(Map map, mpos hex, hstring effectPid, int effectRadius, int damage, DamageTypes damageType, int damageRadius, ident ownerId)
 {
     Effects::RunEffect(map, effectPid, hex, effectRadius);
@@ -290,14 +294,15 @@ void TimerMineInit(Item mine, bool firstTime)
     }
 }
 
+// Подрыв маппер-мины при проходе криттера; при заданном ExplodeTimeRespawnMine планирует возрождение мины.
 [[Event]]
 void TimerMineWalk(Item mine, Critter cr, bool entered, mdir dir)
 {
-    // Cкопировано из MineWalk
+    // Скопировано из MineWalk
     if (entered && cr.LocomotionType != Tla::LocomotionFly && (cr.PerkLightStep == 0 || Game.Random(0, 1) == 0)) {
         Game.StartTimeEvent(ZERO_TIMESPAN, DeferredExplode, mine.Id);
 
-        // Respawn
+        // Возрождение мины: упаковываем координаты и параметры в массив для отложенного вызова.
         if (mine.ExplodeTimeRespawnMine > 0) {
             any[] values = {mine.MapId,                                                                    // 0
                             mine.Hex.x,                                                                    // 1
@@ -313,6 +318,7 @@ void TimerMineWalk(Item mine, Critter cr, bool entered, mdir dir)
     }
 }
 
+// Возрождение маппер-мины в исходных координатах с восстановлением её параметров из сохранённого массива.
 [[TimeEvent]]
 void RespawnTimerMine(any[] values)
 {
@@ -328,6 +334,7 @@ void RespawnTimerMine(any[] values)
     }
 }
 
+// Попытка обезвредить маппер-мину навыком: успех даёт опыт, провал подрывает; при заданном таймере мина всё равно возрождается.
 [[Event]]
 EventResult OnSkillTimerMine(Item mine, Critter cr, CritterProperty skill)
 {
@@ -345,12 +352,12 @@ EventResult OnSkillTimerMine(Item mine, Critter cr, CritterProperty skill)
     int chance = cr.SkillTraps - (mine.TrapValue - 10) * (cr.Id == mine.ExplodeOwnerId ? 5 : 10);
     chance = Math::Clamp(chance, 5, 90) + cr.Luck;
 
-    // Success
+    // Успех: мина снята, начисляем опыт.
     if (chance > Game.Random(1, 100)) {
         cr.Experience += EXPLODE_CLEARANCE_EXPERIENCE;
     }
 
-    // Fail
+    // Провал: мина срабатывает на обезвреживающем.
     else {
         Map? map = cr.GetMap();
         Explode(map, cr.Hex, cr, pid, mine.ExplodeOwnerId, mine.ExplodeBonusDamage, mine.ExplodeBonusRadius);

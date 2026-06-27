@@ -1,4 +1,7 @@
-namespace DenVirgin // Sort 2
+// DenVirgin — серверная логика NPC «девственница» в Дене.
+// Уход из дома после разговора и возврат по таймеру, оповещение о доступности по позиции.
+// Сторона: SERVER; связи: SendMessage, NpcPlanes, Time.
+namespace DenVirgin
 {
 
 #if SERVER
@@ -8,14 +11,15 @@ namespace DenVirgin // Sort 2
 
 ///@ Property Game Server bool DenVirginIsAway Mutable Persistent
 
-// away position
+// Точка, куда NPC уходит из дома
 const int AWAY_X = 131;
 const int AWAY_Y = 225;
 
-// home position (near Mom's Diner)
+// Домашняя точка (рядом с закусочной мамаши)
 const int HOME_X = 134;
 const int HOME_Y = 255;
 
+// Инициализация NPC: idle-цикл, подписки на события и таймер возврата домой
 void VirginInit(Critter virgin, bool firstTime)
 {
     virgin.StartTimeEvent(Time::Asap(), Time::Seconds(1), VirginIdle);
@@ -28,9 +32,14 @@ void VirginInit(Critter virgin, bool firstTime)
     virgin.DenVirginIsHome = true;
 }
 
-[[TimeEvent]]
+// Idle-цикл: оповещает всех на карте, дома ли NPC сейчас (по координатам), и ждёт
+[[TimeEvent]] [[Async]]
 void VirginIdle(Critter virgin)
 {
+    if (!Sync::LockCritterWithMap(virgin)) {
+        return;
+    }
+
     if (virgin.Hex.x == 134 && virgin.Hex.y == 255) {
         SendMessage::ToAllOnMap(virgin, 1220, 1);
     }
@@ -41,20 +50,23 @@ void VirginIdle(Critter virgin)
     CritterState::Wait(virgin, 10000);
 }
 
+// Реакция на появление криттера в поле зрения; тело отключено до домиграции логики по полу
 [[Event]]
 void VirginShowCritter(Critter virgin, Critter crit)
 {
+    // оставлено как breadcrumb к миграции
     // if(crit.Gender)
 }
 
+// Завершение диалога: если NPC не дома, помечаем уход и отправляем его прочь
 [[Event]]
 EventResult VirginTalk(Critter virgin, Critter cr, bool attach, int talkCount)
 {
-    // handle end of dialog
+    // обрабатываем завершение диалога
     if (!attach) {
         if (not virgin.DenVirginIsHome) {
             Game.DenVirginIsAway = true;
-            // reset
+            // сброс
             virgin.DenVirginIsHome = false;
             NpcPlanes::AddWalkPlane(virgin, 0, mpos(AWAY_X, AWAY_Y), 2, false, 2);
         }
@@ -63,6 +75,7 @@ EventResult VirginTalk(Critter virgin, Critter cr, bool attach, int talkCount)
     return EventResult::StopChain;
 }
 
+// Таймер: возвращает NPC домой, когда счётчик дошёл до нуля; иначе декрементит счётчик
 [[TimeEvent]]
 void Check(any value)
 {
@@ -82,11 +95,12 @@ void Check(any value)
     Game.StartTimeEvent(Time::GameMinutes(60), Check, value);
 }
 
+// Результат диалога: взводит счётчик ухода; уход откладываем до конца диалога
 [[DialogResult]]
 void GoAway(Critter cr, Critter virgin, any val)
 {
     virgin.DenVirginCount = 3;
-    // delay plan execution to dialog end
+    // выполнение плана откладываем до завершения диалога
     virgin.DenVirginIsHome = false;
 }
 

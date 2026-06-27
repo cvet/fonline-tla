@@ -1,4 +1,8 @@
-namespace Casino // Sort 2
+// Casino — игровой автомат (однорукий бандит).
+// Обязанности: приём ставки крышками, недельный лимит выплат карты,
+// расчёт выигрыша по навыку Азарт, джекпоты.
+// Сторона: SERVER. Связи: Messaging, MsgStr, MapText, свойства Map.Casino*.
+namespace Casino
 {
 
 #if SERVER
@@ -10,13 +14,16 @@ const int START_BET = 5;
 const int MIN_BET = 1;
 const int MAX_BET = 50;
 const int STR_ONEHANDED_RING = 2000;
+// Период обновления лимита выплат карты — раз в неделю
 timespan RenewTime()
 {
     return Time::GameDays(7);
-} // Обновление лимитов карты на автоматы раз в неделю
-const int MAX_ONEHANDED_LIMIT = 8000; // Максимальная сумма, которую можно выжать из автоматов(без учета джекпотов)
+}
+const int MAX_ONEHANDED_LIMIT = 8000; // Максимальная сумма, которую можно выжать из автоматов (без учёта джекпотов)
 const int STR_EMPTY = 2001;           // Реплика "деньги в автомате закончились"
 
+// Один «дёрг» автомата: проверяет ставку крышками, недельный лимит карты и
+// разыгрывает результат по навыку Азарт. Срабатывает при действии с автоматом.
 [[ItemStatic]]
 bool Onehanded(Critter cr, StaticItem onehanded, Item? item, any skill)
 {
@@ -25,7 +32,7 @@ bool Onehanded(Critter cr, StaticItem onehanded, Item? item, any skill)
         return true;
     }
 
-    // Сheck map weekly OneHanded limit Expire
+    // Проверяем, не истёк ли недельный лимит выплат карты
     Map? map = cr.GetMap();
     if (map == null) {
         return true;
@@ -42,14 +49,14 @@ bool Onehanded(Critter cr, StaticItem onehanded, Item? item, any skill)
         return true;
     }
 
-    // Count bet
+    // Определяем размер ставки
     int bet = START_BET;
     if (item != null) {
-        // Set all money
+        // Ставим всю переданную пачку крышек
         bet = item.Count;
     }
     else {
-        // Check money
+        // Берём ставку из наличных крышек игрока
         bet = cr.CountItem(Content::Item::bottle_caps);
         if (bet < MIN_BET) {
             Messaging::Info(cr, TextPackKey(TextPackName::Game, "" + (MsgStr::StrUseNothing)));
@@ -61,15 +68,15 @@ bool Onehanded(Critter cr, StaticItem onehanded, Item? item, any skill)
         }
     }
 
-    // Check max bet
+    // Ограничиваем ставку максимумом
     if (bet > MAX_BET) {
         bet = MAX_BET;
     }
 
-    // Set text
+    // Всплывающая надпись над автоматом
     MapText::AddText(map, onehanded.Hex, Color::Gray, TextPackKey(TextPackName::Text, "" + (STR_ONEHANDED_RING)));
 
-    // Calculate
+    // Считаем шанс выигрыша по навыку Азарт
     int gambling = cr.SkillGambling;
     if (onehandedMoney < 0) {
         gambling += onehandedMoney;
@@ -77,9 +84,9 @@ bool Onehanded(Critter cr, StaticItem onehanded, Item? item, any skill)
 
     gambling = Math::Clamp(gambling, 6, 95);
 
-    // Win
+    // Выигрыш
     if (gambling >= Game.Random(1, 100)) {
-        // Bonuses
+        // Джекпоты: умножители ставки с убывающим шансом
         if (Game.Random(0, 99) == 77) {
             bet *= 10;
         }
@@ -92,7 +99,7 @@ bool Onehanded(Critter cr, StaticItem onehanded, Item? item, any skill)
             bet *= 1000;
         }
 
-        // Add money
+        // Начисляем выигрыш крышками
         cr.AddItem(Content::Item::bottle_caps, bet);
         if (bet > MAX_BET) {
             Messaging::Info(cr, "***JACKPOT***");
@@ -102,9 +109,9 @@ bool Onehanded(Critter cr, StaticItem onehanded, Item? item, any skill)
         onehandedMoney -= bet;
     }
 
-    // Loose
+    // Проигрыш
     else {
-        // Sub money
+        // Списываем ставку крышками
         cr.DestroyItem(Content::Item::bottle_caps, bet);
         Messaging::Info(cr, "-" + bet + "$");
         onehandedMoney += bet;

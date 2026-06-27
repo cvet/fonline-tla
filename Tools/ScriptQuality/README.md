@@ -22,7 +22,6 @@ Generated files (`Content.fos`, `GuiScreens.fos`) are always excluded.
 | `banner-tags` | warning | yes | `// Author:` / `// ver x.y` header banners (git carries authorship). |
 | `textpack-magic-id` | warning | no | `"" + (1234)` magic text-pack ids → use a named `MsgStr`/`Enum` key. |
 | `hand-rolled-utils` | warning | no | Calls to `UtilsForArray::Find/Present/Merge`, `Tla::Min/Max/Clamp/Abs/Distance/Pow2`, `Stdlib::*Arr*` that duplicate engine APIs. |
-| `cyrillic-comment` | warning | no | Cyrillic text inside comments (committed comments should be English; player-facing text belongs in `Texts/*.fotxt`, not code comments). |
 | `redundant-bool-return` | warning | no | `if (c) return true; else return false;` → `return c;` / `return !c;`. |
 | `commented-out-code` | warning | no | Disabled code left as `//` comments. |
 | `file-too-large` | warning | no | Non-generated file over 1500 lines — candidate for splitting. |

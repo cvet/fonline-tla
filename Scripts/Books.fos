@@ -1,16 +1,21 @@
+// Books — чтение книг навыков (система Fallout 2).
+// Ключевые обязанности: сопоставление книги с навыком, расчёт очков ((100-skill)/10)
+//  с учётом тега/PerkComprehension, таймаут чтения по интеллекту, уничтожение книги.
+// Сторона: SERVER. Связи: MsgStr, Time, Content, CritterProperty, Messaging, Game.
 namespace Books
 {
 
 #if SERVER
 
-// Original Fallout2 system
-// In Fallout, Fallout 2 and Fallout Tactics, the amount of skill points gained is equal to 100,
-// subtract the current skill level, divide by 10, and then rounded down. Thus, the maximum a skill
-// can increased by books is up to 91%. Other books are used in quests.
-// Read time (Int/hours): 1/10, 2/9, 3/8, 4/7, 5/6, 6/5, 7/4, 8/3, 9/2, 10/1
-// For timeout used Science timeout.
+// Оригинальная система Fallout 2.
+// В Fallout, Fallout 2 и Fallout Tactics прирост очков навыка равен: 100 минус текущий
+//  уровень навыка, делённое на 10 и округлённое вниз. Таким образом, книгами навык
+//  можно поднять максимум до 91%. Остальные книги используются в квестах.
+// Время чтения (Интеллект/часы): 1/10, 2/9, 3/8, 4/7, 5/6, 6/5, 7/4, 8/3, 9/2, 10/1.
+// В качестве таймаута используется таймаут навыка Science.
 // TODO: PE_BOOKWORM
 
+// Проверяет, входит ли прото-id предмета в набор читаемых книг навыков.
 bool IsReadableBook(hstring pid)
 {
     hstring[] bookPids = {
@@ -24,13 +29,17 @@ bool IsReadableBook(hstring pid)
     return bookPids.find(pid) != -1;
 }
 
+// Пытается прочитать книгу: проверяет таймаут, начисляет очки соответствующего навыка
+//  и уничтожает книгу. Один таймаут чтения общий и завязан на навык Science.
 void TryReadBook(Critter cr, Item book)
 {
+    // Чтение книг ограничено единым таймаутом — пока он активен, читать нельзя.
     if (Time::IsTimeoutActive(cr.TimeoutSkScience)) {
         Messaging::Info(cr, TextPackKey(TextPackName::Game, "" + (MsgStr::StrSkillWeariness)));
         return;
     }
 
+    // Сопоставляем прото-id книги с навыком и ключом строки-сообщения об успехе чтения.
     CritterProperty skill;
     int strNum;
     if (book.ProtoId == Content::Item::big_book_of_science) {
@@ -61,8 +70,10 @@ void TryReadBook(Critter cr, Item book)
         return;
     }
 
+    // Базовый прирост: (100 - текущий навык) / 10; время чтения тем меньше, чем выше Интеллект.
     int sp = (100 - cr.GetAsInt(skill)) / 10;
     timespan times = Time::GameHours(11 - cr.Intellect);
+    // Навык уже слишком высок — книга расходуется впустую, но таймаут всё равно ставится.
     if (sp <= 0) {
         Messaging::Info(cr, TextPackKey(TextPackName::Game, "" + (MsgStr::StrBookReadFail)));
         cr.TimeoutSkScience = Game.SynchronizedTime + times;
@@ -70,14 +81,17 @@ void TryReadBook(Critter cr, Item book)
         return;
     }
 
+    // Помеченный (tag) навык учится вдвое быстрее.
     if (cr.TagSkills.find(skill) != -1) {
         sp *= 2;
     }
 
+    // Перк Comprehension даёт +50% к приросту от книг.
     if (cr.PerkComprehension != 0) {
         sp = sp * 150 / 100;
     }
 
+    // Начисляем навык, ставим таймаут чтения, сообщаем игроку и уничтожаем книгу.
     cr.SetAsInt(skill, cr.GetAsInt(skill) + sp);
     cr.TimeoutSkScience = Game.SynchronizedTime + times;
     Messaging::Info(cr, TextPackKey(TextPackName::Game, "" + (strNum)));

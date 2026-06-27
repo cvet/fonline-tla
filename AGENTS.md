@@ -12,7 +12,8 @@ Project front door for AI maintainers working on **FOnline: The Life After** (TL
   - `Critters/`, `Items/`, `Maps/`, `Dialogs/`, `Gui/`, `Texts/`, `Resources/` - authored game content and assets.
   - `TLA.fomain` - master engine/game config and `[SubConfig]` profiles.
   - `CMakeLists.txt` / `CMakePresets.json` - build glue. Default local preset is `auto` into `Build/Auto`.
-- Authored repository content is English unless an existing player-facing content surface is already localized. The user usually converses in Russian; answer the user in Russian unless asked otherwise, but keep committed docs/code in English.
+- The user usually converses in Russian; answer the user in Russian unless asked otherwise.
+- **Script comment language is Russian** (owner decision 2026-06-20, reversing the prior English-only rule). In `Scripts/*.fos`: code comments and the per-file header block (see [Docs/ScriptStyle.md](Docs/ScriptStyle.md)) are written in Russian, and existing English comments are translated to Russian as files are touched. **Exception:** serialized/contract names stay English — `///@ Property/Enum/Setting/Event/RemoteCall`, proto ids, text-pack keys, and identifiers (renaming them risks save/network/content migration). Agent-facing markdown (`AGENTS.md`, most of `Docs/`) and native C++ (`SourceExt/`) remain English; player-facing text follows the existing localized pack structure.
 - Text packs are baked for `russ engl`; `Client.Language = engl` in the default config. When editing player-facing text, preserve the existing pack structure and update both language surfaces when the nearby content expects that.
 
 ## Repository Orientation
@@ -25,7 +26,8 @@ Project front door for AI maintainers working on **FOnline: The Life After** (TL
 - `Gui/*.fogui` - GUI definitions and embedded screen script code.
 - `SourceExt/CommonExtension.cpp` - SHA helpers shared by client/server.
 - `SourceExt/ServerExtension.cpp` - server image checks, dialog plumbing, visibility hooks, critter busy/free stubs.
-- `SourceExt/ClientExtension.cpp` - `Game.FormatTags` and client critter busy/free stubs.
+- `SourceExt/ClientExtension.cpp` / `SourceExt/ClientExtension.h` - `Game.FormatTags`, client critter busy/free stubs, `ClientInitHook` + `ClientExtData` (holds the AI control bridge state and embedded-client index).
+- `SourceExt/ClientAiBridge.cpp` - localhost TCP line protocol for the AI control bridge (client-side test/automation). Pairs with `Scripts/AiControl.fos` and `Tools/AiControlMcp/`. See [Docs/AiControl.md](Docs/AiControl.md).
 - `SourceExt/BakerExtension.cpp`, `SourceExt/DialogBaker.*`, `SourceExt/Dialogs.*` - dialog bake/runtime support.
 - `SourceExt/ContentMigration.cpp` - TLA-specific content/data migrations.
 - `SourceExt/SHA/` - bundled SHA implementation wrapped as a static library.
@@ -189,7 +191,7 @@ AngelScript embedded in screens lives in the `.fogui` JSON: `OnGlobalMouseDown`,
 
 - Use `Format :: Scripts`, `Format :: Prototypes`, `Format :: Main Config`, or `Format :: All` before handing off when touched files need formatting.
 - `FormatSource.bat` is a smaller formatter path for `Scripts/*.fos`, `Scripts/Json/*.fos`, `SourceExt/*`, and `Gui/*.fogui`.
-- `Tools/ScriptQuality/validate_scripts.py` is a quality *validator* (reports only; not a formatter) for `Scripts/*.fos`: banner tags, Cyrillic comments, magic text-pack ids, hand-rolled-util calls, redundant bool returns, commented-out code, `namespace`==filename, `#if` balance, component `== null` probes, trailing blank line. Run `Analyze :: Script Quality` for a summary; `--ratchet` fails only on new violations vs `Tools/ScriptQuality/baseline.json`; `--fix` applies the few safe autofixes. See `Tools/NullableEstimate/validate_nullable.py` for the complementary `?`/FO_NULLABLE checks.
+- `Tools/ScriptQuality/validate_scripts.py` is a quality *validator* (reports only; not a formatter) for `Scripts/*.fos`: banner tags, magic text-pack ids, hand-rolled-util calls, redundant bool returns, commented-out code, `namespace`==filename, `#if` balance, component `== null` probes, trailing blank line. (The former `cyrillic-comment` check was retired 2026-06-20 — script comments are Russian now; see [Docs/ScriptStyle.md](Docs/ScriptStyle.md).) Run `Analyze :: Script Quality` for a summary; `--ratchet` fails only on new violations vs `Tools/ScriptQuality/baseline.json`; `--fix` applies the few safe autofixes. See `Tools/NullableEstimate/validate_nullable.py` for the complementary `?`/FO_NULLABLE checks.
 - Do not hand-edit generated files: `Scripts/Content.fos`, generated `Scripts/GuiScreens.fos` without the matching `.fogui` update, baked output under `Baking/`, cache files under `Cache/`, or generated `VERSION`.
 - Local working trees such as `TLA-Dev/`, `Baking/`, `Cache/`, and build folders are outputs/debug state, not canonical authored inputs.
 
@@ -216,6 +218,7 @@ Pick the boundary before reaching for a heavy interactive session:
 ## Quick Reference
 
 - `README.md` - repo-root overview.
+- `Docs/AiControl.md` - AI control bridge (client-side TCP test/automation) + the `Tools/AiControlMcp/` MCP adapter for observing/controlling a real client to test mechanics and quests.
 - `Docs/Refactoring.md` - Scripts/*.fos refactoring plan, phases, and running status.
 - `TLA.fomain` - main config and subconfigs (`LocalTest`, `PublicGame`, resource baking subconfigs).
 - `.vscode/tasks.json` - authoritative build/generate/format/launch tasks.

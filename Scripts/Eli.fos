@@ -1,13 +1,15 @@
+// Eli — серверный странствующий НПЦ (бард-путник) Илай.
+// Ключевые обязанности: инициализация статов/перков, маршрут Traveller по локациям, периодические песни-монологи, самохил стимпаками при атаке, реакции на attack/dead/plane.
+// Сторона: SERVER. Связи: Traveller, NpcPlanes, Monologue, Messaging, MsgStr, Drugs, Time.
 namespace Eli
 {
 
 #if SERVER
 
-// Author rifleman17
-// Странствующий путник, Илай.
-// Может брать с собой одного игрока в качестве спутника
-// Если путника убьет персонаж, у которого есть база, после этого Илай отведет следующего игрока на базу убийцы.
-// не надо ставить его в СФ, иначе не выберется
+// Странствующий путник Илай.
+// Может брать с собой одного игрока в качестве спутника.
+// Если путника убьёт персонаж, у которого есть база, после этого Илай отведёт следующего игрока на базу убийцы.
+// Не надо ставить его в Сан-Франциско, иначе не выберется.
 
 ///@ Property Critter Server synctime EliTimeNextSing Mutable Persistent
 
@@ -19,6 +21,7 @@ const int STR_TIME2MOVE = 4;
 const int STR_PICK = 5;
 const int PLANE_LOOT = 30;
 
+// Заглушка отладочного лога. Включается раскомментированием #define ниже (breadcrumb из старого движка).
 // #define DebugLog #(s) (Game.Log("traveller: " + s))
 void DebugLog(string s)
 {
@@ -26,11 +29,12 @@ void DebugLog(string s)
 
 ident EliId;
 
+// Полная инициализация Илая: статы, сопротивления, навыки, перки и запуск маршрута/подписок на события.
 void EliInit(Critter cr, bool firstTime)
 {
     EliId = cr.Id;
 
-    // Прокачка
+    // Прокачка статов SPECIAL
     cr.StrengthBase = Game.Random(8, 10);
     cr.PerceptionBase = Game.Random(8, 10);
     cr.EnduranceBase = Game.Random(8, 10);
@@ -66,6 +70,7 @@ void EliInit(Critter cr, bool firstTime)
     cr.PerkSlayer = 1;
     cr.PerkTerminator = 1;
 
+    // Список локаций маршрута: Илай странствует между ними как Traveller
     hstring[] locPids = {
         Content::Location::den,           Content::Location::klamath,       Content::Location::modoc,         Content::Location::vault_city,
         Content::Location::gecko,         Content::Location::broken_hills,  Content::Location::new_reno,      Content::Location::sierra_army_depot,
@@ -76,6 +81,7 @@ void EliInit(Critter cr, bool firstTime)
         Content::Location::geck_city,
     };
 
+    // Регистрируем маршрут странника и подписываемся на нужные события криттера
     Traveller::SetTraveller(cr.Id, false, 0, Time::GameDays(1), Time::GameHours(2), locPids, true);
     cr.OnAttacked.Subscribe(EliAttacked);
     cr.OnNpcPlaneBegin.Subscribe(EliPlaneBegin);
@@ -85,6 +91,8 @@ void EliInit(Critter cr, bool firstTime)
     cr.OnAttack.Subscribe(EliAttack);
 }
 
+// Завершение плана НПЦ: после успешного дохода до тела (PLANE_LOOT) проигрываем анимацию подбора,
+// иногда реплику и ставим короткий план атаки.
 [[Event]]
 EventResult EliPlaneEnd(Critter cr, int planeId, int reason, Critter someCr, Item someItem)
 {
@@ -96,7 +104,7 @@ EventResult EliPlaneEnd(Critter cr, int planeId, int reason, Critter someCr, Ite
     if (plane.Identifier == PLANE_LOOT && reason == NpcPlanes::REASON_SUCCESS) {
         AnimHelpers::AnimateCritterPickUp(cr);
         if (Game.Random(1, 3) < 2) {
-            Messaging::Say(cr, TextPackKey(TextPackName::Dialogs, "" + (MsgStr::DialogTextId(cr.DialogId, STR_PICK))));
+            Messaging::Say(cr, MsgStr::DialogTextKey(cr.DialogId, STR_PICK));
         }
 
         NpcPlanes::AddMiscPlane(cr, NpcPlanes::AI_PLANE_ATTACK_PRIORITY - 2, Game.SynchronizedTime + Time::Seconds(2), null);
@@ -105,25 +113,29 @@ EventResult EliPlaneEnd(Critter cr, int planeId, int reason, Critter someCr, Ite
     return EventResult::StopChain;
 }
 
+// При атаке Илая по цели иногда произносит боевую реплику.
 [[Event]]
 EventResult EliAttack(Critter cr, Critter target, Item weapon, int weaponMode, ProtoItem ammo)
 {
     if (Game.Random(1, 10) < 2) {
-        Messaging::Say(cr, TextPackKey(TextPackName::Dialogs, "" + (MsgStr::DialogTextId(cr.DialogId, STR_ATTACK))));
+        Messaging::Say(cr, MsgStr::DialogTextKey(cr.DialogId, STR_ATTACK));
     }
 
     return EventResult::StopChain;
 }
 
+// Кто-то умер: если убийца — сам Илай, произносит реплику и идёт к телу за лутом (PLANE_LOOT).
 [[Event]]
 void EliSmthDead(Critter cr, Critter fromCr, Critter? killer)
 {
     if (killer != null && killer.Id == cr.Id) {
-        Messaging::Say(cr, TextPackKey(TextPackName::Dialogs, "" + (MsgStr::DialogTextId(cr.DialogId, STR_KILL))));
+        Messaging::Say(cr, MsgStr::DialogTextKey(cr.DialogId, STR_KILL));
         NpcPlanes::AddWalkPlane(cr, 0, PLANE_LOOT, fromCr.Id, fromCr.Hex, 6, false, 1);
     }
 }
 
+// Периодический тик: пока Илай на карте и без активных планов — раз в 5 минут поёт песню.
+// На глобалке или при наличии планов таймер песни сбрасывается.
 [[TimeEvent]] [[Async]]
 void EliIdle(Critter cr)
 {
@@ -139,7 +151,7 @@ void EliIdle(Critter cr)
         return;
     }
 
-    // Сохраняется время следующей песни в EliTimeNextSing
+    // Время следующей песни хранится в EliTimeNextSing
     if (Game.SynchronizedTime >= cr.EliTimeNextSing) {
         if (cr.EliTimeNextSing != ZERO_SYNCTIME) {
             DebugLog("sing!");
@@ -150,6 +162,7 @@ void EliIdle(Critter cr)
     }
 }
 
+// Выбирает случайную песню и проигрывает её как монолог-эмоцию (диапазон строк текст-пака на песню).
 void Sing(Critter cr)
 {
     int song = Game.Random(1, 4);
@@ -179,7 +192,7 @@ void Sing(Critter cr)
     Monologue::SetMonologue(cr, firstStr, lastStr, Time::Seconds(4), ZERO_TIMESPAN, SayType::Emote);
 }
 
-// CRITTER_EVENT_PLANE_BEGIN
+// Начало плана НПЦ (событие движка CRITTER_EVENT_PLANE_BEGIN): принудительно запускаем план.
 [[Event]]
 EventResult EliPlaneBegin(Critter cr, int planeId, int reason, Critter someCr, Item someItem)
 {
@@ -192,12 +205,12 @@ EventResult EliPlaneBegin(Critter cr, int planeId, int reason, Critter someCr, I
     return EventResult::StopChain;
 }
 
-// CRITTER_EVENT_ATTACKED
+// Илая атаковали (событие движка CRITTER_EVENT_ATTACKED): иногда реплика и запуск самохила.
 [[Event]]
 EventResult EliAttacked(Critter cr, Critter attacker)
 {
     if (Game.Random(1, 10) < 3) {
-        Messaging::Say(cr, TextPackKey(TextPackName::Dialogs, "" + (MsgStr::DialogTextId(cr.DialogId, STR_ATTACKED))));
+        Messaging::Say(cr, MsgStr::DialogTextKey(cr.DialogId, STR_ATTACKED));
     }
 
     if (cr.CountTimeEvent(HealSelf) == 0) {
@@ -207,10 +220,14 @@ EventResult EliAttacked(Critter cr, Critter attacker)
     return EventResult::StopChain;
 }
 
-// Поиск новой точки маршрута нпц, производится при заходе в локацию
-[[TimeEvent]]
+// Самохил: восстанавливает HP, а при здоровье ниже половины максимума использует супер-стимпак.
+[[TimeEvent]] [[Async]]
 void HealSelf(Critter cr)
 {
+    if (!Sync::LockCritterWithMap(cr)) {
+        return;
+    }
+
     cr.CurrentHp += 50;
     if (cr.CurrentHp * 2 > cr.MaxLife) {
         return;
@@ -221,7 +238,7 @@ void HealSelf(Critter cr)
     return;
 }
 
-// Debug
+// Отладка: сообщает текущее местоположение Илая (карта или координаты глобальной карты).
 void WhereEli(Critter cr, int, int, int)
 {
     if (EliId == ZERO_IDENT) {
@@ -243,6 +260,8 @@ void WhereEli(Critter cr, int, int, int)
     Messaging::Info(cr, "Eli found. MapPid = " + map.ProtoId + "; Id =" + map.Id);
 }
 
+// Отладка: спавнит Илая рядом с вызвавшим криттером и запускает его инициализацию.
+// Пример вызова из консоли (последовательность команд):
 // ~getaccess admin hh
 // ~run debug ToMapEntry 34 0 0
 // ~run eli AddEli 0 0 0

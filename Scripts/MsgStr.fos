@@ -1,9 +1,126 @@
-namespace MsgStr // Sort -1
+namespace MsgStr
 {
 
 int DialogTextId(hstring dialogId, int strNum)
 {
     return (dialogId.uhash) + (12000 + (strNum));
+}
+// Ключ текст-пака для НУМЕРОВАННОГО dialog-текста (реплики на голове NPC: Say/SayOnHead/Info).
+// DialogBaker кладёт эти строки под 4-частный ключ [Dialogs, <имя диалога>, <100000000+strNum>], где
+// 100000000 — общая для всех диалогов база авторских ключей (диалоги различаются частью dialogId).
+// Старый путь `TextPackKey(Dialogs, "" + DialogTextId(...))` обламывался дважды: (1) пропускал dialogId,
+// (2) DialogTextId.uhash на 64-битных хэшах даёт не ту цифру. Этот хелпер строит корректный ключ.
+TextPackKey DialogTextKey(hstring dialogId, int strNum)
+{
+    const int authoredKeyBase = 100000000;
+    int textKey = authoredKeyBase + strNum;
+    return TextPackKey(TextPackName::Dialogs, dialogId, "" + textKey);
+}
+// Тег `@text` для нумерованного dialog-текста, встраиваемый в строки, которые позже прогоняются через
+// Game.FormatTags на КЛИЕНТЕ (так текст резолвится в языке игрока). Использует 3-токенную форму
+// `@text Dialogs <имя диалога> <ключ>@` — FormatTags строит ключ FromPack(Dialogs, dialogId, key),
+// совпадающий с раскладкой DialogBaker. Старая 2-токенная форма теряла dialogId и давала пусто.
+string DialogTextTag(hstring dialogId, int strNum)
+{
+    const int authoredKeyBase = 100000000;
+    int textKey = authoredKeyBase + strNum;
+    return "@text Dialogs " + dialogId + " " + textKey + "@";
+}
+// Тег `@text` для ИМЕНИ NPC из его диалога. DialogBaker кладёт `{Name}` под [Dialogs, <имя диалога>, "Name"],
+// поэтому ключ — строковый "Name" (не число). Старый `NpcNameDlgTextId(dlg)=dlg.hash+10` давал число и не
+// попадал в ключ.
+string NpcNameTag(hstring dialogId)
+{
+    return "@text Dialogs " + dialogId + " Name@";
+}
+// Теги `@text` для ЛОКАЛИЗОВАННЫХ имён прото (критер/предмет/локация). ProtoTextBaker кладёт `$Text <lang>`
+// под [<Pack>, <protoId>] — то есть ключ это САМ id прото (строка), а пак: критеры -> "Critters",
+// предметы -> "Items" (множественное!), локации -> "Locations". Старый код слал `pid.uhash`-число и пак
+// "Item" (ед. число) — мимо ключа и мимо пака, отсюда пустота.
+string NpcProtoNameTag(hstring protoId)
+{
+    return "@text Critters " + protoId + "@";
+}
+string LocNameTag(hstring locPid)
+{
+    return "@text Locations " + locPid + "@";
+}
+string ProtoItemNameTag(hstring protoId)
+{
+    return "@text Items " + protoId + "@";
+}
+string ItemNameTag(Item item)
+{
+    return "@text Items " + item.ProtoId + "@";
+}
+string ItemNameTag(AbstractItem item)
+{
+    return "@text Items " + item.ProtoId + "@";
+}
+// Прямые ключи текст-пака для имени/описания предмета (для Game.GetText/IsTextPresent, где нужен TextPackKey,
+// а не @text-строка). Имя -> [Items, protoId]; описание -> [Items, protoId, "Desc"] (так ProtoTextBaker
+// кладёт `$Text <lang>` и `$Text <lang> Desc`). Старый код брал [Items, pid.uhash+...] — мимо.
+TextPackKey ItemNameKey(Item item)
+{
+    return TextPackKey(TextPackName::Items, item.ProtoId);
+}
+TextPackKey ItemNameKey(AbstractItem item)
+{
+    return TextPackKey(TextPackName::Items, item.ProtoId);
+}
+TextPackKey ItemInfoKey(Item item)
+{
+    return TextPackKey(TextPackName::Items, item.ProtoId, "Desc");
+}
+TextPackKey ItemInfoKey(AbstractItem item)
+{
+    return TextPackKey(TextPackName::Items, item.ProtoId, "Desc");
+}
+// Ключ имени предмета по proto id (когда под рукой только pid, без объекта Item — напр. в GUI крафта).
+TextPackKey ProtoItemNameKey(hstring proto)
+{
+    return TextPackKey(TextPackName::Items, proto);
+}
+// Ключи локации: имя -> [Locations, pid]; описание -> [Locations, pid, "Desc"] (так ProtoTextBaker кладёт
+// `$Text <lang>` и `$Text <lang> Desc` для .foloc). Старый код брал [Locations, pid.uhash] — мимо.
+TextPackKey LocNameKey(hstring locPid)
+{
+    return TextPackKey(TextPackName::Locations, locPid);
+}
+TextPackKey LocInfoKey(hstring locPid)
+{
+    return TextPackKey(TextPackName::Locations, locPid, "Desc");
+}
+// Числовые ключи локации (картинки/карты/входы). .foloc хранит `$Text <lang> <n>` под [Locations, pid, "<n>"]
+// с СЫРЫМ номером n (не 100000000-смещение, как у диалогов): town-pic=5, worldmap-pic=6, имя карты
+// mapInd -> 1000+mapInd*10, вход ent -> 2000+ent*10 (+1 = picX, +2 = picY).
+TextPackKey LocPicKey(hstring locPid)
+{
+    return TextPackKey(TextPackName::Locations, locPid, "5");
+}
+TextPackKey LocLabelPicKey(hstring locPid)
+{
+    return TextPackKey(TextPackName::Locations, locPid, "6");
+}
+TextPackKey LocMapNameKey(hstring locPid, int mapInd)
+{
+    int strNum = 1000 + mapInd * 10;
+    return TextPackKey(TextPackName::Locations, locPid, "" + strNum);
+}
+TextPackKey LocEntranceNameKey(hstring locPid, int ent)
+{
+    int strNum = 2000 + ent * 10;
+    return TextPackKey(TextPackName::Locations, locPid, "" + strNum);
+}
+TextPackKey LocEntrancePicxKey(hstring locPid, int ent)
+{
+    int strNum = 2000 + ent * 10 + 1;
+    return TextPackKey(TextPackName::Locations, locPid, "" + strNum);
+}
+TextPackKey LocEntrancePicyKey(hstring locPid, int ent)
+{
+    int strNum = 2000 + ent * 10 + 2;
+    return TextPackKey(TextPackName::Locations, locPid, "" + strNum);
 }
 int LocationTextId(hstring locPid, int strNum)
 {
@@ -79,22 +196,6 @@ string GetQuestText(int str)
 {
     return GetQuestText("" + str);
 }
-string GetLocationText(string str)
-{
-    return Game.GetText(TextPackKey(TextPackName::Locations, "" + (str)));
-}
-string GetLocationText(int str)
-{
-    return GetLocationText("" + str);
-}
-bool HasLocationText(string str)
-{
-    return Game.IsTextPresent(TextPackKey(TextPackName::Locations, "" + (str)));
-}
-bool HasLocationText(int str)
-{
-    return HasLocationText("" + str);
-}
 string GetHoloText(string str)
 {
     return Game.GetText(TextPackKey(TextPackName::Holo, "" + (str)));
@@ -102,14 +203,6 @@ string GetHoloText(string str)
 string GetHoloText(int str)
 {
     return GetHoloText("" + str);
-}
-string GetItemText(string str)
-{
-    return Game.GetText(TextPackKey(TextPackName::Items, "" + (str)));
-}
-string GetItemText(int str)
-{
-    return GetItemText("" + str);
 }
 
 // Two-token Game text accessors. The bake stores stat/property/karma/reputation strings

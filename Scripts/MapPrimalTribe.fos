@@ -1,4 +1,11 @@
-namespace MapPrimalTribe // Sort 2
+// MapPrimalTribe — серверный сценарий локации первобытного племени: квест Сулика об отражении набега рейдеров.
+// Ключевые обязанности: инициализация карты и подписок на события жителей, выдача и учёт стадий квеста через
+// Property-декларации (TribSulikRaid и др.), спавн и поведение рейдеров (смена целей, отступление женщин),
+// подведение итогов квеста для всех участников при завершении набега.
+// Сторона исполнения: только SERVER (вся логика под #if SERVER).
+// Связи: Entrance (точки входа на карту), NpcPlanes/EnemyStack/Tla (планы и стек врагов ИИ), Teams/Bags/Content
+// (прото-данные рейдеров и диалогов), Messaging (реплики над головой), GameTime/Time (тайминги).
+namespace MapPrimalTribe
 {
 
 #if SERVER
@@ -11,6 +18,7 @@ namespace MapPrimalTribe // Sort 2
 ///@ Property Game Server bool TribRaid Mutable Persistent
 ///@ Property Game Server ident[] PrimalTribeQuestPlayers Mutable Persistent
 
+// Задержка автозапуска набега после взятия квеста (в игровых секундах), роли NPC и стадии квеста.
 const int TIME_FOR_START = 15 * 60 * 60;
 const int ROLE_TRIB_MEN = 10;
 const int ROLE_TRIB_WOMEN = 11;
@@ -27,22 +35,27 @@ const int QUEST_STAT_FAIL_NOT_START = 8;
 const int QUEST_STAT_FAIL_TRIBE_IS_DEAD = 9;
 const int QUEST_STAT_ATTACK_RUNS = 10;
 
+// Случайный период между попытками бегства убегающих жителей.
 timespan RunPeriod()
 {
     return Time::Minutes(6 + Game.Random(0, 7));
 }
 
+// Уровень рейдеров, диапазон групп точек входа и ключ текст-пака для реплики Сулика.
 const int RAIDERS_LEVEL = 4;
 const int ENT_GROUP_START = 10;
 const int ENT_GROUP_FINISH = 12;
 
 const int STR_TALK_TO_SULIK = 2600;
 
+// Случайный период между перенацеливаниями ИИ (защитников и рейдеров).
 timespan TargetChangeTime()
 {
     return Time::Minutes(13 + Game.Random(0, 7));
 }
 
+// Состояние набега в памяти процесса: идёт ли атака, список участников квеста, id карты,
+// флаги «никто ещё не пришёл» и «племя погибло», id отложенного запуска атаки.
 bool AttackRuns = false;
 ident[] QuestPlayers = {};
 ident MapIdent;
@@ -50,17 +63,21 @@ bool NotCome = true;
 bool TribeDead = false;
 int StartAttackInvokeId;
 
+// Точка инициализации карты: поднимает квест; респаун природной живности пока выключен.
 void PrimalTribeInit(Map map, bool firstTime)
 {
     initQuest(map);
+    // отключено до домиграции подсистемы природного респауна
     //	initNaturResp(map);
 }
 
+// Запускает цикл периодического респауна живности на карте.
 void initNaturResp(Map map)
 {
     Game.StartTimeEvent(ZERO_TIMESPAN, NaturResp, map.Id);
 }
 
+// Периодический респаун живности на карте (каждые 12 игровых часов).
 [[TimeEvent]]
 void NaturResp(any value)
 {
@@ -69,6 +86,7 @@ void NaturResp(any value)
         return;
     }
 
+    // референсные координаты точек респауна (карта/x/y) для будущей домиграции:
     // 272 120 82
     // 272 108 81
     // 271 127 87
@@ -77,6 +95,8 @@ void NaturResp(any value)
     Game.StartTimeEvent(Time::GameHours(12), NaturResp, map.Id);
 }
 
+// Запоминает карту, восстанавливает список участников квеста из сохранёнки и подписывает
+// жителей на события: мужчины обороняются на месте, женщины при атаке убегают.
 void initQuest(Map map)
 {
     MapIdent = map.Id;
@@ -87,10 +107,12 @@ void initQuest(Map map)
 
     GetAD();
 
+    // Сначала мужчины, затем женщины в один массив; menCount — граница между ними.
     Critter[] citizens = map.GetCritters(CritterProperty::NpcRole, ROLE_TRIB_MEN, CritterFindType::Npc);
     int menCount = citizens.length();
     citizens.insertLast(map.GetCritters(CritterProperty::NpcRole, ROLE_TRIB_WOMEN, CritterFindType::Npc));
 
+    // Если на карте уже есть живые рейдеры — набег считается идущим.
     if (map.GetCritters(CritterProperty::NpcRole, ROLE_TRIB_RAIDER, CritterFindType::NonDeadNpc).length() > 0) {
         AttackRuns = true;
     }
@@ -109,17 +131,20 @@ void initQuest(Map map)
     }
 }
 
+// При выгрузке карты сохраняет список участников квеста в персистентное свойство Game.
 [[Event]]
 void SaveAd(Map map)
 {
     Game.PrimalTribeQuestPlayers = QuestPlayers;
 }
 
+// Восстанавливает список участников квеста из персистентного свойства Game.
 void GetAD()
 {
     QuestPlayers = Game.PrimalTribeQuestPlayers.clone();
 }
 
+// Выдача квеста через диалог: помечает игрока, включает флаг набега и планирует начало атаки по таймеру.
 [[DialogResult]]
 void StartQuest(Critter master, Critter npc)
 {
@@ -128,15 +153,17 @@ void StartQuest(Critter master, Critter npc)
     master.TribRaiderKillCount = 0;
     NotCome = true;
     QuestPlayers.insertLast(master.Id);
-    StartAttackInvokeId = Game.StartTimeEvent(GameTime::GameSeconds(TIME_FOR_START), StartAttack); //SavedDeferredCall
+    StartAttackInvokeId = Game.StartTimeEvent(GameTime::GameSeconds(TIME_FOR_START), StartAttack); // сохраняемый отложенный вызов
 }
 
+// Добавляет игрока в список участников квеста (без перевыдачи стадий).
 [[DialogResult]]
 void PushQuestPl(Critter master, Critter npc)
 {
     QuestPlayers.insertLast(master.Id);
 }
 
+// Завершение квеста: начисляет опыт и карму пропорционально числу убитых рейдеров, затем сбрасывает счётчик.
 [[DialogResult]]
 void GetExp(Critter master, Critter npc)
 {
@@ -146,6 +173,7 @@ void GetExp(Critter master, Critter npc)
     master.TribSulikRaid = QUEST_STAT_END;
 }
 
+// Условие диалога: идёт ли сейчас набег рейдеров.
 [[DialogDemand]]
 bool IsAttackRunning(Critter master, Critter npc)
 {
@@ -157,6 +185,7 @@ bool IsAttackRunning(Critter master, Critter npc)
     }
 }
 
+// Условие диалога: выполнен ли квест (полностью, частично или уже завершён).
 [[DialogDemand]]
 bool QuestSucc(Critter master, Critter npc)
 {
@@ -164,6 +193,7 @@ bool QuestSucc(Critter master, Critter npc)
     return qs == QUEST_STAT_FULL_SUCC || qs == QUEST_STAT_NOT_FULL_SUCC || qs == QUEST_STAT_END;
 }
 
+// Запуск набега: спавнит группу рейдеров со случайной точки входа.
 void StartAttackImpl()
 {
     StartAttackInvokeId = 0;
@@ -171,12 +201,14 @@ void StartAttackImpl()
     SpawnRaiders(MapIdent, entGroup, 0, RAIDERS_LEVEL);
 }
 
+// Отложенный запуск набега по таймеру.
 [[TimeEvent]]
 void StartAttack()
 {
     StartAttackImpl();
 }
 
+// Переназначает цель защитнику на случайного живого рейдера; если рейдеров не осталось — гасит флаг набега.
 void ChangeTarget(Critter crit)
 {
     Map? map = crit.GetMap();
@@ -189,12 +221,14 @@ void ChangeTarget(Critter crit)
         AttackRuns = false;
     }
     else {
+        // ранее очищался стек врагов перед сменой цели; оставлено как breadcrumb на случай возврата логики
         // EnemyStack::ClearEnemyStack( crit );
         Tla::EraseNpcAllAttackPlanes(crit);
         NpcPlanes::AddAttackPlane(crit, NpcPlanes::AI_PLANE_ATTACK_PRIORITY, raiders[Game.Random(0, raiders.length() - 1)]);
     }
 }
 
+// Отложенное удаление трупа рейдера с карты.
 [[TimeEvent]]
 void DeleteRaider(any value)
 {
@@ -204,6 +238,7 @@ void DeleteRaider(any value)
     }
 }
 
+// Обработчик смерти жителя (зарезервирован; сейчас без действий при наличии убийцы).
 [[Event]]
 void CDead(Critter crit, Critter? killer)
 {
@@ -212,6 +247,7 @@ void CDead(Critter crit, Critter? killer)
     }
 }
 
+// Пока идёт набег — периодически перенацеливает защитника-мужчину на нового рейдера.
 [[TimeEvent]]
 void CChangeTarget(any value)
 {
@@ -226,10 +262,12 @@ void CChangeTarget(any value)
 
     if (AttackRuns) {
         ChangeTarget(crit);
-        Game.StartTimeEvent(TargetChangeTime(), CChangeTarget, value); //SavedDeferredCall
+        Game.StartTimeEvent(TargetChangeTime(), CChangeTarget, value); // сохраняемый отложенный вызов
     }
 }
 
+// Смерть рейдера: перенацеливает NPC-убийцу, начисляет игроку прогресс квеста, при гибели последнего
+// рейдера завершает набег и подводит итоги, затем планирует удаление трупа.
 [[Event]]
 void RaiderDead(Critter crit, Critter? killer)
 {
@@ -238,6 +276,7 @@ void RaiderDead(Critter crit, Critter? killer)
         return;
     }
 
+    // count — оставшиеся живые рейдеры, countAll — всего рейдеров (для проверки «убиты все»).
     int count = map.GetCritters(CritterProperty::NpcRole, ROLE_TRIB_RAIDER, CritterFindType::NonDeadNpc).length();
     int countAll = map.GetCritters(CritterProperty::NpcRole, ROLE_TRIB_RAIDER, CritterFindType::Npc).length();
 
@@ -270,9 +309,10 @@ void RaiderDead(Critter crit, Critter? killer)
         SendQuestStat();
     }
 
-    Game.StartTimeEvent(GameTime::GameSeconds(60 * Game.Random(20, 60)), DeleteRaider, crit.Id); //SavedDeferredCall
+    Game.StartTimeEvent(GameTime::GameSeconds(60 * Game.Random(20, 60)), DeleteRaider, crit.Id); // сохраняемый отложенный вызов
 }
 
+// Гибель игрока-участника во время набега: помечает квест проваленным, если он ещё не был успешен.
 [[Event]]
 void PlayerDead(Critter player, Critter killer)
 {
@@ -284,9 +324,11 @@ void PlayerDead(Critter player, Critter killer)
     player.OnDead.Unsubscribe(PlayerDead);
 }
 
+// Реакция мужчины-жителя на атаку: цепочка событий обрывается (мужчины держат оборону на месте).
 [[Event]]
 EventResult MOnAttack(Critter crit, Critter attacker)
 {
+    // ранее атака рейдера сама поднимала флаг набега; оставлено как breadcrumb
     //	if(!AttackRuns)
     //	{
     //		AttackRuns=true;
@@ -299,9 +341,11 @@ EventResult MOnAttack(Critter crit, Critter attacker)
     }
 }
 
+// Реакция женщины-жителя на атаку: при нападении рейдера убегает; цепочка событий обрывается.
 [[Event]]
 EventResult WOnAttack(Critter crit, Critter attacker)
 {
+    // ранее атака рейдера сама поднимала флаг набега; оставлено как breadcrumb
     //	if(!AttackRuns)
     //	{
     //		AttackRuns=true;
@@ -315,6 +359,7 @@ EventResult WOnAttack(Critter crit, Critter attacker)
     }
 }
 
+// Создаёт одного рейдера на заданной точке входа со свойствами команды/пида/уровня и подписывает на смерть.
 Critter? SpawnRaider(Map map, int entGroup, int entNum, hstring npcPid, hdir dir, int dialog, int bagId, int level)
 {
     mpos hex;
@@ -349,6 +394,8 @@ Critter? SpawnRaider(Map map, int entGroup, int entNum, hstring npcPid, hdir dir
     return raider;
 }
 
+// Периодический выбор цели для рейдера: если живых жителей не осталось — племя считается вырезанным,
+// рейдер уходит и удаляется; иначе с вероятностью атакует случайного жителя или игрока.
 [[TimeEvent]]
 void RaiderChangeTarget(any value)
 {
@@ -370,6 +417,7 @@ void RaiderChangeTarget(any value)
     auto womens = map.GetCritters(CritterProperty::NpcRole, ROLE_TRIB_WOMEN, CritterFindType::NonDeadNpc);
     int citizenCount = mens.length() + womens.length();
 
+    // Жителей не осталось — племя вырезано: рейдер уходит, набег завершается с провалом.
     if (citizenCount == 0) {
         NpcPlanes::AddWalkPlane(raider, NpcPlanes::AI_PLANE_WALK_PRIORITY, raider.MapPrimalTribeRaiderHex, HDIR_Random, true, Game.Random(0, 1));
         NpcPlanes::AddMiscPlane(raider, NpcPlanes::AI_PLANE_MISC_PRIORITY, ZERO_TIMESPAN, MapPrimalTribe::DelRaider);
@@ -383,6 +431,7 @@ void RaiderChangeTarget(any value)
 
         Critter[] players = map.GetCritters(CritterFindType::NonDeadPlayers);
 
+        // Выбор цели: половина шанса (или при отсутствии игроков) — житель, иначе случайный игрок.
         Critter target;
         if (Game.Random(0, 1) == 0 || players.length() == 0) {
             if (Game.Random(0, 1) == 0 || womens.length() == 0) {
@@ -402,6 +451,7 @@ void RaiderChangeTarget(any value)
     }
 }
 
+// Удаляет рейдера (вызывается из misc-плана ухода); защита от удаления не-рейдера.
 void DelRaider(Critter raider)
 {
     if (raider.NpcRole != ROLE_TRIB_RAIDER) {
@@ -411,6 +461,8 @@ void DelRaider(Critter raider)
     Game.DestroyCritter(raider);
 }
 
+// Запуск волны набега: чистит старых рейдеров, спавнит новых по всем точкам входа, поднимает флаг набега,
+// переводит взятых игроков в стадию «атака идёт» и активирует поведение защитников (мужчины бьются, женщины бегут).
 void SpawnRaiders(ident mapId, int entGroup, int dialogId, int mobLevel)
 {
     Map? map = Game.GetMap(mapId);
@@ -419,9 +471,11 @@ void SpawnRaiders(ident mapId, int entGroup, int dialogId, int mobLevel)
         return;
     }
 
+    // Снимаем прошлых рейдеров, чтобы волны не накапливались.
     Critter[] raiders = map.GetCritters(CritterProperty::NpcRole, ROLE_TRIB_RAIDER, CritterFindType::Npc);
     Game.DestroyCritters(raiders);
 
+    // Спавним по одному рейдеру на каждую точку входа группы, пол и набор шмота — случайные.
     int entCount = Entrance::MapCountEntry(map, entGroup);
 
     for (int i = 0; i < entCount; i++) {
@@ -438,6 +492,7 @@ void SpawnRaiders(ident mapId, int entGroup, int dialogId, int mobLevel)
         SpawnRaider(map, entGroup, i, npcPid, HDIR_Random, dialogId, bagId, mobLevel);
     }
 
+    // Первый запуск набега: переводим взятых игроков в стадию «атака идёт».
     if (!AttackRuns) {
         AttackRuns = true;
 
@@ -449,11 +504,13 @@ void SpawnRaiders(ident mapId, int entGroup, int dialogId, int mobLevel)
         }
     }
 
+    // Мужчины-жители начинают перенацеливаться на рейдеров.
     Critter[] citizensM = map.GetCritters(CritterProperty::NpcRole, ROLE_TRIB_MEN, CritterFindType::NonDeadNpc);
     for (int i = 0; i < citizensM.length(); i++) {
-        Game.StartTimeEvent(ZERO_TIMESPAN, CChangeTarget, citizensM[i].Id); //SavedDeferredCall
+        Game.StartTimeEvent(ZERO_TIMESPAN, CChangeTarget, citizensM[i].Id); // сохраняемый отложенный вызов
     }
 
+    // Женщины-жители начинают периодически убегать и не возвращаются домой во время набега.
     Critter[] citizensW = map.GetCritters(CritterProperty::NpcRole, ROLE_TRIB_WOMEN, CritterFindType::NonDeadNpc);
     for (int i = 0; i < citizensW.length(); i++) {
         Game.StartTimeEvent(RunPeriod(), RunRandom, citizensW[i].Id);
@@ -462,6 +519,8 @@ void SpawnRaiders(ident mapId, int entGroup, int dialogId, int mobLevel)
     }
 }
 
+// Подводит итоги квеста для всех участников при завершении набега: тем, кто никого не убил, выставляет
+// соответствующий провал в зависимости от того, ушли ли они с карты, не пришли вовсе, либо племя погибло.
 void SendQuestStat()
 {
     Critter? cr;
@@ -507,6 +566,8 @@ void SendQuestStat()
     QuestPlayers.clear();
 }
 
+// Вход игрока на карту: если у него взят квест и набег ещё не идёт — запускает атаку немедленно
+// (отменяя отложенный таймер) и подписывает игрока на смерть.
 [[Event]]
 void PlayerInMap(Map map, Critter cr)
 {
@@ -529,6 +590,7 @@ void PlayerInMap(Map map, Critter cr)
     }
 }
 
+// Отправляет жителя бежать в случайный гекс рядом с текущей позицией.
 void RunAwayCritter(Critter crit)
 {
     Map? map = crit.GetMap();
@@ -536,10 +598,9 @@ void RunAwayCritter(Critter crit)
         return;
     }
 
-    // Flee to a random hex near the current position, clamped to the map so the
-    // destination is always valid. The previous do/while bounded the candidate
-    // against an unset home origin (0,0) with an always-true condition, hanging
-    // the server thread whenever this ran.
+    // Бежим в случайный гекс рядом с текущей позицией, ограниченный размерами карты, чтобы точка
+    // назначения всегда была валидной. Прежний do/while проверял кандидата относительно неустановленного
+    // домашнего начала (0,0) с всегда-истинным условием и вешал поток сервера при каждом запуске.
     mpos cur = crit.Hex;
     int x = Math::Clamp(cur.x + Game.Random(-8, 8), 0, map.Size.width - 1);
     int y = Math::Clamp(cur.y + Game.Random(-8, 8), 0, map.Size.height - 1);
@@ -547,6 +608,8 @@ void RunAwayCritter(Critter crit)
     NpcPlanes::AddWalkPlane(crit, NpcPlanes::AI_PLANE_WALK_PRIORITY, dest, Game.GetDirection(cur, dest), true, 0);
 }
 
+// Периодическое бегство женщины-жителя: если живых рейдеров не осталось — прекращает бегать и возвращается
+// к обычному поведению (плюс завершает набег, если он ещё активен); иначе снова убегает.
 [[TimeEvent]]
 void RunRandom(any value)
 {
@@ -575,6 +638,7 @@ void RunRandom(any value)
     }
 }
 
+// Завершение плана ИИ у убегающей женщины: перезапускает таймер очередного бегства.
 [[Event]]
 EventResult WPlaneEnd(Critter crit, int planeId, int reason, Critter someCr, Item someItem)
 {
@@ -584,6 +648,8 @@ EventResult WPlaneEnd(Critter crit, int planeId, int reason, Critter someCr, Ite
     return EventResult::StopChain;
 }
 
+// Реакция жителей на попытку диалога: при успешном квесте Сулик-житель (не сам Сулик) бросает реплику над головой;
+// в любом случае стандартный диалог не открывается.
 [[Event]]
 EventResult OnDial(Critter cr, Critter player, bool attach, int talkCount)
 {
@@ -601,6 +667,8 @@ EventResult OnDial(Critter cr, Critter player, bool attach, int talkCount)
     }
 }
 
+// Инициализация жителя при загрузке: если набег уже идёт — сразу включает боевое поведение
+// (мужчины перенацеливаются на рейдеров, женщины убегают).
 void CritterInit(Critter crit, bool firstTime)
 {
     if (!AttackRuns) {
@@ -608,7 +676,7 @@ void CritterInit(Critter crit, bool firstTime)
     }
 
     if (crit.Gender == GenderType::Male) {
-        Game.StartTimeEvent(ZERO_TIMESPAN, CChangeTarget, crit.Id); //SavedDeferredCall
+        Game.StartTimeEvent(ZERO_TIMESPAN, CChangeTarget, crit.Id); // сохраняемый отложенный вызов
     }
     else {
         Game.StartTimeEvent(RunPeriod(), RunRandom, crit.Id);

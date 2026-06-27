@@ -1,4 +1,7 @@
-namespace Base // Sort 2
+// Base — захват баз и снабжение (Sierra/Mariposa/Cathedral).
+// SERVER: терминал назначает владельца/организацию, BaseRefresh периодически создаёт машину снабжения с лутом (FillBag) и считает очки Enclave/BoS.
+// Связи: Entrance, Scores, GameTime, PidsGroups, EScores, Content.
+namespace Base
 {
 
 #if SERVER
@@ -18,22 +21,28 @@ namespace Base // Sort 2
 ///@ Property Game Server int32 BaseEnclaveScore Mutable Persistent
 ///@ Property Game Server int32 BaseBosScore Mutable Persistent
 
+// Индексы баз: используются как ключи во всех параллельных массивах ниже
 const int SIERRA_BASE = 0;
 const int MARIPOSA_BASE = 1;
 const int CATHEDRAL_BASE = 2;
 const int MAX_BASES = 3;
 
+// Организации, претендующие на базы
 const int ORG_ENCLAVE = 1;
 const int ORG_BOS = 2;
 
+// Интервал до следующего создания машины снабжения: 25-35 реальных минут
 timespan BaseRefreshTime()
 {
     return Time::Minutes(Game.Random(25, 35));
-} // 25-35 real minutes
-const int CAR_WAIT_TIME = 60 * 60; // 1 game hour
+}
 
+const int CAR_WAIT_TIME = 60 * 60; // 1 игровой час
+
+// Тип точки входа (Entrance), куда ставится машина снабжения
 const int ENTRY_SUPPLY_CAR = 50;
 
+// Параллельные таблицы по индексу базы: карты, глобальные переменные владельца/организации/тайм-ивента и id очков
 const hstring[] CarMaps = {Content::Map::sad_enter, Content::Map::mariposa_enter, Content::Map::cath_enter};
 const hstring[] TerminalMaps = {Content::Map::sad_level4, Content::Map::mariposa_level4, Content::Map::cath_level3};
 const GameProperty[] GvarRule = {GameProperty::BaseSierraRule, GameProperty::BaseMariposaRule, GameProperty::BaseCathedralRule};
@@ -43,12 +52,14 @@ const int[] ScoreCur = {EScores::SierraCur, EScores::MariposaCur, EScores::Cathe
 const int[] ScoreBest = {EScores::SierraBest, EScores::MariposaBest, EScores::CathedralBest};
 const int[] ScoreOrg = {EScores::SierraOrg, EScores::MariposaOrg, EScores::CathedralOrg};
 
+// Тайм-ивент периодического снабжения базы; value — индекс базы
 [[TimeEvent]]
 void BaseRefresh(any value)
 {
     RefreshBase(value);
 }
 
+// Очередной цикл снабжения: спавн машины с лутом и начисление очков владельцу/организации
 void RefreshBase(int base)
 {
     if (base >= MAX_BASES) {
@@ -79,6 +90,7 @@ void RefreshBase(int base)
         Scores::AddScore(player, ScoreBest[base], 1);
     }
 
+    // Глобальный зачёт между организациями за все базы
     if (varOrg == ORG_ENCLAVE) {
         Game.BaseEnclaveScore += 1;
     }
@@ -86,6 +98,7 @@ void RefreshBase(int base)
         Game.BaseBosScore += 1;
     }
 
+    // Лидер по сумме очков выводится в таблице рекордов
     if (Game.BaseEnclaveScore > Game.BaseBosScore) {
         Scores::SetBestScore(EScores::BaseBestOrg, "Enclave");
     }
@@ -97,11 +110,13 @@ void RefreshBase(int base)
     }
 }
 
+// Спавн машины снабжения с лутом на свободной точке входа; для BoS — hummer, иначе scout
 void CreateSupplyCar(Map map, int base, ident playerId, int org)
 {
     Entrance::Entry[] entries = Entrance::ParseEntries(map, ENTRY_SUPPLY_CAR);
     hstring carPid = (org == ORG_BOS ? Content::Item::hummer : Content::Item::scout);
 
+    // Ищем первую точку входа, где машина помещается; если свободной нет — выходим
     mpos hex;
     for (int i = 0, j = entries.length(); i <= j; i++) {
         if (i == j) {
@@ -115,16 +130,20 @@ void CreateSupplyCar(Map map, int base, ident playerId, int org)
         }
     }
 
+    // Создаём машину со случайным запасом топлива и износом
     Item car = map.AddItem(hex, carPid, 1);
     car.LockerId = 1;
     car.Charge = Game.Random(0, car.Car_TankVolume);
     car.Deterioration = Game.Random(0, car.Car_MaxDeterioration);
 
+    // Багажник машины и его наполнение лутом замком, привязанным к владельцу базы
+    // breadcrumb миграции: прежде багажник брался как car.GetChild(0) — оставлено как ссылка на исходный замысел
     Item? bag; // = car.GetChild( 0 );
     if (bag != null) {
         bag.LockerId = (org == ORG_ENCLAVE ? Tla::CritterFingersDoorId(playerId) : Tla::CritterEyesDoorId(playerId));
         bag.LockerComplexity = Game.Random(100, 200);
 
+        // Редкий шанс выпадения силовой брони в зависимости от организации
         if (org == ORG_ENCLAVE) {
             if (Game.Random(1, 200) == 1) {
                 bag.AddItem(Content::Item::advanced_power_armor, 10, Tla::RootContainerStack());
@@ -146,6 +165,7 @@ void CreateSupplyCar(Map map, int base, ident playerId, int org)
 
         bag.AddItem(Content::Item::bottle_caps, Game.Random(100, 1000), Tla::RootContainerStack());
 
+        // Случайное наполнение по группам прото-id: (min, max, шанс в %)
         FillBag(bag, PidsGroups::Pids_Ammo, 40, 80, 80);
         FillBag(bag, PidsGroups::Pids_AmmoOther, 1, 5, 40);
 
@@ -185,7 +205,7 @@ void CreateSupplyCar(Map map, int base, ident playerId, int org)
         FillBag(bag, PidsGroups::Pids_MiscToolsSpecial, 1, 1, 50);
         FillBag(bag, PidsGroups::Pids_MiscOther, 1, 1, 70);
 
-        // Activate militia on Cathedral
+        // Поднимаем ополчение Кафедрала: натравливаем всех живых NPC на игроков на карте
         if (base == CATHEDRAL_BASE) {
             Critter[] npcCritters = map.GetCritters(CritterFindType::NonDeadNpc);
             Critter[] playerCritters = map.GetCritters(CritterFindType::NonDeadPlayers);
@@ -200,9 +220,11 @@ void CreateSupplyCar(Map map, int base, ident playerId, int org)
         }
     }
 
+    // Машина исчезает через CAR_WAIT_TIME, если её не забрали
     Game.StartTimeEvent(GameTime::GameSeconds(CAR_WAIT_TIME), DeleteCar, car.Id); //SavedDeferredCall
 }
 
+// С заданным шансом добавляет в багажник случайный прото-id из группы в количестве min..max
 void FillBag(Item bag, hstring[] pids, int min, int max, int chance)
 {
     if (chance >= Game.Random(1, 100)) {
@@ -210,6 +232,7 @@ void FillBag(Item bag, hstring[] pids, int min, int max, int chance)
     }
 }
 
+// Тайм-ивент удаления невостребованной машины снабжения
 [[TimeEvent]]
 void DeleteCar(any value)
 {
@@ -219,6 +242,7 @@ void DeleteCar(any value)
     }
 }
 
+// Использование терминала базы игроком открывает диалог управления базой
 [[ItemStatic]]
 bool Terminal(Critter player, StaticItem terminal, Item? item, any skill)
 {
@@ -229,18 +253,21 @@ bool Terminal(Critter player, StaticItem terminal, Item? item, any skill)
     return true;
 }
 
+// Ответ диалога: передать базу Анклаву
 [[DialogResult]]
 void BaseToEnclave(Critter player, Critter terminal, any val)
 {
     BaseTo(player, ORG_ENCLAVE);
 }
 
+// Ответ диалога: передать базу Братству Стали
 [[DialogResult]]
 void BaseToBos(Critter player, Critter terminal, any val)
 {
     BaseTo(player, ORG_BOS);
 }
 
+// Назначает игрока владельцем базы от имени организации и перезапускает цикл снабжения
 void BaseTo(Critter player, int org)
 {
     int base = GetBaseByMap(player.GetMap());
@@ -253,17 +280,18 @@ void BaseTo(Critter player, int org)
     Scores::SetBestScore(ScoreCur[base], player.Name);
     Scores::SetBestScore(ScoreOrg[base], org == ORG_ENCLAVE ? "Enclave" : "Br. of Steel");
 
-    // Delete old
+    // Останавливаем прежний цикл снабжения этой базы
     if (Game.GetAsInt(GvarTimeEvent[base]) != 0) {
         Game.StopTimeEvent(Game.GetAsInt(GvarTimeEvent[base]));
         Game.SetAsAny(GvarTimeEvent[base], 0);
     }
 
-    // Create new
+    // Запускаем новый цикл снабжения и запоминаем его id
     int cteId = Game.StartTimeEvent(BaseRefreshTime(), BaseRefresh, base); //SavedDeferredCall
     Game.SetAsInt(GvarTimeEvent[base], cteId);
 }
 
+// Индекс базы по карте терминала, либо -1, если карта не относится к базам
 int GetBaseByMap(Map? map)
 {
     if (map == null) {
@@ -280,6 +308,7 @@ int GetBaseByMap(Map? map)
     return -1;
 }
 
+// Demand-проверка доступа к терминалу базы (заглушка: пока всегда разрешает)
 [[DialogDemand]]
 bool CheckTerminalLock(Critter player, Critter terminal, any val)
 {

@@ -1,4 +1,8 @@
-namespace GameEventRacing // Sort 3
+// GameEventRacing — серверный сценарий события «гонки» (Den, den_carstop).
+// Обязанности: фазы события (prepare/begin/run/stop/clear), спавн Билла/телохранителей/зрителей,
+// чекпоинты и выявление победителя, радио-анонсы.
+// Сторона: SERVER. Связи: GameEvent, Radio, Location, Dialogs, Entrance, GameTime, PlayerRegistration, Tla.
+namespace GameEventRacing
 {
 
 #if SERVER
@@ -16,17 +20,25 @@ namespace GameEventRacing // Sort 3
 ///@ Property Game Server uint8 RacingWinnersFound Mutable Persistent Max = 2
 ///@ Property Game Server ident RacingWinner Mutable Persistent
 
+// Диагностический лог фаз события (префикс модуля)
 void DebugLog(string s)
 {
     Game.Log("GameEventRacing: " + s);
 }
+// Breadcrumb миграции: старый макрос DebugLog из движкового препроцессора, не удалять до домиграции
 // #define DebugLog                                 # ( s )
+
+// Ключ текст-пака радио-анонса
 const int STR_ANNOUNCE = 3853;
+
+// Роли НПЦ события (значения свойства NpcRole), по которым находим участников сценария на карте
 const int ROLE_BRAHMIN = 221;
 const int ROLE_BILL = 222;
 const int ROLE_GUARD = 223;
 const int ROLE_BODYGUARD = 224;
 const int ROLE_SPECTATOR = 225;
+
+// Номера точек входа (entry) на карте den_carstop для спавна и расстановки НПЦ
 const int ENTRY_BILL_PREPARE = 222;
 const int ENTRY_BODYGUARD_PREPARE = 223;
 const int ENTRY_GUARD = 224;
@@ -39,40 +51,47 @@ const int CTE_RUN_START_EVENT = 223;
 const int CTE_COMMENT = 224;
 const int CTE_OPENNING = 225;
 
+// Идентификаторы фаз события для GameEvent::RunGameEvent / CheckEventStatus
 const int EVENT_RACING_PREPARE = 1; // Предварительные рассказы о гонке
 const int EVENT_RACING_BEGIN = 2;   // Начало гонок - сбор НПЦ и администрации на старте, прием заявок на участие
 const int EVENT_RACING_RUN = 3;     // Начало гонок
 const int EVENT_RACING_STOP = 4;    // Конец гонок, найден победитель
 const int EVENT_RACING_CLEAR = 5;   // Удаление нпц и энкаунтеров
 
+// Статусы фазы для GameEvent::CheckEventStatus
 const int STATUS_NEVER_OCCURED = 0;
 const int STATUS_RUNNING = 1;
 const int STATUS_OCCURED = 2;
 const int STATUS_ENDED = 3;
 
+// Диапазоны ключей текст-пака для случайных реплик зрителей (по полу) на первой фазе
 const int STR_1PHASE_COMMENT_MALE_FIRST = 3800;
 const int STR_1PHASE_COMMENT_MALE_LAST = 3806;
 const int STR_1PHASE_COMMENT_FEMALE_FIRST = 3804;
 const int STR_1PHASE_COMMENT_FEMALE_LAST = 3808;
 
+// Длительность в игровых месяцах (30 игровых дней на месяц) для отложенных таймеров
 timespan GameMonth(int mon)
 {
     return Time::GameDays(mon * 30);
 }
 
+// Случайный ключ текст-пака реплики зрителя с учётом пола криттера
 int GetPhase1Comment(Critter cr)
 {
     return cr.BodyType == BodyTypes::Women ? Game.Random(STR_1PHASE_COMMENT_FEMALE_FIRST, STR_1PHASE_COMMENT_FEMALE_LAST) :
                                              Game.Random(STR_1PHASE_COMMENT_MALE_FIRST, STR_1PHASE_COMMENT_MALE_LAST);
 }
 
-// ******************* Предварительный этап. Билл и телохранители рассказывают о гонках ********************
+// Предварительный этап: Билл и телохранители рассказывают о предстоящих гонках
 
+// Точка входа фазы prepare из системы событий
 void RunPreparePhase()
 {
     PrepareRacing();
 }
 
+// Спавнит Билла и телохранителей в стартовых позициях и заводит таймер радио-анонса
 void PrepareRacing()
 {
     Map? map = Game.GetMap(Content::Map::den_carstop);
@@ -150,9 +169,10 @@ void PrepareRacing()
         map.AddCritter(Content::Critter::Bodyguard, entries[i].Hex, 2, Tla::GetCritPropsDict(propsBodyGuard));
     }
 
-    Game.StartTimeEvent(Time::GameMinutes(20), AnnounceRadio); //SavedDeferredCall
+    Game.StartTimeEvent(Time::GameMinutes(20), AnnounceRadio); // сохраняемый отложенный вызов
 }
 
+// Повторяющийся радио-анонс о начале гонок, пока фаза begin активна
 [[TimeEvent]]
 void AnnounceRadio()
 {
@@ -164,16 +184,19 @@ void AnnounceRadio()
             Radio::SendChannelRadioMessage(0, GameTime::SynchronizedTimeToString(time));
         }
 
-        Game.StartTimeEvent(Time::GameMinutes(25), AnnounceRadio); //SavedDeferredCall
+        Game.StartTimeEvent(Time::GameMinutes(25), AnnounceRadio); // сохраняемый отложенный вызов
     }
 }
 
-// ******************* Начальный этап. Билл и телохранители идут к месту начала гонок, окружающие нпц собираются ********************
+// Начальный этап: Билл и телохранители идут к месту старта, окружающие НПЦ собираются как зрители
+
+// Точка входа фазы begin из системы событий
 void RunBeginPhase()
 {
     BeginRacing();
 }
 
+// Подставляет в диалог время следующего старта гонок (тег |when)
 void RacingWhen(Critter player, Critter npc, string& textArgs)
 {
     if (!Tla::IsDialogGenerated(textArgs)) {
@@ -189,6 +212,8 @@ void RacingWhen(Critter player, Critter npc, string& textArgs)
     textArgs = "|when:" + GameTime::SynchronizedTimeToString(time);
 }
 
+// Расставляет Билла и телохранителей по стартовым позициям, спавнит охрану и набирает
+// до 25 случайных подходящих НПЦ в зрители (с сохранением их прежней роли/дома для возврата)
 void BeginRacing()
 {
     Map? map = Game.GetMap(Content::Map::den_carstop);
@@ -262,6 +287,8 @@ void BeginRacing()
             }
         }
 
+        // Набор зрителей: берём свободных мирных НПЦ, запоминаем их прежний дом/роль в GERacing*-полях,
+        // ставим роль ROLE_SPECTATOR и отправляем смотреть на старт; через GameMonth(3) вернутся домой
         entries = Entrance::ParseEntries(map, ENTRY_SPECTATORS);
         mpos hexLook;
         mdir dir = mdir(hdir(2));
@@ -301,6 +328,8 @@ void BeginRacing()
     }
 }
 
+// Реакция зрителя на попытку заговорить: один раз запускает диалог den_spectator на игрока,
+// отметка о просмотре хранится в player.NpcStory по Id зрителя
 [[Event]]
 EventResult SpectatorTalk(Critter cr, Critter player, bool attach, int talkCount)
 {
@@ -333,6 +362,8 @@ EventResult SpectatorTalk(Critter cr, Critter player, bool attach, int talkCount
     return EventResult::StopChain;
 }
 
+// Возвращает зрителя домой: восстанавливает прежний дом/направление/роль из GERacing*-полей
+// и отписывает от OnTalk. Пока фаза активна — повторяется, чтобы дождаться конца события
 [[TimeEvent]] [[Async]]
 void Npc2HomePos(Critter cr, TimeEventContext event)
 {
@@ -369,12 +400,14 @@ void Npc2HomePos(Critter cr, TimeEventContext event)
     return;
 }
 
+// Инициализация охранника: базовое поведение охраны плюс подписка на чужие применения навыков
 void DenGuardInit(Critter cr, bool firstTime)
 {
     MapBarterGround::GuardInit(cr, firstTime);
     cr.OnSomeCritterUseSkill.Subscribe(GuardSmthSkill);
 }
 
+// Охрана атакует того, кто пытается вскрыть замок (lockpick) рядом
 [[Event]]
 void GuardSmthSkill(Critter cr, Critter fromCr, CritterProperty skill, Critter onCritter, Item? onItem, StaticItem onScenery)
 {
@@ -384,9 +417,14 @@ void GuardSmthSkill(Critter cr, Critter fromCr, CritterProperty skill, Critter o
     }
 }
 
-[[TimeEvent]]
+// Ждёт, пока Билл дойдёт до стартового гекса; по прибытии запускает фазу run и комментарии зрителей
+[[TimeEvent]] [[Async]]
 void RunStartEvent(Critter cr, TimeEventContext event)
 {
+    if (!Sync::LockCritterWithMap(cr)) {
+        return;
+    }
+
     if (cr.Hex.x == cr.GERacingCritterHx && cr.Hex.y == cr.GERacingCritterHy && cr.IsAlive()) {
         GameEvent::RunGameEvent(EVENT_RACING_RUN);
         cr.StartTimeEvent(Time::Seconds(30), Comment);
@@ -399,6 +437,8 @@ void RunStartEvent(Critter cr, TimeEventContext event)
     }
 }
 
+// Периодически выбирает двух разных зрителей (не браминов) и заставляет их обменяться репликами,
+// пока идёт фаза run
 [[TimeEvent]] [[Async]]
 void Comment(Critter cr, TimeEventContext event)
 {
@@ -453,21 +493,28 @@ void Comment(Critter cr, TimeEventContext event)
     }
 }
 
-[[TimeEvent]]
+// Произносит реплику (обычная речь) с ключом текст-пака из rate
+[[TimeEvent]] [[Async]]
 void Talk(Critter cr, any rate)
 {
+    if (!Sync::LockCritterWithMap(cr)) {
+        return;
+    }
+
     Messaging::Say(cr, TextPackKey(TextPackName::Text, "" + (rate)));
     return;
 }
 
-// ******************* Начало гонок. Билл произносит приветственную речь и открываются энкаунтеры для участников ********************
+// Начало гонок: Билл произносит приветственную речь, после неё открываются чекпоинты участникам
 
+// Точка входа фазы run из системы событий
 void RunRacingPhase()
 {
     RunRacing();
     DebugLog("RACING NOW");
 }
 
+// Запускает у Билла цепочку реплик приветственной речи (Opening)
 void RunRacing()
 {
     Map? map = Game.GetMap(Content::Map::den_carstop);
@@ -482,6 +529,8 @@ void RunRacing()
     }
 }
 
+// Пошаговая приветственная речь Билла по строкам OpeningPhrases (rate — индекс шага в массиве):
+// реплика Билла, затем выкрики зрителей/женщин/телохранителей; на шаге 12 открывает чекпоинты (Start)
 [[TimeEvent]] [[Async]]
 void Opening(Critter cr, TimeEventContext event)
 {
@@ -510,6 +559,7 @@ void Opening(Critter cr, TimeEventContext event)
     bool talkAlready = true;
     int tries = 0;
     auto spectators = map.GetCritters(CritterProperty::NpcRole, ROLE_SPECTATOR, CritterFindType::NonDeadNpc);
+    // Раздаём выкрики случайным зрителям (индекс 2 строки), избегая повтора уже выданной реплики
     for (int i = 0, l = OpeningPhrases[rate][2].length(); i < l && i < spectators.length(); i++) {
         talkAlready = true;
         tries = 10;
@@ -527,6 +577,7 @@ void Opening(Critter cr, TimeEventContext event)
         }
     }
 
+    // Отдельные женские реплики (индекс 3 строки): только зрители-женщины, без повтора из обоих пулов
     for (int i = 0, l = OpeningPhrases[rate][3].length(); i < l && i < spectators.length(); i++) {
         talkAlready = true;
         tries = 10;
@@ -545,6 +596,7 @@ void Opening(Critter cr, TimeEventContext event)
         }
     }
 
+    // Реакция телохранителей (индекс 4 строки как флаг): первые двое произносят реплику 3854
     if (OpeningPhrases[rate][4][0] > 0) {
         Critter[] critters = map.GetCritters(CritterProperty::NpcRole, ROLE_BODYGUARD, CritterFindType::NonDeadNpc);
         for (int i = 0; i < 2 && i < critters.length(); i++) {
@@ -552,6 +604,7 @@ void Opening(Critter cr, TimeEventContext event)
         }
     }
 
+    // Переходим к следующему шагу речи; индекс 1 строки — задержка в десятых долях реальных секунд
     rate = rate + 1;
     timespan delayTicks = Time::Seconds(OpeningPhrases[rate - 1][1][0] / 10);
     if (delayTicks != ZERO_TIMESPAN) {
@@ -560,13 +613,20 @@ void Opening(Critter cr, TimeEventContext event)
     }
 }
 
-[[TimeEvent]]
+// Выкрик над головой криттера с ключом текст-пака из rate
+[[TimeEvent]] [[Async]]
 void Shout(Critter cr, any rate)
 {
+    if (!Sync::LockCritterWithMap(cr)) {
+        return;
+    }
+
     Messaging::SayOnHead(cr, TextPackKey(TextPackName::Text, "" + (rate)));
     return;
 }
 
+// Открывает гонку: включает RacingEvent, выдаёт первый чекпоинт всем заявившимся игрокам
+// (DenBillRacingWin == 1 -> 2) и анонсирует число участников по радио
 void Start()
 {
     Map? map = Game.GetMap(Content::Map::den_carstop);
@@ -639,6 +699,7 @@ ident CreateCheckPoint(Critter player)
     return locId;
 }
 
+// Демэнд диалога: игрок находится на «своём» текущем чекпоинте (номер локации совпадает со счётчиком)
 [[DialogDemand]]
 bool CanCheckThisPoint(Critter player, Critter npc)
 {
@@ -653,6 +714,7 @@ bool CanCheckThisPoint(Critter player, Critter npc)
     return loc.RacingCheckpointNumber == player.RacingCheckPoints;
 }
 
+// Результат диалога: выдать игроку следующий чекпоинт
 [[DialogResult]]
 void NextCheckPoint(Critter player, Critter npc)
 {
@@ -699,13 +761,15 @@ void Win(Critter player, StaticItem trigger, bool entered, mdir dir)
         player.DenBillRacingWin = 4;
         Radio::SendChannelRadioMessage(0, TextPackKey(TextPackName::Text, "" + (3957)));
         Radio::SendChannelRadioMessage(0, PlayerRegistration::GetPlayerName(Game.RacingWinner));
-        StopRacing(); // 3957
+        StopRacing();
         return;
     }
 
     player.DenBillRacingWin = 3;
 }
 
+// Пошаговая поздравительная речь Билла победителю по строкам FirstWinnerPhrases (аналогично Opening):
+// реплики Билла и выкрики зрителей; по завершении/без победителя — финальный радио-анонс
 [[TimeEvent]] [[Async]]
 void WinnerTimeEvent(Critter cr, TimeEventContext event)
 {
@@ -786,6 +850,7 @@ void WinnerTimeEvent(Critter cr, TimeEventContext event)
     }
 }
 
+// Координаты чекпоинтов на глобальной карте (x, y), индекс == номер чекпоинта по порядку
 int[][] Coords = {
     {275, 511},   // 1
     {372, 696},   // 2
@@ -802,6 +867,9 @@ int[][] Coords = {
     {851, 113}    // 13
 };
 
+// Сценарий приветственной речи Билла по шагам. Каждый шаг — пять массивов:
+// [0] реплика Билла, [1] задержка до следующего шага (десятые доли реальных секунд),
+// [2] выкрики зрителей, [3] выкрики женщин-зрителей, [4] флаг реакции телохранителей
 int[][][] OpeningPhrases = {{
                                 {3809}, // Фраза билли
                                 {30},   // Время до следующей фразы в 10 долях реальных секунд
@@ -889,6 +957,9 @@ int[][][] OpeningPhrases = {{
                             {{3821}, {150}, {3846, 3847, 3848, 3849, 3851, 3852}, {3850}, {0}},
                             {{3874}, {90}, {3876, 3877}, {0}, {0}},
                             {{3875}, {120}, {3878, 3879, 3880, 3881}, {0}, {0}}};
+
+// Сценарий поздравительной речи Билла победителю. Структура шага та же, что в OpeningPhrases:
+// [0] реплика Билла, [1] задержка, [2] выкрики зрителей, [3] женщин, [4] флаг телохранителей
 int[][][] FirstWinnerPhrases = {{
                                     {3883},                                                 // Фраза билли
                                     {110},                                                  // Время до следующей фразы в 10 долях реальных секунд
@@ -918,12 +989,17 @@ int[][][] FirstWinnerPhrases = {{
                                     {3847},
                                 }};
 
+// Завершающий этап: гонка остановлена, объявляется итог и убирается обстановка
+
+// Точка входа фазы stop из системы событий
 void RunStopPhase()
 {
     DebugLog("RACING STOP");
     StopRacing();
 }
 
+// Останавливает событие: помечает чекпоинты на автоудаление, шлёт радио-итог (есть/нет двух призёров)
+// и расходит НПЦ — охрану/Билла на удаление, зрителей домой
 void StopRacing()
 {
     GameEvent::StopGameEvent(EVENT_RACING_STOP);
@@ -961,15 +1037,21 @@ void StopRacing()
     }
 }
 
+// Результат диалога: досрочно остановить событие
 [[DialogResult]]
 void StopEvent(Critter cr, Critter npc)
 {
     StopRacing();
 }
 
-[[TimeEvent]]
+// Удаляет НПЦ события (кроме управляемых игроком) по таймеру разбора обстановки
+[[TimeEvent]] [[Async]]
 void DelNpc(Critter cr, any rate)
 {
+    if (!Sync::LockCritterWithMap(cr)) {
+        return;
+    }
+
     if (!cr.ControlledByPlayer) {
         Game.DestroyCritter(cr);
     }
@@ -977,6 +1059,7 @@ void DelNpc(Critter cr, any rate)
     return;
 }
 
+// Подставляет в диалог имя победителя (тег |winner); по умолчанию — «Избранный»
 void WinnerText(Critter player, Critter npc, string& textArgs)
 {
     if (!Tla::IsDialogGenerated(textArgs)) {

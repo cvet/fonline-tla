@@ -1,3 +1,8 @@
+// Messaging — централизованная выдача текста игроку: служебные сообщения (Info) и реплики
+// персонажей (Say). SERVER рассылает реплики получателям по правилу типа (обычная — всем, кто
+// видит; крик — всей карте; шёпот — в радиусе) и шлёт служебный текст контролирующему игроку.
+// CLIENT выводит сообщения в окно/над головой и разбирает ввод из консоли (префиксы типа речи,
+// эмоут, радио).
 namespace Messaging
 {
 
@@ -33,6 +38,10 @@ void InitMessaging()
 
 #if SERVER
 
+// Серверная часть: формирование адресатов и доставка текста на клиент.
+
+// Info — служебное сообщение в окно сообщений игрока. Перегрузки принимают игрока или
+// криттера и либо готовый текст, либо ключ текст-пака с аргументами.
 void Info(Player player, string text)
 {
     if (!text.isEmpty()) {
@@ -57,6 +66,9 @@ void Info(Critter cr, TextPackKey textKey, string textArgs = "")
     cr.PlayerClientCall.ReceiveInfo("", textKey, textArgs);
 }
 
+// Say* — реплика персонажа. Варианты различаются типом (обычная/шёпот/крик/эмоут) и тем,
+// показывать ли реплику только над головой (OnHead) без дублирования в окне сообщений.
+// Все они — тонкие обёртки над SayExt.
 void Say(Critter cr, string text)
 {
     if (!text.isEmpty()) {
@@ -153,6 +165,7 @@ void SayEmoteOnHead(Critter cr, TextPackKey textKey, string textArgs = "")
     SayExt(cr, SayType::Emote, true, "", textKey, textArgs);
 }
 
+// Реплика, пришедшая от игрока: проверяем на флуд и рассылаем как обычную речь его криттера.
 [[ServerRemoteCall]] [[Async]]
 void ReceiveChosenSay(Player player, SayType sayType, string text)
 {
@@ -162,9 +175,10 @@ void ReceiveChosenSay(Player player, SayType sayType, string text)
         return;
     }
 
-    // Todo: cleanup text from bad symbols
+    // Todo: очистить текст от недопустимых символов.
     // Keyb.RemoveInvalidChars(str, KIF_NO_SPEC_SYMBOLS);
 
+    // Антифлуд: 5 одинаковых сообщений подряд — отключаем игрока.
     if (text == player.LastSay) {
         player.LastSayEqualCount += 1;
 
@@ -187,6 +201,9 @@ void ReceiveChosenSay(Player player, SayType sayType, string text)
     SayExt(cr, sayType, false, text, TextPackKey(), "");
 }
 
+// Базовая рассылка реплики: собирает получателей по типу речи и шлёт им ReceiveSay.
+// Крик слышит вся карта, шёпот — игроки в радиусе WhisperDist, обычная речь — все, кто
+// видит говорящего (плюс он сам). Вне карты — только те, кто его видит.
 void SayExt(Critter cr, SayType sayType, bool onHeadOnly, string text, TextPackKey textKey, string textArgs)
 {
     if (cr.IsDead()) {
@@ -221,6 +238,9 @@ void SayExt(Critter cr, SayType sayType, bool onHeadOnly, string text, TextPackK
 
 #if CLIENT
 
+// Клиентская часть: вывод сообщений в интерфейс и разбор ввода игрока.
+
+// Цвет текста окна сообщений по типу (взгляд/разговор/бой); по умолчанию — обычный.
 dict<MessageBoxType, ucolor> TextColors = {{MessageBoxType::Default, Color::Text},
                                            {MessageBoxType::Look, Color::DGreen},
                                            {MessageBoxType::Talk, Color::DGreen},
@@ -265,6 +285,7 @@ void Info(MessageBoxType type, TextPackKey textKey, string textArgs = "")
     Info(type, text);
 }
 
+// Ввод из консоли: строка с префиксом "~" — админ-команда (пока отключена), иначе — речь.
 [[Event]]
 void OnConsoleMessage(string text)
 {
@@ -278,7 +299,7 @@ void OnConsoleMessage(string text)
         text = text.substr(1).trim();
 
         if (!text.isEmpty()) {
-            Info("Not implemented"); // Todo: restore admin commands
+            Info("Not implemented"); // Todo: вернуть админ-команды.
         }
     }
     else {
@@ -286,6 +307,9 @@ void OnConsoleMessage(string text)
     }
 }
 
+// Разбирает введённую строку и отправляет реплику на сервер, определяя тип речи по
+// модификаторам (Shift — крик, Ctrl — шёпот) и по текстовым префиксам ("/с", "/ш", "/э",
+// "/р" для радио; "*эмоут*").
 void SendSay(string text)
 {
     SayType sayType = SayType::Normal;
@@ -324,7 +348,7 @@ void SendSay(string text)
             }
         }
         else if (text.length() >= 4 && text[0] == "*" && text[1] != "*" && text[text.length() - 2] != "*" &&
-                 text[text.length() - 1] == "*") { // RegExp: [*]([^*].*[^*])[*]
+                 text[text.length() - 1] == "*") { // Эмоут вида *текст* (звёздочки по краям). RegExp: [*]([^*].*[^*])[*]
             sayType = SayType::Emote;
             text = text.substr(1, text.length() - 2);
         }
@@ -337,6 +361,9 @@ void SendSay(string text)
     }
 }
 
+// Локальный показ реплики на клиенте: выбирает строки формата по типу речи, преобразует
+// текст (крик — в верхний регистр, шёпот — в нижний), пишет реплику над головой и при
+// необходимости дублирует её в окно сообщений.
 void LocalSay(Critter? cr, SayType sayType, bool onHeadOnly, string text, TextPackKey textKey, string textArgs)
 {
     int formatCrNum = 0;
@@ -391,6 +418,7 @@ void LocalSay(Critter? cr, SayType sayType, bool onHeadOnly, string text, TextPa
     Game.FlashUnfocusedWindow();
 }
 
+// Подставляет text1/text2 в строку формата из игрового текст-пака (%1, %2).
 string FormatText(int formatStrNum, string text1, string text2 = "")
 {
     string formatStr = Game.GetText(TextPackKey(TextPackName::Game, "" + (formatStrNum)));

@@ -1,4 +1,11 @@
-namespace GuiScreensExt // Sort 2
+// GuiScreensExt — ручная (негенерируемая) логика поверх сгенерированного GuiScreens.fos.
+// Отвечает за переключение экранов интерфейса по событиям клиента (старт, загрузка/выгрузка
+// карты, подключение/отключение), за обработку выхода/отмены (TryExit), смену курсора
+// и за хелперы-гарды доступа к GUI-объектам (бросают исключение вместо тихого null).
+// CLIENT: вся работа с экранами, курсором и пинг-клиент.
+// SERVER: только серверная часть пинга (обработка GuiPingRequest).
+// Парный модуль к генерируемому GuiScreens.fos; источник GUI — Gui/*.fogui.
+namespace GuiScreensExt
 {
 
 // Todo: ввести рисование подсветки гекса при курсоре передвижения, см. CurMap.SetCursorPos
@@ -9,6 +16,7 @@ namespace GuiScreensExt // Sort 2
 
 #if CLIENT
 
+// Точка входа модуля: подписываемся на клиентские события для переключения экранов.
 [[ModuleInit]]
 void InitGuiScreensExt()
 {
@@ -20,14 +28,17 @@ void InitGuiScreensExt()
     Game.OnDisconnected.Subscribe(OnDisconnected);
 }
 
+// При старте клиента показываем экран логина (без автоподключения к серверу).
 [[Event]]
 void OnStart()
 {
+    // отключено: ранее клиент подключался к серверу сразу при старте
     //Game.Connect();
     Gui::ShowScreen(GuiScreen::Login);
     ScreenFadeOut();
 }
 
+// Карта загружена — переходим к игровому экрану и ставим курсор перемещения.
 [[Event]]
 void OnMapLoaded()
 {
@@ -37,12 +48,14 @@ void OnMapLoaded()
     ScreenFadeOut();
 }
 
+// Карта выгружается — убираем все экраны.
 [[Event]]
 void OnMapUnload()
 {
     Gui::HideAllScreens();
 }
 
+// Идёт подключение — показываем экран ожидания (если он ещё не активен).
 [[Event]]
 void OnConnecting()
 {
@@ -52,6 +65,7 @@ void OnConnecting()
     }
 }
 
+// Подключение не удалось — возвращаемся на экран логина.
 [[Event]]
 void OnConnectingFailed()
 {
@@ -62,6 +76,7 @@ void OnConnectingFailed()
     }
 }
 
+// Соединение разорвано — возвращаемся на экран логина.
 [[Event]]
 void OnDisconnected()
 {
@@ -72,11 +87,15 @@ void OnDisconnected()
     }
 }
 
+// Плавное затемнение экрана из чёрного (общий переход между экранами).
 void ScreenFadeOut()
 {
     Effects::FadeScreen(Color::Black, ZERO_UCOLOR, Time::Milliseconds(1000));
 }
 
+// Хелперы-гарды доступа к GUI-объектам: сужают nullable-хендл и громко падают, если объект
+// отсутствует, вместо тихого возврата null. Используются вызывающим кодом GUI, где элемент
+// обязан существовать по контракту экрана.
 Gui::Object NeedObject(Gui::Object? obj)
 {
     if (obj == null) {
@@ -140,6 +159,9 @@ Sprite::Sprite NeedSprite(Sprite::Sprite? sprite)
     return sprite;
 }
 
+// Реакция на запрос «выйти/отмена» (обычно Esc): поведение зависит от активного экрана —
+// выход из игры на логине, шаг назад в регистрации, разрыв соединения на ожидании, сброс
+// активного курсора или открытие меню в игре, скрытие неосновного экрана по умолчанию.
 void TryExit()
 {
     Gui::Screen? screen = Gui::GetActiveScreen();
@@ -180,12 +202,15 @@ void TryExit()
     }
 }
 
+// Является ли экран «основным» (его нельзя просто скрыть по отмене, в отличие от диалогов/панелей).
 bool IsMainScreen(Gui::Screen screen)
 {
     GuiScreen num = screen.Num;
     return num == GuiScreen::Login || num == GuiScreen::Registration || num == GuiScreen::Game || num == GuiScreen::GlobalMap || num == GuiScreen::Wait;
 }
 
+// Циклическое переключение типа курсора (по умолчанию -> перемещение -> применение оружия и т.д.).
+// Курсор оружия доступен только при наличии Chosen, вне таймаута боя и с активным оружием в руках.
 void NextCursor()
 {
     switch (Gui::Cursor) {
@@ -217,12 +242,14 @@ void NextCursor()
 
 #endif
 
-// Ping
+// Пинг сервера: клиент шлёт запрос и ждёт ответа, флаг отражает «запрос в процессе».
+// Используется для проверки/индикации связи с сервером.
 
 #if CLIENT
 
 bool _PingInProgress = false;
 
+// Отправить запрос пинга на сервер и пометить, что ответ ожидается.
 void Ping()
 {
     _PingInProgress = true;
@@ -234,16 +261,19 @@ bool IsPingInProgress()
     return _PingInProgress;
 }
 
+// сторона вызова закомментирована как breadcrumb парного контракта (см. GuiPingRequest на сервере)
 // [[ServerRemoteCall]]
 [[ClientRemoteCall]]
 void GuiPingAnswer()
 {
     _PingInProgress = false;
 }
+
 #endif
 
 #if SERVER
 
+// сторона вызова закомментирована как breadcrumb парного контракта (см. GuiPingAnswer на клиенте)
 // [[ClientRemoteCall]]
 [[ServerRemoteCall]]
 void GuiPingRequest(Player player)

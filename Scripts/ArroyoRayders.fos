@@ -1,3 +1,6 @@
+// ArroyoRayders — ИИ рейдеров Арройо.
+// Обязанности: захват цели-игрока, реплики при виде/исчезновении, тревога по сообщению, поиск игроков по таймеру, учёт счётчика рейдеров.
+// Сторона: SERVER. Зависит от NpcPlanes, SendMessage, EnemyStack, Sync.
 namespace ArroyoRayders
 {
 
@@ -5,9 +8,10 @@ namespace ArroyoRayders
 
 ///@ Property Critter Server ident ArroyoRaydersAttackedId Mutable Persistent
 
-// Defines
+// Канал сообщения тревоги между рейдерами.
 const int ARROYO_RAIDERS_MSG = 301;
 
+// Инициализация рейдера: подписки на события восприятия/смерти/сообщений и запуск таймера поиска.
 void RaiderInit(Critter raider, bool firstTime)
 {
     raider.ReplicationTime = -1;
@@ -20,16 +24,17 @@ void RaiderInit(Critter raider, bool firstTime)
 
     raider.ArroyoRaydersAttackedId = ZERO_IDENT; // Id атакуемого игрока.
 
-    // Записываем группу рейдеров. Эти данные используются при выходе с карты, для определения все-ли рейдеры убиты...
+    // Учитываем рейдера в общем счётчике. Счётчик используется при выходе с карты, чтобы определить, все ли рейдеры убиты.
     if (firstTime) {
         Game.ArroyoRaidersCount = Game.ArroyoRaidersCount + 1;
     }
 }
 
+// Рейдер увидел криттера: если ещё не занят целью, берёт игрока в захват и поднимает тревогу.
 [[Event]]
 void RaiderSaw(Critter raider, Critter player)
 {
-    // Проверяем свободен ли криттер
+    // Пропускаем, если рейдер уже занят атакой другой цели.
     if (raider.ArroyoRaydersAttackedId != ZERO_IDENT) {
         return;
     }
@@ -43,22 +48,23 @@ void RaiderSaw(Critter raider, Critter player)
         SendMessage::ToWhoSeesMe(raider, ARROYO_RAIDERS_MSG, raider.ArroyoRaydersAttackedId);
         if (NpcPlanes::AddAttackPlane(raider, 0, player)) {
             if (Game.Random(0, 8) == 0) {
-                Messaging::SayShoutOnHead(raider, TextPackKey(TextPackName::Dialogs, "" + (MsgStr::DialogTextId(raider.DialogId, 0))));
+                Messaging::SayShoutOnHead(raider, MsgStr::DialogTextKey(raider.DialogId, 0));
             }
             else if (Game.Random(0, 6) == 1) {
-                Messaging::SayShoutOnHead(raider, TextPackKey(TextPackName::Dialogs, "" + (MsgStr::DialogTextId(raider.DialogId, 0))));
+                Messaging::SayShoutOnHead(raider, MsgStr::DialogTextKey(raider.DialogId, 0));
             }
         }
     }
 }
 
+// Цель скрылась из поля зрения: реплика вслед и снятие плана атаки, освобождение рейдера, если планов больше нет.
 [[Event]]
 void RaiderHide(Critter raider, Critter player)
 {
-    // Если игрок пропал из поля зрения, убираем план атаки
+    // Реагируем только если из виду пропал именно атакуемый игрок.
     if (player.ControlledByPlayer && raider.ArroyoRaydersAttackedId != ZERO_IDENT) {
         if (Game.Random(0, 10) == 0) {
-            Messaging::SayShoutOnHead(raider, TextPackKey(TextPackName::Dialogs, "" + (MsgStr::DialogTextId(raider.DialogId, 1))));
+            Messaging::SayShoutOnHead(raider, MsgStr::DialogTextKey(raider.DialogId, 1));
         }
 
         NpcPlanes::EraseAttackPlane(raider, player);
@@ -68,6 +74,7 @@ void RaiderHide(Critter raider, Critter player)
     }
 }
 
+// Периодический поиск целей: если в поле зрения есть живой игрок — заводим план атаки на него.
 [[TimeEvent]] [[Async]]
 void RaiderIdle(Critter raider)
 {
@@ -75,22 +82,25 @@ void RaiderIdle(Critter raider)
         return;
     }
 
-    // Ищем игроков и атакуем
+    // Берём первого видимого живого игрока как цель атаки.
     Critter[] playerCritters = raider.GetCritters(CritterSeeType::WhoISee, CritterFindType::NonDeadPlayers);
     if (!playerCritters.isEmpty()) {
         NpcPlanes::AddAttackPlane(raider, 0, playerCritters[0]);
     }
 }
 
+// Смерть рейдера: уменьшаем общий счётчик живых рейдеров.
 [[Event]]
 void RaiderDead(Critter raider, Critter player)
 {
     Game.ArroyoRaidersCount = Game.ArroyoRaidersCount - 1;
 }
 
+// Тревога по сообщению от союзника: свободный рейдер подхватывает указанную цель в атаку.
 [[Event]]
 void RaiderAlarm(Critter raider, Critter fromCrit, int message, any value)
 {
+    // Реагируем только на чужое сообщение и только если сами свободны (нет планов).
     if (raider.Id != fromCrit.Id && NpcPlanes::IsNoPlanes(raider)) {
         Critter? target = Game.GetCritter(value);
         if (target == null) {

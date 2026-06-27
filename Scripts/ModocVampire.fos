@@ -1,10 +1,13 @@
+// ModocVampire — серверная логика квеста "Ночь нежна": выяснить, почему слабеют брамины
+// на одной из ферм Модока, и при желании вылечить виновного вампира.
+// SERVER: создание квестовой локации фермы, ночной триггер на карте, спавн говорящей
+//   летучей мыши-проводника, поведение вампира и попытка его излечения через диалог.
+// Связи: Location/Entrance/NpcPlanes/CritterState/Messaging-хелперы; статус квеста
+//   хранится в свойстве криттера ModJoeVampire; диалоги и текст-пак Text управляют репликами.
 namespace ModocVampire
 {
 
 #if SERVER
-
-// Author: rifleman17
-// Квест "Ночь нежна" - выяснить, почему ослабли коровы на одной из ферм модока.
 
 ///@ Property Critter Server int32 ModVampireFarmLocation Mutable Persistent
 
@@ -26,7 +29,8 @@ const int STR_DONT_SHOOT = 5972;   // Не стреляй, давай погов
 const int FD_CURE_SUCCESS = 16;    // Успех при попытке исцелить вампира
 const int FD_CURE_FAIL = 17;       // Провала при попытке исцелить вампира
 
-// Отображение локации "Ферма с вампиром" для игрока.
+// Открывает игроку квестовую локацию фермы на глобальной карте и привязывает её к нему как
+// к квестодателю; локация самоудаляется через 2 игровых дня, если игрок до неё не доберётся.
 [[DialogResult]]
 void ShowVampireFarm(Critter player, Critter npc)
 {
@@ -42,18 +46,20 @@ void ShowVampireFarm(Critter player, Critter npc)
     }
 }
 
-// Скрипт для карты ферма с вампиром
+// Инициализация карты фермы: при выгрузке карты проверяем прогресс квестодателя.
 void VampireFarmInit(Map map, bool firstTime)
 {
     map.OnFinish.Subscribe(VampireFarmFinish);
 }
 
+// Если игрок покинул ферму, не продвинувшись по квесту, откатываем статус, чтобы
+// квест можно было пройти заново при следующем визите.
 [[Event]]
 void VampireFarmFinish(Map map)
 {
     Location loc = map.GetLocation();
 
-    // Игрок не посетил ферму, либо не дошел до нужной точки статус квеста должен быть сброшен в ноль
+    // Квестодатель не задан — на ферму так и не зашли, сбрасывать нечего.
     if (loc.LocModVampireFarmQuesterId == ZERO_IDENT) {
         return;
     }
@@ -144,9 +150,13 @@ void BatInit(Critter cr, bool firstTime)
     cr.StartTimeEvent(Time::Asap(), Time::Seconds(1), BatIdle); // Удаление вампира сразу, как дойдет до нужной точки
 }
 
-[[TimeEvent]]
+[[TimeEvent]] [[Async]]
 void BatIdle(Critter cr)
 {
+    if (!Sync::LockCritterWithMap(cr)) {
+        return;
+    }
+
     Game.DestroyCritter(cr);
 }
 

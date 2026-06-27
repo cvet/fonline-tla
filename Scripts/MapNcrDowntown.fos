@@ -1,27 +1,43 @@
-namespace MapNcrDowntown // Sort 2
+// MapNcrDowntown — серверная инициализация карты центра NCR: осада города и суточный цикл силового поля.
+// Обязанности: при первом запуске объявляет событие осады (NcrSiege); планирует ежедневные тайм-события,
+//   которые отключают силовое поле утром и включают вечером (через EnergyBarier), и сразу включает поле,
+//   если карта стартует в ночное время.
+// Сторона: SERVER.
+// Связи: NcrSiege (осада), EnergyBarier (управление силовым полем), GameTime (расчёт ближайшего времени суток).
+// Комментарий "Sort 2" задаёт порядок инициализации карты — не трогать.
+namespace MapNcrDowntown
 {
 
 #if SERVER
 
+// Стартовая инициализация карты: единоразовое объявление осады и настройка суточного цикла силового поля.
 void MapInit(Map downtown, bool firstTime)
 {
+    // Осаду объявляем только при самом первом создании карты.
     if (firstTime) {
         NcrSiege::DeclareSiegeEvent(downtown);
     }
 
     int year = 0, month = 0, day = 0, hour = 0, minute = 0, second = 0, milisecond = 0;
+
+    // Параметры для тайм-событий силового поля: маркер и идентификатор локации.
     any[] values = {};
     values.insertLast(any(1));
     Location loc = downtown.GetLocation();
     values.insertLast(any(loc.Id));
+
+    // Заводим суточный цикл: отключение поля к 06:00 и включение к 20:00 (старт от ближайшего такого времени суток).
     Game.StartTimeEvent((GameTime::GetNearSynchronizedTime(0, 0, 0, 6, 0, 0) - Game.SynchronizedTime), RepeatableDisableForceField, values);
     Game.StartTimeEvent((GameTime::GetNearSynchronizedTime(0, 0, 0, 20, 0, 0) - Game.SynchronizedTime), RepeatableEnableForceField, values);
+
+    // Если карта стартует ночью — сразу включаем силовое поле, не дожидаясь вечернего тайм-события.
     Game.UnpackSynchronizedTime(Game.SynchronizedTime, year, month, day, hour, minute, second, milisecond);
     if (hour >= 20 || hour < 5) {
         Game.StartTimeEvent(ZERO_TIMESPAN, EnergyBarier::EnableForceField, values);
     }
 }
 
+// Утреннее звено суточного цикла: отключает силовое поле и перепланирует себя на следующие сутки.
 [[TimeEvent]]
 void RepeatableDisableForceField(any[] values)
 {
@@ -29,6 +45,7 @@ void RepeatableDisableForceField(any[] values)
     Game.StartTimeEvent(Time::GameDays(1), RepeatableDisableForceField, values);
 }
 
+// Вечернее звено суточного цикла: включает силовое поле и перепланирует себя на следующие сутки.
 [[TimeEvent]]
 void RepeatableEnableForceField(any[] values)
 {

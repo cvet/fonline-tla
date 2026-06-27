@@ -1,12 +1,18 @@
+// Barter — серверный обмен предметами игрока с НПЦ-торговцем.
+// Ключевые обязанности: старт/refresh/close окна бартера, полная валидация оффера,
+// расчёт sell/buy цены с barter_k, события OnItemCheckMove/OnItemsBarter, перемещение предметов.
+// Сторона: SERVER. Связи: Messaging, MsgStr, Parameters, ItemMovement, TransferTypes, Settings.Dialog.
 namespace Barter
 {
 
 #if SERVER
 
+// Открывает окно бартера: помечает контейнер-трейдера и шлёт игроку его инвентарь.
 void StartNpcBarter(Critter playerCr, Critter trader)
 {
     if (trader.IsNoBarter) {
         Messaging::Info(playerCr, TextPackKey(TextPackName::Game, "" + (MsgStr::StrBarterNoBarterMode)));
+        // TODO: перевести уведомление в реплику НПЦ (breadcrumb миграции SayMsg)
         // Todo: playerCr.SayMsg(SAY_DIALOG, TextPackName::Game, MsgStr::StrBarterNoBarterMode);
         return;
     }
@@ -17,6 +23,7 @@ void StartNpcBarter(Critter playerCr, Critter trader)
     playerCr.SendItems(items);
 }
 
+// Повторно шлёт инвентарь трейдера, чтобы окно бартера отрисовало актуальное состояние после сделки.
 void RefreshBarter(Critter playerCr, Critter trader)
 {
     Item[] items = trader.GetItems(ItemProperty::CritterSlot, CritterItemSlot::Inventory);
@@ -25,6 +32,7 @@ void RefreshBarter(Critter playerCr, Critter trader)
     playerCr.SendItems(items, false, false, 42);
 }
 
+// Закрывает окно бартера у игрока: сбрасывает тип передачи и контейнер.
 void SendBarterClose(Critter playerCr)
 {
     Item[]? items = null;
@@ -33,20 +41,27 @@ void SendBarterClose(Critter playerCr)
     playerCr.SendItems(items);
 }
 
+// Обрабатывает оффер бартера от игрока к НПЦ: валидирует входные данные и состояние сторон,
+// считает суммарную стоимость продажи/покупки с учётом barter_k и, если сделка выгодна НПЦ,
+// перемещает предметы и обновляет окно. На любой ошибке валидации закрывает бартер.
 void ProcessBarterNpcOffer(Critter playerCr, ident[] saleItemsIds, int[] saleItemsCount, ident[] buyItemsIds, int[] buyItemsCount)
 {
+    // Списки id и количеств должны совпадать по длине — иначе оффер сформирован неверно.
     if (saleItemsIds.length() != saleItemsCount.length() || buyItemsIds.length() != buyItemsCount.length()) {
         Game.Log("Wrong barter data. player " + playerCr.Id);
         SendBarterClose(playerCr);
         return;
     }
 
+    // Продажа без предметов — бессмысленный оффер.
     if (saleItemsIds.length() == 0) {
         Messaging::Info(playerCr, TextPackKey(TextPackName::Game, "" + (MsgStr::StrBarterBadOffer)));
+        // TODO: перевести уведомление в реплику НПЦ (breadcrumb миграции SayMsg)
         // Todo: playerCr.SayMsg(SAY_DIALOG, TextPackName::Game, MsgStr::StrBarterBadOffer);
         return;
     }
 
+    // Контейнер-трейдер должен быть задан стартом бартера; иначе оффер не привязан к НПЦ.
     if (playerCr.TransferContainerId == ZERO_IDENT) {
         Game.Log("Npc trader id invalid. Offer from player " + playerCr.Id);
         SendBarterClose(playerCr);
@@ -59,6 +74,7 @@ void ProcessBarterNpcOffer(Critter playerCr, ident[] saleItemsIds, int[] saleIte
         return;
     }
 
+    // Сужаем nullable-результат: трейдер мог исчезнуть между стартом и оффером.
     Critter? npcCr = Game.GetCritter(playerCr.TransferContainerId);
 
     if (npcCr == null) {
@@ -73,6 +89,7 @@ void ProcessBarterNpcOffer(Critter playerCr, ident[] saleItemsIds, int[] saleIte
         return;
     }
 
+    // Бартер допустим только в локации: игрок и НПЦ должны быть на одной карте рядом.
     Map? mapPlayer = playerCr.GetMap();
 
     if (mapPlayer == null) {
@@ -96,6 +113,7 @@ void ProcessBarterNpcOffer(Critter playerCr, ident[] saleItemsIds, int[] saleIte
         return;
     }
 
+    // Дистанция бартера ограничена тем же радиусом, что и разговор.
     int dist = Game.GetDistance(playerCr.Hex, npcCr.Hex);
 
     if (dist > Settings.Dialog.TalkDistance) {
@@ -104,6 +122,7 @@ void ProcessBarterNpcOffer(Critter playerCr, ident[] saleItemsIds, int[] saleIte
         return;
     }
 
+    // Коэффициент бартера — разница навыков НПЦ и игрока, зажатая в [5, 95] процентов.
     int barter_k = Parameters::CritterGetBarterCoefficientImpl(npcCr) - Parameters::CritterGetBarterCoefficientImpl(playerCr);
     barter_k = Math::Clamp(barter_k, 5, 95);
 
@@ -112,6 +131,7 @@ void ProcessBarterNpcOffer(Critter playerCr, ident[] saleItemsIds, int[] saleIte
     int sell_cost = 0;
     int buy_cost = 0;
 
+    // Предметы на продажу: валидируем каждый предмет игрока и копим суммарную стоимость продажи.
     for (int i = 0; i < saleItemsIds.length(); i++) {
         Item? item = playerCr.GetItem(saleItemsIds[i]);
         int itemCount = saleItemsCount[i];
@@ -147,6 +167,7 @@ void ProcessBarterNpcOffer(Critter playerCr, ident[] saleItemsIds, int[] saleIte
         itemsSell.insertLast(item);
     }
 
+    // Предметы на покупку: валидируем каждый предмет НПЦ и копим суммарную стоимость покупки.
     for (int i = 0; i < buyItemsIds.length(); i++) {
         Item? item = npcCr.GetItem(buyItemsIds[i]);
         int itemCount = buyItemsCount[i];
@@ -184,19 +205,24 @@ void ProcessBarterNpcOffer(Critter playerCr, ident[] saleItemsIds, int[] saleIte
 
     Game.Log("Total SellCost = " + sell_cost + "; buy_cort" + buy_cost + "; koef = " + barter_k);
 
+    // Сделка проходит, только если игрок отдаёт не меньше, чем берёт, и продажа непустая.
     if (buy_cost > sell_cost || sell_cost == 0) {
         Game.Log("Barter offer error sell < buy. PlayerId:" + playerCr.Id + "; npcid = " + npcCr.Id);
         Messaging::Info(playerCr, TextPackKey(TextPackName::Game, "" + (MsgStr::StrBarterBadOffer)));
+        // TODO: перевести уведомление в реплику НПЦ (breadcrumb миграции SayMsg)
         // Todo: playerCr.SayMsg(SAY_DIALOG, TextPackName::Game, MsgStr::StrBarterBadOffer);
         return;
     }
 
+    // Последний гард-событие перед фактическим обменом — скрипты могут отменить сделку.
     if ((Game.OnItemsBarter.Fire(itemsSell, saleItemsCount, itemsBuy, buyItemsCount, playerCr, npcCr) == EventResult::StopChain)) {
         Messaging::Info(playerCr, TextPackKey(TextPackName::Game, "" + (MsgStr::StrBarterBadOffer)));
+        // TODO: перевести уведомление в реплику НПЦ (breadcrumb миграции SayMsg)
         // Todo: playerCr.SayMsg(SAY_DIALOG, TextPackName::Game, MsgStr::StrBarterBadOffer);
         return;
     }
 
+    // Все проверки пройдены — переносим предметы игрока к НПЦ и обратно.
     for (int i = 0; i < itemsSell.length(); i++) {
         ItemMovement::MoveItem(itemsSell[i], saleItemsCount[i], npcCr);
     }
@@ -206,6 +232,7 @@ void ProcessBarterNpcOffer(Critter playerCr, ident[] saleItemsIds, int[] saleIte
     }
 
     Messaging::Info(playerCr, TextPackKey(TextPackName::Game, "" + (MsgStr::StrBarterGoodOffer)));
+    // TODO: перевести уведомление в реплику НПЦ (breadcrumb миграции SayMsg)
     // Todo: playerCr.SayMsg(SAY_DIALOG, TextPackName::Game, MsgStr::StrBarterGoodOffer);
     RefreshBarter(playerCr, npcCr);
 }

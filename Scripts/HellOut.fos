@@ -1,3 +1,8 @@
+// HellOut — настройка и поведение охраны, турелей и усиленных гражданских локации "Ад".
+// SERVER: задаёт боевые параметры разных типов НПЦ, подписывает их на события охраны
+// и реагирует на запрещённые предметы (взрывчатка, мины) — провоцируя атаку нарушителя.
+// Большая часть логики делегируется в GuardLib::CGuardsManager; этот модуль лишь
+// настраивает конкретные профили НПЦ и специфику локации.
 namespace HellOut
 {
 
@@ -11,11 +16,12 @@ class CGuardsManagerForHell : GuardLib::CGuardsManager
     CGuardsManagerForHell()
     {
         super();
+        // след миграции: диалог охраны Ада пока не привязан
         // Dialog = Content::Dialog::hell_guard;
     }
 };
 
-// класс с алгоритмом
+// Единый экземпляр менеджера охраны с алгоритмом для локации
 CGuardsManagerForHell Grd = CGuardsManagerForHell();
 
 bool GuardItemTest(Item item)
@@ -23,7 +29,7 @@ bool GuardItemTest(Item item)
     return Grd.GuardItemTest(item);
 }
 
-// Функция для универсальных охранников:
+// Профили боевых НПЦ для локации: задают характеристики и подписки на события.
 
 void GuardInit1(Critter cr, bool firstTime) // Охрана поверхности Ада. "1" потому, что просто Init уже есть в GuardLib.
 {
@@ -44,8 +50,8 @@ void GuardInit1(Critter cr, bool firstTime) // Охрана поверхност
     fp.SetOnAttackedEvents(cr);
     cr.FighterPatternCanGenStim = 1000; // число стимпаков
 
-    // Выше - всё из fighter pattern.
-    // Ниже - из библиотеки охраны, только npc заменён на cr.
+    // Выше — всё из fighter pattern.
+    // Ниже — из библиотеки охраны, только npc заменён на cr.
 
     cr.OnCritterAppeared.Subscribe(GuardOnAddCritter);
     cr.OnCritterDisappeared.Subscribe(GuardOnRemoveCritter);
@@ -104,6 +110,8 @@ void GuardInit2(Critter cr, bool firstTime) // Охрана репликацио
     }
 }
 
+// Реакция охраны на сигнал "у игрока запрещённые предметы": заводим план атаки
+// и иногда выкрикиваем предупреждение нарушителю.
 [[Event]]
 void GuardMessage(Critter cr, Critter fromCr, int message, any value)
 {
@@ -131,6 +139,8 @@ void GuardSmthStealing(Critter guard, Critter fromCr, Critter thief, bool succes
     }
 }
 
+// Атакуем за выброс активной взрывчатки рядом с охраной; запрещённые предметы
+// охранник дополнительно пытается подобрать.
 [[Event]]
 void GuardSmthDropItem(Critter npc, Critter fromCr, Item item)
 {
@@ -152,6 +162,7 @@ void GuardSmthDropItem(Critter npc, Critter fromCr, Item item)
     NpcPlanes::AddPickPlane(npc, NpcPlanes::AI_PLANE_ATTACK_PRIORITY, item, ZERO_IDENT, true);
 }
 
+// Атакуем за попытку применить взрывчатку/детонаторы на территории охраны.
 [[Event]]
 void GuardSmthUseItem(Critter npc, Critter whoUse, Item item, Critter onCritter, Item onItem, StaticItem onScenery, int param)
 {
@@ -163,7 +174,7 @@ void GuardSmthUseItem(Critter npc, Critter whoUse, Item item, Critter onCritter,
     }
 }
 
-// Illegal items list and checks
+// Список запрещённых на локации предметов и проверки на них
 
 const hstring[] Pids_IllegalItems = {Content::Item::active_dynamite,
                                      Content::Item::active_plastic_explosive,
@@ -191,8 +202,7 @@ bool CheckItemIsIllegal(Item? item)
     return Pids_IllegalItems.clone().find(item.ProtoId) != -1;
 }
 
-// Аналогичное для турелей, но они не кричат:
-
+// Профиль турели: настройка как у охраны, но без выкриков предупреждений.
 void TurretInit(Critter cr, bool firstTime)
 {
     cr.BonusLook = 30;
@@ -206,8 +216,8 @@ void TurretInit(Critter cr, bool firstTime)
     fp.MustHealLvl = 60;   // процент здоровья, при котором нпц начнет лечиться
     fp.ForceCritterArmour(cr);
     fp.SetOnAttackedEvents(cr);
-    // Выше - всё из fighter pattern.
-    // Ниже - из библиотеки охраны, только npc заменён на cr.
+    // Выше — всё из fighter pattern.
+    // Ниже — из библиотеки охраны, только npc заменён на cr.
 
     cr.OnCritterAppeared.Subscribe(GuardOnAddCritter);
     cr.OnCritterDisappeared.Subscribe(GuardOnRemoveCritter);
@@ -229,8 +239,7 @@ void TurretSmthAttack(Critter turret, Critter attacker, Critter target, Item wea
     }
 }
 
-// Усиление для гражданских
-
+// Усиленный профиль для мирных НПЦ: боевые характеристики без полного набора подписок охраны.
 void PowerInit(Critter cr, bool firstTime)
 {
     cr.BonusLook = 30;
@@ -249,12 +258,12 @@ void PowerInit(Critter cr, bool firstTime)
     cr.FighterPatternCanGenStim = 1000; // число стимпаков
 }
 
-// Наследование GuardLib
+// Базовая охрана на основе GuardLib: проксирует все события охраны в общий менеджер.
 
-// Инициализация нпц. происходит при вводе нпц в игру
+// Инициализация НПЦ происходит при вводе НПЦ в игру.
 void GuardInit(Critter npc, bool firstTime)
 {
-    // вешаем обработчики событий
+    // Подписываем НПЦ на обработчики событий охраны.
     npc.OnCritterAppeared.Subscribe(GuardOnAddCritter);
     npc.OnCritterDisappeared.Subscribe(GuardOnRemoveCritter);
     npc.OnNpcPlaneEnd.Subscribe(GuardEndPlane);
@@ -265,21 +274,26 @@ void GuardInit(Critter npc, bool firstTime)
     npc.OnSomeCritterAttack.Subscribe(GuardOnSmthAttack);
     npc.OnSomeCritterDropItem.Subscribe(GuardOnDropItem); // r17
 
-    // Создаем событие наблюдения
+    // Заводим периодическое событие наблюдения за обстановкой.
     if (not firstTime && npc.CountTimeEvent(Observing) == 0) {
         npc.StartTimeEvent(GuardLib::ObservationPeriod(), Observing);
     }
 }
 
-[[TimeEvent]]
+[[TimeEvent]] [[Async]]
 void Observing(Critter npc, TimeEventContext event)
 {
+    if (!Sync::LockCritterWithMap(npc)) {
+        return;
+    }
+
     timespan delayTicks = Grd.EventObserving(npc);
     if (delayTicks != ZERO_TIMESPAN) {
         event.Repeat(delayTicks);
     }
 }
 
+// Тонкие обёртки над событиями криттера: просто пробрасывают вызовы в менеджер охраны Grd.
 [[Event]]
 void GuardOnAddCritter(Critter crit, Critter showCrit)
 {

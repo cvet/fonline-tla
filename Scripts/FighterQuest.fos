@@ -1,10 +1,13 @@
+// FighterQuest — фреймворк поединков игрок-против-НПЦ (дуэли)
+// Обязанности: запуск/отмена боя, контроль порога HP, проверка безоружности, фиксация исхода в квест-переменной
+// Сторона: SERVER. Связи: NpcPlanes, CritterState, Messaging, MsgStr, EnemyStack, Tla
 namespace FighterQuest
 {
 
 #if SERVER
 
-// Специальный класс для реализации квестов на рукопашный или другой бой с НПЦ
-// только с одним игроком. Cмерть нпц засчитывается победой игрока
+// Класс реализует квесты на рукопашный (или иной) поединок НПЦ строго с одним игроком.
+// Смерть НПЦ засчитывается победой игрока.
 
 ///@ Property Critter Server int32 FighterQuestMinHp Mutable Persistent
 ///@ Property Critter Server uint8 FighterQuestOnlyHandCombat Mutable Persistent
@@ -23,17 +26,22 @@ const int STATUS_LOOSE = 1;       // Статус исхода поединка.
 const int STATUS_WIN = 2;         // Статус исхода поединка. Игрок победил, нпц жив
 const int STATUS_DEAD = 3;        // Статус исхода поединка. Игрок победил, нпц мертв
 
+// Отладочный лог поединка: тело пустое (отладка выключена).
+// Закомментированная форма ниже включает вывод в лог — оставлена как breadcrumb для отладки.
 // #define DebugLog#(s) (Game.Log(""+s))
 void DebugLog(string s)
 {
 }
 
+// Состояние одного поединка. Параметры боя хранятся в свойствах НПЦ (ToCritter/FromCritter),
+// сам объект — это удобная обёртка над ними плюс действия запуска/завершения боя.
 class FighterQuest
 {
     FighterQuest()
     {
     }
 
+    // Создание нового поединка: переносит параметры в свойства НПЦ и подписывает обработчики (ToCritter).
     FighterQuest(Critter npc, int newTeam, int minHp, bool handCombat, ident playerId, int priority, int varNum)
     {
         DebugLog("fq constructor called");
@@ -81,6 +89,7 @@ class FighterQuest
         DebugLog("fq to critter success");
     }
 
+    // Восстанавливает состояние поединка из свойств НПЦ (обратная операция к ToCritter).
     FighterQuest FromCritter(Critter cr)
     {
         MinHp = cr.FighterQuestMinHp;
@@ -94,6 +103,8 @@ class FighterQuest
         return this;
     }
 
+    // Завершает поединок: сбрасывает все боевые свойства НПЦ, снимает план атаки и подписки,
+    // лечит НПЦ до максимума и восстанавливает исходную команду.
     void CancelFigther()
     {
         DebugLog("fq cancel called");
@@ -102,6 +113,7 @@ class FighterQuest
             return;
         }
 
+        // Возвращаем исходную команду и обнуляем боевые свойства поединка.
         cr.TeamId = TeamIdOld;
         cr.FighterQuestMinHp = 0;
         cr.FighterQuestOnlyHandCombat = 0;
@@ -113,10 +125,12 @@ class FighterQuest
 
         NpcPlanes::EraseAttackPlane(cr, PlayerId);
 
+        // Отписываемся от боевых событий, чтобы НПЦ вышел из логики поединка.
         cr.OnAttacked.Unsubscribe(FighterAttacked);
         cr.OnAttack.Unsubscribe(FighterAttack);
         cr.OnDead.Unsubscribe(FighterDead);
 
+        // Снимаем повреждения частей тела и восстанавливаем HP/AP.
         cr.IsDamagedEye = false;
         cr.IsDamagedRightArm = false;
         cr.IsDamagedLeftArm = false;
@@ -126,6 +140,8 @@ class FighterQuest
         cr.CurrentAp = cr.ActionPoints * Tla::AP_DIVIDER;
     }
 
+    // Запускает поединок: переводит НПЦ в боевую команду, ставит план атаки на игрока
+    // и шлёт игроку сообщение о начале боя с подставленным именем НПЦ.
     void StartFight()
     {
         Critter? npc = Game.GetCritter(NpcId);
@@ -136,17 +152,19 @@ class FighterQuest
 
         npc.TeamId = TeamIdFight;
         NpcPlanes::AddAttackPlane(npc, FightPriority, player, MinHp);
+        // Имя НПЦ берём из текст-пака диалога, а если диалога нет — из имени прото-криттера.
         string lex;
         if (npc.DialogId == EMPTY_HSTRING) {
-            lex = "|npcname:@text Critters " + MsgStr::NpcProtoNameTextId(npc.ProtoId) + "@";
+            lex = "|npcname:" + MsgStr::NpcProtoNameTag(npc.ProtoId);
         }
         else {
-            lex = "|npcname:@text Dialogs " + MsgStr::NpcNameDlgTextId(npc.DialogId) + "@";
+            lex = "|npcname:" + MsgStr::NpcNameTag(npc.DialogId);
         }
 
         Messaging::Info(player, TextPackKey(TextPackName::Text, "" + (STR_FIGHT_BEGIN)), lex);
     }
 
+    // Исход: игрок победил, НПЦ убит. Пишет в квест-переменную STATUS_DEAD и завершает бой.
     void SetFighterDead()
     {
         if (PlayerId != ZERO_IDENT) {
@@ -160,6 +178,7 @@ class FighterQuest
         CancelFigther();
     }
 
+    // Исход: игрок победил, НПЦ жив. Пишет в квест-переменную STATUS_WIN и завершает бой.
     void SetPlayerWin()
     {
         if (PlayerId != ZERO_IDENT) {
@@ -167,10 +186,10 @@ class FighterQuest
             Critter? npc = Game.GetCritter(NpcId);
             if (npc != null) {
                 if (npc.DialogId == EMPTY_HSTRING) {
-                    lex = "|npcname:@text Critters " + MsgStr::NpcProtoNameTextId(npc.ProtoId) + "@";
+                    lex = "|npcname:" + MsgStr::NpcProtoNameTag(npc.ProtoId);
                 }
                 else {
-                    lex = "|npcname:@text Dialogs " + MsgStr::NpcNameDlgTextId(npc.DialogId) + "@";
+                    lex = "|npcname:" + MsgStr::NpcNameTag(npc.DialogId);
                 }
             }
 
@@ -180,6 +199,7 @@ class FighterQuest
                 CritterState::Wait(cr, 0);
 
                 Messaging::Info(cr, TextPackKey(TextPackName::Text, "" + (STR_FIGHT_WIN)), lex);
+                // Breadcrumb: прежний способ показа сообщения о победе через диалоговое окно (до миграции). Не удалять.
                 /*
                    //cr.ShowScreen( GuiScreen::DialogBox, 0, "None" );
                    cr.SayMsg( Tla::SayDialogboxText, TextPackName::Text, STR_FIGHT_WIN, lex );
@@ -190,6 +210,7 @@ class FighterQuest
         CancelFigther();
     }
 
+    // Исход: игрок проиграл. Пишет в квест-переменную STATUS_LOOSE и завершает бой.
     void SetPlayerLoose()
     {
         DebugLog("player loose called");
@@ -198,10 +219,10 @@ class FighterQuest
             Critter? npc = Game.GetCritter(NpcId);
             if (npc != null) {
                 if (npc.DialogId == EMPTY_HSTRING) {
-                    lex = "|npcname:@text Critters " + MsgStr::NpcProtoNameTextId(npc.ProtoId) + "@";
+                    lex = "|npcname:" + MsgStr::NpcProtoNameTag(npc.ProtoId);
                 }
                 else {
-                    lex = "|npcname:@text Dialogs " + MsgStr::NpcNameDlgTextId(npc.DialogId) + "@";
+                    lex = "|npcname:" + MsgStr::NpcNameTag(npc.DialogId);
                 }
             }
 
@@ -232,6 +253,7 @@ class FighterQuest
     }
 };
 
+// НПЦ атакует: после атаки откладываем проверку HP, чтобы решить исход поединка.
 [[Event]]
 EventResult FighterAttack(Critter cr, Critter target, Item weapon, int weaponMode, ProtoItem ammo)
 {
@@ -239,6 +261,7 @@ EventResult FighterAttack(Critter cr, Critter target, Item weapon, int weaponMod
     return EventResult::StopChain;
 }
 
+// НПЦ атакован: если игрок нарушил условие безоружного боя — он проигрывает, иначе откладываем проверку HP.
 [[Event]]
 EventResult FighterAttacked(Critter cr, Critter attacker)
 {
@@ -255,6 +278,7 @@ EventResult FighterAttacked(Critter cr, Critter attacker)
     return EventResult::StopChain;
 }
 
+// Проверка порога HP: если игрок упал ниже порога — он проиграл; если НПЦ ниже порога — игрок победил.
 [[TimeEvent]]
 void CheckHealth(any value)
 {
@@ -279,6 +303,7 @@ void CheckHealth(any value)
     }
 }
 
+// Смерть НПЦ: если убил тот самый игрок — это победа (НПЦ мёртв), иначе игроку засчитывается поражение.
 [[Event]]
 void FighterDead(Critter cr, Critter? killer)
 {
@@ -296,6 +321,8 @@ void FighterDead(Critter cr, Critter? killer)
     }
 }
 
+// Результат диалога: создаёт поединок из параметров диалога и запускает бой.
+// Порог HP считается как процент от текущего HP игрока и затем зажимается в допустимый диапазон.
 [[DialogResult]]
 void BeginFight(Critter player, Critter? npc, any newTeam, any hpPercent, any handCombat, any priority, any varNum)
 {
@@ -310,6 +337,7 @@ void BeginFight(Critter player, Critter? npc, any newTeam, any hpPercent, any ha
     fq.StartFight();
 }
 
+// Пустой обработчик-заглушка для диалогового окна (нужен как валидная цель колбэка).
 void None(Critter player, int answerI, string answerS)
 {
     // заглушка для диалогового окна

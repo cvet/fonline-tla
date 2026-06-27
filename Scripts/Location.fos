@@ -1,28 +1,39 @@
+// Location — управление локациями глобальной карты: создание, сборка мусора и видимость для игроков.
+// Ключевые обязанности: создание локаций (в т.ч. персональных, привязанных к криттеру),
+//   автоматическое удаление пустых локаций (garbager), список известных криттеру локаций,
+//   геометрические выборки локаций по радиусу/зоне глобальной карты.
+// Сторона исполнения: только SERVER (весь модуль под единым #if SERVER).
+// Связи: вызывается из GlobalMapLocations (валидация известных локаций) и Worldmap;
+//   опирается на хелперы CritterState/CritterActionAnim для оформления мёртвого криттера.
 namespace Location
 {
 
 #if SERVER
 
+// Property-декларации модуля: набор карт локации, лимит игроков, флаги автоудаления и GECK.
 ///@ Property Location Server hstring[] MapProtos
 ///@ Property Location Server int32 MaxPlayers Mutable Persistent
 ///@ Property Location Server bool AutoGarbage Mutable Persistent
-///@ Property Location Server bool GeckVisible Mutable Persistent // Todo: improve GeckVisible mechanics
+///@ Property Location Server bool GeckVisible Mutable Persistent // Todo: доработать механику GeckVisible
 ///@ Property Location Server hstring[] Automaps Mutable Persistent
 ///@ Property Critter Server bool IsGeck Mutable Persistent
 ///@ Property Item Server bool IsGeck Mutable Persistent
 
+// Точка входа модуля: подписка на инициализацию локации.
 [[ModuleInit]]
 void InitLocation()
 {
     Game.OnLocationInit.Subscribe(OnLocationInit);
 }
 
+// При инициализации локации запускаем периодическую проверку на автоудаление.
 [[Event]]
 void OnLocationInit(Location loc, bool firstTime)
 {
     Game.StartTimeEvent(Time::Seconds(1), LocationGarbager, loc.Id);
 }
 
+// Создаёт локацию по прототипу в указанной точке мира; опционально делает её известной криттерам.
 Location CreateLocation(hstring protoId, ipos wpos, Critter[]? critters = null, dict<LocationProperty, any>? props = null)
 {
     ProtoLocation proto = Game.GetProtoLocation(protoId);
@@ -41,6 +52,7 @@ Location CreateLocation(hstring protoId, ipos wpos, Critter[]? critters = null, 
     return loc;
 }
 
+// Периодический сборщик мусора: удаляет пустую локацию или перезапускает проверку.
 [[TimeEvent]]
 void LocationGarbager(any locId)
 {
@@ -57,6 +69,7 @@ void LocationGarbager(any locId)
     }
 }
 
+// Локация считается мусором, только если все её карты пусты (нет игроков и «домашних» NPC/GECK).
 bool CheckLocationForGarbage(Location loc)
 {
     for (int i = 0; i < loc.GetMapCount(); i++) {
@@ -66,7 +79,8 @@ bool CheckLocationForGarbage(Location loc)
             return false;
         }
 
-        // Todo: improve Item::IsGeck for map
+        // Todo: доработать Item::IsGeck для карты
+        // breadcrumb: проверка GECK-предмета на самой карте отключена до доработки Item::IsGeck
         //if (map.GetItem(ItemProperty::IsGeck, 1) != null) {
         //    return false;
         //}
@@ -75,6 +89,7 @@ bool CheckLocationForGarbage(Location loc)
     return true;
 }
 
+// Карта считается пустой, если на ней нет игроков и нет NPC, которых нельзя удалять (GECK/привязка к дому/GECK-предмет).
 bool CheckMapForGarbage(Map map)
 {
     Critter[] playerCritters = map.GetCritters(CritterFindType::Players);
@@ -172,15 +187,16 @@ void UnsetKnownLoc(Critter cr, hstring locPid)
     UnsetKnownLoc(cr, Game.GetLocation(locPid));
 }
 
-// Локация, которая автоматически удаляется через определенное время.
-// Установка даты удаления локации в переменную. Внимание, одной установки переменной недостаточно для удаления локации.
-// Location - локация, для которой назначается переменная
-// time - игровое время в секундах,
+// Запускает отложенное удаление локации через заданное время.
+// Внимание: само по себе это лишь включает AutoGarbage по таймеру — фактически удалит локацию сборщик мусора (LocationGarbager), когда она опустеет.
+// loc  - локация, для которой назначается отложенное удаление
+// time - задержка перед включением автоудаления
 void SetLocationDeleteTime(Location loc, timespan time)
 {
     Game.StartTimeEvent(time, DeferredDestroyLocation, loc.Id); //SavedDeferredCall
 }
 
+// Отложенный колбэк: помечает локацию под автоудаление (если она ещё существует).
 [[TimeEvent]]
 void DeferredDestroyLocation(any value)
 {
@@ -190,12 +206,12 @@ void DeferredDestroyLocation(any value)
     }
 }
 
-// Создание видимой для игрока локации и запоминание ее Id  в переменную, если номер переменной > 0.
-// player - персонаж, для которого будет сохранена локация
-// locPid - код прототипа локации
+// Создаёт видимую для игрока локацию и (если номер переменной > 0) запоминает её Id в свойстве криттера.
+// player        - персонаж, которому локация станет известна
+// locPid        - код прототипа локации
 // worldX, worldY - координаты локации на глобальной карте
-// delta - максимальное смещение локации относительно указанных координат
-// varNum - номер переменной игрока в которую сохраняется код Id локации
+// delta         - максимальное случайное смещение локации относительно указанных координат
+// varNum        - номер свойства игрока, в которое сохраняется Id локации
 Location? CreateLocationForCritter(Critter player, hstring locPid, int worldX, int worldY, int delta, int varNum)
 {
     Location loc = Location::CreateLocation(locPid, ipos(worldX + Game.Random(-1 * delta, delta), worldY + Game.Random(-1 * delta, delta)), null);
@@ -208,6 +224,7 @@ Location? CreateLocationForCritter(Critter player, hstring locPid, int worldX, i
     return loc;
 }
 
+// Проверяет, не превысит ли вход новых игроков лимит MaxPlayers по сумме всех карт локации.
 bool IsCanEnter(Location loc, int playersCount)
 {
     if (loc.MaxPlayers != 0) {
@@ -222,12 +239,14 @@ bool IsCanEnter(Location loc, int playersCount)
     return true;
 }
 
+// Инициализация криттера, который должен сразу появиться мёртвым (труп-декорация).
 void DeadInit(Critter cr, bool firstTime)
 {
     CritterState::ToDead(cr, CritterActionAnim::DeadFront, null);
     cr.ReplicationTime = -1;
 }
 
+// Чистит список известных локаций криттера от ссылок на уже удалённые локации.
 void ValidateKnownLocations(Critter cr)
 {
     ident[] knownLocs = cr.KnownLocations.clone();
@@ -240,6 +259,7 @@ void ValidateKnownLocations(Critter cr)
     cr.KnownLocations = knownLocs;
 }
 
+// Возвращает все локации, чьи области (радиус локации + radius) пересекают точку на глобальной карте.
 Location[] GetLocationsInRadius(ipos wpos, int radius)
 {
     Location[] result = {};
@@ -256,6 +276,7 @@ Location[] GetLocationsInRadius(ipos wpos, int radius)
     return result;
 }
 
+// То же, что GetLocationsInRadius, но возвращает только не скрытые и уже известные данному криттеру локации.
 Location[] GetVisibleLocations(ipos wpos, int radius, Critter cr)
 {
     Location[] result = {};
@@ -275,6 +296,7 @@ Location[] GetVisibleLocations(ipos wpos, int radius, Critter cr)
     return result;
 }
 
+// Возвращает не скрытые локации, попадающие в зону глобальной карты (zx, zy) с запасом в zoneRadius зон.
 Location[] GetZoneLocations(int zx, int zy, int zoneRadius)
 {
     Location[] result = {};
@@ -293,6 +315,7 @@ Location[] GetZoneLocations(int zx, int zy, int zoneRadius)
     return result;
 }
 
+// Проверяет пересечение двух прямоугольных областей в координатах зон глобальной карты (с расширением на zones зон).
 bool IsIntersectZone(int wx1, int wy1, int w1Radius, int wx2, int wy2, int w2Radius, int zones)
 {
     int z = Settings.GlobalMap.GlobalMapZoneLength;

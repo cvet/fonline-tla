@@ -1,12 +1,15 @@
+// JsonTokenizer — лексер JSON: разбивает исходный текст на поток токенов.
+// Отвечает за нижний уровень JSON-парсинга: распознаёт структурные символы,
+// строки, числа и литералы true/false/null, выдавая массив Token для
+// последующего разбора.
+// COMMON: вспомогательный модуль JSON-подсистемы, работает поверх посимвольных
+// хелперов из модуля Json (Json::GetChar / Json::AppendChar и т. п.).
+
 namespace JsonTokenizer
 {
 
-/******************************************************************************
- *                                                                            *
- *  TOKENIZER                                                                 *
- *  Takes a JSON text and produces an array of JSON tokens.                   *
- *                                                                            *
- ******************************************************************************/
+// Разбор чисел и строк ведём посимвольно через offset; границы текста и тип
+// токена (целое/дробное) определяются по ходу чтения.
 
 enum TokenType
 {
@@ -24,6 +27,7 @@ enum TokenType
     INTEGER = 'I'
 }
 
+// Один токен потока: тип, текстовое значение и позиция в исходнике (row/col).
 class Token
 {
     TokenType type;
@@ -38,6 +42,7 @@ class Token
         this.value = value;
     }
 
+    // Человекочитаемое имя типа токена — для сообщений об ошибках разбора.
     string name()
     {
         switch (this.type) {
@@ -70,8 +75,8 @@ class Token
     }
 }
 
-
-//  Returns true if reached end of text
+// Дописывает символ к текущему токену и сдвигает offset.
+// Возвращает true, если достигнут конец текста.
 bool growToken( string& tokenValue, int& tokenLength, int& offset, int length, uint8 character )
 {
     tokenLength++;
@@ -80,6 +85,9 @@ bool growToken( string& tokenValue, int& tokenLength, int& offset, int length, u
     return offset >= length;
 }
 
+// Читает число по грамматике JSON: знак, целая часть, дробная часть и
+// экспонента. Тип уточняется до NUMBER, как только встречается точка или
+// экспонента (иначе остаётся INTEGER).
 bool eatNumberToken(const string& text, int& offset, int length, array<Token> tokens)
 {
     string tokenValue = "";
@@ -175,6 +183,8 @@ bool eatNumberToken(const string& text, int& offset, int length, array<Token> to
     return true;
 }
 
+// Читает строковый токен в кавычках, разворачивая escape-последовательности
+// (\", \\, \/, \b, \f, \n, \r, \t) в соответствующие символы.
 bool eatStringToken(const string& text, int& offset, int length, array<Token> tokens)
 {
     string tokenValue = "";
@@ -182,13 +192,13 @@ bool eatStringToken(const string& text, int& offset, int length, array<Token> to
     offset++;
 
     while (offset < length) {
-        if (Json::GetChar(text, offset) == '"') // end of string
+        if (Json::GetChar(text, offset) == '"') // конец строки
         {
             tokens.insertLast(Token(TokenType::STRING, tokenValue));
             offset++;
             return true;
         }
-        else if (Json::GetChar(text, offset) == 92) // escape sequence
+        else if (Json::GetChar(text, offset) == 92) // escape-последовательность
         {
             offset++;
             if (offset >= length) {
@@ -216,7 +226,7 @@ bool eatStringToken(const string& text, int& offset, int length, array<Token> to
             case 't':
                 growToken(tokenValue, tokenLength, offset, length, 9);
                 break;
-            case 'u': // TODO: implement unicode sequence
+            case 'u': // TODO: реализовать unicode-последовательность
                 offset += 5;
                 if (offset >= length) {
                     return false;
@@ -231,6 +241,8 @@ bool eatStringToken(const string& text, int& offset, int length, array<Token> to
     return false;
 }
 
+// Проверяет, что начиная с offset идёт точное слово-литерал (true/false/null),
+// и добавляет соответствующий токен. Тип берётся по первому символу литерала.
 bool eatLiteralToken(const string& text, int& offset, string match, array<Token> tokens)
 {
     int tokenLength = Json::GetCharLength(match);
@@ -250,12 +262,16 @@ bool eatLiteralToken(const string& text, int& offset, string match, array<Token>
     return true;
 }
 
+// Добавляет одиночный структурный токен (скобки, запятая, двоеточие); тип
+// совпадает с кодом символа.
 void eatStructuralToken(const string& text, int& offset, array<Token> tokens)
 {
     tokens.insertLast(Token(TokenType(Json::GetChar(text, offset)), ""));
     offset++;
 }
 
+// Пропускает подряд идущие пробельные символы (таб, перевод строки, возврат
+// каретки, пробел).
 void eatWhitespace(const string& text, int& offset, int length)
 {
     offset++;
@@ -273,13 +289,15 @@ void eatWhitespace(const string& text, int& offset, int length)
     }
 }
 
+// Главный цикл лексера: проходит текст и направляет каждый символ в нужный
+// обработчик. Возвращает false при некорректном символе или незавершённом токене.
 bool tokenize(const string& text, array<Token> tokens)
 {
     int length = Json::GetCharLength(text);
     int offset = 0;
     uint8 symbol;
 
-    // Skip UTF-8 BOM
+    // Пропускаем UTF-8 BOM
     if (length > 2) {
         if (Json::GetChar(text, 0) == 239 && Json::GetChar(text, 1) == 187 && Json::GetChar(text, 2) == 191) {
             offset += 3;

@@ -1,17 +1,22 @@
-namespace Geiger // Sort 2
+// Geiger — счётчик Гейгера: измерение уровня радиации и расход зарядов прибора.
+// Ключевые обязанности: включение/выключение измерения по таймеру, замер радиации
+// у носителя или у криттеров в радиусе вокруг предмета на земле, подзарядка прибора
+// энергоячейками и вывод текущего заряда по навыку.
+// Сторона исполнения: SERVER.
+// Связи: Messaging (сообщения игроку), Effects (звук), MapText (плавающий текст на карте),
+// Content::Item (прото-id энергоячеек), таймерные события движка.
+namespace Geiger
 {
 
 #if SERVER
-
-// Geiger counter
 
 ///@ Property Item Server bool GeigerEnabled Mutable Persistent
 ///@ Property Item Server int32 GeigerCapacity Mutable Persistent
 ///@ Property Item Server int32 GeigerTimeEvent Mutable Persistent
 
 const int GEIGER_MAX_CAPACITY = 100;
-const timespan GEIGER_DURATION = Time::Seconds(5); // 5 real seconds
-const int GEIGER_HEX_RANGE = 20;                   // Range of critters collect
+const timespan GEIGER_DURATION = Time::Seconds(5); // 5 реальных секунд между замерами
+const int GEIGER_HEX_RANGE = 20;                   // радиус сбора криттеров для оценки радиации
 const int GEIGER_ENERGY_CHARGE = 10;
 const int GEIGER_FUSION_CHARGE = 50;
 
@@ -24,6 +29,8 @@ const int STR_GEIGER_NOTHING = 10355;
 const int STR_GEIGER_ADD_CHARGE = 10356;
 const int STR_GEIGER_CUR_CHARGE = 10357;
 
+// Переключатель прибора: если включён — выключает и снимает таймер; если выключен —
+// делает первый замер, тратит заряд и запускает периодический опрос по таймеру.
 bool UseGeiger(Critter cr, Item geiger)
 {
     if (geiger.GeigerEnabled) {
@@ -48,7 +55,7 @@ bool UseGeiger(Critter cr, Item geiger)
             Messaging::Info(cr, TextPackKey(TextPackName::Game, "" + (STR_GEIGER_NO_CHARGES)));
         }
         else {
-            // Turn on and loop
+            // включаем прибор и запускаем периодический замер по таймеру
             geiger.GeigerEnabled = true;
             geiger.GeigerTimeEvent = Game.StartTimeEvent(GEIGER_DURATION, ProcessGeiger, geiger.Id); //SavedDeferredCall
             Effects::PlaySound(cr, "sound/SFX/GEIGER.ACM");
@@ -58,6 +65,8 @@ bool UseGeiger(Critter cr, Item geiger)
     return true;
 }
 
+// Подзарядка прибора: малые энергоячейки и микро-фьюжн-ячейки пополняют ёмкость,
+// расходуется ровно столько ячеек, сколько нужно до максимума (с учётом остатка).
 bool UseItemOnGeiger(Critter cr, Item geiger, Item item)
 {
     hstring itemPid = item.ProtoId;
@@ -88,10 +97,12 @@ bool UseItemOnGeiger(Critter cr, Item geiger, Item item)
     return true;
 }
 
+// Применение навыка к прибору: «Наука» показывает текущий/максимальный заряд,
+// «поднять с земли» отдаём движку, остальные навыки — без эффекта.
 bool UseSkillOnGeiger(Critter cr, Item geiger, CritterProperty skill)
 {
     if (skill == CritterProperty::SpecialSkillPickOnGround) {
-        return false; // Pick, move
+        return false; // поднять/переместить — обрабатывает движок
     }
 
     if (skill == CritterProperty::SkillScience) {
@@ -104,6 +115,8 @@ bool UseSkillOnGeiger(Critter cr, Item geiger, CritterProperty skill)
     return true;
 }
 
+// Периодический замер по таймеру: тратит заряд, показывает уровень радиации и
+// перезапускает таймер; при исчерпании заряда выключает прибор.
 [[TimeEvent]]
 void ProcessGeiger(any value)
 {
@@ -113,14 +126,14 @@ void ProcessGeiger(any value)
     }
 
     if (!geiger.GeigerEnabled) {
-        return; // Off
+        return; // прибор выключен
     }
 
     if (geiger.GeigerCapacity > 0) {
         geiger.GeigerCapacity -= 1;
     }
 
-    // Show rems
+    // показываем уровень радиации (в ремах)
     if (geiger.Ownership == ItemOwnership::CritterInventory) {
         Critter? cr = Game.GetCritter(geiger.CritterId);
         if (cr != null) {
@@ -137,7 +150,7 @@ void ProcessGeiger(any value)
         Map? map = geiger.GetMapPosition(hex);
         if (map != null) {
             Critter[] critters = map.GetCrittersInRadius(hex, GEIGER_HEX_RANGE - 1, CritterFindType::Any);
-            // Calculate aprox value of radiation
+            // прикидываем уровень радиации по ближайшему «фонящему» криттеру (с учётом расстояния)
             int aproxValue = 0;
             for (int i = 0; i < critters.length(); i++) {
                 Critter cr = critters[i];
@@ -147,12 +160,12 @@ void ProcessGeiger(any value)
                 }
             }
 
-            // Show to all
+            // показываем результат всем на карте
             MapText::AddText(map, hex, Color::Gray, TextPackKey(TextPackName::Game, "" + (STR_GEIGER_LOOP_CHECK)), "|rem:" + aproxValue);
         }
     }
 
-    if (geiger.GeigerCapacity <= 0) { // Turn off
+    if (geiger.GeigerCapacity <= 0) { // заряд исчерпан — выключаем
         geiger.GeigerEnabled = false;
         geiger.GeigerTimeEvent = 0;
         return;

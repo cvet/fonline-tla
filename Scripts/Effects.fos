@@ -1,3 +1,7 @@
+// Effects — эффекты экрана, звука и анимаций.
+// SERVER: хелперы FadeScreen/QuakeScreen/RunEffect/PlaySound рассылают RemoteCall видящим игрокам.
+// CLIENT: отрисовка fade-оверлеев, тряски экрана, локальных и полётных эффектов, звуки оружия.
+// Сторона: MIXED (SERVER+CLIENT). Связи: PlayerClientCall, Game render API.
 namespace Effects
 {
 
@@ -10,20 +14,23 @@ namespace Effects
 
 #if SERVER
 
-// Default values
+// Параметры тряски экрана по умолчанию (для перегрузок без явных аргументов).
 const int QuakeNoise = 8;
 const timespan QuakeTime = Time::Milliseconds(800);
 
+// Затемнение/высветление экрана у одного игрока: fadeOut=true — уход в чёрное, false — из чёрного.
 void FadeScreen(Critter cr, bool fadeOut, timespan time)
 {
     cr.PlayerClientCall.DoFadeScreen(fadeOut ? ucolor(0, 0, 0, 255) : ZERO_UCOLOR, fadeOut ? ZERO_UCOLOR : ucolor(0, 0, 0, 255), time);
 }
 
+// Затемнение экрана у игрока с произвольным переходом цвета.
 void FadeScreen(Critter cr, ucolor fromColor, ucolor toColor, timespan time)
 {
     cr.PlayerClientCall.DoFadeScreen(fromColor, toColor, time);
 }
 
+// Затемнение экрана у всех игроков на карте (массовая версия предыдущих хелперов).
 void FadeScreen(Map map, bool fadeOut, timespan time)
 {
     Critter[] critters = map.GetCritters(CritterFindType::Players);
@@ -42,6 +49,7 @@ void FadeScreen(Map map, ucolor fromColor, ucolor toColor, timespan time)
     }
 }
 
+// Тряска экрана у одного игрока с параметрами по умолчанию.
 void QuakeScreen(Critter cr)
 {
     cr.PlayerClientCall.DoQuakeScreen(QuakeNoise, QuakeTime);
@@ -52,6 +60,7 @@ void QuakeScreen(Critter cr, int noise, timespan time)
     cr.PlayerClientCall.DoQuakeScreen(noise, time);
 }
 
+// Тряска экрана у всех игроков на карте.
 void QuakeScreen(Map map)
 {
     Critter[] critters = map.GetCritters(CritterFindType::Players);
@@ -70,6 +79,7 @@ void QuakeScreen(Map map, int noise, timespan time)
     }
 }
 
+// Запуск эффекта в гексе (и в кольце радиуса): шлём только тем игрокам, кто видит гекс.
 void RunEffect(Map map, hstring effectPid, mpos hex, int radius = 0)
 {
     Critter[] critters = map.GetCrittersWhoSeeHex(hex, radius, CritterFindType::Players);
@@ -79,6 +89,7 @@ void RunEffect(Map map, hstring effectPid, mpos hex, int radius = 0)
     }
 }
 
+// Полётный эффект от криттера к криттеру (например выстрел): видят те, кто видит путь.
 void RunFlyEffect(Map map, hstring effectPid, Critter cr, Critter target)
 {
     Critter[] critters = map.GetCrittersWhoSeePath(cr.Hex, target.Hex, CritterFindType::Players);
@@ -88,6 +99,7 @@ void RunFlyEffect(Map map, hstring effectPid, Critter cr, Critter target)
     }
 }
 
+// Полётный эффект от криттера в указанный гекс (цель-криттера нет).
 void RunFlyEffect(Map map, hstring effectPid, Critter cr, mpos targetHex)
 {
     Critter[] critters = map.GetCrittersWhoSeePath(cr.Hex, targetHex, CritterFindType::Players);
@@ -97,6 +109,7 @@ void RunFlyEffect(Map map, hstring effectPid, Critter cr, mpos targetHex)
     }
 }
 
+// Полётный эффект между двумя гексами (без привязки к криттерам).
 void RunFlyEffect(Map map, hstring effectPid, mpos hex, mpos targetHex)
 {
     Critter[] critters = map.GetCrittersWhoSeePath(hex, targetHex, CritterFindType::Players);
@@ -106,6 +119,7 @@ void RunFlyEffect(Map map, hstring effectPid, mpos hex, mpos targetHex)
     }
 }
 
+// Воспроизведение звука в гексе: слышат игроки, видящие гекс (и кольцо радиуса).
 void PlaySound(Map map, hstring soundName, mpos hex, int radius = 0)
 {
     Critter[] critters = map.GetCrittersWhoSeeHex(hex, radius, CritterFindType::Players);
@@ -115,11 +129,13 @@ void PlaySound(Map map, hstring soundName, mpos hex, int radius = 0)
     }
 }
 
+// Перегрузка по string — приводит имя звука к hstring и делегирует основной версии.
 void PlaySound(Map map, string soundName, mpos hex, int radius = 0)
 {
     PlaySound(map, soundName.hstr(), hex, radius);
 }
 
+// Звук для всех игроков на карте (без привязки к гексу).
 void PlaySound(Map map, hstring soundName)
 {
     Critter[] critters = map.GetCritters(CritterFindType::Players);
@@ -129,11 +145,13 @@ void PlaySound(Map map, hstring soundName)
     }
 }
 
+// Перегрузка по string для версии «звук на всю карту».
 void PlaySound(Map map, string soundName)
 {
     PlaySound(map, soundName.hstr());
 }
 
+// Звук «от криттера»: сам криттер плюс все игроки, которые его видят.
 void PlaySound(Critter cr, hstring soundName)
 {
     cr.PlayerClientCall.DoPlaySound(soundName);
@@ -145,11 +163,13 @@ void PlaySound(Critter cr, hstring soundName)
     }
 }
 
+// Перегрузка по string для версии «звук от криттера».
 void PlaySound(Critter cr, string soundName)
 {
     PlaySound(cr, soundName.hstr());
 }
 
+// Проигрывание анимации криттера у всех видящих его игроков (сервер сам анимацию не хранит).
 void Animate(Critter cr, CritterStateAnim state, CritterActionAnim action)
 {
     Critter[] critters = cr.GetCritters(CritterSeeType::WhoSeeMe, CritterFindType::Players);
@@ -163,6 +183,7 @@ void Animate(Critter cr, CritterStateAnim state, CritterActionAnim action)
 
 #if CLIENT
 
+// Описание одного fade-перехода: когда начался, сколько длится и между какими цветами тянуть.
 class FadeEffect
 {
     nanotime BeginTime;
@@ -171,8 +192,10 @@ class FadeEffect
     ucolor EndColor;
 }
 
+// Очередь активных fade-эффектов: могут накладываться друг за другом (см. appendEffect).
 FadeEffect[] FadeEffects = {};
 
+// Текущее состояние тряски экрана: амплитуда по осям, шаг затухания и тайминг следующего шага.
 bool QuakeActive = false;
 bool QuakeOffsetApplied = false;
 float QuakeOffsetX = 0.0f;
@@ -180,6 +203,7 @@ float QuakeOffsetY = 0.0f;
 float QuakeStep = 0.0f;
 nanotime QuakeNextTime = ZERO_NANOTIME;
 
+// Подписки на тики, отрисовку интерфейса и выгрузку карты — точка входа клиентской части.
 [[ModuleInit]]
 void InitEffects()
 {
@@ -188,6 +212,8 @@ void InitEffects()
     Game.OnMapUnload.Subscribe(OnMapUnload);
 }
 
+// Добавление fade-эффекта в очередь. appendEffect=true ставит его в конец уже идущих,
+// чтобы переходы шли последовательно, а не накладывались одновременно.
 void FadeScreen(ucolor fromColor, ucolor toColor, timespan time, bool appendEffect = false)
 {
     PruneFadeEffects();
@@ -212,6 +238,8 @@ void FadeScreen(ucolor fromColor, ucolor toColor, timespan time, bool appendEffe
     FadeEffects.insertLast(effect);
 }
 
+// Запуск тряски: задаём стартовое смещение в случайную сторону и шаг затухания на длительность.
+// noise=0 или нулевая длительность — просто сброс текущей тряски.
 void QuakeScreen(int noise, timespan time)
 {
     if (noise == 0 || time.milliseconds <= 0) {
@@ -229,36 +257,43 @@ void QuakeScreen(int noise, timespan time)
     ApplyQuakeOffset();
 }
 
+// Покадровое продвижение тряски экрана.
 [[Event]]
 void OnLoop()
 {
     ProcessQuake();
 }
 
+// Отрисовка fade-оверлеев поверх интерфейса.
 [[Event]]
 void OnRenderIface()
 {
     DrawFadeEffects();
 }
 
+// При выгрузке карты сбрасываем тряску, чтобы не тащить смещение на новую карту.
 [[Event]]
 void OnMapUnload()
 {
     ResetQuake();
 }
 
+// Серверный вызов затемнения — добавляем эффект в очередь (append, чтобы не сбивать текущие).
 [[ClientRemoteCall]]
 void DoFadeScreen(ucolor fromColor, ucolor toColor, timespan time)
 {
     FadeScreen(fromColor, toColor, time, true);
 }
 
+// Серверный вызов тряски экрана.
 [[ClientRemoteCall]]
 void DoQuakeScreen(int noise, timespan time)
 {
     QuakeScreen(noise, time);
 }
 
+// Серверный вызов эффекта в гексе: создаём локальный предмет-эффект в центре, затем заполняем
+// кольца до radius, обходя их по соседним направлениям. Каждый эффект самоуничтожается после анимации.
 [[ClientRemoteCall]]
 void DoRunEffect(hstring effectPid, mpos hex, int radius)
 {
@@ -291,6 +326,7 @@ void DoRunEffect(hstring effectPid, mpos hex, int radius)
     }
 }
 
+// Отложенное удаление эффекта: когда анимация доиграла — убираем предмет и гасим тайм-эвент.
 [[TimeEvent]]
 void EffectDeferredDestroy(Item item, TimeEventContext event)
 {
@@ -300,6 +336,8 @@ void EffectDeferredDestroy(Item item, TimeEventContext event)
     }
 }
 
+// Серверный вызов полётного эффекта: если криттеры ещё видимы — берём их актуальные гексы,
+// иначе используем присланные. Эффект летит из hex в targetHex и удаляется по прибытии.
 [[ClientRemoteCall]]
 void DoRunFlyEffect(hstring effectPid, ident crId, ident targetId, mpos hex, mpos targetHex)
 {
@@ -319,6 +357,7 @@ void DoRunFlyEffect(hstring effectPid, ident crId, ident targetId, mpos hex, mpo
     effect.StartTimeEvent(Time::Milliseconds(100), Time::Milliseconds(100), FlyEffectDeferredDestroy);
 }
 
+// Отложенное удаление полётного эффекта: убираем предмет, когда он долетел (перестал двигаться).
 [[TimeEvent]]
 void FlyEffectDeferredDestroy(Item item, TimeEventContext event)
 {
@@ -328,6 +367,7 @@ void FlyEffectDeferredDestroy(Item item, TimeEventContext event)
     }
 }
 
+// Шаг тряски экрана раз в ~30 мс: затухаем по обеим осям, при достижении нуля — полный сброс.
 void ProcessQuake()
 {
     if (!QuakeActive) {
@@ -355,6 +395,7 @@ void ProcessQuake()
     QuakeNextTime = Game.FrameTime + Time::Milliseconds(30);
 }
 
+// Затухание одной оси тряски: уменьшаем модуль на шаг и инвертируем знак, чтобы экран качался.
 float DecayQuakeAxis(float value)
 {
     float magnitude = Math::MaxF(Math::AbsF(value) - QuakeStep, 0.0f);
@@ -366,6 +407,7 @@ float DecayQuakeAxis(float value)
     return value < 0.0f ? magnitude : -magnitude;
 }
 
+// Применение текущего смещения тряски к скроллу карты; помечаем, что смещение наложено.
 void ApplyQuakeOffset()
 {
     if (!HasCurMap) {
@@ -376,6 +418,7 @@ void ApplyQuakeOffset()
     QuakeOffsetApplied = true;
 }
 
+// Полный сброс тряски: возвращаем скролл карты на место (если смещали) и обнуляем состояние.
 void ResetQuake()
 {
     if (QuakeOffsetApplied && HasCurMap) {
@@ -390,6 +433,7 @@ void ResetQuake()
     QuakeNextTime = ZERO_NANOTIME;
 }
 
+// Удаление уже завершившихся fade-эффектов из очереди.
 void PruneFadeEffects()
 {
     for (int i = 0; i < int(FadeEffects.length()); i++) {
@@ -399,6 +443,7 @@ void PruneFadeEffects()
     }
 }
 
+// Отрисовка активных fade-эффектов: считаем прогресс t по времени и тянем цвет от старта к концу.
 void DrawFadeEffects()
 {
     for (int i = 0; i < int(FadeEffects.length()); i++) {
@@ -421,6 +466,7 @@ void DrawFadeEffects()
     }
 }
 
+// Покомпонентная интерполяция цвета (RGBA) для плавного fade.
 ucolor LerpColor(ucolor fromColor, ucolor toColor, float t)
 {
     return ucolor(Math::Lerp(int(fromColor.red), int(toColor.red), t),
@@ -429,6 +475,8 @@ ucolor LerpColor(ucolor fromColor, ucolor toColor, float t)
                   Math::Lerp(int(fromColor.alpha), int(toColor.alpha), t));
 }
 
+// Заливка всего экрана цветом через два треугольника (полноэкранный fade-оверлей).
+// Полностью прозрачный цвет пропускаем — рисовать нечего.
 void DrawFullscreenOverlay(ucolor color)
 {
     if (color.alpha == 0) {
@@ -460,12 +508,14 @@ void DrawFullscreenOverlay(ucolor color)
     Game.DrawPrimitive(RenderPrimitiveType::TriangleList, data);
 }
 
+// Серверный вызов проигрывания звука.
 [[ClientRemoteCall]]
 void DoPlaySound(hstring soundName)
 {
     Game.PlaySound(soundName);
 }
 
+// Серверный вызов анимации криттера: анимируем, только если криттер виден клиенту.
 [[ClientRemoteCall]]
 void DoAnimate(ident crId, CritterStateAnim state, CritterActionAnim action)
 {
@@ -476,12 +526,13 @@ void DoAnimate(ident crId, CritterStateAnim state, CritterActionAnim action)
     }
 }
 
-/* soundType
-'R' - перезарядка
-'A' - атака
-'O' - отсутствие зарядов
-'F' - полет заряда
-'H' - попадание в цель*/
+// Воспроизведение звука оружия по схеме имени "WHD1XXX1": подставляем тип/id/режим в фиксированные
+// позиции строки. soundType — буква действия:
+//   'R' — перезарядка
+//   'A' — атака
+//   'O' — отсутствие зарядов
+//   'F' — полёт заряда
+//   'H' — попадание в цель
 void PlayWeaponSound(int soundType, int soundId, int mode)
 {
     if (soundId == 0) {

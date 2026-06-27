@@ -56,8 +56,9 @@ compiled, baked, and smoke-tested as above.
 
 `Tools/ScriptQuality/validate_scripts.py` is a report-only quality validator (not a formatter) for
 `Scripts/*.fos`: trailing-blank-line, `namespace`==filename, preprocessor-guard balance, component
-`== null` probes (errors); banner tags, textpack magic ids, hand-rolled utils, Cyrillic comments,
-redundant bool returns, commented-out code, file-too-large (warnings). Modes: `--summary`,
+`== null` probes (errors); banner tags, textpack magic ids, hand-rolled utils,
+redundant bool returns, commented-out code, file-too-large (warnings; the `cyrillic-comment`
+check was retired 2026-06-20 — comments are Russian now). Modes: `--summary`,
 `--baseline`, `--ratchet` (fail only on new violations vs `baseline.json`), `--fix` (safe autofixes).
 Run via the VS Code task `Analyze :: Script Quality`. See also `Tools/NullableEstimate/`.
 
@@ -130,3 +131,73 @@ The active phases above are complete. What is intentionally not changed, and why
   module; new metadata went into genuinely new files.
 - Moved helpers that call symbols still resident in `Tla.fos` must qualify those calls (e.g.
   `Tla::MaxSkillValue`, `Tla::Max`); the compiler catches any that are missed.
+
+---
+
+# Round 2 (2026-06-20) — Polish, headers, comments, bug fixes, tests
+
+Reopened by the owner after the Phase 0–4 close. New goal: bring every `Scripts/*.fos`
+module to a uniformly readable, well-documented, correct state. The detailed style rules
+live in [ScriptStyle.md](ScriptStyle.md); this section is the **plan and running status**.
+
+## Owner decisions (2026-06-20)
+
+1. **Comment language = Russian, including translating existing English comments.** This
+   reverses the prior English-only convention and the 2026-06-17 "don't touch comments"
+   feedback. `AGENTS.md` and memory are updated so future agents don't revert it.
+   Serialized names (`///@ Property/Enum/Setting/Event`, proto ids, text-pack keys) stay
+   English.
+2. **File headers everywhere.** Every non-generated script gets a Russian header block
+   above `namespace` describing its purpose and side (SERVER/CLIENT/MAPPER).
+3. **Aggressive behavior changes allowed.** Bug fixes and cross-file function relocation
+   are applied in-pass, verified by compile + bake + headless smoke. Gameplay/quest
+   changes that smoke can't catch are still applied but **flagged in the batch report**
+   (owner playtest). Serialized-contract changes still gate on `///@ MigrationRule` +
+   owner confirmation.
+
+## Scope
+
+269 `Scripts/*.fos` + 3 `Scripts/Json/*.fos`. Generated files excluded (`Content.fos`,
+`GuiScreens.fos`). Work proceeds in domain batches, low-coupling leaves first, core
+(`Tla`/`Main`/`Parameters`) last — same ordering principle as round 1.
+
+## Phases
+
+- **R2-0 — Inventory & criteria.** `ScriptStyle.md` (done). A read-only workflow builds a
+  per-module map: purpose (→ header text), domain, size, formatting/naming/structure issues,
+  suspected bugs (line refs), test-feasibility (pure helpers), dependencies. Feeds headers
+  + batching. *(Status: criteria done; inventory pending.)*
+- **R2-1 — Pilot.** 3–5 representative modules (one leaf, one NPC/quest, one client/GUI,
+  one mid-size system) taken fully through ScriptStyle.md so the owner can approve the
+  target look before fan-out. *(Status: pending.)*
+- **R2-2 — Per-domain polish batches.** Each batch, per module: confirm intent → header →
+  translate/add Russian block comments → reorganize structure (radel 4) → format → naming →
+  idiom/nullability cleanup → in-pass bug fixes → verify. Batches sized small (4–6 modules)
+  to stay under server rate limits and keep review tractable. *(Status: pending.)*
+- **R2-3 — Tests.** Per the testing decision below. *(Status: blocked on owner decision.)*
+
+## Testing strategy — decided (2026-06-20): B, lightweight harness
+
+Owner chose tier **B**. Port a compact `Testing.fos` from lf-7 down to TLA's systems
+(RegisterTest / Expect / Pass / Fail + fixtures: isolated location, spawn NPC/player/item,
+cleanup with leak check), gated by a `Testing.Enabled` setting, plus a `Launch :: Tests`
+task. Then `Test_*` suites starting with pure helpers (Reputation, Math/Flags, GameTime,
+WeaponHelpers), growing into critical server flows. Done as phase R2-3 after the polish
+batches establish stable module shapes.
+
+For the record, the tiers considered:
+
+- **A. Minimal** — keep relying on compile + bake + headless smoke + engine `TLA_UnitTests`;
+  add `//~run`-style dev commands (like `Test.fos`) for manual checks. ~0 new infra.
+- **B. Lightweight harness (recommended)** — a small TLA `Testing.fos` (RegisterTest /
+  Expect / Pass / Fail + fixtures: isolated location, spawn NPC/player/item, cleanup with
+  leak check) gated by a `Testing.Enabled` setting and a `Launch :: Tests` task, seeded by
+  adapting lf-7's `Testing.fos` down to TLA's systems. Then `Test_*` suites starting with
+  pure helpers, growing into critical server flows. Moderate effort, incremental.
+- **C. Full port** of the lf-7 framework (parallel suites, embedded-client warmup, etc.).
+  High effort; overkill for current needs.
+
+## Verification & process
+
+Per ScriptStyle.md §9. Do not commit/stage/push (owner reviews). Surface contentious or
+gameplay-affecting changes in each batch report rather than applying silently.

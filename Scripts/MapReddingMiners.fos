@@ -1,20 +1,28 @@
-namespace MapReddingMiners // Sort 2
+// MapReddingMiners — серверная логика карты шахтёрского квартала Реддинга.
+// Отвечает за: инициализацию NPC-проводников караванов (Савинелли, Стенвелл, Бен Вейд),
+// экстренный вызов каравана Стенвелла через диалог, усиление полиции/Андерсона
+// и суточный цикл патрулирования регуляторов по карте.
+// Сторона исполнения: только SERVER.
+// Связи: Caravan (караваны), Patrol (маршруты патрулей), ReddingCommon (усиление NPC),
+// Teams/Bags/GameTime/Time и сгенерированный Content (id диалогов/криттеров).
+namespace MapReddingMiners
 {
 
 #if SERVER
 
+// Заглушка отладочного лога: оставлена пустой, реальный вывод отключён.
 void DebugLog(string s)
 {
 }
 
-/************************************** Проводник караванов Савинелли ****************************************************/
+// Инициализация NPC-проводника каравана Савинелли.
 void SavinelInit(Critter cr, bool firstTime)
 {
     cr.CaravanCrvId = 2;
     Caravan::SetupCaravanLeader(2, cr);
 }
 
-/************************************** Проводник караванов Стенвелл *****************************************************/
+// Инициализация NPC-проводника каравана Стенвелл (помечается как квестовый NPC).
 void StanwellInit(Critter cr, bool firstTime)
 {
     cr.CaravanCrvId = 3;
@@ -22,14 +30,15 @@ void StanwellInit(Critter cr, bool firstTime)
     Caravan::SetupCaravanLeader(3, cr);
 }
 
-/*************************************** Проводник караванов Бен Вейд ****************************************************/
+// Инициализация NPC-проводника каравана Бен Вейд.
 void WadeInit(Critter cr, bool firstTime)
 {
     cr.CaravanCrvId = 1;
     Caravan::SetupCaravanLeader(1, cr);
 }
 
-/**************************** Экстренное возвращение каравана Стенвелла **************************************************/
+// Экстренное возвращение каравана Стенвелла: вызывается из диалога.
+// Если караван (id 3) ещё не в нужном статусе, готовит его и через 4 игровых часа запускает.
 [[DialogResult]]
 void PrepareCaravan(Critter player, Critter? npc)
 {
@@ -46,12 +55,13 @@ void PrepareCaravan(Critter player, Critter? npc)
     }
 
     Caravan::PrepareCaravan(3);
-    Game.StartTimeEvent(Time::GameHours(4), Caravan::StartCaravan, 3); //SavedDeferredCall
+    Game.StartTimeEvent(Time::GameHours(4), Caravan::StartCaravan, 3); // отложенный вызов сохраняется в тайм-евенте
 }
 
-/*************************************************** MISC ****************************************************************/
+// Параметры карты и патрулирование регуляторов.
 const string SCRIPTNAME = "MapReddingMiners"; // имя скрипта для patrol_h
 
+// Идентификаторы точек входа (Entry) на карте — опорные точки маршрута патруля.
 const int ENTRY_LEFT_ENTRANCE = 156;
 const int ENTRY_RIGHT_ENTRANCE = 157;
 const int ENTRY_CENTER = 158;
@@ -59,8 +69,11 @@ const int ENTRY_BEFORE_ANDERSON = 159;
 const int ENTRY_EXIT_TO_MINES = 160;
 const int ENTRY_TREVOR = 161;
 
+// Состояние патруля карты: маршрут и список патрульных.
 Patrol::PatrolInfo pInfo;
 
+// Инициализация карты: усиливает полицию и Андерсона, строит маршрут патруля
+// с тремя патрульными и заводит суточный цикл патрулирования.
 void MapInit(Map map, bool firstTime)
 {
     Critter[] npc = map.GetCritters(CritterFindType::Npc);
@@ -71,6 +84,7 @@ void MapInit(Map map, bool firstTime)
         }
     }
 
+    // Собираем маршрут патруля из опорных точек входа (точка + радиус ожидания).
     pInfo = Patrol::PatrolInfo();
     DebugLog("here");
     pInfo.Route.AddPoint(Patrol::PatrolPoint(map, ENTRY_LEFT_ENTRANCE, 14));
@@ -98,17 +112,21 @@ void MapInit(Map map, bool firstTime)
                        Fallout2AIPackets::BountyHunter,
                        30);
 
+    // Старт патрулирования в 06:00 игрового времени.
     Game.StartTimeEvent((GameTime::GetNearSynchronizedTime(0, 0, 0, 6, 0, 0) - Game.SynchronizedTime), BeginPatrol);
 }
 
+// Начало смены патруля: поднимает патрульных, запускает движение и планирует завершение.
 [[TimeEvent]]
 void BeginPatrol()
 {
     pInfo.BeginPatrol();
     pInfo.MovePatrol();
+    // Завершить смену в 05:55 следующих суток.
     Game.StartTimeEvent((GameTime::GetNearSynchronizedTime(0, 0, 0, 5, 55, 0) - Game.SynchronizedTime), EndPatrol);
 }
 
+// Окончание смены патруля: распускает патрульных и планирует следующий старт.
 [[TimeEvent]]
 void EndPatrol()
 {

@@ -1,9 +1,13 @@
+// Lockers — двери, контейнеры и замки: открытие/закрытие, проверка ключей, взлом.
+// SERVER: реакция на использование предмета/навыка по запертому объекту (дверь, контейнер),
+//   логика ключей и взлома замка, переключение состояния и показ содержимого контейнера.
+// CLIENT: анимация дверей/контейнеров при появлении на карте и при смене состояния Opened.
+// Связи: Messaging (сообщения игроку), ItemMovement (перенос предметов), Scores/GameTime,
+//   общие хелперы Tla (id ключей-дверей, таймауты навыков).
 namespace Lockers
 {
 
-// Doors and keys stuff.
-
-// Lockers and doors
+// Property-декларации для дверей, контейнеров и замков.
 ///@ Property Item Common bool Opened Mutable PublicSync Persistent
 ///@ Property Item Common bool IsCanOpen
 ///@ Property Item Common int64 LockerId Mutable OwnerSync Persistent
@@ -26,6 +30,8 @@ namespace Lockers
 ///@ Property Item Server uint8[] Door_MultyHexLine2 Mutable Persistent
 ///@ Property Item Server int32[] Door_BlockerIds Mutable Persistent
 
+// Точка входа модуля: на клиенте подписываемся на появление предметов на карте
+// и на установку свойства Opened, чтобы проигрывать анимацию дверей/контейнеров.
 [[ModuleInit]]
 void InitLockers()
 {
@@ -37,11 +43,14 @@ void InitLockers()
 
 #if SERVER
 
+// Применение предмета по запертому объекту. Сейчас не реализовано (всегда «использование обработано»).
 bool UseItemOnLocker(Critter cr, Item locker, Item item)
 {
     return true;
 }
 
+// Применение навыка по двери/контейнеру: открытие/закрытие, кража, взлом замка.
+// Возвращает true, если использование обработано здесь; false — чтобы движок продолжил обычную обработку.
 bool UseSkillOnLocker(Critter cr, Item locker, CritterProperty skill)
 {
     Map? map = cr.GetMap();
@@ -52,43 +61,43 @@ bool UseSkillOnLocker(Critter cr, Item locker, CritterProperty skill)
 
     if (skill == CritterProperty::SpecialSkillPickOnGround) {
         if (locker.Type == ItemType::Door) {
-            // NoOpen
+            // Объект помечен как неоткрываемый
             if (locker.Locker_NoOpen) {
                 Messaging::Info(cr, TextPackKey(TextPackName::Game, "" + (MsgStr::StrUseNothing)));
                 return true;
             }
 
-            // Critter on hex
+            // Нельзя закрыть открытую дверь, если на её гексе кто-то стоит
             if (locker.Opened && map.GetCritterOnHex(locker.Hex) != null) {
                 Messaging::Info(cr, TextPackKey(TextPackName::Game, "" + (MsgStr::StrUseNothing)));
                 return true;
             }
 
-            // Check key
+            // Закрытая дверь с замком требует подходящего ключа (если не сломана)
             if (!locker.Opened && locker.LockerId != 0 && !locker.Locker_Broken && !IsKeyAvailable(cr, locker.LockerId)) {
                 Messaging::Info(cr, TextPackKey(TextPackName::Game, "" + (MsgStr::StrItemLockerNeedKey)));
                 return true;
             }
 
-            // Change state
+            // Переключаем состояние двери на противоположное
             SwitchLocker(locker, !locker.Opened);
         }
         else if (locker.Type == ItemType::Container) {
-            // NoOpen
+            // Объект помечен как неоткрываемый
             if (locker.Locker_NoOpen) {
                 Messaging::Info(cr, TextPackKey(TextPackName::Game, "" + (MsgStr::StrUseNothing)));
                 return true;
             }
 
-            // Check key
+            // Закрытый контейнер с замком требует подходящего ключа (если не сломан)
             if (!locker.Opened && locker.LockerId != 0 && !locker.Locker_Broken && !IsKeyAvailable(cr, locker.LockerId)) {
                 Messaging::Info(cr, TextPackKey(TextPackName::Game, "" + (MsgStr::StrItemLockerNeedKey)));
                 return true;
             }
 
-            // Is changeble
+            // Контейнер можно открывать/закрывать
             if (locker.Container_Changeble) {
-                // Change state
+                // Переключаем состояние; при открытии сразу показываем содержимое
                 if (locker.Opened) {
                     SwitchLocker(locker, !locker.Opened);
                 }
@@ -98,7 +107,7 @@ bool UseSkillOnLocker(Critter cr, Item locker, CritterProperty skill)
                 }
             }
 
-            // No changeble
+            // Контейнер без переключения состояния — просто показываем содержимое
             else {
                 ShowContainer(cr, null, locker, locker.GroundLevel ? TransferTypes::HexContDown : TransferTypes::HexContUp);
             }
@@ -113,7 +122,7 @@ bool UseSkillOnLocker(Critter cr, Item locker, CritterProperty skill)
         }
     }
     else if (skill == CritterProperty::SkillLockpick) {
-        // NoOpen
+        // Объект помечен как неоткрываемый
         if (locker.Locker_NoOpen) {
             Messaging::Info(cr, TextPackKey(TextPackName::Game, "" + (MsgStr::StrUseNothing)));
             return true;
@@ -129,6 +138,7 @@ bool UseSkillOnLocker(Critter cr, Item locker, CritterProperty skill)
             return true;
         }
 
+        // Базовый шанс взлома: навык минус сложность замка, с бонусом от отмычек в руке
         int base = cr.SkillLockpick - locker.LockerComplexity;
         Item? itemLockpick = cr.GetItem(ItemProperty::CritterSlot, CritterItemSlot::Main);
         if (itemLockpick != null) {
@@ -149,6 +159,7 @@ bool UseSkillOnLocker(Critter cr, Item locker, CritterProperty skill)
             // Todo: Content::Item::electronic_lockpicks, Content::Item::elec_lockpick_mkii
         }
 
+        // Бросок против итогового шанса (1..100): успех открывает замок и даёт опыт
         base = Math::Clamp(base, 0, 95);
         int value = Game.Random(1, 100);
         if (base >= value) {
@@ -164,6 +175,7 @@ bool UseSkillOnLocker(Critter cr, Item locker, CritterProperty skill)
             Messaging::Info(cr, TextPackKey(TextPackName::Game, "" + (MsgStr::StrSkillLockpickFail)));
         }
 
+        // Таймаут на повторную попытку взлома независимо от результата
         cr.TimeoutSkLockpick = GameTime::LockpickTimeout(cr);
     }
     else if (skill == Tla::SKILL_TAKE_ALL_CONT) {
@@ -176,12 +188,15 @@ bool UseSkillOnLocker(Critter cr, Item locker, CritterProperty skill)
     return true;
 }
 
+// Есть ли у криттера доступ к замку: спец-привязка (Fingers/Eyes), запомненный id или физический ключ.
 bool IsKeyAvailable(Critter cr, int lockerId)
 {
+    // Замок без идентификатора открыт для всех
     if (lockerId == 0) {
         return true;
     }
 
+    // Доступ по спец-привязкам криттера или ранее запомненному замку
     if (Tla::CritterFingersDoorId(cr.Id) == lockerId || Tla::CritterEyesDoorId(cr.Id) == lockerId || cr.KnownLockerId.find(lockerId) >= 0) {
         return true;
     }
@@ -196,8 +211,10 @@ bool IsKeyAvailable(Critter cr, int lockerId)
     return false;
 }
 
+// Возвращает id физического ключа-предмета от данного замка (или ZERO_IDENT, если ключа-предмета нет).
 ident GetKeyId(Critter cr, int lockerId)
 {
+    // Для замка без id и для спец-привязок физического предмета-ключа не существует
     if (lockerId == 0 || Tla::CritterFingersDoorId(cr.Id) == lockerId || Tla::CritterEyesDoorId(cr.Id) == lockerId) {
         return ZERO_IDENT;
     }
@@ -212,6 +229,7 @@ ident GetKeyId(Critter cr, int lockerId)
     return ZERO_IDENT;
 }
 
+// Переключает состояние замка/двери; у двери синхронно обновляет проходимость для стрельбы/света/движения.
 bool SwitchLocker(Item locker, bool toOpen)
 {
     locker.Opened = toOpen;
@@ -225,17 +243,19 @@ bool SwitchLocker(Item locker, bool toOpen)
     return toOpen;
 }
 
+// Открывает игроку доступ к содержимому: лут/кража у криттера (crFrom) или просмотр контейнера (container).
+// Для NPC предметы переносятся напрямую; игроку отправляется список через TransferType/SendItems.
 void ShowContainer(Critter cr, Critter? crFrom, Item? container, TransferTypes typeShow)
 {
     /*	// Заглушка, требует реализации (просмотр контейнера или трупа)
-                // Show open animation for all who view container
+                // Анимация открытия для всех, кто видит контейнер
         Critter[] players = crTo.GetCritters( true, CritterFindType::Players );
         if( crTo.ControlledByPlayer )
             players.insertFirst( crTo );
         for( int i = 0; i < players.length(); i++ )
             players[ i ].PlayerClientCall.ShowOpenCloseAnimation( container.Id );
      */
-    // Start container operation
+    // Лут/кража у криттера: доступно только в пределах дальности использования на той же карте
     Item[] items = {};
     if (crFrom != null && (typeShow == TransferTypes::CritLoot || typeShow == TransferTypes::CritSteal)) {
         Map? mapCrFrom = crFrom.GetMap();
@@ -252,6 +272,7 @@ void ShowContainer(Critter cr, Critter? crFrom, Item? container, TransferTypes t
         }
     }
 
+    // Просмотр обычного контейнера: игроку показываем содержимое, NPC забирает предметы себе
     if (container != null) {
         items = container.GetItems(Tla::RootContainerStack());
         if (cr.ControlledByPlayer) {
@@ -269,6 +290,8 @@ void ShowContainer(Critter cr, Critter? crFrom, Item? container, TransferTypes t
 
 #if CLIENT
 
+// При появлении двери/контейнера на карте сразу выставляем кадр анимации
+// под текущее состояние Opened (открыто — конечный кадр, закрыто — начальный).
 [[Event]]
 void OnItemMapIn(Item item)
 {
@@ -286,6 +309,7 @@ void OnItemMapIn(Item item)
     }
 }
 
+// Реакция на смену свойства Opened: проигрываем анимацию открытия/закрытия (закрытие — в обратную сторону).
 [[PropertySetter]]
 void ItemSetOpened(Item item, bool& opened)
 {

@@ -1,9 +1,12 @@
+// DappoLostCRobot — квест 'Потерянный караван Даппо'.
+// Ключевые обязанности: ИИ робота-патруля, копирование записи на голодиск, мёртвые караванщики, диалоговые demand/result по наличию голодиска.
+// Сторона: SERVER. Связи: NpcPlanes, Entrance, Messaging, CritterState, Tla, Content.
 namespace DappoLostCRobot
 {
 
 #if SERVER
 
-// Dappo's Lost Caravan quest Encounter Mob^ battle robot
+// Encounter-моб квеста 'Потерянный караван Даппо' — боевой робот.
 
 ///@ Property Critter Server uint8 NcrBusterLostCStatus Mutable Persistent Max = 4
 ///@ Property Critter Server uint8 QDappoLostRobotHexNum Mutable Persistent
@@ -32,30 +35,27 @@ const int STR_NUM_MAP_LEAVE = 2807;
    {2806}{}{От каравана Даппо мало что осталось. Пресловутым ..
    {2807}{}{Очевидно, что робот случайно активировался,...
 */
-// Когда криттер в области видимости подвергается атаке. См. CRITTER_EVENT_ATTACKED.
-// CRITTER_EVENT_SMTH_USE_ITEM
-
-// инициализация робота
+// Инициализация робота: подписки на события восприятия/атаки и запуск патрулирования.
 void RoboInit(Critter robo, bool firstTime)
 {
     // robo.OnNpcPlaneEnd.Subscribe(NpcPlaneEnd);
-    // robo увидел кого-то
+    // робот увидел кого-то
     robo.OnCritterAppeared.Subscribe(RoboShowCritter);
     // заскучал
     robo.StartTimeEvent(Time::Asap(), Time::Seconds(1), RoboCritterIdle);
-    // кто-то что-то поюзал в пределах видимости
+    // кто-то что-то применил в пределах видимости
     robo.OnSomeUseItemOnMe.Subscribe(RoboSmthUseItemOnMe);
-    // robo грохнул кого-то
+    // робот кого-то убил
     robo.OnSomeCritterDead.Subscribe(RoboSmthDead);
     // начало патрулирования
     robo.QDappoLostRobotHexNum = ENT_HEX_NUM4;
-    // если робота убьют, реплицироваться он не нужен
+    // если робота убьют, реплицироваться он не должен
     robo.ReplicationTime = -1;
-    // робот пошел патрулировать
+    // робот пошёл патрулировать
     RoboPatrolNextMove(robo);
 }
 
-// использование голодиска на робота, неважно, мертвого или живого
+// Применение предмета на робота: запись копируется на голодиск только когда робот мёртв и предмет — голодиск.
 [[Event]]
 void RoboSmthUseItemOnMe(Critter robo, Critter whoUse, Item item, int param)
 {
@@ -64,28 +64,27 @@ void RoboSmthUseItemOnMe(Critter robo, Critter whoUse, Item item, int param)
     }
 
     if (item.ProtoId != Content::Item::holodisk) {
-        Messaging::SayOnHead(whoUse,
-                             TextPackKey(TextPackName::Text, "" + (STR_NUM_WRONG_ITEM))); // (SAY_NORM_ON_HEAD,"Useless. I have find something else...");
+        Messaging::SayOnHead(whoUse, TextPackKey(TextPackName::Text, "" + (STR_NUM_WRONG_ITEM))); // "Бесполезно. Не работает. Нужно придумать что-то ещё."
         return;
     }
 
-    Messaging::SayOnHead(whoUse, TextPackKey(TextPackName::Text, "" + (STR_NUM_RIGHT_ITEM))); // "Hmmm... I can copy record from his camera");
+    Messaging::SayOnHead(whoUse, TextPackKey(TextPackName::Text, "" + (STR_NUM_RIGHT_ITEM))); // "Получилось скопировать запись с видеокамеры робота."
     item.HolodiskNum = HOLO_MSG_ID;
 
     whoUse.NcrBusterLostCStatus = 2;
 }
 
-// Робот не стоит на месте, ходит по 4 контрольным точкам
+// Шаг патрулирования: робот ходит по кругу из 4 контрольных точек.
 void RoboPatrolNextMove(Critter robo)
 {
     mpos hex;
-    // получаем координаты гекса, следующего в маршруте
-    // гексы установлены в маппере
-
+    // координаты следующего гекса маршрута (гексы заданы в маппере)
     Entrance::GetNearEntry(robo.GetMap(), robo.QDappoLostRobotHexNum, hex);
-    // отправляем робота на след пункт маршрута
+
+    // отправляем робота на следующий пункт маршрута
     NpcPlanes::AddWalkPlane(robo, 2, hex, HDIR_Random, false, Game.Random(0, 1));
-    // сохраняем следующий гекс маршрута в robo.QDappoLostRobotHexNum, если был последний, начинаем с первого, иначе просто инкремент
+
+    // переходим к следующей точке: после последней замыкаемся на первую
     if (robo.QDappoLostRobotHexNum == ENT_HEX_NUM4) {
         robo.QDappoLostRobotHexNum = ENT_HEX_NUM1;
     }
@@ -94,52 +93,50 @@ void RoboPatrolNextMove(Critter robo)
     }
 }
 
-// robo - робот
-// showCrit - предположительно игрок (тот, кого увидел робот)
+// Робот заметил кого-то (showCrit, как правило игрок) — бросаем все атакующие планы и атакуем цель.
 [[Event]]
 void RoboShowCritter(Critter robo, Critter showCrit)
 {
-    Messaging::SayOnHead(robo, TextPackKey(TextPackName::Text, "" + (STR_NUM_ENEMY_SPOT))); // "Enemy spotted!");
+    Messaging::SayOnHead(robo, TextPackKey(TextPackName::Text, "" + (STR_NUM_ENEMY_SPOT))); // "Цель обнаружена. Атака."
 
     Tla::EraseNpcAllAttackPlanes(robo);
     NpcPlanes::AddAttackPlane(robo, 0, showCrit.Id);
 }
 
-// robo - робот
-// fromCrit - кого грохнули
-// killer кто убил
+// Робот убил кого-то рядом — реплика об уничтожении цели.
 [[Event]]
 void RoboSmthDead(Critter robo, Critter fromCrit, Critter killer)
 {
-    Messaging::SayOnHead(robo, TextPackKey(TextPackName::Text, "" + (STR_NUM_ENEMY_KILL))); // "Enemy killed");
+    Messaging::SayOnHead(robo, TextPackKey(TextPackName::Text, "" + (STR_NUM_ENEMY_KILL))); // "Цель уничтожена."
 }
 
-// robo - робот
-// обработчик события CRITTER_EVENT_IDLE - когда робот стоит на месте
-[[TimeEvent]]
+// Робот достиг контрольной точки — пауза на 3 игровых минуты перед движением к следующей.
+[[TimeEvent]] [[Async]]
 void RoboCritterIdle(Critter robo)
 {
-    Messaging::SayOnHead(robo, TextPackKey(TextPackName::Text, "" + (STR_NUM_PT_REACHED))); // "Control point reached.");
+    if (!Sync::LockCritterWithMap(robo)) {
+        return;
+    }
+
+    Messaging::SayOnHead(robo, TextPackKey(TextPackName::Text, "" + (STR_NUM_PT_REACHED))); // "Контрольная точка достигнута."
     // робот останавливается на каждой контрольной точке на 3 игровых минуты
     NpcPlanes::AddMiscPlane(robo, 2, Game.SynchronizedTime + Time::GameMinutes(3), DappoLostCRobot::PatrolMoveNext);
 }
 
-// robo - робот
-// обработка плана ожидания на контрольной точке
+// Завершение паузы на контрольной точке — продолжаем патрулирование к следующему пункту.
 void PatrolMoveNext(Critter robo)
 {
-    Messaging::SayOnHead(robo, TextPackKey(TextPackName::Text, "" + (STR_NUM_NEXT_POINT))); // "Moving next point...");
-    // робот после передышки снова идет на следующую контрольную точку
+    Messaging::SayOnHead(robo, TextPackKey(TextPackName::Text, "" + (STR_NUM_NEXT_POINT))); // "Продолжаю патрулирование."
+    // после передышки робот снова идёт на следующую контрольную точку
     RoboPatrolNextMove(robo);
 }
 
-// ******************************************************************************************************************
-// мертвые караванщики
+// Мёртвые караванщики.
 
-// инициализация караванщиков
+// Инициализация караванщиков: гарантируем мёртвое состояние и навешиваем диалог по телу.
 void DeadMenInit(Critter npc, bool firstTime)
 {
-    // караванщики мертвы
+    // караванщики должны быть мертвы
     if (not npc.IsDead()) {
         CritterState::ToDead(npc, CritterActionAnim::DeadBurst, null);
     }
@@ -148,28 +145,19 @@ void DeadMenInit(Critter npc, bool firstTime)
     npc.DialogId = Content::Dialog::all_q_dappo_deadmen;
 }
 
-// ******************************************************************************************************************
-// Скрипты для работы с голодиском
+// Работа с голодиском в диалогах.
 
-// Удаление голодиска с нужной записью из инвентаря игрока. Если голодиск не найден в инвентаре - ничего не происходит.
-// player - игрок
-// npc - нпц в диалоге
-// val - номер Голодиска в FOHOLO.MSG
+// Удаление голодиска с нужной записью из инвентаря игрока. Если такого голодиска нет — ничего не происходит.
+// val — номер записи голодиска в FOHOLO.MSG.
 [[DialogResult]]
 void RemoveHolodisk(Critter player, Critter npc, any val)
 {
-    // массив итемов в инвентаре игрока
     Item[] items = player.GetItems(ItemProperty::CritterSlot, CritterItemSlot::Inventory);
-    // цикл по всему массиву
-    // у игрока может быть несколько разных голодисков
+    // у игрока может быть несколько разных голодисков — ищем именно с нужной записью
     for (int i = 0; i < items.length(); i++) {
-        // если предмет == голодиск, проверяем, что нужный
         if (ItemIsHolodisk(items[i].ProtoId)) {
-            // если инфо голодиска совпало
-            // чтобы не было warning'a несоответствия типов int|int
-            // приводим значение к беззнаковому типу
+            // приводим val к int, чтобы не было warning'а несоответствия типов
             if (items[i].HolodiskNum == int(val)) {
-                // удаляем нужный голодиск из инвентаря
                 Game.DestroyItem(items[i], 1);
                 return;
             }
@@ -177,6 +165,7 @@ void RemoveHolodisk(Critter player, Critter npc, any val)
     }
 }
 
+// Все прото-id предметов, считающихся голодиском (для проверки типа предмета в инвентаре).
 hstring[] HolodiskPids = {Content::Item::holodisk,
                           Content::Item::brotherhood_tape,
                           Content::Item::disk_fev,
@@ -214,6 +203,7 @@ hstring[] HolodiskPids = {Content::Item::holodisk,
                           Content::Item::ncr_history_holodisk,
                           Content::Item::elron_teach_holo};
 
+// Является ли предмет с данным прото-id голодиском.
 bool ItemIsHolodisk(hstring pid)
 {
     for (int i = 0, l = HolodiskPids.length(); i < l; i++) {
@@ -225,58 +215,51 @@ bool ItemIsHolodisk(hstring pid)
     return false;
 }
 
-// !/У игрока есть голодиск с нужной записью в инвентаре?
-// пример: используется для квеста "Потерянный караван Даппо". Должен быть любой голодиск с нужной записью. в данном случае val = 51
-// player - игрок
-// npc - нпц в диалоге
-// val - номер Голодиска в FOHOLO.MSG
+// Есть ли у игрока в инвентаре голодиск с нужной записью.
+// Подходит любой голодиск, важна именно запись. Для квеста 'Потерянный караван Даппо' val = 51.
+// val — номер записи голодиска в FOHOLO.MSG.
 bool HasHolodiskImpl(Critter player, Critter npc, int val)
 {
-    // val = HOLO_MSG_ID;
-    // массив итемов в инвентаре игрока
+    // breadcrumb прежнего жёсткого значения записи: val = HOLO_MSG_ID;
     Item[] items = player.GetItems(ItemProperty::CritterSlot, CritterItemSlot::Inventory);
-    // цикл по всему массиву
-    // у игрока может быть несколько разных голодисков
+    // у игрока может быть несколько разных голодисков — ищем именно с нужной записью
     for (int i = 0; i < items.length(); i++) {
-        // если предмет == голодиск, проверяем, что нужный
         if (ItemIsHolodisk(items[i].ProtoId)) {
-            // если инфо голодиска совпало
-            // чтобы не было warning'a несоответствия типов int|int
-            // приводим значение к беззнаковому типу
+            // приводим val к int, чтобы не было warning'а несоответствия типов
             if (items[i].HolodiskNum == int(val)) {
-                // голодиск с нужной записью есть в инвентаре, истина
                 return true;
             }
         }
     }
 
-    // не найден искомый голодиск, либо вообще нет голодисков в инвентаре, ложь
+    // нужный голодиск не найден (или голодисков нет вовсе)
     return false;
 }
 
+// Диалоговый demand: у игрока есть нужный голодиск.
 [[DialogDemand]]
 bool HasHolodisk(Critter player, Critter npc, any val)
 {
     return HasHolodiskImpl(player, npc, val);
 }
 
+// Диалоговый demand: у игрока нет нужного голодиска.
 [[DialogDemand]]
 bool NoHolodisk(Critter player, Critter npc, any val)
 {
     return !HasHolodiskImpl(player, npc, val);
 }
 
-// ******************************************************************************************************************
-// КАРТА. События игрок вошел и вышел с карты
+// Карта: события входа игрока на карту и выхода с неё.
 
-// скрипт на загрузку карты, описание в окне состояния на вход и выход из локации
+// Инициализация карты: подписки на вход/выход криттеров для подсказок в окне состояния.
 void MapInit(Map map, bool firstTime)
 {
     map.OnCritterIn.Subscribe(LostCEncInCritter);
     map.OnCritterOut.Subscribe(LostCEncOutCritter);
 }
 
-// игрок вошел в локацию
+// Игрок вошёл в локацию — показываем вводное описание сцены.
 [[Event]]
 void LostCEncInCritter(Map map, Critter player)
 {
@@ -287,18 +270,18 @@ void LostCEncInCritter(Map map, Critter player)
                 TextPackName::Text,
                 "" +
                     (STR_NUM_MAP_ENTER))); // "От каравана Даппо мало что осталось. Пресловутым грузом оказался боевой робот в заводской упаковке. Робот случайно
-                                           // активировался, выбрался на свободу и уничтожил караван.");
+                                           // активировался, выбрался на свободу и уничтожил караван."
     }
 }
 
-// игрок вышел из локации
+// Игрок вышел из локации — итоговая подсказка по квесту.
 [[Event]]
 void LostCEncOutCritter(Map map, Critter player)
 {
     if (player.ControlledByPlayer) {
         Messaging::Info(
             player,
-            TextPackKey(TextPackName::Text, "" + (STR_NUM_MAP_LEAVE))); // "Даппо должен узнать, что произошло с его караваном. Робот не пожалел никого.");
+            TextPackKey(TextPackName::Text, "" + (STR_NUM_MAP_LEAVE))); // "Даппо должен узнать, что произошло с его караваном. Робот не пожалел никого."
     }
 }
 

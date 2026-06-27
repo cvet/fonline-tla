@@ -1,4 +1,11 @@
-namespace Hunter // Sort 2
+// Hunter — серверная логика цепочки квестов "Лучший охотник Пустоши".
+// Отвечает за: торговцев Хьюза и Лоуренса (выдача дудки/токсина по таймауту,
+// барные ограничения), счётчик убитых крыс, ультразвуковой свисток для ловли
+// крыс, приманку Лоуренса (спавн и наведение крыс на игрока), вертиберд-заглушку.
+// Сторона исполнения: только SERVER.
+// Связи: Trader, LimitedBarter, NpcPlanes, RatGrenade, Explode, Messaging,
+// SendMessage, Entrance, EnemyStack, диалоги Хьюза/Лоуренса.
+namespace Hunter
 {
 
 #if SERVER
@@ -17,13 +24,16 @@ namespace Hunter // Sort 2
 
 const int MSG_COM2ME = 33;
 
+// Заглушка отладочного лога: тело пустое, чтобы вызовы DebugLog(...) ничего не печатали.
+// Исходный макрос оставлен как breadcrumb — раскомментировать при отладке для вывода в лог.
 // #define DebugLog            # (s) ( Game.Log( "" + s ) )
 void DebugLog(string s)
 {
 }
 
-// Часть первая: Тестовое задание
+// Часть первая: тестовое задание.
 
+// Подставляет цвета имён в сгенерированный диалог (Хьюз — основной текст, Лоуренс — жёлтый контур).
 void Colorize(Critter player, Critter npc, string& textArgs)
 {
     if (!Tla::IsDialogGenerated(textArgs)) {
@@ -33,6 +43,7 @@ void Colorize(Critter player, Critter npc, string& textArgs)
     textArgs = "|colorHugh:" + Color::Tag(Color::Text) + "|colorLourence:" + Color::Tag(Color::ContourYellow);
 }
 
+// Засчитывает игроку убитую большую кротокрысу для квеста; на 10-й тушке переводит квест в стадию 2.
 void OnCritterKilled(Critter cr, Critter? killer)
 {
     if (killer != null && !cr.ControlledByPlayer && killer.ControlledByPlayer && cr.ModelNameBase == Tla::CRTYPE_MOLESKIN_RAT_BIG &&
@@ -46,6 +57,7 @@ void OnCritterKilled(Critter cr, Critter? killer)
     }
 }
 
+// Реакция NPC на провал тестового задания: зовёт всех на карте к игроку и через 3 сек запускает подрыв.
 [[DialogResult]]
 void Explode(Critter player, Critter? npc)
 {
@@ -55,6 +67,7 @@ void Explode(Critter player, Critter? npc)
     }
 }
 
+// Отложенный подрыв динамита на месте NPC и последующая реплика через 2 сек.
 [[TimeEvent]] [[Async]]
 void ExplodeTimeEvent(Critter cr)
 {
@@ -71,14 +84,19 @@ void ExplodeTimeEvent(Critter cr)
     return;
 }
 
-[[TimeEvent]]
+// Реплика NPC после подрыва (строка 1 его диалога).
+[[TimeEvent]] [[Async]]
 void Comment(Critter cr)
 {
-    Messaging::Say(cr, TextPackKey(TextPackName::Dialogs, "" + (MsgStr::DialogTextId(cr.DialogId, 1))));
+    if (!Sync::LockCritterWithMap(cr)) {
+        return;
+    }
+
+    Messaging::Say(cr, MsgStr::DialogTextKey(cr.DialogId, 1));
     return;
 }
 
-// Скрипт торговли для Хьюза
+// Инициализация торговца Хьюза: торговля только за наличные, без кражи/лута/дропа, подписки на барт и планы.
 void HoughInit(Critter cr, bool firstTime)
 {
     Trader::TraderInit(cr, firstTime);
@@ -93,6 +111,7 @@ void HoughInit(Critter cr, bool firstTime)
     cr.OnNpcPlaneEnd.Subscribe(HoughPlaneEnd);
 }
 
+// По сигналу MSG_COM2ME Хьюз идёт к позвавшему игроку.
 [[Event]]
 void HoughMessage(Critter cr, Critter fromCr, int message, any value)
 {
@@ -101,6 +120,7 @@ void HoughMessage(Critter cr, Critter fromCr, int message, any value)
     }
 }
 
+// По достижении точки хода (план с приоритетом 17) ставит короткую misc-паузу.
 [[Event]]
 EventResult HoughPlaneEnd(Critter cr, int planeId, int reason, Critter someCr, Item someItem)
 {
@@ -117,12 +137,14 @@ EventResult HoughPlaneEnd(Critter cr, int planeId, int reason, Critter someCr, I
     return EventResult::StopChain;
 }
 
+// Барт у Хьюза: при выкладке предметов по таймаутам подкидывает игроку дудку и токсины,
+// чтобы продвигать квесты; выданное добивается отложенным уничтожением, если не куплено.
 [[Event]]
 EventResult HoughBarter(Critter cr, Critter barterCr, bool attach, int barterCount)
 {
     if (attach) {
         any[] values = {cr.Id};
-        // Сюда добавить добавление в инвентарь различных девайсов
+        // Подкидываем в обмен различные девайсы по таймаутам.
         // 1. Дудка
         Item? flute = cr.GetItem(Content::Item::lourence_flute);
         Item? fluteBarter = barterCr.GetItem(Content::Item::lourence_flute);
@@ -172,6 +194,7 @@ EventResult HoughBarter(Critter cr, Critter barterCr, bool attach, int barterCou
     return EventResult::StopChain;
 }
 
+// Удаляет у владельца ранее выданные при барте предметы, если он их так и не забрал (values[0] — id криттера).
 [[TimeEvent]]
 void DestroyItemsHough(any[] values)
 {
@@ -186,7 +209,7 @@ void DestroyItemsHough(any[] values)
     }
 }
 
-// Скрипт лоуренса
+// Инициализация торговца Лоуренса: только наличные, без кражи/лута/дропа, плюс лимиты на покупку/продажу.
 void LourenceInit(Critter cr, bool firstTime)
 {
     cr.MaxTalkers = 1;
@@ -211,7 +234,7 @@ void LourenceInit(Critter cr, bool firstTime)
     LimitedBarter::SaveBarterLimit(cr.Id, sellItems, buyItems);
 }
 
-// Вертиберд
+// Вертиберд: декоративный объект, который нельзя вскрыть; на любое использование/навык — отказ.
 void VertiberdInit(Item vertiberd, bool firstTime)
 {
     vertiberd.CarIsNoLockpick = true;
@@ -220,6 +243,7 @@ void VertiberdInit(Item vertiberd, bool firstTime)
     vertiberd.Info = 2;
 }
 
+// Прямое использование предмета на вертиберде — сообщение "ничего не происходит".
 [[Event]]
 EventResult VertiberdUse(Item vertiberd, Critter cr, Item usedItem, int param)
 {
@@ -227,6 +251,7 @@ EventResult VertiberdUse(Item vertiberd, Critter cr, Item usedItem, int param)
     return EventResult::StopChain;
 }
 
+// Применение навыка на вертиберде — сообщение "ничего не происходит".
 [[Event]]
 EventResult VertiberdSkill(Item vertiberd, Critter cr, CritterProperty skill)
 {
@@ -234,7 +259,7 @@ EventResult VertiberdSkill(Item vertiberd, Critter cr, CritterProperty skill)
     return EventResult::StopChain;
 }
 
-// Ультразвуковой свисток
+// Ультразвуковой свисток: при первом создании задаёт 10 зарядов и подписку на использование на цели.
 void FluteInit(Item item, bool firstTime)
 {
     if (firstTime) {
@@ -251,6 +276,8 @@ const int STR_RAT_CATCHED =
 const int STR_EMPTY = 28;    // В свистке закончились заряды. При последнем неаккуратном применении прибор был уничтожен.
 const int STR_WRONGRAT = 29; // Крыса не реагирует на воздействие гипнотизатора. Попробуйте найти менее устойчивый экземпляр, где-нибудь в Пустоши.
 
+// Применение свистка на живой крысе: на подходящей карте заменяет крысу на предмет rat_grenade,
+// тратит заряд, ведёт счётчик квеста; на чужой карте — отказ; при нуле зарядов свисток уничтожается.
 [[Event]]
 EventResult FluteUse(Item item, Critter cr, Critter? onCritter, Item onItem, StaticItem onScenery, int param)
 {
@@ -288,7 +315,7 @@ EventResult FluteUse(Item item, Critter cr, Critter? onCritter, Item onItem, Sta
     return EventResult::StopChain;
 }
 
-// Диалоги, установка переменных, отвечающих за частоту появления разных предметов в инвентаре Хьюза
+// Из диалога: ставит игроку таймаут (переменную timeoutNum), отвечающий за частоту выдачи предметов у Хьюза.
 [[DialogResult]]
 void SetTo(Critter player, Critter npc, any timeoutNum, any realHours)
 {
@@ -296,7 +323,7 @@ void SetTo(Critter player, Critter npc, any timeoutNum, any realHours)
     DebugLog("" + (Game.SynchronizedTime + Time::Hours(realHours)));
 }
 
-// Сдача крыс лоуренсу при выполнении квеста "пляши под мою дудку"
+// Из диалога квеста "пляши под мою дудку": спавнит вокруг NPC до 5 крыс с приказом атаковать его, затем реплика.
 [[DialogResult]]
 void AwakeRats(Critter cr, Critter? npc)
 {
@@ -318,15 +345,19 @@ void AwakeRats(Critter cr, Critter? npc)
     }
 }
 
-[[TimeEvent]]
+// Реплика NPC после спавна крыс (строка 2 его диалога).
+[[TimeEvent]] [[Async]]
 void Comment1(Critter cr)
 {
-    Messaging::Say(cr, TextPackKey(TextPackName::Dialogs, "" + (MsgStr::DialogTextId(cr.DialogId, 2))));
+    if (!Sync::LockCritterWithMap(cr)) {
+        return;
+    }
+
+    Messaging::Say(cr, MsgStr::DialogTextKey(cr.DialogId, 2));
     return;
 }
 
-// Приманка лоуренса
-
+// Приманка Лоуренса: ключи текст-пака для трёх исходов применения.
 // Неудачно выбрано место для использования приманки.
 const int STR_WRONG_PLACE = 33;
 // Вы открываете крышку и у вас кружится голова от ужасной вони. Вы выливаете содержимое банки на свою одежду. Теперь остается только ждать, пока
@@ -340,11 +371,13 @@ const int STR_FOO = 35;
 const int ENTRY_SPAWN = 17;
 const int ENTRY_MOVETO = 18;
 
+// Приманка: подписка на использование предмета.
 void LureInit(Item item, bool firstTime)
 {
     item.OnCritterUse.Subscribe(LureUse);
 }
 
+// Применение приманки: только на нужной карте рядом с маркером — запускает спавн крыс и периодические реплики NPC.
 [[Event]]
 EventResult LureUse(Item item, Critter cr, int param)
 {
@@ -352,7 +385,8 @@ EventResult LureUse(Item item, Critter cr, int param)
     if (map != null && map.ProtoId == Content::Map::q_rats_out && map.GetStaticItemsInRadius(cr.Hex, 1, Content::Item::generic_4777).length() > 0) {
         Messaging::Info(cr, TextPackKey(TextPackName::Text, "" + (STR_SUCCESS)));
         Game.DestroyItem(item);
-        Game.StartTimeEvent(Time::Seconds(10), MoveRat, map.GetLocation().Id); //SavedDeferredCall
+        // SavedDeferredCall — отложенный вызов должен переживать рестарт сервера (breadcrumb из исходника).
+        Game.StartTimeEvent(Time::Seconds(10), MoveRat, map.GetLocation().Id);
         cr.ModLourenceLureActive = Game.SynchronizedTime + Time::Hours(3);
         cr.StartTimeEvent(Time::Seconds(30), Lure);
         return EventResult::StopChain;
@@ -362,6 +396,7 @@ EventResult LureUse(Item item, Critter cr, int param)
     return EventResult::StopChain;
 }
 
+// Пока приманка активна — периодически заставляет случайного NPC рядом возмутиться запахом игрока.
 [[TimeEvent]] [[Async]]
 void Lure(Critter cr, TimeEventContext event)
 {
@@ -389,6 +424,7 @@ void Lure(Critter cr, TimeEventContext event)
     return;
 }
 
+// Переносит до 5 крыс с карты-источника на целевую карту, делает их бездомными и натравливает на игроков/союзников.
 [[TimeEvent]]
 void MoveRat(any value)
 {
@@ -417,11 +453,13 @@ void MoveRat(any value)
                 }
             }
 
-            Game.StartTimeEvent(Time::Seconds(Game.Random(1, 3)), MoveRat, value); //SavedDeferredCall
+            // SavedDeferredCall — отложенный вызов должен переживать рестарт сервера (breadcrumb из исходника).
+            Game.StartTimeEvent(Time::Seconds(Game.Random(1, 3)), MoveRat, value);
         }
     }
 }
 
+// Периодически ведёт перенесённую крысу к точке выхода ENTRY_MOVETO, пока та жива и без активных планов.
 [[TimeEvent]] [[Async]]
 void Move(Critter cr, TimeEventContext event)
 {

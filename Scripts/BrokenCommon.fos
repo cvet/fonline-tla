@@ -1,16 +1,15 @@
+// BrokenCommon — квесты Брокен-Хиллс (саботажники, голодиск, скидка на уран)
+// Обязанности: учёт убитых саботажников по группе, обработка голодиска по Науке, бонусы и скидка на руду при бартере
+// Сторона: SERVER. Связи: GlobalmapGroupExtended, EncounterNpc, Trader, Messaging
 namespace BrokenCommon
 {
 
 #if SERVER
 
-// Author: rifleman17
-// Квесты Брокен Хиллс
-
-// Квест "Рога изобилия".
-
 ///@ Property Critter Server uint8 BHHubHoloRemembered Mutable Persistent Max = 1
 ///@ Property Critter Server uint8 BHUranDiscount Mutable Persistent Max = 1
 
+// Ключи текст-пака, порог Науки для голодиска и параметры скидки на уран
 const int STR_KILL_SABOTEUR = 5900;
 const int HOLO_MSG_ID = 56;
 const int STR_LOW_SCIENCE = 5901;
@@ -18,7 +17,7 @@ const int STR_HIGH_SCIENCE = 5902;
 const int MIN_SCIENCE = 120;
 const int URANIUM_DISCOUNT = 25; // Скидка в процентах на уран для выполнившего квест
 
-// Подсчет убитых саботажников для квеста
+// Засчитывает убитого саботажника всем игрокам группы убийцы, чей квест на нужной стадии
 void CountDeadSaboteurs(Critter cr, Map? map, Critter? killer)
 {
     if (map == null || killer == null || cr.ControlledByPlayer) {
@@ -61,6 +60,7 @@ void CountDeadSaboteurs(Critter cr, Map? map, Critter? killer)
     }
 }
 
+// Выдаёт игроку голодиск и навешивает на него скрипт инициализации
 [[DialogResult]]
 void WriteHolodisk(Critter player, Critter npc)
 {
@@ -68,6 +68,7 @@ void WriteHolodisk(Critter player, Critter npc)
     holo.SetupScript(HoloInit);
 }
 
+// Настраивает голодиск: номер записи и обработчики использования
 void HoloInit(Item holo, bool firstTime)
 {
     holo.HolodiskNum = HOLO_MSG_ID;
@@ -75,12 +76,14 @@ void HoloInit(Item holo, bool firstTime)
     holo.OnCritterUseSkill.Subscribe(HoloSkill);
 }
 
+// Блокирует применение навыков по голодиску (читается только через использование)
 [[Event]]
 EventResult HoloSkill(Item item, Critter cr, CritterProperty skill)
 {
     return EventResult::StopChain;
 }
 
+// Чтение голодиска: при достаточной Науке открывает запись, иначе сообщает о нехватке знаний
 [[Event]]
 EventResult HoloUse(Item item, Critter cr, int param)
 {
@@ -97,18 +100,21 @@ EventResult HoloUse(Item item, Critter cr, int param)
     return EventResult::StopChain;
 }
 
+// Награда за квест: прибавка к базовому сопротивлению радиации
 [[DialogResult]]
 void GrantPlayer(Critter cr, Critter npc)
 {
     cr.RadiationResistanceBase += 5;
 }
 
+// Инициализация торговца-гуля: базовый торговый скрипт плюс свой обработчик бартера
 void GhoulTraderInit(Critter cr, bool firstTime)
 {
     Trader::TraderInit(cr, firstTime);
     cr.OnBarter.Subscribe(GhoulBarter);
 }
 
+// Бартер у гуля: даёт скидку на руду игрокам с выполненным квестом на уран
 [[Event]]
 EventResult GhoulBarter(Critter cr, Critter player, bool attach, int barterCount)
 {
@@ -125,6 +131,7 @@ EventResult GhoulBarter(Critter cr, Critter player, bool attach, int barterCount
     return EventResult::StopChain;
 }
 
+// Пересчитывает цену очищенной руды у торговца от заданного процента (100 = без скидки)
 void SedUraniumCost(Critter cr, int percent)
 {
     Item? ore = cr.GetItem(Content::Item::refined_ore);
@@ -136,12 +143,14 @@ void SedUraniumCost(Critter cr, int percent)
     ore.Cost = newCost;
 }
 
+// Инициализация NPC-саботажника: базовый скрипт энкаунтера плюс подписка на смерть
 void SaboteurInit(Critter npc, bool firstTime)
 {
     EncounterNpc::NpcInit(npc, firstTime);
     npc.OnDead.Subscribe(SaboteurDead);
 }
 
+// Смерть саботажника: засчитывает убийство в квест и выполняет общую логику энкаунтера
 [[Event]]
 void SaboteurDead(Critter npc, Critter killer)
 {

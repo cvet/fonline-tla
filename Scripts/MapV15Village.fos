@@ -1,26 +1,39 @@
+// MapV15Village — серверная логика наземной карты Убежища 15 (v15_village).
+// Отвечает за реакцию NPC на игрока с кармой "Педобир": при входе на карту
+// заводит отложенное событие, после которого ближайший гуманоид озвучивает
+// презрительную реплику.
+// Сторона исполнения: SERVER.
+// Связи: Messaging (озвучивание реплик), Sync (блокировки async-колбэка),
+// Content::Map (идентификатор карты), KarmaPerkPedobear (свойство кармы криттера).
 namespace MapV15Village
 {
 
 #if SERVER
 
-// Vault15 ground map script. Special phrases for pedobear karma.
-
-// Проваливай отсюда, извращенец.Посмотрите на эту мразь! Он набрался наглости вернуться сюда!таким как ты в польше химическую кастрацию делают, Иди \
-// в жопу извращенец!И откуда вы, мрази, беретесь.Охотники уже идут за тобой. Ты сдохнешь!
+// Реплики, которыми NPC встречает игрока с кармой "Педобир" (ключ текст-пака).
+// Текст реплик: "Проваливай отсюда, извращенец. Посмотрите на эту мразь!
+// Он набрался наглости вернуться сюда! Таким как ты в Польше химическую
+// кастрацию делают. Иди в жопу, извращенец! И откуда вы, мрази, беретесь.
+// Охотники уже идут за тобой. Ты сдохнешь!"
 const int STR_SAY = 5905;
 
+// Радиус поиска ближайшего NPC-гуманоида вокруг игрока.
 const int DIST_FIND = 10;
 
+// Реплику произносит только NPC-гуманоид (человек/женщина/ребёнок),
+// прочие типы тел игнорируем.
 bool IsHumanoid(Critter npc)
 {
     return npc.BodyType == BodyTypes::Men || npc.BodyType == BodyTypes::Women || npc.BodyType == BodyTypes::Children;
 }
 
+// Подписываемся на вход криттеров на карту при её инициализации.
 void MapInit(Map map, bool firstTime)
 {
     map.OnCritterIn.Subscribe(MapInCritter);
 }
 
+// При входе игрока с кармой "Педобир" откладываем реакцию NPC на 20 секунд.
 [[Event]]
 void MapInCritter(Map map, Critter cr)
 {
@@ -29,13 +42,17 @@ void MapInCritter(Map map, Critter cr)
     }
 }
 
+// Периодический колбэк: находит ближайшего NPC-гуманоида и заставляет его
+// озвучить реплику, после чего повторяет реакцию каждые 20 секунд.
 [[TimeEvent]] [[Async]]
 void NpcReact(Critter cr, TimeEventContext event)
 {
+    // Async-доступ к криттеру и его карте требует блокировки.
     if (!Sync::LockCritterWithMap(cr)) {
         return;
     }
 
+    // Реагируем только пока игрок остаётся на наземной карте Убежища 15.
     Map? map = cr.GetMap();
     if (map == null || map.ProtoId != Content::Map::v15_village) {
         return;
@@ -62,9 +79,13 @@ void DelayKarma(Critter player, Critter npc)
     player.StartTimeEvent(Time::Hours(8), IncKarma);
 }
 
-[[TimeEvent]]
+[[TimeEvent]] [[Async]]
 void IncKarma(Critter cr)
 {
+    if (!Sync::LockCritterWithMap(cr)) {
+        return;
+    }
+
     cr.KarmaPerkPedobear = 2;
     return;
 }

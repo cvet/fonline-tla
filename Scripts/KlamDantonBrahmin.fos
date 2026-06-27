@@ -1,23 +1,29 @@
+// KlamDantonBrahmin — серверная логика квеста "Сгубить браминов" (Кламат, Дантон).
+// Игрок уводит за собой и убивает двух браминов с пастбища Эйдена; пока брамин
+// следует за игроком, есть шанс, что Эйден поймает игрока на горячем.
+// SERVER: ведение брамина за игроком (повторяющийся TimeEvent), диалоговые
+// действия начала/настройки слежения и продвижение состояния квеста.
+// Состояние квеста хранится в Property-декларации KlamDantonBramin на криттере.
+// Связи: NpcPlanes (планы ИИ ходьбы), EnemyStack (сброс целей), MapKlamath (роль коров).
 namespace KlamDantonBrahmin
 {
 
 #if SERVER
 
-// Для квеста "Сгубить браминов".
-// Выдает Дантон.
-// Увести за собой и убить двоих браминов (с пастбища Эйдена). При этом есть шанс, равный 100%-(удача*10),
-// что игрока поймает на горячем Эйден. Дальше – несколько вариантов: либо сдать Дантона, либо убежать, либо бой,
-// либо убедить Эйдена отпустить игрока.
+// Описание квеста: брамина (с пастбища Эйдена) надо увести и убить — двоих.
+// Шанс, что Эйден поймает игрока на горячем, равен 100% - (удача * 10).
+// Дальнейшие развилки: сдать Дантона, убежать, бой или убедить Эйдена отпустить игрока.
 
 ///@ Property Critter Common uint8 KlamDantonBramin Mutable OwnerSync Persistent Group = Quests Quest = 3211 Max = 8
 
-// ----------------------------------------------------------------------------
+// Заглушка инициализации брамина на карте (пока тело пустое).
 void InitBrahmin(Map map, bool firstTime)
 {
     // ...
 }
 
-// ------------------------- Игровые события ----------------------------------
+// Игровые события: повторяющийся шаг слежения брамина за игроком.
+// Брамин идёт к текущему гексу игрока, пока выполняются условия слежения.
 [[TimeEvent]]
 void Follow(any[] values) // следовать за игроком
 {
@@ -40,7 +46,8 @@ void Follow(any[] values) // следовать за игроком
     Game.StartTimeEvent(Time::Seconds(1), Follow, values); //SavedDeferredCall
 }
 
-// ------------------------ Диалоговые функции ---------------------------------
+// Диалоговые функции: запускают и настраивают поведение брамина из диалога.
+// Помечаем брамина "без дома" и заводим повторяющийся шаг слежения за игроком.
 void FollowForPlayer(Critter player, Critter? cow)
 {
     if (cow == null) {
@@ -57,6 +64,8 @@ void FollowForPlayer(Critter player, Critter? cow)
     Game.StartTimeEvent(Time::Seconds(1), Follow, values); //SavedDeferredCall
 }
 
+// Переставляет точку "дома" брамина на его текущее место и разворачивает его в
+// сторону игрока (направление берётся из направления игрока).
 void ChangeDir(Critter player, Critter? cow)
 {
     if (cow == null) {
@@ -77,7 +86,8 @@ void ChangeDir(Critter player, Critter? cow)
     cow.HomeDir = player.Dir.hex.value;
 }
 
-// ------------------------------ Триггеры --------------------------------------
+// Триггеры карты: когда брамин-корова (не уведённая игроком) доходит до точки,
+// сбрасываем его боевые цели и планы ИИ, чтобы он остановился.
 void StopTrigger(Critter cow, StaticItem trigger, bool entered, mdir dir)
 {
     if (cow.NpcRole != MapKlamath::RoleCows) {
@@ -92,7 +102,8 @@ void StopTrigger(Critter cow, StaticItem trigger, bool entered, mdir dir)
     NpcPlanes::ErasePlane(cow, -1, true);
 }
 
-// --------------------------- Инструментарий------------------------------------
+// Инструментарий: завершение слежения и работа с состоянием квеста.
+// Завершает слежение: откатывает шаг состояния квеста и возвращает брамину "дом".
 void EndFollow(ident playerId, Critter cow)
 {
     int state = GetQuestState(playerId);
@@ -105,6 +116,8 @@ void EndFollow(ident playerId, Critter cow)
     cow.IsNoHome = false;
 }
 
+// Проверяет, можно ли продолжать слежение, и возвращает целевой гекс (игрока).
+// false означает, что слежение пора прекратить (оффлайн, глобал, другая карта, тайм-аут).
 bool ProccesingValues(ident playerId, int time, Critter cow, int& resultX, int& resultY)
 {
     Map? mapCow = cow.GetMap();
@@ -136,6 +149,7 @@ bool ProccesingValues(ident playerId, int time, Critter cow, int& resultX, int& 
     return true;
 }
 
+// Записывает состояние квеста в Property игрока (если игрок ещё доступен).
 void SetQuestState(ident playerId, int state)
 {
     Critter? player = Game.GetCritter(playerId);
@@ -144,6 +158,7 @@ void SetQuestState(ident playerId, int state)
     }
 }
 
+// Читает состояние квеста из Property игрока; 0, если игрок недоступен.
 int GetQuestState(ident playerId)
 {
     Critter? player = Game.GetCritter(playerId);

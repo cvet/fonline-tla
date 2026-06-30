@@ -119,6 +119,23 @@ def wait_chosen(bridge: Bridge, timeout: float) -> dict | None:
     return None
 
 
+def close_modal(bridge: Bridge) -> bool:
+    """Dismiss any blocking message box / modal screen (e.g. a login or info popup).
+
+    A modal captures client input, so move/talk commands silently do nothing while it is up
+    and the headless driver never sees it. Returns True if a modal was present and dismissed.
+    """
+    o = bridge.observe_safe() or {}
+    if o.get("dialog", {}).get("active") or o.get("screen", {}).get("modalActive"):
+        bridge.act("dialog_answer", intArg=0xF2)  # advance/close answer for dialog-type modals
+        time.sleep(0.5)
+        bridge.act("close_screen")
+        bridge.act("clear_actions")
+        time.sleep(0.5)
+        return True
+    return False
+
+
 def manhattan(a: dict, x: int, y: int) -> int:
     return abs(a["hexX"] - x) + abs(a["hexY"] - y)
 
@@ -153,6 +170,10 @@ def run(args: argparse.Namespace) -> dict:
                 report["findings"].append("login/register did not reach in-game state")
                 return report
         step("enter_game", True)
+
+        # A login/info message box can be up here; it blocks all game input until dismissed.
+        if close_modal(bridge):
+            step("dismiss_modal", True)
 
         # Optional QA teleport to a content map/location (requires AiControl.AllowQaCommands=True).
         if args.teleport_map:
@@ -212,6 +233,7 @@ def run(args: argparse.Namespace) -> dict:
         for tgt in reachable[: args.max_interact]:
             tx, ty = tgt["hex"]
             start = (ch["hexX"], ch["hexY"])
+            close_modal(bridge)  # a popup may have appeared since enter_game; clear it before driving
             if tgt["kind"] == "critter" and tgt["tag"]:
                 bridge.act("talk_to", targetId=tgt["id"])
             else:

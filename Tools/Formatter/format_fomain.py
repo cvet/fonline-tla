@@ -134,7 +134,15 @@ def register_setting(setting_name: str, setting_order: dict[str, int]) -> None:
 def build_setting_order(project_root: Path, main_config: Path) -> dict[str, int]:
     setting_order: dict[str, int] = {}
 
-    settings_include = project_root / 'Engine' / 'Source' / 'Common' / 'Settings-Include.h'
+    # The engine renamed Settings-Include.h -> Settings.inc; accept either so the formatter
+    # works across engine SHAs (and sibling repos) on both sides of the rename.
+    settings_dir = project_root / 'Engine' / 'Source' / 'Common'
+    settings_include = next(
+        (settings_dir / name for name in ('Settings.inc', 'Settings-Include.h') if (settings_dir / name).is_file()),
+        None,
+    )
+    if settings_include is None:
+        raise FileNotFoundError(f'engine settings include not found under {settings_dir} (looked for Settings.inc / Settings-Include.h)')
     for raw_line in settings_include.read_text(encoding='utf-8-sig').splitlines():
         line = raw_line.strip()
         match = ENGINE_SETTING_RE.match(line)

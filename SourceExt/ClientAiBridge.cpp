@@ -13,23 +13,23 @@ FO_USING_NAMESPACE();
 
 FO_BEGIN_NAMESPACE
 ///@ ExportMethod
-FO_SCRIPT_API bool Client_Game_AiControlStart(ClientEngine* client, bool enabled, string_view host, int32_t port, string_view token, int32_t maxQueuedCommands, int32_t maxEvents);
+FO_SCRIPT_API bool Client_Game_AiControlStart(ptr<ClientEngine> client, bool enabled, string_view host, int32_t port, string_view token, int32_t maxQueuedCommands, int32_t maxEvents);
 ///@ ExportMethod
-FO_SCRIPT_API void Client_Game_AiControlStop(ClientEngine* client);
+FO_SCRIPT_API void Client_Game_AiControlStop(ptr<ClientEngine> client);
 ///@ ExportMethod
-FO_SCRIPT_API bool Client_Game_AiControlIsRunning(ClientEngine* client);
+FO_SCRIPT_API bool Client_Game_AiControlIsRunning(ptr<ClientEngine> client);
 ///@ ExportMethod
-FO_SCRIPT_API bool Client_Game_AiControlPullCommand(ClientEngine* client, uint32_t& commandSeq, string& type, ident_t& targetId, ident_t& itemId, ident_t& auxId, int32_t& hexX, int32_t& hexY, int32_t& screenX, int32_t& screenY, int32_t& intArg, string& stringArg, bool& append);
+FO_SCRIPT_API bool Client_Game_AiControlPullCommand(ptr<ClientEngine> client, uint32_t& commandSeq, string& type, ident_t& targetId, ident_t& itemId, ident_t& auxId, int32_t& hexX, int32_t& hexY, int32_t& screenX, int32_t& screenY, int32_t& intArg, string& stringArg, bool& append);
 ///@ ExportMethod
-FO_SCRIPT_API void Client_Game_AiControlSetObservation(ClientEngine* client, string_view observationJson);
+FO_SCRIPT_API void Client_Game_AiControlSetObservation(ptr<ClientEngine> client, string_view observationJson);
 ///@ ExportMethod
-FO_SCRIPT_API void Client_Game_AiControlPushEvent(ClientEngine* client, string_view eventJson);
+FO_SCRIPT_API void Client_Game_AiControlPushEvent(ptr<ClientEngine> client, string_view eventJson);
 ///@ ExportMethod
-FO_SCRIPT_API void Client_Game_AiControlCompleteCommand(ClientEngine* client, uint32_t commandSeq, bool success, string_view message);
+FO_SCRIPT_API void Client_Game_AiControlCompleteCommand(ptr<ClientEngine> client, uint32_t commandSeq, bool success, string_view message);
 ///@ ExportMethod
-FO_SCRIPT_API string Client_Game_AiControlGetStatus(ClientEngine* client);
+FO_SCRIPT_API string Client_Game_AiControlGetStatus(ptr<ClientEngine> client);
 ///@ ExportMethod
-FO_SCRIPT_API ident_t Client_Game_AiControlGetEntityId(ClientEngine* client, FO_NULLABLE ClientEntity* entity);
+FO_SCRIPT_API ident_t Client_Game_AiControlGetEntityId(ptr<ClientEngine> client, nptr<ClientEntity> entity);
 FO_END_NAMESPACE
 
 #if !FO_WEB && !FO_IOS && !FO_ANDROID
@@ -88,7 +88,7 @@ static auto BuildAiControlStatus(AiControlClientData& data) -> nlohmann::json;
 static auto BuildAiControlObservation(AiControlClientData& data) -> nlohmann::json;
 static auto BuildAiControlEvents(AiControlClientData& data, uint64_t after_seq, size_t limit) -> nlohmann::json;
 static auto EnqueueAiControlCommand(AiControlClientData& data, const nlohmann::json& id, const nlohmann::json& params) -> string;
-static auto EnsureAiControlData(ClientEngine* client) -> AiControlClientData&;
+static auto EnsureAiControlData(ptr<ClientEngine> client) -> AiControlClientData&;
 static auto JsonDumpToString(const nlohmann::json& value) -> string;
 static auto GetJsonString(const nlohmann::json& object, string_view name, string_view def_value = {}) -> string;
 static auto GetJsonBool(const nlohmann::json& object, string_view name, bool def_value = false) -> bool;
@@ -104,7 +104,7 @@ static auto LogTypeToString(LogType type) noexcept -> string_view;
 static auto TrimAiControlLogMessage(string_view message) -> string;
 static bool ContainsCaseInsensitive(string_view text, string_view needle) noexcept;
 
-bool FO_NAMESPACE Client_Game_AiControlStart(ClientEngine* client, bool enabled, string_view host, int32_t port, string_view token, int32_t maxQueuedCommands, int32_t maxEvents)
+bool FO_NAMESPACE Client_Game_AiControlStart(ptr<ClientEngine> client, bool enabled, string_view host, int32_t port, string_view token, int32_t maxQueuedCommands, int32_t maxEvents)
 {
     FO_STACK_TRACE_ENTRY();
 
@@ -139,7 +139,7 @@ bool FO_NAMESPACE Client_Game_AiControlStart(ClientEngine* client, bool enabled,
     return true;
 }
 
-void FO_NAMESPACE Client_Game_AiControlStop(ClientEngine* client)
+void FO_NAMESPACE Client_Game_AiControlStop(ptr<ClientEngine> client)
 {
     FO_STACK_TRACE_ENTRY();
 
@@ -147,7 +147,7 @@ void FO_NAMESPACE Client_Game_AiControlStop(ClientEngine* client)
     StopAiControlBridge(data);
 }
 
-bool FO_NAMESPACE Client_Game_AiControlIsRunning(ClientEngine* client)
+bool FO_NAMESPACE Client_Game_AiControlIsRunning(ptr<ClientEngine> client)
 {
     FO_STACK_TRACE_ENTRY();
 
@@ -155,7 +155,7 @@ bool FO_NAMESPACE Client_Game_AiControlIsRunning(ClientEngine* client)
     return data.Running.load(std::memory_order_acquire) && !data.StopRequested.load(std::memory_order_acquire);
 }
 
-bool FO_NAMESPACE Client_Game_AiControlPullCommand(ClientEngine* client, uint32_t& commandSeq, string& type, ident_t& targetId, ident_t& itemId, ident_t& auxId, int32_t& hexX, int32_t& hexY, int32_t& screenX, int32_t& screenY, int32_t& intArg, string& stringArg, bool& append)
+bool FO_NAMESPACE Client_Game_AiControlPullCommand(ptr<ClientEngine> client, uint32_t& commandSeq, string& type, ident_t& targetId, ident_t& itemId, ident_t& auxId, int32_t& hexX, int32_t& hexY, int32_t& screenX, int32_t& screenY, int32_t& intArg, string& stringArg, bool& append)
 {
     FO_STACK_TRACE_ENTRY();
 
@@ -185,7 +185,7 @@ bool FO_NAMESPACE Client_Game_AiControlPullCommand(ClientEngine* client, uint32_
     return true;
 }
 
-void FO_NAMESPACE Client_Game_AiControlSetObservation(ClientEngine* client, string_view observationJson)
+void FO_NAMESPACE Client_Game_AiControlSetObservation(ptr<ClientEngine> client, string_view observationJson)
 {
     FO_STACK_TRACE_ENTRY();
 
@@ -196,7 +196,7 @@ void FO_NAMESPACE Client_Game_AiControlSetObservation(ClientEngine* client, stri
     data.ObservationJson = observationJson.empty() ? "{}" : string(observationJson);
 }
 
-void FO_NAMESPACE Client_Game_AiControlPushEvent(ClientEngine* client, string_view eventJson)
+void FO_NAMESPACE Client_Game_AiControlPushEvent(ptr<ClientEngine> client, string_view eventJson)
 {
     FO_STACK_TRACE_ENTRY();
 
@@ -204,7 +204,7 @@ void FO_NAMESPACE Client_Game_AiControlPushEvent(ClientEngine* client, string_vi
     PushAiControlEvent(data, eventJson);
 }
 
-void FO_NAMESPACE Client_Game_AiControlCompleteCommand(ClientEngine* client, uint32_t commandSeq, bool success, string_view message)
+void FO_NAMESPACE Client_Game_AiControlCompleteCommand(ptr<ClientEngine> client, uint32_t commandSeq, bool success, string_view message)
 {
     FO_STACK_TRACE_ENTRY();
 
@@ -219,7 +219,7 @@ void FO_NAMESPACE Client_Game_AiControlCompleteCommand(ClientEngine* client, uin
     PushAiControlEvent(data, JsonDumpToString(event));
 }
 
-string FO_NAMESPACE Client_Game_AiControlGetStatus(ClientEngine* client)
+string FO_NAMESPACE Client_Game_AiControlGetStatus(ptr<ClientEngine> client)
 {
     FO_STACK_TRACE_ENTRY();
 
@@ -227,16 +227,16 @@ string FO_NAMESPACE Client_Game_AiControlGetStatus(ClientEngine* client)
     return JsonDumpToString(BuildAiControlStatus(data));
 }
 
-ident_t FO_NAMESPACE Client_Game_AiControlGetEntityId(ClientEngine* client, ClientEntity* entity)
+ident_t FO_NAMESPACE Client_Game_AiControlGetEntityId(ptr<ClientEngine> client, nptr<ClientEntity> entity)
 {
     FO_STACK_TRACE_ENTRY();
 
     ignore_unused(client);
 
-    return entity != nullptr ? entity->GetId() : ident_t {};
+    return entity.get() != nullptr ? entity.get()->GetId() : ident_t {};
 }
 
-static auto EnsureAiControlData(ClientEngine* client) -> AiControlClientData&
+static auto EnsureAiControlData(ptr<ClientEngine> client) -> AiControlClientData&
 {
     FO_STACK_TRACE_ENTRY();
 
@@ -288,7 +288,7 @@ static void RunAiControlBridge(AiControlClientData& data)
 
         string input;
         bool authorized = data.Token.empty();
-        unique_ptr<asio::ip::tcp::socket> socket;
+        unique_nptr<asio::ip::tcp::socket> socket;
 
         while (!data.StopRequested.load(std::memory_order_acquire)) {
             if (!socket) {
@@ -741,12 +741,12 @@ static void RegisterAiControlLogCallback(AiControlClientData& data)
 
     data.LogCallbackKey = string(strex("AiControlLog.{}", data.Port).str());
 
-    SetLogCallback(data.LogCallbackKey, [&data](LogType type, string_view message, const CatchedStackTraceData* st) {
+    SetLogCallback(data.LogCallbackKey, [&data](LogType type, string_view message, nptr<const CatchedStackTraceData> st) {
         if (!data.Running.load(std::memory_order_acquire) || data.StopRequested.load(std::memory_order_acquire)) {
             return;
         }
 
-        if (std::optional<string> event = TryBuildAiControlLogExceptionEvent(type, message, st); event.has_value()) {
+        if (std::optional<string> event = TryBuildAiControlLogExceptionEvent(type, message, st.get()); event.has_value()) {
             PushAiControlEvent(data, *event);
         }
     });
@@ -882,7 +882,7 @@ static bool ContainsCaseInsensitive(string_view text, string_view needle) noexce
 
 #else
 
-bool FO_NAMESPACE Client_Game_AiControlStart(ClientEngine* client, bool enabled, string_view host, int32_t port, string_view token, int32_t maxQueuedCommands, int32_t maxEvents)
+bool FO_NAMESPACE Client_Game_AiControlStart(ptr<ClientEngine> client, bool enabled, string_view host, int32_t port, string_view token, int32_t maxQueuedCommands, int32_t maxEvents)
 {
     FO_STACK_TRACE_ENTRY();
 
@@ -890,14 +890,14 @@ bool FO_NAMESPACE Client_Game_AiControlStart(ClientEngine* client, bool enabled,
     return false;
 }
 
-void FO_NAMESPACE Client_Game_AiControlStop(ClientEngine* client)
+void FO_NAMESPACE Client_Game_AiControlStop(ptr<ClientEngine> client)
 {
     FO_STACK_TRACE_ENTRY();
 
     ignore_unused(client);
 }
 
-bool FO_NAMESPACE Client_Game_AiControlIsRunning(ClientEngine* client)
+bool FO_NAMESPACE Client_Game_AiControlIsRunning(ptr<ClientEngine> client)
 {
     FO_STACK_TRACE_ENTRY();
 
@@ -905,7 +905,7 @@ bool FO_NAMESPACE Client_Game_AiControlIsRunning(ClientEngine* client)
     return false;
 }
 
-bool FO_NAMESPACE Client_Game_AiControlPullCommand(ClientEngine* client, uint32_t& commandSeq, string& type, ident_t& targetId, ident_t& itemId, ident_t& auxId, int32_t& hexX, int32_t& hexY, int32_t& screenX, int32_t& screenY, int32_t& intArg, string& stringArg, bool& append)
+bool FO_NAMESPACE Client_Game_AiControlPullCommand(ptr<ClientEngine> client, uint32_t& commandSeq, string& type, ident_t& targetId, ident_t& itemId, ident_t& auxId, int32_t& hexX, int32_t& hexY, int32_t& screenX, int32_t& screenY, int32_t& intArg, string& stringArg, bool& append)
 {
     FO_STACK_TRACE_ENTRY();
 
@@ -925,28 +925,28 @@ bool FO_NAMESPACE Client_Game_AiControlPullCommand(ClientEngine* client, uint32_
     return false;
 }
 
-void FO_NAMESPACE Client_Game_AiControlSetObservation(ClientEngine* client, string_view observationJson)
+void FO_NAMESPACE Client_Game_AiControlSetObservation(ptr<ClientEngine> client, string_view observationJson)
 {
     FO_STACK_TRACE_ENTRY();
 
     ignore_unused(client, observationJson);
 }
 
-void FO_NAMESPACE Client_Game_AiControlPushEvent(ClientEngine* client, string_view eventJson)
+void FO_NAMESPACE Client_Game_AiControlPushEvent(ptr<ClientEngine> client, string_view eventJson)
 {
     FO_STACK_TRACE_ENTRY();
 
     ignore_unused(client, eventJson);
 }
 
-void FO_NAMESPACE Client_Game_AiControlCompleteCommand(ClientEngine* client, uint32_t commandSeq, bool success, string_view message)
+void FO_NAMESPACE Client_Game_AiControlCompleteCommand(ptr<ClientEngine> client, uint32_t commandSeq, bool success, string_view message)
 {
     FO_STACK_TRACE_ENTRY();
 
     ignore_unused(client, commandSeq, success, message);
 }
 
-string FO_NAMESPACE Client_Game_AiControlGetStatus(ClientEngine* client)
+string FO_NAMESPACE Client_Game_AiControlGetStatus(ptr<ClientEngine> client)
 {
     FO_STACK_TRACE_ENTRY();
 
@@ -954,7 +954,7 @@ string FO_NAMESPACE Client_Game_AiControlGetStatus(ClientEngine* client)
     return "{}";
 }
 
-ident_t FO_NAMESPACE Client_Game_AiControlGetEntityId(ClientEngine* client, ClientEntity* entity)
+ident_t FO_NAMESPACE Client_Game_AiControlGetEntityId(ptr<ClientEngine> client, nptr<ClientEntity> entity)
 {
     FO_STACK_TRACE_ENTRY();
 

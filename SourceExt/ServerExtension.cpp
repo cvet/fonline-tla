@@ -15,57 +15,57 @@ struct ServerImage
 struct ServerExtData
 {
     int32_t LookMinimum {};
-    raw_ptr<const Property> InSneakMode {};
-    raw_ptr<const Property> SneakCoefficient {};
-    raw_ptr<const Property> IsAlwaysView {};
-    raw_ptr<const Property> IsTrap {};
-    raw_ptr<const Property> TrapValue {};
-    vector<unique_ptr<ServerImage>> ServerImages {};
-    unique_ptr<DialogManager> DialogMngr {};
+    nptr<const Property> InSneakMode {};
+    nptr<const Property> SneakCoefficient {};
+    nptr<const Property> IsAlwaysView {};
+    nptr<const Property> IsTrap {};
+    nptr<const Property> TrapValue {};
+    vector<unique_nptr<ServerImage>> ServerImages {};
+    unique_nptr<DialogManager> DialogMngr {};
 };
 
 static constexpr int32_t TLA_SNEAK_DIVIDER = 6;
 
-static auto GetServerExtData(ServerEngine* server) -> ServerExtData&
+static auto GetServerExtData(ptr<ServerEngine> server) -> ServerExtData&
 {
     return *reinterpret_cast<ServerExtData*>(server->UserData.get());
 }
 
-static auto GetServerExtData(const ServerEngine* server) -> const ServerExtData&
+static auto GetServerExtData(ptr<const ServerEngine> server) -> const ServerExtData&
 {
     return *reinterpret_cast<const ServerExtData*>(server->UserData.get());
 }
 
 FO_BEGIN_NAMESPACE
 ///@ EngineHook
-FO_SCRIPT_API void ServerInitHook(ServerEngine* server);
+FO_SCRIPT_API void ServerInitHook(ptr<ServerEngine> server);
 ///@ EngineHook
-FO_SCRIPT_API CritterVisibilityMode CheckCritterVisibilityHook(const ServerEngine* server, const Map* map, const Critter* cr, const Critter* target);
+FO_SCRIPT_API CritterVisibilityMode CheckCritterVisibilityHook(ptr<const ServerEngine> server, ptr<const Map> map, ptr<const Critter> cr, ptr<const Critter> target);
 ///@ EngineHook
-FO_SCRIPT_API bool CheckItemVisibilityHook(const ServerEngine* server, const Map* map, const Critter* cr, const Item* item);
+FO_SCRIPT_API bool CheckItemVisibilityHook(ptr<const ServerEngine> server, ptr<const Map> map, ptr<const Critter> cr, ptr<const Item> item);
 ///@ ExportMethod
-FO_SCRIPT_API isize32 Server_Game_LoadImage(ServerEngine* server, uint32_t imageSlot, string_view imageName);
+FO_SCRIPT_API isize32 Server_Game_LoadImage(ptr<ServerEngine> server, uint32_t imageSlot, string_view imageName);
 ///@ ExportMethod
-FO_SCRIPT_API ucolor Server_Game_GetImageColor(ServerEngine* server, uint32_t imageSlot, ipos32 pos);
+FO_SCRIPT_API ucolor Server_Game_GetImageColor(ptr<ServerEngine> server, uint32_t imageSlot, ipos32 pos);
 ///@ ExportMethod
-FO_SCRIPT_API FO_NULLABLE DialogPack* Server_Game_GetDialogPack(ServerEngine* server, hstring packId);
+FO_SCRIPT_API nptr<DialogPack> Server_Game_GetDialogPack(ptr<ServerEngine> server, hstring packId);
 ///@ ExportMethod
-FO_SCRIPT_API string Server_Game_RunSpeechScript(ServerEngine* server, DialogSpeech* speech, Critter* cr, FO_NULLABLE Critter* talker);
+FO_SCRIPT_API string Server_Game_RunSpeechScript(ptr<ServerEngine> server, ptr<DialogSpeech> speech, ptr<Critter> cr, nptr<Critter> talker);
 ///@ ExportMethod
-FO_SCRIPT_API bool Server_Game_DialogScriptDemand(ServerEngine* server, DialogAnswerReq* demand, Critter* master, FO_NULLABLE Critter* slave);
+FO_SCRIPT_API bool Server_Game_DialogScriptDemand(ptr<ServerEngine> server, ptr<DialogAnswerReq> demand, ptr<Critter> master, nptr<Critter> slave);
 ///@ ExportMethod
-FO_SCRIPT_API int32_t Server_Game_DialogScriptResult(ServerEngine* server, DialogAnswerReq* result, Critter* master, FO_NULLABLE Critter* slave);
+FO_SCRIPT_API int32_t Server_Game_DialogScriptResult(ptr<ServerEngine> server, ptr<DialogAnswerReq> result, ptr<Critter> master, nptr<Critter> slave);
 ///@ ExportMethod
-FO_SCRIPT_API bool Server_Critter_IsFree(Critter* server);
+FO_SCRIPT_API bool Server_Critter_IsFree(ptr<Critter> server);
 ///@ ExportMethod
-FO_SCRIPT_API bool Server_Critter_IsBusy(Critter* server);
+FO_SCRIPT_API bool Server_Critter_IsBusy(ptr<Critter> server);
 ///@ ExportMethod
-FO_SCRIPT_API void Server_Critter_Wait(Critter* server, int32_t ms);
+FO_SCRIPT_API void Server_Critter_Wait(ptr<Critter> server, int32_t ms);
 ///@ ExportMethod
-FO_SCRIPT_API void Server_Critter_ViewMap(Critter* self, Map* map, int32_t look, mpos hex, mdir dir);
+FO_SCRIPT_API void Server_Critter_ViewMap(ptr<Critter> self, ptr<Map> map, int32_t look, mpos hex, mdir dir);
 FO_END_NAMESPACE
 
-void FO_NAMESPACE ServerInitHook(ServerEngine* server)
+void FO_NAMESPACE ServerInitHook(ptr<ServerEngine> server)
 {
     FO_STACK_TRACE_ENTRY();
 
@@ -80,16 +80,16 @@ void FO_NAMESPACE ServerInitHook(ServerEngine* server)
 
     auto& ext_data = GetServerExtData(server);
 
-    ext_data.LookMinimum = strvex(server->Settings.GetCustomSetting("Look.LookMinimum")).to_int32();
+    ext_data.LookMinimum = strvex(server->Settings->GetCustomSetting("Look.LookMinimum")).to_int32();
     FO_VERIFY_AND_THROW(ext_data.LookMinimum != 0, "Look.LookMinimum setting must be set");
 
-    const auto* cr_props = server->GetPropertyRegistrator(Critter::ENTITY_TYPE_NAME);
+    const auto* cr_props = server->GetPropertyRegistrator(Critter::ENTITY_TYPE_NAME).get();
     ext_data.InSneakMode = cr_props->FindProperty("InSneakMode");
     FO_VERIFY_AND_THROW(ext_data.InSneakMode, "Critter property InSneakMode not found");
     ext_data.SneakCoefficient = cr_props->FindProperty("SneakCoefficient");
     FO_VERIFY_AND_THROW(ext_data.SneakCoefficient, "Critter property SneakCoefficient not found");
 
-    const auto* item_props = server->GetPropertyRegistrator(Item::ENTITY_TYPE_NAME);
+    const auto* item_props = server->GetPropertyRegistrator(Item::ENTITY_TYPE_NAME).get();
     ext_data.IsAlwaysView = item_props->FindProperty("IsAlwaysView");
     FO_VERIFY_AND_THROW(ext_data.IsAlwaysView, "Item property IsAlwaysView not found");
     ext_data.IsTrap = item_props->FindProperty("IsTrap");
@@ -101,7 +101,7 @@ void FO_NAMESPACE ServerInitHook(ServerEngine* server)
     ext_data.DialogMngr->LoadFromResources(server->Resources);
 }
 
-CritterVisibilityMode FO_NAMESPACE CheckCritterVisibilityHook(const ServerEngine* server, const Map* map, const Critter* cr, const Critter* target)
+CritterVisibilityMode FO_NAMESPACE CheckCritterVisibilityHook(ptr<const ServerEngine> server, ptr<const Map> map, ptr<const Critter> cr, ptr<const Critter> target)
 {
     FO_STACK_TRACE_ENTRY();
 
@@ -119,7 +119,7 @@ CritterVisibilityMode FO_NAMESPACE CheckCritterVisibilityHook(const ServerEngine
     }
 
     const auto& ext_data = GetServerExtData(server);
-    const auto& target_props = target->GetProperties();
+    const auto& target_props = *target->GetProperties();
 
     if (target_props.GetValue<bool>(ext_data.InSneakMode.get())) {
         const int32_t sneak_penalty = target_props.GetValue<int32_t>(ext_data.SneakCoefficient.get()) / TLA_SNEAK_DIVIDER;
@@ -130,7 +130,7 @@ CritterVisibilityMode FO_NAMESPACE CheckCritterVisibilityHook(const ServerEngine
     return look_dist >= dist ? CritterVisibilityMode::Full : CritterVisibilityMode::None;
 }
 
-bool FO_NAMESPACE CheckItemVisibilityHook(const ServerEngine* server, const Map* map, const Critter* cr, const Item* item)
+bool FO_NAMESPACE CheckItemVisibilityHook(ptr<const ServerEngine> server, ptr<const Map> map, ptr<const Critter> cr, ptr<const Item> item)
 {
     FO_STACK_TRACE_ENTRY();
 
@@ -141,7 +141,7 @@ bool FO_NAMESPACE CheckItemVisibilityHook(const ServerEngine* server, const Map*
     }
 
     const auto& ext_data = GetServerExtData(server);
-    const auto& props = item->GetProperties();
+    const auto& props = *item->GetProperties();
 
     if (props.GetValue<bool>(ext_data.IsAlwaysView.get())) {
         return true;
@@ -159,7 +159,7 @@ bool FO_NAMESPACE CheckItemVisibilityHook(const ServerEngine* server, const Map*
     return look_dist >= dist;
 }
 
-isize32 FO_NAMESPACE Server_Game_LoadImage(ServerEngine* server, uint32_t imageSlot, string_view imageName)
+isize32 FO_NAMESPACE Server_Game_LoadImage(ptr<ServerEngine> server, uint32_t imageSlot, string_view imageName)
 {
     FO_STACK_TRACE_ENTRY();
 
@@ -219,7 +219,7 @@ isize32 FO_NAMESPACE Server_Game_LoadImage(ServerEngine* server, uint32_t imageS
     const auto height = reader.GetLEUInt16();
     [[maybe_unused]] const auto nx = reader.GetLEInt16();
     [[maybe_unused]] const auto ny = reader.GetLEInt16();
-    const auto* data = reader.GetCurBuf();
+    const auto* data = reader.GetCurBuf().get();
 
     reader.GoForward(numeric_cast<size_t>(width) * height * 4);
 
@@ -237,7 +237,7 @@ isize32 FO_NAMESPACE Server_Game_LoadImage(ServerEngine* server, uint32_t imageS
     return {width, height};
 }
 
-ucolor FO_NAMESPACE Server_Game_GetImageColor(ServerEngine* server, uint32_t imageSlot, ipos32 pos)
+ucolor FO_NAMESPACE Server_Game_GetImageColor(ptr<ServerEngine> server, uint32_t imageSlot, ipos32 pos)
 {
     FO_STACK_TRACE_ENTRY();
 
@@ -257,12 +257,12 @@ ucolor FO_NAMESPACE Server_Game_GetImageColor(ServerEngine* server, uint32_t ima
     return result;
 }
 
-DialogPack* FO_NAMESPACE Server_Game_GetDialogPack(ServerEngine* server, hstring packId)
+nptr<DialogPack> FO_NAMESPACE Server_Game_GetDialogPack(ptr<ServerEngine> server, hstring packId)
 {
     FO_STACK_TRACE_ENTRY();
 
     auto& ext_data = GetServerExtData(server);
-    auto* pack = ext_data.DialogMngr->GetDialog(packId);
+    auto pack = ext_data.DialogMngr->GetDialog(packId);
 
     if (pack == nullptr) {
         BreakIntoDebugger();
@@ -272,7 +272,7 @@ DialogPack* FO_NAMESPACE Server_Game_GetDialogPack(ServerEngine* server, hstring
     return pack;
 }
 
-string FO_NAMESPACE Server_Game_RunSpeechScript(ServerEngine* server, DialogSpeech* speech, Critter* cr, Critter* talker)
+string FO_NAMESPACE Server_Game_RunSpeechScript(ptr<ServerEngine> server, ptr<DialogSpeech> speech, ptr<Critter> cr, nptr<Critter> talker)
 {
     FO_STACK_TRACE_ENTRY();
 
@@ -281,10 +281,10 @@ string FO_NAMESPACE Server_Game_RunSpeechScript(ServerEngine* server, DialogSpee
     if (speech->DlgScriptFuncName) {
         bool failed = false;
 
-        if (auto func = server->FindFunc<void, Critter*, Critter*, string&>(speech->DlgScriptFuncName); func && !func.Call(cr, talker, textArgs)) {
+        if (auto func = server->FindFunc<void, Critter*, Critter*, string&>(speech->DlgScriptFuncName); func && !func.Call(cr.get(), talker.get(), textArgs)) {
             failed = true;
         }
-        if (auto func = server->FindFunc<uint32_t, Critter*, Critter*, string&>(speech->DlgScriptFuncName); func && !func.Call(cr, talker, textArgs)) {
+        if (auto func = server->FindFunc<uint32_t, Critter*, Critter*, string&>(speech->DlgScriptFuncName); func && !func.Call(cr.get(), talker.get(), textArgs)) {
             failed = true;
         }
 
@@ -296,13 +296,18 @@ string FO_NAMESPACE Server_Game_RunSpeechScript(ServerEngine* server, DialogSpee
     return textArgs;
 }
 
-bool FO_NAMESPACE Server_Game_DialogScriptDemand(ServerEngine* server, DialogAnswerReq* demand, Critter* master, Critter* slave)
+bool FO_NAMESPACE Server_Game_DialogScriptDemand(ptr<ServerEngine> server, ptr<DialogAnswerReq> demand, ptr<Critter> master, nptr<Critter> slave)
 {
     FO_STACK_TRACE_ENTRY();
 
-    const auto call_demand = [server, demand, master, slave]<typename... TArgs>(const TArgs&... args) -> bool {
-        auto func = server->FindFunc<bool, Critter*, Critter*, TArgs...>(demand->AnswerScriptFuncName);
-        return func && func.HasAttribute("DialogDemand") && func.Call(master, slave, args...) && func.GetResult();
+    ServerEngine* server_ptr = server.get();
+    DialogAnswerReq* demand_ptr = demand.get();
+    Critter* master_ptr = master.get();
+    Critter* slave_ptr = slave.get();
+
+    const auto call_demand = [server_ptr, demand_ptr, master_ptr, slave_ptr]<typename... TArgs>(const TArgs&... args) -> bool {
+        auto func = server_ptr->FindFunc<bool, Critter*, Critter*, TArgs...>(demand_ptr->AnswerScriptFuncName);
+        return func && func.HasAttribute("DialogDemand") && func.Call(master_ptr, slave_ptr, args...) && func.GetResult();
     };
 
     switch (demand->ValuesCount) {
@@ -323,23 +328,28 @@ bool FO_NAMESPACE Server_Game_DialogScriptDemand(ServerEngine* server, DialogAns
     }
 }
 
-int32_t FO_NAMESPACE Server_Game_DialogScriptResult(ServerEngine* server, DialogAnswerReq* result, Critter* master, Critter* slave)
+int32_t FO_NAMESPACE Server_Game_DialogScriptResult(ptr<ServerEngine> server, ptr<DialogAnswerReq> result, ptr<Critter> master, nptr<Critter> slave)
 {
     FO_STACK_TRACE_ENTRY();
 
-    const auto call_result_int = [server, result, master, slave]<typename... TArgs>(const TArgs&... args) -> optional<int32_t> {
-        auto func = server->FindFunc<int32_t, Critter*, Critter*, TArgs...>(result->AnswerScriptFuncName);
+    ServerEngine* server_ptr = server.get();
+    DialogAnswerReq* result_ptr = result.get();
+    Critter* master_ptr = master.get();
+    Critter* slave_ptr = slave.get();
 
-        if (func && func.HasAttribute("DialogResult") && func.Call(master, slave, args...)) {
+    const auto call_result_int = [server_ptr, result_ptr, master_ptr, slave_ptr]<typename... TArgs>(const TArgs&... args) -> optional<int32_t> {
+        auto func = server_ptr->FindFunc<int32_t, Critter*, Critter*, TArgs...>(result_ptr->AnswerScriptFuncName);
+
+        if (func && func.HasAttribute("DialogResult") && func.Call(master_ptr, slave_ptr, args...)) {
             return func.GetResult();
         }
 
         return std::nullopt;
     };
 
-    const auto call_result_void = [server, result, master, slave]<typename... TArgs>(const TArgs&... args) -> bool {
-        auto func = server->FindFunc<void, Critter*, Critter*, TArgs...>(result->AnswerScriptFuncName);
-        return func && func.HasAttribute("DialogResult") && func.Call(master, slave, args...);
+    const auto call_result_void = [server_ptr, result_ptr, master_ptr, slave_ptr]<typename... TArgs>(const TArgs&... args) -> bool {
+        auto func = server_ptr->FindFunc<void, Critter*, Critter*, TArgs...>(result_ptr->AnswerScriptFuncName);
+        return func && func.HasAttribute("DialogResult") && func.Call(master_ptr, slave_ptr, args...);
     };
 
     switch (result->ValuesCount) {
@@ -415,7 +425,7 @@ int32_t FO_NAMESPACE Server_Game_DialogScriptResult(ServerEngine* server, Dialog
     return 0;
 }
 
-bool FO_NAMESPACE Server_Critter_IsFree(Critter* server)
+bool FO_NAMESPACE Server_Critter_IsFree(ptr<Critter> server)
 {
     FO_STACK_TRACE_ENTRY();
 
@@ -423,7 +433,7 @@ bool FO_NAMESPACE Server_Critter_IsFree(Critter* server)
     return true;
 }
 
-bool FO_NAMESPACE Server_Critter_IsBusy(Critter* server)
+bool FO_NAMESPACE Server_Critter_IsBusy(ptr<Critter> server)
 {
     FO_STACK_TRACE_ENTRY();
 
@@ -431,14 +441,14 @@ bool FO_NAMESPACE Server_Critter_IsBusy(Critter* server)
     return false;
 }
 
-void FO_NAMESPACE Server_Critter_Wait(Critter* server, int32_t ms)
+void FO_NAMESPACE Server_Critter_Wait(ptr<Critter> server, int32_t ms)
 {
     FO_STACK_TRACE_ENTRY();
 
     ignore_unused(server, ms);
 }
 
-void FO_NAMESPACE Server_Critter_ViewMap(Critter* self, Map* map, int32_t look, mpos hex, mdir dir)
+void FO_NAMESPACE Server_Critter_ViewMap(ptr<Critter> self, ptr<Map> map, int32_t look, mpos hex, mdir dir)
 {
     FO_STACK_TRACE_ENTRY();
 
@@ -451,13 +461,13 @@ void FO_NAMESPACE Server_Critter_ViewMap(Critter* self, Map* map, int32_t look, 
         return;
     }
 
-    auto* player = self->GetPlayer();
+    auto player = self->GetPlayer();
     if (player == nullptr) {
         return;
     }
 
     player->Send_LoadMap(map);
-    self->GetEngine()->MapMngr.ViewMap(player, map);
+    self->GetEngine()->MapMngr.ViewMap(player.as_ptr(), map);
 
     auto out_buf = player->GetConnection()->WriteMsg(NetMessage::ViewMap);
     out_buf->Write(hex);

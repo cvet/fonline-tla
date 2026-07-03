@@ -1,3 +1,6 @@
+// Main — центральный серверный модуль-диспетчер игровых событий мира и криттеров.
+// Подписывает в ModuleInit и обрабатывает: инициализацию/генерацию мира (start, GenerateWorld, создание локаций), боевые хуки (атака, кража, применение предметов/навыков, перезарядка оружия), жизненный цикл криттеров (init/finish/dead/knockout/respawn), вход/выход на карте, бартер, вход/регистрацию/перемещение/поворот игрока и старт диалога.
+// Только SERVER; делегирует работу профильным модулям (Worldmap, Combat, Location, Navarro и др.) через Game.On*-события.
 namespace Main
 {
 
@@ -29,7 +32,7 @@ void InitMain()
     Game.OnCritterRespawn.Subscribe(CritterRespawn);
     Game.OnMapCritterIn.Subscribe(MapCritterIn);
     Game.OnMapCritterOut.Subscribe(MapCritterOut);
-    // OnMapCheckLook/OnMapCheckTrapLook removed from engine; visibility now handled via Properties refresh
+    // OnMapCheckLook/OnMapCheckTrapLook удалены из движка; видимость теперь обрабатывается через обновление Properties
     // Game.OnMapCheckLook.Subscribe(CheckLook);
     // Game.OnMapCheckTrapLook.Subscribe(CheckTrapLook);
     Game.OnItemsBarter.Subscribe(ItemsBarter);
@@ -39,44 +42,44 @@ void InitMain()
     Game.OnCritterTalk.Subscribe(OnCritterTalk);
 }
 
-// Called before world generation.
+// Вызывается перед генерацией мира.
 [[Event]]
 void init()
 {
 }
 
-// Call on start server.
+// Вызывается при старте сервера.
 [[Event]]
 EventResult start()
 {
-    // Global map initialization
+    // Инициализация глобальной карты
     Worldmap::WorldmapInit();
 
-    // Caravans initialization
+    // Инициализация караванов
     // Caravan::CaravansInit(); // WIP: flaky null-deref in CaravanInfo route setup on init
 
-    // NoPvP initialization
+    // Инициализация зон без PvP
     // NoPvpMaps::SetNoPvp();
 
-    // Game Events initialization
+    // Инициализация игровых событий
     // GameEvent::DeclareEvents(); // WIP: null-deref in DeclareEvent (GameEvent.fos:391) on fresh DB
     // GameEvent::CheckAllGameEvents(); // WIP: depends on DeclareEvents; racing event also broken
 
-    // Bulletin boards
+    // Доски объявлений
     // BulletinBoard::StartMessenger(); // WIP: null-deref in Messenger.Load (BulletinBoard.fos:243) on fresh DB
 
     return EventResult::ContinueChain;
 }
 
-// Call on world initialization.
-// Parameter         Min    Max
+// Вызывается при инициализации мира.
+// Параметр          Min    Max
 // multiplier        1      50000
 // year              1700   30000
 // month             1      12
 // day               1      31
 // hour              0      23
 // minute            0      59
-// Call on world generation.
+// Вызывается при генерации мира.
 [[Event]]
 EventResult GenerateWorld()
 {
@@ -122,7 +125,7 @@ EventResult GenerateWorld()
     return EventResult::ContinueChain;
 }
 
-// Call on something critter attack another.
+// Вызывается, когда криттер атакует другого.
 [[Event]]
 void CritterAttack(Critter cr, Critter target, Item weapon, int weaponMode, ProtoItem? ammo)
 {
@@ -141,7 +144,7 @@ void CritterAttack(Critter cr, Critter target, Item weapon, int weaponMode, Prot
     Game.OnCritterAttacked.Fire(target, cr);
 }
 
-// Call on something critter attack another.
+// Вызывается, когда криттер атакует другого.
 [[Event]]
 void CritterAttacked(Critter cr, Critter attacker)
 {
@@ -151,10 +154,10 @@ void CritterAttacked(Critter cr, Critter attacker)
     }
 
     if (cr.ControlledByPlayer) {
-        return; // Diable player helping
+        return; // Игрокам помощь не подключается
     }
     else {
-        NpcPlanes::AddAttackPlane(cr, 0, attacker); // Answer on attack
+        NpcPlanes::AddAttackPlane(cr, 0, attacker); // Отвечаем на атаку
     }
 
     int helpers = 0;
@@ -168,7 +171,7 @@ void CritterAttacked(Critter cr, Critter attacker)
         if (plane != null && plane.Type == NpcPlanes::AI_PLANE_ATTACK && plane.Attack_TargId == attacker.Id) {
             helpers++;
             if (helpers >= maxHelpers) {
-                return; // No help needed
+                return; // Больше помощь не нужна
             }
 
             excluded[i] = true;
@@ -180,16 +183,16 @@ void CritterAttacked(Critter cr, Critter attacker)
     int attackerTeamId = attacker.TeamId;
     for (int i = 0; i < critters.length(); i++) {
         if (excluded[i]) {
-            continue; // Skip excluded
+            continue; // Пропускаем исключённых
         }
 
         Critter someCr = critters[i];
         int someCrTeamId = someCr.TeamId;
         if (attackerTeamId == someCrTeamId) {
-            continue; // No attack temmate
+            continue; // Не атакуем союзника
         }
 
-        int teamParity = TeamsTable::GetTeamParity(someCrTeamId, teamId); // From -> To
+        int teamParity = TeamsTable::GetTeamParity(someCrTeamId, teamId); // От -> Кому
         switch (teamParity) {
         case TeamsTable::Ignore:
             continue;
@@ -238,12 +241,12 @@ void CritterAttacked(Critter cr, Critter attacker)
         NpcPlanes::AddAttackPlane(someCr, 0, attacker);
         helpers++;
         if (helpers >= maxHelpers) {
-            break; // Enough
+            break; // Достаточно
         }
     }
 }
 
-// Call on something critter steal another.
+// Вызывается, когда криттер обкрадывает другого.
 [[Event]]
 EventResult CritterStealing(Critter cr, Critter thief, Item item, int count)
 {
@@ -277,32 +280,32 @@ EventResult CritterStealing(Critter cr, Critter thief, Item item, int count)
         size = 1;
     }
 
-    // Perk pickpocket, ignore size and facing
+    // Перк «Карманник»: игнорируем объём и направление
     if (thief.PerkPickpocket != 0) {
         kDir = 0;
         size = 1;
     }
 
-    // Count modifier
+    // Модификатор за количество
     int kCount = count / steal;
     if (kCount <= 0) {
         kCount = 1;
     }
 
-    // Check time of stealing
+    // Проверяем интервал с прошлой кражи
     ident lastStealCrId = thief.LastStealCrId;
     int stealCount = thief.StealCount;
     if (lastStealCrId == cr.Id && Time::IsTimeoutActive(thief.TimeoutStealing)) {
         steal -= steal * stealCount * 9 / 100;
     }
 
-    // Calc
+    // Расчёт
     int k = (steal - kDir * 10) / (size * kCount);
     k = Math::Clamp(k, 5, 95);
     bool success = !(Game.Random(1, 100) > k);
 
     if (success) {
-        // Add experience     10,30,60,100,150,210,280,360,450,550,660,780
+        // Начисляем опыт     10,30,60,100,150,210,280,360,450,550,660,780
         const int[] stealExp = {10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120};
 
         if (lastStealCrId == cr.Id && Time::IsTimeoutActive(thief.TimeoutStealing)) {
@@ -360,7 +363,7 @@ EventResult CritterStealing(Critter cr, Critter thief, Item item, int count)
     return (success) ? EventResult::ContinueChain : EventResult::StopChain;
 }
 
-// Call on something critter use item.
+// Вызывается, когда криттер использует предмет.
 [[Event]]
 EventResult CritterUseItem(Critter cr, Item item, Critter? targetCr, Item? targetItem, StaticItem? targetScen, int param)
 {
@@ -368,13 +371,13 @@ EventResult CritterUseItem(Critter cr, Item item, Critter? targetCr, Item? targe
     hstring pid = item.ProtoId;
     bool useOnSelf = (targetCr == null && targetItem == null && targetScen == null);
 
-    // Holodisk
+    // Голодиск
     if (useOnSelf && item.IsHolodisk) {
         Holodisk::ReadHolodisk(cr, item);
         return EventResult::StopChain;
     }
 
-    // Radio
+    // Радио
     if (item.HasRadio && useOnSelf) {
         if (isPlayer) {
             Radio::EditRadioSettings(cr, item);
@@ -383,23 +386,23 @@ EventResult CritterUseItem(Critter cr, Item item, Critter? targetCr, Item? targe
         return EventResult::StopChain;
     }
 
-    // Book reading
+    // Чтение книги
     if (useOnSelf && Books::IsReadableBook(pid)) {
         Books::TryReadBook(cr, item);
         return EventResult::StopChain;
     }
 
-    // Explosion
+    // Взрыв
     if (Explode::OnUseExplode(cr, item, targetCr, targetItem, targetScen, param)) {
         return EventResult::StopChain;
     }
 
-    // Cars
+    // Машины
     if (targetItem != null && targetItem.Type == ItemType::Car && Car::UseItemOnCar(cr, targetItem, item)) {
         return EventResult::StopChain;
     }
 
-    // Drugs
+    // Наркотики
     if (item.Type == ItemType::Drug) {
         if (useOnSelf) {
             Drugs::UseDrug(cr, item);
@@ -414,7 +417,7 @@ EventResult CritterUseItem(Critter cr, Item item, Critter? targetCr, Item? targe
         return EventResult::StopChain;
     }
 
-    // Play dice
+    // Бросок костей
     if (pid == Content::Item::dice) {
         Messaging::SayEmoteOnHead(cr, TextPackKey(TextPackName::Text, "" + (MsgStr::StrDiceThrow)), "|result:" + Game.Random(1, 6));
         return EventResult::StopChain;
@@ -425,25 +428,25 @@ EventResult CritterUseItem(Critter cr, Item item, Critter? targetCr, Item? targe
         return EventResult::StopChain;
     }
 
-    // Magic ball
+    // Магический шар
     if (pid == Content::Item::magic_8_ball) {
         // Messaging::SayEmoteOnHead(cr, TextPackKey(TextPackName::Text, "" + (Game.Random(1,2)==1?MsgStr::StrMagicBallYes:MsgStr::StrMagicBallNo)));
         return EventResult::StopChain;
     }
 
-    // Cosmetic
+    // Косметика
     if (pid == Content::Item::cosmetic_case && cr.Gender == GenderType::Female) {
         Messaging::SayEmoteOnHead(cr, TextPackKey(TextPackName::Text, "" + (MsgStr::StrCosmeticUse)));
         return EventResult::StopChain;
     }
 
-    // Cigarettes smoking
+    // Курение сигарет
     if (pid == Content::Item::cigarettes && cr.CountItem(Content::Item::lighter) > 0) {
         Messaging::SayEmoteOnHead(cr, TextPackKey(TextPackName::Text, "" + (MsgStr::StrCigarettesSmoke)));
         return EventResult::StopChain;
     }
 
-    // Geiger counter
+    // Счётчик Гейгера
     if (pid == Content::Item::geiger_counter && useOnSelf && Geiger::UseGeiger(cr, item)) {
         return EventResult::StopChain;
     }
@@ -462,36 +465,36 @@ EventResult CritterUseItem(Critter cr, Item item, Critter? targetCr, Item? targe
         other[i].OnSomeCritterUseItem.Fire(cr, item, targetCr, targetItem, targetScen, param);
     }
 
-    // Take process to engine
+    // Дальнейшую обработку передаём движку
     return EventResult::StopChain;
 }
 
-// Call on something critter use skill.
+// Вызывается, когда криттер применяет навык.
 [[Event]]
 EventResult CritterUseSkill(Critter cr, CritterProperty skill, Critter? targetCr, Item? targetItem, StaticItem? targetScen)
 {
     bool isPlayer = cr.ControlledByPlayer;
 
-    // Cars
+    // Машины
     if (targetItem != null && targetItem.Type == ItemType::Car && Car::UseSkillOnCar(cr, targetItem, skill)) {
         return EventResult::StopChain;
     }
 
-    // Geiger counter
+    // Счётчик Гейгера
     if (targetItem != null && targetItem.ProtoId == Content::Item::geiger_counter && Geiger::UseSkillOnGeiger(cr, targetItem, skill)) {
         return EventResult::StopChain;
     }
 
-    // Doors or containers
+    // Двери или контейнеры
     if (targetItem != null && (targetItem.Type == ItemType::Door || targetItem.Type == ItemType::Container) &&
         Lockers::UseSkillOnLocker(cr, targetItem, skill)) {
         return EventResult::StopChain;
     }
 
     switch (skill) {
-    case int(CritterProperty::SpecialSkillPickOnGround): // Pick item or scenery on ground
+    case int(CritterProperty::SpecialSkillPickOnGround): // Подбор предмета или объекта сцены с земли
     {
-        // Scenery
+        // Объект сцены
         if (targetScen != null) {
             if (targetScen.StaticScript != EMPTY_HSTRING && Game.CallStaticItemFunction(cr, targetScen, null, int(skill))) {
                 return EventResult::StopChain;
@@ -516,18 +519,18 @@ EventResult CritterUseSkill(Critter cr, CritterProperty skill, Critter? targetCr
             return EventResult::StopChain;
         }
 
-        // Wanted
+        // Знак розыска
         if (targetItem != null && targetItem.ProtoId == Content::Item::wanted_sign &&
             Wanted::WantedSignSet(Game.GetItem(targetItem.Id), cr.Name, Game.Random(1000, 2000))) {
             return EventResult::StopChain;
         }
 
-        // Explosion
+        // Взрыв
         if (targetItem != null && targetItem.ProtoId == Content::Item::active_mine && Explode::OnUseExplode(cr, targetItem, null, null, null, 0)) {
             return EventResult::StopChain;
         }
 
-        // Pick some item
+        // Подбор предмета
         if (targetItem != null) {
             Item item = targetItem;
             if (not item.IsCanPickUp) {
@@ -540,27 +543,27 @@ EventResult CritterUseSkill(Critter cr, CritterProperty skill, Critter? targetCr
 
             int freeWeight = cr.CarryWeight - cr.ItemsWeight;
             if (freeWeight >= int(item.Weight * item.Count)) {
-                // Pick full
+                // Берём целиком
                 ItemMovement::MoveItem(item, item.Count, cr);
             }
             else {
-                // Pick half
+                // Берём часть
                 if (item.Stackable && freeWeight >= int(item.Weight)) {
                     ItemMovement::MoveItem(item, freeWeight / item.Weight, cr); //TODO: возможно, неверная формула, почему здесь вес, а не количество.
                 }
 
-                // Overweight
+                // Перегруз
                 else {
                     Messaging::Info(cr, TextPackKey(TextPackName::Game, "" + (MsgStr::StrOverweight)));
                 }
             }
         }
     } break;
-    case Tla::SKILL_PUT_CONT:                        // Put item in container, only targetItem is valid
-    case Tla::SKILL_TAKE_CONT:                       // Take item from container, only targetItem is valid
-    case Tla::SKILL_TAKE_ALL_CONT:                   // Take all items from critter or item container
-        return EventResult::StopChain;               // Allow transactions
-    case CritterProperty::SpecialSkillLootCritter: { // Loot critter, only targetCr is valid
+    case Tla::SKILL_PUT_CONT:                        // Положить предмет в контейнер, валиден только targetItem
+    case Tla::SKILL_TAKE_CONT:                       // Взять предмет из контейнера, валиден только targetItem
+    case Tla::SKILL_TAKE_ALL_CONT:                   // Забрать все предметы из криттера или контейнера
+        return EventResult::StopChain;               // Разрешаем транзакции
+    case CritterProperty::SpecialSkillLootCritter: { // Обыскать криттера, валиден только targetCr
         if (targetCr == null) {
             return EventResult::StopChain;
         }
@@ -569,7 +572,7 @@ EventResult CritterUseSkill(Critter cr, CritterProperty skill, Critter? targetCr
         Lockers::ShowContainer(cr, lootTarget, null, TransferTypes::CritLoot);
         return EventResult::StopChain;
     }
-    case Tla::SKILL_PUSH_CRITTER: { // Push critter, only targetCr is valid
+    case Tla::SKILL_PUSH_CRITTER: { // Оттолкнуть криттера, валиден только targetCr
         if (targetCr == null) {
             return EventResult::StopChain;
         }
@@ -584,7 +587,7 @@ EventResult CritterUseSkill(Critter cr, CritterProperty skill, Critter? targetCr
         return EventResult::StopChain;
     }
     case CritterProperty::SkillScience: {
-        // Radio
+        // Радио
         if (targetItem != null && targetItem.HasRadio && targetItem.Ownership == ItemOwnership::CritterInventory && targetItem.CritterId == cr.Id) {
             if (isPlayer) {
                 Radio::EditRadioSettings(cr, targetItem);
@@ -601,7 +604,7 @@ EventResult CritterUseSkill(Critter cr, CritterProperty skill, Critter? targetCr
         Messaging::Info(cr, TextPackKey(TextPackName::Game, "" + (MsgStr::StrUseNothing))); // Todo: "You fail to learn anything."
     } break;
     case CritterProperty::SkillRepair: {
-        // Generic repair
+        // Обычный ремонт
         if (targetItem != null && targetItem.Ownership == ItemOwnership::CritterInventory && targetItem.Deteriorable && Repair::TryRepairItem(cr, targetItem)) {
             return EventResult::StopChain;
         }
@@ -629,13 +632,13 @@ EventResult CritterUseSkill(Critter cr, CritterProperty skill, Critter? targetCr
             Messaging::Info(cr, TextPackKey(TextPackName::Game, "" + (MsgStr::StrUseNothing)));
         }
         else if (targetCr != null) {
-            // Loot
+            // Обыск трупа
             if (targetCr.IsDead()) {
                 cr.Action(CritterAction::PickCritter, 0, null);
                 Lockers::ShowContainer(cr, targetCr, null, TransferTypes::CritLoot);
             }
 
-            // Steal
+            // Кража
             else {
                 if (isPlayer && Time::IsTimeoutActive(cr.TimeoutSkSteal)) {
                     Messaging::Info(cr, TextPackKey(TextPackName::Game, "" + (MsgStr::StrSkillWeariness)));
@@ -823,10 +826,10 @@ EventResult CritterUseSkill(Critter cr, CritterProperty skill, Critter? targetCr
         }
     } break;
     case CritterProperty::SkillLockpick: {
-        // Lockers processed in lockers.fos
+        // Замки обрабатываются в lockers.fos
     } break;
     case CritterProperty::SkillTraps: {
-        // Explosion
+        // Взрыв
         if (targetItem != null) {
             hstring pid = targetItem.ProtoId;
             if ((pid == Content::Item::active_dynamite || pid == Content::Item::active_plastic_explosive || pid == Content::Item::active_mine) &&
@@ -845,12 +848,12 @@ EventResult CritterUseSkill(Critter cr, CritterProperty skill, Critter? targetCr
     return EventResult::StopChain;
 }
 
-// Call on something critter reload weapon.
-// If ammo is not valid than only unload.
+// Вызывается при перезарядке оружия криттером.
+// Если патроны невалидны — только разряжаем.
 [[Event]]
 void CritterReloadWeapon(Critter cr, Item weapon, Item? ammo)
 {
-    // Special weapons
+    // Особое оружие
     if (weapon.Weapon_Caliber == 0) {
         if (weapon.ProtoId == Content::Item::solar_scorcher) {
             if (GameTime::IsNight(GameTime::GetHour())) {
@@ -864,8 +867,8 @@ void CritterReloadWeapon(Critter cr, Item weapon, Item? ammo)
         return;
     }
 
-    // Other weapons
-    // Unload
+    // Прочее оружие
+    // Разряжаем
     if (ammo == null || (weapon.AmmoCount > 0 && weapon.AmmoPid != ammo.ProtoId)) {
         if (weapon.AmmoPid != EMPTY_HSTRING) {
             Item? existAmmo = cr.GetItem(weapon.AmmoPid);
@@ -880,7 +883,7 @@ void CritterReloadWeapon(Critter cr, Item weapon, Item? ammo)
         weapon.AmmoCount = 0;
     }
 
-    // Load
+    // Заряжаем
     if (ammo != null) {
         int count = Math::Min(ammo.Count, weapon.Weapon_MaxAmmoCount - weapon.AmmoCount);
         weapon.AmmoCount += count;
@@ -889,14 +892,14 @@ void CritterReloadWeapon(Critter cr, Item weapon, Item? ammo)
     }
 }
 
-// Call on player register/login in game or npc created/loaded.
-// Default start position for players is center of global map.
+// Вызывается при регистрации/входе игрока или создании/загрузке NPC.
+// Стартовая позиция игроков по умолчанию — центр глобальной карты.
 [[Event]]
 void CritterInit(Critter cr, bool firstTime)
 {
     if (firstTime) {
         if (cr.ControlledByPlayer) {
-            // Input: 7 special, 3 tag skills, 2 traits, age, gender
+            // Входные данные: 7 SPECIAL, 3 профильных навыка, 2 черты, возраст, пол
             int traitsCount = 0;
             for (int i = 0; i < CritterPropertyGroup::Traits.length(); i++) {
                 if (cr.GetAsInt(CritterPropertyGroup::Traits[i]) != 0 && traitsCount < 2) {
@@ -935,9 +938,9 @@ void CritterInit(Critter cr, bool firstTime)
             }
 
             cr.EmpResistanceBase = 500;
-            Holodisk::AddHolodiskInfo(cr, 42); // Journalist's research
+            Holodisk::AddHolodiskInfo(cr, 42); // Исследование журналиста
 
-            // Default skin
+            // Скин по умолчанию
             cr.ModelNameBase = (cr.Gender == GenderType::Male ? Tla::CRTYPE_DEFAULT_M : Tla::CRTYPE_DEFAULT_F);
             verify(cr.ModelNameBase != EMPTY_HSTRING, "Assertion failed");
             cr.ModelName = cr.ModelNameBase;
@@ -977,7 +980,7 @@ void CritterInit(Critter cr, bool firstTime)
 
             Replication::SetStartLocation(cr);
 
-            // Main quest
+            // Основной квест
             if (Settings.Story.MainStoryLineActive) {
                 MainIntro::SetPlayerStoryLineLocation(cr);
             }
@@ -997,7 +1000,7 @@ void CritterInit(Critter cr, bool firstTime)
         }
     }
     else {
-        // Main quest
+        // Основной квест
         if (cr.ControlledByPlayer && Settings.Story.MainStoryLineActive) {
             MainIntro::SetPlayerStoryLineLocation(cr);
         }
@@ -1005,7 +1008,7 @@ void CritterInit(Critter cr, bool firstTime)
             Replication::SetStartLocation(cr);
         }
 
-        // Current skin validation
+        // Проверка текущего скина
         Item? armor = cr.GetItem(ItemProperty::CritterSlot, CritterItemSlot::Armor);
         if (armor == null) {
             hstring modelName = cr.ModelNameBase;
@@ -1019,7 +1022,7 @@ void CritterInit(Critter cr, bool firstTime)
             }
         }
 
-        // Clear timeouts if too long (happens when saves got removed)
+        // Сбрасываем слишком длинные таймауты (бывает после удаления сейвов)
         for (int i = 0; i < CritterPropertyGroup::Timeouts.length(); i++) {
             if (CritterPropertyGroup::Timeouts[i] != CritterProperty::TimeoutBattle &&
                 cr.GetAsAny(CritterPropertyGroup::Timeouts[i]) > GameTime::MAXIMUM_TIMEOUT) {
@@ -1027,7 +1030,7 @@ void CritterInit(Critter cr, bool firstTime)
             }
         }
 
-        // Erase zero time events
+        // Удаляем нулевые time-events
         //cr.RemoveTimeEvents(0);
 
         // TRAIT_FAST_SHOT migration, delete in future
@@ -1053,7 +1056,7 @@ void CritterInit(Critter cr, bool firstTime)
     cr.StartTimeEvent(Time::Milliseconds(0), Time::Milliseconds(1000), CritterIdle);
 }
 
-// Call on critter exit from game.
+// Вызывается при выходе криттера из игры.
 [[Event]]
 void CritterFinish(Critter cr)
 {
@@ -1068,7 +1071,7 @@ void CritterFinish(Critter cr)
     }
 }
 
-// Call every Settings.Critter.CritterIdleTick time.
+// Вызывается каждый тик Settings.Critter.CritterIdleTick.
 [[TimeEvent]] [[Async]]
 void CritterIdle(Critter cr)
 {
@@ -1076,12 +1079,12 @@ void CritterIdle(Critter cr)
         return;
     }
 
-    // Replication
+    // Репликация
     if (cr.IsDead() && cr.ReplicationTime >= 0 && !Time::IsTimeoutActive(cr.TimeoutReplication)) {
         Replication::ReplicateCritter(cr);
     }
 
-    // Healing
+    // Лечение
     if (!Time::IsTimeoutActive(cr.TimeoutHealing)) {
         if (!cr.IsDead() && !cr.IsNoHeal && !Time::IsTimeoutActive(cr.TimeoutBattle) && cr.CurrentHp < cr.MaxLife) {
             cr.CurrentHp += cr.HealingRate * (cr.PerkVampireRegeneration != 0 ? 2 : 1);
@@ -1094,7 +1097,7 @@ void CritterIdle(Critter cr)
         cr.TimeoutHealing = GameTime::HealingTimeout(cr);
     }
 
-    // Ap regeneration
+    // Восстановление ОД
     if (cr.CurrentAp < cr.ActionPoints * Tla::AP_DIVIDER) {
         auto tick = Game.FrameTime;
 
@@ -1122,7 +1125,7 @@ void CritterIdle(Critter cr)
         }
     }
 
-    // Look distance and sneak coef
+    // Дальность обзора и коэффициент скрытности
     int lookDist = Parameters::GetCritterLookDistance(cr);
     int sneakCoef = Parameters::GetCritterSneakCoefficient(cr);
 
@@ -1132,7 +1135,7 @@ void CritterIdle(Critter cr)
         cr.RefreshView();
     }
 
-    // Auto unload player critter
+    // Автовыгрузка криттера игрока
     if (cr.ControlledByPlayer && cr.GetPlayer() == null && cr.GetPlayerOfflineTime() >= Time::Milliseconds(Settings.Account.MinimumOfflineTime) &&
         !Time::IsTimeoutActive(cr.TimeoutRemoveFromGame)) {
         Game.UnloadCritter(cr);
@@ -1147,12 +1150,12 @@ void CritterKnockout(Critter cr)
     }
 }
 
-// Call on something critter dies.
-// Killer can be null.
+// Вызывается при смерти криттера.
+// Убийца может быть null.
 [[Event]]
 void CritterDead(Critter cr, Critter? killer)
 {
-    // Move slot items to inventory
+    // Переносим предметы из слотов в инвентарь
     Item? hands1 = cr.GetItem(ItemProperty::CritterSlot, CritterItemSlot::Main);
     Item? hands2 = cr.GetItem(ItemProperty::CritterSlot, CritterItemSlot::Secondary);
     if (hands1 != null) {
@@ -1163,16 +1166,16 @@ void CritterDead(Critter cr, Critter? killer)
         cr.ChangeItemSlot(hands2.Id, CritterItemSlot::Inventory);
     }
 
-    // Move inventory items to ground
+    // Выбрасываем предметы из инвентаря на землю
     Map? map = cr.GetMap();
     if ((cr.DeadActionAnim == CritterActionAnim::DeadPulseDust || cr.DeadActionAnim == CritterActionAnim::DeadExplode) && Tla::CanCritterDropItemsOnDead(cr)) {
-        // Drop all, exclude armor
+        // Роняем всё, кроме брони
         Item[] items = {};
         items.insertLast(cr.GetItems(ItemProperty::CritterSlot, CritterItemSlot::Inventory));
         items.insertLast(cr.GetItems(ItemProperty::CritterSlot, CritterItemSlot::Main));
         items.insertLast(cr.GetItems(ItemProperty::CritterSlot, CritterItemSlot::Secondary));
         if (map != null) {
-            // Disable drop of hidden items
+            // Запрещаем выпадение скрытых предметов
             for (int i = 0; i < items.length(); i++) {
                 if (items[i].IsGag) {
                     Game.DestroyItem(items[i]);
@@ -1190,7 +1193,7 @@ void CritterDead(Critter cr, Critter? killer)
         }
     }
 
-    // Mob drops
+    // Дроп с мобов
     hstring npcPid = cr.ProtoId;
     hstring dropPid;
     if (npcPid == Content::Critter::GoldenGecko || npcPid == Content::Critter::ToughGoldenGecko) {
@@ -1223,7 +1226,7 @@ void CritterDead(Critter cr, Critter? killer)
         cr.AddItem(dropPid, 1);
     }
 
-    // Karma, temporary
+    // Карма, временно
     if (killer != null && killer.ControlledByPlayer) {
         int karmaBefore = killer.Karma;
         int team = cr.TeamId;
@@ -1274,12 +1277,12 @@ void CritterDead(Critter cr, Critter? killer)
             killer.KarmaPerkChildkiller += 1;
         }
 
-        TownSupply::CallTownSupply(cr, killer); // Town supply call
+        TownSupply::CallTownSupply(cr, killer); // Вызов снабжения города
     }
 
     Replication::SetReplicationTime(cr);
     if (!cr.ControlledByPlayer) {
-        NpcPlanes::DropPlanes(cr); // Delete all planes
+        NpcPlanes::DropPlanes(cr); // Удаляем все планы
     }
 
     if (map != null && cr.DeadDrawNoFlatten) {
@@ -1300,7 +1303,7 @@ void CritterDead(Critter cr, Critter? killer)
     }
 }
 
-// Call on something critter reswapned.
+// Вызывается при респавне криттера.
 [[Event]]
 void CritterRespawn(Critter cr)
 {
@@ -1314,7 +1317,7 @@ void CritterRespawn(Critter cr)
     }
 }
 
-// Call on something critter in to map.
+// Вызывается при входе криттера на карту.
 [[Event]]
 void MapCritterIn(Map map, Critter cr)
 {
@@ -1338,7 +1341,7 @@ void MapCritterIn(Map map, Critter cr)
     cr.WorldPos = map.GetLocation().WorldPos;
 }
 
-// Call on something critter out from map.
+// Вызывается при выходе криттера с карты.
 [[Event]]
 void MapCritterOut(Map map, Critter cr)
 {
@@ -1358,33 +1361,33 @@ void MapCritterOut(Map map, Critter cr)
     cr.WorldPos = map.GetLocation().WorldPos;
 }
 
-// Call on something player votes for another.
-// Already checked valid positions and timeout.
+// Вызывается, когда игрок голосует за другого.
+// Позиции и таймаут уже проверены.
 void KarmaVoting(Critter crFrom, Critter crTo, bool valUp)
 {
-    // Players karma system (not used)
+    // Система кармы игроков (не используется)
     crTo.PlayerKarma += (valUp ? int(5) : -10);
-    crFrom.TimeoutKarmaVoting = Game.SynchronizedTime + Time::Hours(4); // 4 hours
+    crFrom.TimeoutKarmaVoting = Game.SynchronizedTime + Time::Hours(4); // 4 часа
 }
 
-// Call to determine visibility of critters.
-// To start working set flag LOOK_CHECK_SCRIPT to Settings.CommonGameplay.LookChecks global var.
-// Return true to allow see one critter another, false to disallow.
-// Note: CRITTER_EVENT_SHOW_CRITTER_X, CRITTER_EVENT_HIDE_CRITTER_X is not processed.
+// Вызывается для определения видимости криттеров.
+// Чтобы включить, установите флаг LOOK_CHECK_SCRIPT в глобальную переменную Settings.CommonGameplay.LookChecks.
+// Вернуть true — разрешить видеть одного криттера другому, false — запретить.
+// Примечание: CRITTER_EVENT_SHOW_CRITTER_X, CRITTER_EVENT_HIDE_CRITTER_X не обрабатываются.
 bool CheckLook(Map map, Critter critter, Critter target)
 {
     return true;
 }
 
-// Call to determine visibility of items with ITEM_TRAP flag.
-// To start working set flag LOOK_CHECK_SCRIPT to Settings.CommonGameplay.LookChecks global var.
+// Вызывается для определения видимости предметов с флагом ITEM_TRAP.
+// Чтобы включить, установите флаг LOOK_CHECK_SCRIPT в глобальную переменную Settings.CommonGameplay.LookChecks.
 bool CheckTrapLook(Map map, Critter critter, Item item)
 {
     return true;
 }
 
-// Call on barter transaction.
-// Return false to cancel transaction.
+// Вызывается при бартерной сделке.
+// Вернуть false, чтобы отменить сделку.
 [[Event]]
 EventResult ItemsBarter(Item[] saleItems, int[] saleItemsCount, Item[] buyItems, int[] buyItemsCount, Critter player, Critter npc)
 {
@@ -1407,8 +1410,8 @@ EventResult ItemsBarter(Item[] saleItems, int[] saleItemsCount, Item[] buyItems,
     return EventResult::StopChain;
 }
 
-// Call on player try register
-// Return true to allow, false to disallow
+// Вызывается при попытке регистрации игрока
+// Вернуть true — разрешить, false — запретить
 
 bool PlayerRegistration(Player player, string name)
 {
@@ -1424,8 +1427,8 @@ bool PlayerRegistration(Player player, string name)
     return true;
 }
 
-// Call on player try login
-// Return true to allow, false to disallow
+// Вызывается при попытке входа игрока
+// Вернуть true — разрешить, false — запретить
 [[Event]]
 EventResult PlayerLogin(Player player, Player? unloginedPlayer)
 {

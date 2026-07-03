@@ -1,3 +1,6 @@
+// NpcPlanes — серверная система AI-планов NPC: приоритетная очередь поведенческих задач (misc/attack/walk/pick; патруль и курьер — в разработке).
+// Периодический тайм-эвент OnCritterIdle вызывает ProcessAi: берёт текущий план, двигает NPC по путям с трассировкой, атакует/подбирает предметы/выполняет скрипт и переключает планы по приоритету.
+// Планы хранятся в persistent-свойстве Critter.Planes; порождает события OnNpcPlaneBegin/End/Run. Опирается на EnemyStack, CritterState, Messaging, Dialogs, LineTracer. Только сторона SERVER.
 namespace NpcPlanes
 {
 
@@ -16,15 +19,15 @@ namespace NpcPlanes
 
 const int MAX_PLANES_PER_CRITTER = 10;
 
-// Planes types
+// Типы планов
 const int AI_PLANE_MISC = 0;
 const int AI_PLANE_ATTACK = 1;
 const int AI_PLANE_WALK = 2;
 const int AI_PLANE_PICK = 3;
-const int AI_PLANE_PATROL = 4;  // WIP
-const int AI_PLANE_COURIER = 5; // WIP
+const int AI_PLANE_PATROL = 4;  // в разработке
+const int AI_PLANE_COURIER = 5; // в разработке
 
-// Planes deault priority
+// Приоритеты планов по умолчанию
 const int AI_PLANE_MISC_PRIORITY = 10;
 const int AI_PLANE_ATTACK_PRIORITY = 50;
 const int AI_PLANE_WALK_PRIORITY = 20;
@@ -32,14 +35,14 @@ const int AI_PLANE_PICK_PRIORITY = 35;
 const int AI_PLANE_PATROL_PRIORITY = 25;
 const int AI_PLANE_COURIER_PRIORITY = 30;
 
-// Plane begin/end/run reasons
-// Begin
+// Причины начала/завершения/выполнения плана
+// Начало
 const int REASON_GO_HOME = 10;
 const int REASON_FOUND_IN_ENEMY_STACK = 11;
 const int REASON_FROM_DIALOG = 12;
 const int REASON_FROM_SCRIPT = 13;
 const int REASON_RUN_AWAY = 14;
-// End
+// Завершение
 const int REASON_SUCCESS = 30;
 const int REASON_HEX_TOO_FAR = 31;
 const int REASON_HEX_BUSY = 32;
@@ -55,7 +58,7 @@ const int REASON_GAG_CRITTER = 41;
 const int REASON_GAG_ITEM = 42;
 const int REASON_NO_UNARMED = 43;
 const int REASON_CANT_SEE_TARGET = 44;
-// Run
+// Выполнение
 const int REASON_ATTACK_TARGET = 50;
 const int REASON_ATTACK_WEAPON = 51;
 const int REASON_ATTACK_DISTANTION = 52;
@@ -116,14 +119,14 @@ bool CheckHasEnoughAP(Critter cr, int ap)
 
 int ProcessAi(Critter npc)
 {
-    // Check busy
+    // Проверка занятости
     if (CritterState::IsBusy(npc)) {
         return 1000;
     }
 
-    // Global map
+    // Глобальная карта
     if (npc.MapId == ZERO_IDENT) {
-        // TODO: global and groups
+        // TODO: глобальная карта и группы
         /*if( !npc->GroupMove )
             return;
            MapMngr.ProcessGroup( npc, npc->GroupMove, GLOBAL_PROCESS_NPC_IDLE );
@@ -138,12 +141,12 @@ int ProcessAi(Critter npc)
         return 5000;
     }
 
-    // Check turn based
-    // TODO: turnbased
+    // Проверка пошагового режима
+    // TODO: пошаговый режим
     // if( map->IsTurnBasedOn && !map->IsCritterTurn( npc ) )
     //    return;
 
-    // Check wait
+    // Проверка ожидания
     // r17:
     /*if( npc->IsWait() )
        {
@@ -152,16 +155,16 @@ int ProcessAi(Critter npc)
         return;
        }*/
 
-    // Get current plane
+    // Получить текущий план
     NpcPlane? plane = GetCurPlane(npc);
-    // Begin
+    // Начало
     if (plane == null) {
-        // Check talking
+        // Проверка диалога
         if (Dialogs::IsTalking(npc)) {
             return 2000;
         }
 
-        // Enemy stack
+        // Стек врагов
         Critter? enemy = EnemyStack::ScanEnemyStack(npc);
         if (enemy != null) {
             if (AddAttackPlane(npc, 0, REASON_FOUND_IN_ENEMY_STACK, enemy)) {
@@ -169,7 +172,7 @@ int ProcessAi(Critter npc)
             }
         }
 
-        // Go home
+        // Идти домой
         if (!npc.IsNoHome && map.Id == npc.HomeMapId && (npc.Hex != npc.HomeHex)) {
             if (!npc.IsNoMove) {
                 AddWalkPlane(npc, 0, 0, 0, npc.HomeHex, mdir(hdir(npc.HomeDir == 0 ? 1 : 0)), false, 0, REASON_GO_HOME);
@@ -180,7 +183,7 @@ int ProcessAi(Critter npc)
             }
         }
 
-        // Set home direction
+        // Установить домашнее направление
         else if (!npc.IsNoHome && map.Id == npc.HomeMapId && npc.Dir != npc.HomeDir) {
             npc.SetDir(mdir(hdir(npc.HomeDir)));
         }
@@ -188,9 +191,9 @@ int ProcessAi(Critter npc)
         return 0;
     }
     else {
-        // Process move
+        // Обработка перемещения
         if (plane.IsMove) {
-            // Check run availability
+            // Проверка возможности бега
             if (plane.Run) {
                 if (npc.IsDamagedRightLeg || npc.IsDamagedLeftLeg || npc.IsOverweight) {
                     plane.Run = false;
@@ -198,10 +201,10 @@ int ProcessAi(Critter npc)
                 }
             }
 
-            // Check ap availability
+            // Проверка наличия очков действия
             int ap_move = (plane.Run ? Settings.Movement.RtApCostCritterRun : Settings.Movement.RtApCostCritterWalk);
 
-            // TODO:tb
+            // TODO: пошаговый режим
             /*
                if( map->IsTurnBasedOn )
                     ap_move += npc->GetMoveAp();
@@ -227,10 +230,10 @@ int ProcessAi(Critter npc)
                     reason = REASON_GAG_ITEM;
                 }
 
-                // Resolve what blocked the move from the moving context's block hex
-                // (set by the engine on a gag) before stopping, so the gag reactions
-                // in NpcPlaneEnd can attack the blocker / open the door. The old code
-                // left gagId unassigned, so these reactions never fired.
+                // Определяем, что заблокировало движение, по гексу блокировки из контекста
+                // движения (движок задаёт его при заслоне) до остановки, чтобы реакции на заслон
+                // в NpcPlaneEnd могли атаковать блокирующего / открыть дверь. Старый код
+                // оставлял gagId неназначенным, поэтому эти реакции никогда не срабатывали.
                 Critter? gagCr = null;
                 Item? gagItem = null;
                 MovingContext? moving = npc.GetMovingContext();
@@ -258,7 +261,7 @@ int ProcessAi(Critter npc)
 
         bool is_busy = (plane.IsMove || CritterState::IsBusy(npc)); // || CritterState::IsWait(npc);
 
-        // Process planes
+        // Обработка планов
         switch (plane.Type) {
         /* ========================   Misc   ================================== */
         case AI_PLANE_MISC: {
@@ -281,13 +284,13 @@ int ProcessAi(Critter npc)
         } break;
         /* ========================   Attack   ================================ */
         case AI_PLANE_ATTACK: {
-            // TODO: tb
+            // TODO: пошаговый режим
 
-            /* Target is visible                                                    */
+            /* Цель видима                                                    */
             Critter? targ = Game.GetCritter(plane.Attack_TargId);
 
             if (targ != null && npc.IsSee(targ)) {
-                /* Step 0: Check for success plane and continue target timeout          */
+                /* Шаг 0: проверка успешного завершения плана и продолжение таймаута цели          */
 
                 if (plane.Attack_IsGag && (targ.Hex != plane.Attack_GagHex)) {
                     NextPlane(npc, REASON_SUCCESS);
@@ -312,13 +315,13 @@ int ProcessAi(Critter npc)
                     break;
                 }
 
-                // Is moving
+                // Движется
                 if (npc.GetMovingState() == MovingState::InProgress) {
                     return 1000;
                 }
 
-                /* Step 1: Choose weapon                                                */
-                // Get battle weapon
+                /* Шаг 1: выбор оружия                                                */
+                // Получить боевое оружие
                 int use;
                 AbstractItem? weap = null;
                 any r0 = targ.Id;
@@ -330,7 +333,7 @@ int ProcessAi(Critter npc)
                 }
 
                 if (plane.PlaneId != plane.GetCurPlane().PlaneId) { // TODO: проверить, что тут нет ошибки
-                    break;                                          // Validate plane
+                    break;                                          // Проверка плана
                 }
 
                 if (ident(r0) != ZERO_IDENT) {
@@ -362,7 +365,7 @@ int ProcessAi(Critter npc)
                 Item? realMainItem = cast<Item?>(mainItem);
                 Item? realWeapon = cast<Item?>(weap);
 
-                // Hide cur, show new
+                // Спрятать текущее, показать новое
                 if (realMainItem != null && realWeapon != null && realWeapon.Id != realMainItem.Id) {
                     CritterActions::MoveInvItem(npc, realMainItem.Id, CritterItemSlot::Inventory);
                     break; // TODO: проверить, не слишком ли долго будет думать нпц при замене оружия
@@ -385,7 +388,7 @@ int ProcessAi(Critter npc)
                     npc.HandsItemMode = WeaponHelpers::MakeWeaponMode(use, 0);
                 }
 
-                // Load weapon
+                // Зарядить оружие
                 if (realWeapon != null) {
                     if (!npc.IsUnlimitedAmmo && realWeapon.Weapon_MaxAmmoCount > 0 && realWeapon.AmmoCount == 0) {
                         Item? ammo = FindAmmoForWeapon(npc, realWeapon);
@@ -410,7 +413,7 @@ int ProcessAi(Critter npc)
                     }
                 }
 
-                /* Step 2: Move to target                                               */
+                /* Шаг 2: движение к цели                                               */
                 bool is_can_walk = !npc.IsNoMove;
                 int bestDist = 0, min_dist = 0, maxDist = 0;
                 r0 = targ.Id;
@@ -422,14 +425,14 @@ int ProcessAi(Critter npc)
                 }
 
                 if (plane.PlaneId != plane.GetCurPlane().PlaneId) {
-                    break; // Validate plane
+                    break; // Проверка плана
                 }
 
                 bestDist = r0;
                 min_dist = r1;
                 maxDist = r2;
 
-                if (r2 <= 0) // Run away
+                if (r2 <= 0) // Убежать
                 {
                     NextPlane(npc, REASON_RUN_AWAY);
                     break;
@@ -466,14 +469,14 @@ int ProcessAi(Critter npc)
                     break;
                 }
 
-                // Find better position
+                // Найти позицию получше
                 mpos hex = npc.Hex;
                 mpos targetHex = targ.Hex;
                 mpos resHex = targetHex;
 
                 bool is_range = (maxDist > 2);
                 if (is_range && !npc.IsNoMove) {
-                    // Check target reachability
+                    // Проверка достижимости цели
                     auto tracer = AttackCritterTracer(targ);
                     LineTracer::LineTracerHex(map, hex, targetHex, maxDist, tracer);
                     if (!tracer.Success) {
@@ -494,13 +497,13 @@ int ProcessAi(Critter npc)
                             }
                         }
 
-                        // Better position not found
+                        // Позиция получше не найдена
                         NextPlane(npc, REASON_POSITION_NOT_FOUND);
                         break;
                     }
                 }
 
-                // Find precision HtH attack
+                // Найти точную рукопашную атаку
                 else if (!is_range) {
                     if (Game.GetDistance(npc.Hex, targ.Hex) > maxDist) {
                         if (!is_can_walk) {
@@ -516,7 +519,7 @@ int ProcessAi(Critter npc)
                     }
                 }
 
-                /* Step 3: Attack                                                       */
+                /* Шаг 3: атака                                                       */
 
                 r0 = targ.Id;
                 r1 = 0;
@@ -549,7 +552,7 @@ int ProcessAi(Critter npc)
                 CritterActions::Attack(npc, targ.Id, WeaponHelpers::MakeWeaponMode(use, aim));
             }
 
-            /* Target not visible, try find by last stored position                 */
+            /* Цель не видна, пытаемся найти по последней сохранённой позиции                 */
             else {
                 if (is_busy) {
                     break;
@@ -561,7 +564,7 @@ int ProcessAi(Critter npc)
                     break;
                 }
 
-                // AttackPlan Is moving last pos"
+                // AttackPlan движется к последней позиции
                 if (npc.GetMovingState() == MovingState::InProgress) {
                     break;
                 }
@@ -680,7 +683,7 @@ class AttackCritterTracer : LineTracer::ITraceContext
 
     void FinishExec(Map map, int resultDist) override
     {
-        // Nothing
+        // Ничего
     }
 
     bool Exec(Map map, mpos hex) override
@@ -723,7 +726,7 @@ class NpcPlane
     ident Pick_UseItemId;
     bool Pick_ToOpen;
     bool Pick_IsRun;
-    // private
+    // приватные
     NpcPlane? ChildPlane;
     bool Assigned;
     int RefCounter;
@@ -826,16 +829,16 @@ NpcPlane? GetCritterPlane(Critter? cr, int planeId)
     return null;
 }
 
-// Remove one or more planes from critter pool. all - remove all of the planeType, planeType = -1 => remove any type.
+// Удаляет один или несколько планов из пула криттера. all - удалить все планы типа planeType, planeType = -1 => удалить любой тип.
 int ErasePlane(Critter cr, int planeType, bool all)
 {
     int erased = 0;
 
     NpcPlane[]? planes = AllNpcPlanes.get(cr.Id, null);
     if (planes != null && !planes.isEmpty()) {
-        // Remove in place: do not advance i after a removal (the array shifts),
-        // and re-check the live length each iteration so multiple matches under
-        // all=true are not skipped or read past the shrunken end.
+        // Удаляем на месте: не увеличиваем i после удаления (массив сдвигается)
+        // и каждую итерацию заново проверяем актуальную длину, чтобы несколько совпадений
+        // при all=true не были пропущены и чтобы не выйти за уменьшившийся конец.
         for (int i = 0; i < planes.length();) {
             if (planes[i].Type == planeType || planeType == -1) {
                 planes.removeAt(i);
@@ -913,7 +916,7 @@ bool IsCurPlane(Critter cr, int planeType)
     return false;
 }
 
-// Returns first plan for the critter. Deepest child plane returned first.
+// Возвращает первый план криттера. Самый глубокий дочерний план возвращается первым.
 NpcPlane? GetCurPlane(Critter cr)
 {
     NpcPlane[]? planes = AllNpcPlanes.get(cr.Id, null);
@@ -1072,11 +1075,11 @@ bool AddPlane(Critter? cr, NpcPlane plane, int reason)
 
         Critter? someCr = (plane.Attack_TargId == ZERO_IDENT ? null : Game.GetCritter(plane.Attack_TargId));
         Item? someItem = (plane.Pick_UseItemId == ZERO_IDENT ? null : Game.GetItem(plane.Pick_UseItemId));
-        // Begin handlers claim/allow a plane by returning StopChain; the plane
-        // is kept only when both the global and the per-critter handler allow it.
-        // Erase the freshly inserted plane if either handler vetoes (returns
-        // ContinueChain). This mirrors the pre-migration `if (!Fire() || !Fire())`
-        // veto semantics and the End side (advance only on ContinueChain).
+        // Обработчики Begin принимают/разрешают план, возвращая StopChain; план
+        // сохраняется только если и глобальный, и покриттерный обработчик его разрешают.
+        // Удаляем только что вставленный план, если любой из обработчиков накладывает вето
+        // (возвращает ContinueChain). Это повторяет домиграционную семантику вето
+        // `if (!Fire() || !Fire())` и сторону End (продвижение только при ContinueChain).
         if ((Game.OnNpcPlaneBegin.Fire(cr, plane.PlaneId, reason, someCr, someItem) == EventResult::ContinueChain) ||
             (cr.OnNpcPlaneBegin.Fire(plane.PlaneId, reason, someCr, someItem) == EventResult::ContinueChain)) {
             ErasePlane(cr, index);
@@ -1093,7 +1096,7 @@ void NextPlane(Critter cr, int reason)
 {
     NpcPlane[]? planes = AllNpcPlanes.get(cr.Id, null);
     if (planes != null && !planes.isEmpty()) {
-        // Remove first plane and notify about
+        // Удалить первый план и уведомить об этом
         NpcPlane plane = planes[0];
         if ((Game.OnNpcPlaneEnd.Fire(cr, plane.PlaneId, reason, null, null) == EventResult::ContinueChain)) {
             planes.removeFirst();

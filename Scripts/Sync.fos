@@ -1,20 +1,26 @@
+// Sync — скриптовая обёртка над нативным примитивом блокировки Game.Sync(...) для async-кода воркеров.
+// Весь модуль — только SERVER (#if SERVER). Хелперы Sync::Lock(...) добавляют поверх Game.Sync политику
+// живучести: проверяют IsDestroyed до и после захвата и возвращают false для раннего выхода без обращения
+// к мёртвым хэндлам. Snapshot/Restore сохраняют покрытие блокировок вокруг ре-энтрантной работы, а
+// LockCritterWithMap[AndLocation] расширяют набор до карты/локации с повторами при миграции криттера.
+
 namespace Sync
 {
 
 #if SERVER
 
-// Game.Sync(...) is the native lock primitive — it only acquires locks, replacing the SyncContext
-// lock set with exactly the listed entities. It has no return value: if a pending lock wait is
-// aborted by server shutdown (after the Server.ShutdownGraceMs drain window expires) it throws
-// EntityLockWaitAbortedException, which is not caught here — the exception unwinds the async job and
-// stops its work during teardown. These Sync::Lock(...) helpers add the liveness policy on top: they
-// check IsDestroyed before and after acquiring and return `false` so the caller can early-out without
-// touching dead handles. A destroyed entity is not always fatal — e.g. a critter's presumed map can
-// change and the old one be destroyed, in which case the caller re-reads the map and locks again
-// rather than treating `false` as a hard stop.
+// Game.Sync(...) — нативный примитив блокировки: он только захватывает локи, полностью заменяя набор
+// блокировок SyncContext ровно перечисленными сущностями. Возврата у него нет: если ожидание лока
+// прерывается остановкой сервера (после истечения окна дренажа Server.ShutdownGraceMs), он бросает
+// EntityLockWaitAbortedException, которое здесь не ловится — исключение разворачивает async-задачу и
+// останавливает её работу при завершении. Эти хелперы Sync::Lock(...) добавляют сверху политику живучести:
+// проверяют IsDestroyed до и после захвата и возвращают `false`, чтобы вызывающий рано вышел, не трогая
+// мёртвые хэндлы. Уничтоженная сущность не всегда фатальна — например, предполагаемая карта криттера может
+// смениться, а старая быть уничтожена; тогда вызывающий перечитывает карту и блокирует заново, а не считает
+// `false` жёсткой остановкой.
 //
-// Empty inputs are treated as "nothing to lock" and return `true`. All call sites can use a
-// uniform pattern:
+// Пустой ввод трактуется как «блокировать нечего» и возвращает `true`. Все точки вызова используют
+// единый шаблон:
 //
 //     if (!Sync::Lock(npc, map)) return;
 //     if (!Sync::Lock(npc, map, nearbyCritters)) return;
@@ -79,11 +85,11 @@ bool Lock(Entity[] entities)
     return true;
 }
 
-// Snapshot the current lock cover (the entities whose locks are held) so a caller can
-// run a helper that REPLACES the lock set (Modifiers::FireCritterEvent, async sub-helpers, …) and
-// then re-establish exactly the same cover with Restore(). This is the script-side equivalent of the
-// engine's per-callback nested SyncContext: it keeps a caller's downstream entity access valid across
-// re-entrant work that internally re-Sync's.
+// Снимок текущего покрытия блокировок (сущности, чьи локи удержаны), чтобы вызывающий мог
+// запустить хелпер, который ЗАМЕНЯЕТ набор блокировок (Modifiers::FireCritterEvent, async-подхелперы, …), и
+// затем восстановить ровно то же покрытие через Restore(). Это скриптовый аналог вложенного SyncContext
+// движка на каждый колбэк: он сохраняет доступ вызывающего к нижележащим сущностям сквозь ре-энтрантную
+// работу, которая внутри сама делает повторный Sync.
 Entity[] Snapshot()
 {
     return Game.GetHeldSyncEntities();
@@ -92,9 +98,9 @@ Entity[] Snapshot()
 [[Async]]
 bool Restore(Entity[] entities)
 {
-    // Best-effort: re-lock whatever of the snapshot cover still exists. The re-entrant work may have
-    // legitimately destroyed some covered entity (a consumed item, a killed NPC); skip those and
-    // restore the survivors so the caller keeps reading the entities that are still alive.
+    // По возможности: заново блокируем то из снятого покрытия, что ещё существует. Ре-энтрантная работа
+    // могла законно уничтожить какую-то из покрытых сущностей (израсходованный предмет, убитый NPC); их
+    // пропускаем и восстанавливаем выживших, чтобы вызывающий продолжал читать ещё живые сущности.
     Entity[] survivors = {};
 
     for (int i = 0; i < entities.length(); i++) {
@@ -183,11 +189,11 @@ bool Lock(Location[] locations)
     return Lock(entities);
 }
 
-// Each Game.Sync replaces the SyncContext lock set entirely, so a script that wants both fixed
-// entities (typically the [[TimeEvent]] owner and a related entity like a map) AND a list of
-// neighbours synced has to list everything in one call. These overloads bundle the fixed leading
-// entities with a typed array into a single Entity[] sync request and run the alive check across
-// the union.
+// Каждый Game.Sync полностью заменяет набор блокировок SyncContext, поэтому скрипту, которому нужны и
+// фиксированные сущности (обычно владелец [[TimeEvent]] и связанная сущность вроде карты), И список
+// соседей, приходится перечислять всё в одном вызове. Эти перегрузки собирают фиксированные ведущие
+// сущности вместе с типизированным массивом в единый запрос синхронизации Entity[] и проверяют живучесть
+// по всему объединению.
 
 [[Async]]
 bool Lock(Entity entity, Critter[] critters)
@@ -300,7 +306,7 @@ bool LockCritterWithMap(Critter cr)
             continue;
         }
 
-        // Critter migrated to another map between read and lock; retry.
+        // Криттер мигрировал на другую карту между чтением и блокировкой; повтор.
         if (cr.MapId != mapId) {
             continue;
         }
@@ -335,7 +341,7 @@ bool LockCritterWithMapAndLocation(Critter cr)
 
         ident mapId = map.Id;
 
-        // cr + map must be held before map.GetLocation() can be read against the map's lock.
+        // cr + map должны быть удержаны, прежде чем map.GetLocation() можно прочитать под локом карты.
         if (!Lock(cr, map)) {
             continue;
         }
@@ -351,12 +357,12 @@ bool LockCritterWithMapAndLocation(Critter cr)
 
         ident locId = loc.Id;
 
-        // Escalate to cr + map + location so the location's own properties are accessible.
+        // Расширяем до cr + map + location, чтобы стали доступны собственные свойства локации.
         if (!Lock(cr, map, loc)) {
             continue;
         }
 
-        // Critter migrated while widening the lock set; retry.
+        // Криттер мигрировал при расширении набора блокировок; повтор.
         if (cr.MapId != mapId) {
             continue;
         }

@@ -1,3 +1,7 @@
+// ChosenActions — очередь действий игрового персонажа (Chosen): постановка, покадровая обработка и исполнение команд игрока.
+// CLIENT: копит и прогоняет очередь действий (перемещение, атака, использование предметов и навыков, подбор, диалог, контейнеры), регенерирует ОД и шлёт серверу RemoteCall.
+// SERVER: реализует эти RemoteCall и Lock*-хелперы, управляя busy/free-состоянием критера; опирается на коды действий из Tla, а также на боевую, диалоговую и предметную логику.
+
 namespace ChosenActions
 {
 
@@ -74,10 +78,10 @@ void ChosenProcess()
     Critter chosen = Chosen;
 
     if (HasCurMap) {
-        // Roof
+        // Крыша
         CurMap.SetHiddenRoof(chosen.Hex);
 
-        // Hidden mode
+        // Режим скрытности
         chosen.SetAlpha(chosen.InSneakMode ? 130 : 255);
 
         // Shoot borders (SetShootBorders removed in engine update)
@@ -86,8 +90,8 @@ void ChosenProcess()
         // CurMap.SetShootBorders(shootBorders, attackDist);
 
         if (chosen.IsMoving()) {
-            // Allow a queued move action to retarget the current walk (e.g. fresh map click);
-            // anything else keeps the in-flight movement until it completes.
+            // Даём действию перемещения из очереди перенацелить текущий ход (например, при новом клике по карте);
+            // всё остальное не прерывает начатое движение, пока оно не завершится.
             int pendingType = (ChosenActions.length() > 0 ? int(ChosenActions[0]) : 0);
             if (pendingType != Tla::ChosenMove && pendingType != Tla::ChosenMoveToCrit) {
                 return;
@@ -95,12 +99,12 @@ void ChosenProcess()
         }
     }
 
-    // Actions
+    // Действия
     if (!IsFree(chosen)) {
         return;
     }
 
-    // Ap regeneration
+    // Регенерация ОД
     if (chosen.CurrentAp < chosen.ActionPoints * Tla::AP_DIVIDER) {
         nanotime tick = Game.FrameTime;
         if (chosen.ApRegenerationTick == ZERO_NANOTIME) {
@@ -141,7 +145,7 @@ void ChosenProcess()
     curAction.resize(7);
     int actionType = curAction[0];
 
-    // Force end move
+    // Принудительно завершаем перемещение
     if (actionType != Tla::ChosenMove && actionType != Tla::ChosenMoveToCrit) {
         chosen.StopMove();
     }
@@ -157,7 +161,7 @@ void ChosenProcess()
             break;
         }
 
-        // Move to critter
+        // Перемещение к критеру
         if (actionType == Tla::ChosenMoveToCrit) {
             Critter? cr = Game.GetCritter(ChosenActions[1]);
             if (cr != null) {
@@ -168,18 +172,18 @@ void ChosenProcess()
             hex = mpos(ChosenActions[1], ChosenActions[2]);
         }
 
-        // Already here
+        // Уже на месте
         if (Game.GetDistance(chosen.Hex, hex) <= cut) {
             break;
         }
 
-        // Can't move
+        // Не может двигаться
         if (chosen.IsNoMove) {
             Messaging::Info(TextPackKey(TextPackName::Game, "" + (MsgStr::StrCritterCantMove)));
             break;
         }
 
-        // Check running
+        // Проверка бега
         if (isRun) {
             if (!Settings.Movement.RunOnCombat && Time::IsTimeoutActive(chosen.TimeoutBattle)) {
                 isRun = false;
@@ -195,13 +199,13 @@ void ChosenProcess()
             }
         }
 
-        // Find path
+        // Поиск пути
         auto path = CurMap.GetPath(chosen.Hex, hex, cut);
         if (path.isEmpty() && Game.GetDistance(chosen.Hex, hex) > cut + 1) {
             path = CurMap.GetPath(chosen.Hex, hex, ++cut);
         }
 
-        // Move to
+        // Перемещение к цели
         if (!path.isEmpty()) {
             hex = chosen.Hex;
             for (int i = 0; i < path.length(); i++) {
@@ -209,8 +213,8 @@ void ChosenProcess()
             }
 
             int speed = isRun ? chosen.WalkSpeed * 2 : chosen.WalkSpeed;
-            // Re-issue MoveToHex only when destination/speed changed or movement stopped — this is what
-            // makes a fresh click retarget the walk instead of waiting for it to finish.
+            // Повторно вызываем MoveToHex только если сменились цель/скорость или движение остановилось — именно это
+            // позволяет новому клику перенацелить ход, а не ждать завершения текущего.
             if (!chosen.IsMoving() || hex != LastIssuedMoveHex || speed != LastIssuedMoveSpeed) {
                 chosen.MoveToHex(hex, ipos(0, 0), speed);
                 LastIssuedMoveHex = hex;
@@ -285,7 +289,7 @@ void ChosenProcess()
         int use = (rate & 0xF);
         int aim = (rate >> 4);
 
-        // Find item
+        // Поиск предмета
         AbstractItem? item = (itemId != ZERO_IDENT ? cast<AbstractItem>(chosen.GetItem(itemId)) : CritterItem::GetSlotItemProto(chosen));
         if (item == null) {
             break;
@@ -295,7 +299,7 @@ void ChosenProcess()
         Item? mainslotItem = chosen.GetItem(ItemProperty::CritterSlot, CritterItemSlot::Main);
         bool isMainItem = (realItem == null || (mainslotItem != null && realItem.Id == mainslotItem.Id));
 
-        // Find target
+        // Поиск цели
         Critter? targetCr;
         Item? targetItem;
         Item? targetSelfItem;
@@ -323,7 +327,7 @@ void ChosenProcess()
             targetId = chosen.Id;
         }
 
-        // Check
+        // Проверка
         if (targetType == ClientDefines::TARGET_CRITTER && targetCr == null) {
             break;
         }
@@ -336,12 +340,12 @@ void ChosenProcess()
             break;
         }
 
-        // Parse use
+        // Разбор способа использования
         bool isAttack = (targetType == ClientDefines::TARGET_CRITTER && isMainItem && item.Type == ItemType::Weapon && use < WeaponHelpers::MAX_USES);
         bool isReload = (targetType == ClientDefines::TARGET_SELF_ITEM && use == WeaponHelpers::USE_RELOAD && item.Type == ItemType::Weapon);
         bool isSelf = (targetType == ClientDefines::TARGET_SELF || targetType == ClientDefines::TARGET_SELF_ITEM);
 
-        // Calculate ap cost
+        // Расчёт стоимости в ОД
         int apCost = Parameters::GetItemUseApCost(chosen, item, rate);
         {
             int needApValue = int(apCost);
@@ -353,7 +357,7 @@ void ChosenProcess()
                 return;
             }
         }
-        // Check weapon
+        // Проверка оружия
         if (isAttack) {
             // ChosenActions::SetChosenActions({Tla::ChosenUseItem, useItem.Id, 0, TARGET_CRITTER, cr.Id, isAttack ? mode : USE_USE, 0});
 
@@ -425,12 +429,12 @@ void ChosenProcess()
             }
 
             if (item.Weapon_MaxAmmoCount == 0) {
-                break; // No have holder
+                break; // Нет держателя боезапаса
             }
 
-            if (targetSelfItem == null) { // Reload
+            if (targetSelfItem == null) { // Перезарядка
                 if (item.AmmoCount >= item.Weapon_MaxAmmoCount) {
-                    break; // Is full
+                    break; // Уже заполнено
                 }
 
                 if (item.Weapon_Caliber != 0) {
@@ -469,14 +473,14 @@ void ChosenProcess()
                     targetId = targetSelfItem->GetId();
                    }*/
             }
-            else // Load
+            else // Зарядка
             {
                 if (item.Weapon_Caliber != targetSelfItem.Ammo_Caliber) {
-                    break; // Different caliber
+                    break; // Другой калибр
                 }
 
                 if (item.AmmoPid == targetSelfItem.ProtoId && item.AmmoCount == item.Weapon_MaxAmmoCount) {
-                    break; // Is full
+                    break; // Уже заполнено
                 }
             }
 
@@ -487,14 +491,14 @@ void ChosenProcess()
             CurPlayer.ServerCall.ReloadWeapon(realItem.Id, targetId);
             chosen.CurrentAp -= apCost * Tla::AP_DIVIDER;
         }
-        else // Use
+        else // Использование
         {
             if (use != WeaponHelpers::USE_USE) {
                 break;
             }
         }
 
-        // Find Target
+        // Поиск цели
         if (!isSelf && HasCurMap) {
             int hx, hy;
             if (targetCr != null) {
@@ -522,7 +526,7 @@ void ChosenProcess()
                 maxDist += targetCr.Multihex;
             }
 
-            // Target find
+            // Определение цели
             int dist = Game.GetDistance(chosen.Hex, mpos(hx, hy));
             bool needMove = dist > maxDist;
             // if( isAttack )
@@ -552,7 +556,7 @@ void ChosenProcess()
                 break;
             }
 
-            // Refresh orientation
+            // Разворот к цели
             {
                 int needApValue = int(apCost);
                 if (chosen.ActionPoints < needApValue) {
@@ -569,7 +573,7 @@ void ChosenProcess()
             }
         }
 
-        // Use
+        // Использование
         {
             int needApValue = int(apCost);
             if (chosen.ActionPoints < needApValue) {
@@ -651,9 +655,9 @@ void ChosenProcess()
         }
 
         if ((Game.OnCritterCheckMoveItem.Fire(chosen, item, toSlot) == EventResult::StopChain)) {
-            // Gameplay swap workaround
+            // Обходной приём для обмена предметами местами
             if (itemSwap != null && !isSecondTry) {
-                // Add actions
+                // Добавляем действия
                 if ((Game.OnCritterCheckMoveItem.Fire(chosen, itemSwap, CritterItemSlot::Inventory) == EventResult::ContinueChain) &&
                     (Game.OnCritterCheckMoveItem.Fire(chosen, item, toSlot) == EventResult::ContinueChain)) {
                     ChosenActions.reverse();
@@ -669,7 +673,7 @@ void ChosenProcess()
             break;
         }
 
-        // Action points
+        // Очки действия
         int apCost = Settings.Movement.RtApCostMoveItemInventory;
         if ((fromSlot == CritterItemSlot::Main && toSlot == CritterItemSlot::Secondary) ||
             (fromSlot == CritterItemSlot::Secondary && toSlot == CritterItemSlot::Main)) {
@@ -744,7 +748,7 @@ void ChosenProcess()
             }
         }
         else {
-            // Container disappeared
+            // Контейнер исчез
             break;
         }
 
@@ -968,7 +972,7 @@ void ChosenProcess()
                 return;
             }
         }
-        // Refresh orientation
+        // Разворот к цели
         mdir dir = Game.GetDirection(chosen.Hex, cr.Hex);
         if (Game.GetDistance(chosen.Hex, cr.Hex) >= 1 && chosen.Dir != dir) {
             chosen.ChangeDir(dir);
@@ -1011,7 +1015,7 @@ void ChosenProcess()
         //    break;
         // }
 
-        // Refresh orientation
+        // Разворот к цели
         mdir dir = Game.GetDirection(chosen.Hex, cr.Hex);
         if (Game.GetDistance(chosen.Hex, cr.Hex) >= 1 && chosen.Dir != dir) {
             chosen.ChangeDir(dir);
@@ -1053,7 +1057,7 @@ void ChosenProcess()
                 return;
             }
         }
-        // Refresh orientation
+        // Разворот к цели
         mdir dir = Game.GetDirection(chosen.Hex, mpos(hx, hy));
         if (Game.GetDistance(chosen.Hex, mpos(hx, hy)) >= 1 && chosen.Dir != dir) {
             chosen.ChangeDir(dir);
@@ -1114,7 +1118,7 @@ void ChosenProcess()
                 return;
             }
         }
-        // Refresh orientation
+        // Разворот к цели
         mdir dir = Game.GetDirection(chosen.Hex, cr.Hex);
         if (Game.GetDistance(chosen.Hex, cr.Hex) >= 1 && chosen.Dir != dir) {
             chosen.ChangeDir(dir);

@@ -1,3 +1,7 @@
+// Parameters — расчёт производных характеристик криттеров: SPECIAL, вторичные статы, навыки и их применение.
+// Регистрирует геттеры/сеттеры свойств (MaxLife, ActionPoints, ArmorClass, сопротивления, вес, урон и т.п.),
+// обрабатывает создание персонажа, прокачку навыков/перков/опыта и уровней, оружие в руках и режимы атаки,
+// стоимость очков действия и дальность атаки, дальность обзора. Сторона SERVER и CLIENT; опирается на Perks, CritterTypes, Settings.
 namespace Parameters
 {
 
@@ -153,11 +157,11 @@ void CritterSetExperience(Critter cr, CritterProperty prop, int& newValue)
 
     int exp = newValue - cr.Experience;
     if (exp > 0) {
-        // SwiftLearner perk
+        // Перк SwiftLearner
         exp += exp * (cr.PerkSwiftLearner * 5) / 100;
         newValue = cr.Experience + exp;
 
-        // Process new experience
+        // Обработка полученного опыта
         if (cr.Level < int(Settings.Player.LevelCap)) {
             Game.StartTimeEvent(ZERO_TIMESPAN, UpdateExperienceLevel, cr.Id);
         }
@@ -175,28 +179,28 @@ void UpdateExperienceLevel(any crId)
     while (cr.Level < int(Settings.Player.LevelCap) && cr.Experience >= NextLevelNeedExp(cr)) {
         cr.Level += 1;
 
-        // Skill points
+        // Очки навыков
         cr.UnspentSkillPoints += 5 + cr.IntellectBase * 2;
 
-        // Skilled trait
+        // Черта Skilled
         if (cr.IsTraitSkilled) {
             cr.UnspentSkillPoints += 5;
         }
 
-        // Educated perk
+        // Перк Educated
         cr.UnspentSkillPoints += cr.PerkEducated * 2;
 
-        // Clamp skill points
+        // Ограничиваем очки навыков
         if (cr.UnspentSkillPoints > 99) {
             cr.UnspentSkillPoints = 99;
         }
 
-        // Add max hp
+        // Прибавляем макс. здоровье
         if (Settings.Player.MaxLifeLevelSoftCap == 0 || int(cr.Level) <= Settings.Player.MaxLifeLevelSoftCap) {
             cr.MaxLifeBase += 2 + cr.EnduranceBase / 2 + cr.PerkLifegiver * 4;
         }
 
-        // Add perk
+        // Даём перк
         if ((cr.Level % (cr.IsTraitSkilled ? 4 : 3)) == 0) {
             cr.UnspentPerks += 1;
         }
@@ -303,11 +307,11 @@ void CritterSetUnspentPerks(Critter cr)
 }
 #endif
 
-// Parameters generation
-// For server and client
-// Both generation need be equal
-// Input for player: 7 special, 3 tag skills, 2 traits, age, gender
-// Imput for npc: data from prototype
+// Генерация параметров
+// Для сервера и клиента
+// Обе генерации должны давать одинаковый результат
+// Вход для игрока: 7 SPECIAL, 3 тег-навыка, 2 черты, возраст, пол
+// Вход для NPC: данные из прототипа
 void CritterGenerate(dict<CritterProperty, int> props)
 {
     props.setIfNotExist(CritterProperty::StrengthBase, 0);
@@ -448,7 +452,7 @@ void CritterGenerate(dict<CritterProperty, int> props)
     }
 
 #if CLIENT
-    // Runtime calculations, only for client registration
+    // Расчёты в рантайме, только для регистрации на клиенте
     props[CritterProperty::ArmorClassBase] = props[CritterProperty::ArmorClassBase] + (props[CritterProperty::AgilityBase]);
     props[CritterProperty::MaxLifeBase] =
         props[CritterProperty::MaxLifeBase] + (props[CritterProperty::StrengthBase] + props[CritterProperty::EnduranceBase] * 2);
@@ -495,17 +499,17 @@ dict<CritterProperty, int> GenerateRegProps()
     return regProps;
 }
 
-// Check valid of input data
+// Проверка корректности входных данных
 bool CritterGenerateCheck(dict<CritterProperty, int> props)
 {
-    // Check name
+    // Проверка имени
     int nameError = CheckPlayerName(Game.GetCacheText("RegName__"));
     if (nameError != 0) {
         Messaging::Info(Game.GetText(TextPackKey(TextPackName::Game, "" + (nameError))));
         return false;
     }
 
-    // Check special
+    // Проверка SPECIAL
     int special = 0;
     for (int i = 0; i < CritterPropertyGroup::SpecialBase.length(); i++) {
         if (props[CritterPropertyGroup::SpecialBase[i]] < 1 || props[CritterPropertyGroup::SpecialBase[i]] > 10) {
@@ -521,7 +525,7 @@ bool CritterGenerateCheck(dict<CritterProperty, int> props)
         return false;
     }
 
-    // Check choosed tag skills
+    // Проверка выбранных тег-навыков
     if ((props[CritterProperty::TagSkill1] != CritterProperty::None &&
          CritterPropertyGroup::Skills.find(CritterProperty(props[CritterProperty::TagSkill1])) == -1) ||
         (props[CritterProperty::TagSkill2] != CritterProperty::None &&
@@ -564,12 +568,12 @@ int CritterGetBarterCoefficient(Critter cr)
 
 int CheckPlayerName(string name)
 {
-    // Length
+    // Длина
     if (name.length() < 4 || name.length() > 12) {
         return MsgStr::StrNetLoginpassWrong;
     }
 
-    // Valid letters
+    // Допустимые символы
     string allLetters = Settings.Account.ValidNameLettersCommon + Settings.Account.ValidNameLettersCulture1 + Settings.Account.ValidNameLettersCulture2;
 
     for (int i = 0, j = name.length(); i < j; i++) {
@@ -578,7 +582,7 @@ int CheckPlayerName(string name)
         }
     }
 
-    // Spaces
+    // Пробелы
     if (name[0] == " " || name[-1] == " ") {
         return MsgStr::StrNetBeginEndSpaces;
     }
@@ -589,7 +593,7 @@ int CheckPlayerName(string name)
         }
     }
 
-    // Different cultures
+    // Смешение разных языков
     int letters1 = 0;
     int letters2 = 0;
     for (int i = 0, j = name.length() - 1; i < j; i++) {
@@ -605,12 +609,12 @@ int CheckPlayerName(string name)
         return MsgStr::StrNetDifferentLang;
     }
 
-    // Too many common symbols
+    // Слишком много общих символов
     if ((letters1 + letters2) * 100 / name.length() < 70) {
         return MsgStr::StrNetManySymbols;
     }
 
-    // All fine, return zero
+    // Всё в порядке, возвращаем ноль
     return 0;
 }
 
@@ -943,7 +947,7 @@ void CritterSetHandsProtoItemId(Critter cr, CritterProperty prop, hstring& newVa
 [[PropertySetter]]
 void CritterSetHandsItemMode(Critter cr, CritterProperty prop, uint8& newValue)
 {
-    // Check uses and aiming
+    // Проверка режимов использования и прицеливания
 }
 
 int ConvertGrams(int x)
@@ -957,16 +961,16 @@ bool IsTurnBasedBattleTimeout(synctime to)
 
 int CritterGetStrengthImpl(Critter cr)
 {
-    // Base value
+    // Базовое значение
     int val = cr.StrengthBase;
 
-    // Adrenaline rush perk
+    // Перк Adrenaline Rush
     if (cr.PerkAdrenalineRush != 0 && Time::IsTimeoutActive(cr.TimeoutBattle) &&
         cr.CurrentHp <= (cr.MaxLifeBase + cr.StrengthBase + cr.EnduranceBase * 2) / 2) {
         val += 1;
     }
 
-    // Armor perk
+    // Перк брони
     int armorPerk = cr.CurrentArmorPerk;
     if (armorPerk == ArmorPerks::Powered) {
         val += 3;
@@ -975,7 +979,7 @@ int CritterGetStrengthImpl(Critter cr)
         val += 4;
     }
 
-    // Drug effect
+    // Эффект от препаратов
     val += Drugs::GetDrugEffect(cr, CritterProperty::StrengthBase);
 
     return Math::Clamp(val, 1, 10);
@@ -989,15 +993,15 @@ int CritterGetStrength(Critter cr)
 
 int CritterGetPerceptionImpl(Critter cr)
 {
-    // Base value
+    // Базовое значение
     int val = (cr.IsDamagedEye ? 1 : cr.PerceptionBase);
 
-    // Night person perk
+    // Перк Night Person
     if (cr.IsTraitNightPerson) {
         val += GetNightPersonBonus();
     }
 
-    // Drug effect
+    // Эффект от препаратов
     val += Drugs::GetDrugEffect(cr, CritterProperty::PerceptionBase);
 
     return Math::Clamp(val, 1, 10);
@@ -1011,10 +1015,10 @@ int CritterGetPerception(Critter cr)
 
 int CritterGetEnduranceImpl(Critter cr)
 {
-    // Base value
+    // Базовое значение
     int val = cr.EnduranceBase;
 
-    // Drug effect
+    // Эффект от препаратов
     val += Drugs::GetDrugEffect(cr, CritterProperty::EnduranceBase);
 
     return Math::Clamp(val, 1, 10);
@@ -1029,15 +1033,15 @@ int CritterGetEndurance(Critter cr)
 [[PropertyGetter]]
 int CritterGetCharisma(Critter cr)
 {
-    // Base value
+    // Базовое значение
     int val = cr.CharismaBase;
 
-    // Armor perk
+    // Перк брони
     if (cr.CurrentArmorPerk == ArmorPerks::Charisma) {
         val += 1;
     }
 
-    // Drug effect
+    // Эффект от препаратов
     val += Drugs::GetDrugEffect(cr, CritterProperty::CharismaBase);
 
     return Math::Clamp(val, 1, 10);
@@ -1046,15 +1050,15 @@ int CritterGetCharisma(Critter cr)
 [[PropertyGetter]]
 int CritterGetIntellegence(Critter cr)
 {
-    // Base value
+    // Базовое значение
     int val = cr.IntellectBase;
 
-    // Night person perk
+    // Перк Night Person
     if (cr.IsTraitNightPerson) {
         val += GetNightPersonBonus();
     }
 
-    // Drug effect
+    // Эффект от препаратов
     val += Drugs::GetDrugEffect(cr, CritterProperty::IntellectBase);
 
     return Math::Clamp(val, 1, 10);
@@ -1062,10 +1066,10 @@ int CritterGetIntellegence(Critter cr)
 
 int CritterGetAgilityImpl(Critter cr)
 {
-    // Base value
+    // Базовое значение
     int val = cr.AgilityBase;
 
-    // Drug effect
+    // Эффект от препаратов
     val += Drugs::GetDrugEffect(cr, CritterProperty::AgilityBase);
 
     return Math::Clamp(val, 1, 10);
@@ -1079,10 +1083,10 @@ int CritterGetAgility(Critter cr)
 
 int CritterGetLuckImpl(Critter cr)
 {
-    // Base value
+    // Базовое значение
     int val = cr.LuckBase;
 
-    // Drug effect
+    // Эффект от препаратов
     val += Drugs::GetDrugEffect(cr, CritterProperty::LuckBase);
 
     return Math::Clamp(val, 1, 10);
@@ -1239,7 +1243,7 @@ int[] CritterGetDamageResistanceImpl(Critter cr)
         cr.RadiationResistanceBase + CritterGetEnduranceImpl(cr) * 2,
     };
 
-    // Armor perk
+    // Перк брони
     int armorPerk = cr.CurrentArmorPerk;
     if (armorPerk == ArmorPerks::Powered) {
         result[DamageTypes::Radiation] += 30;
@@ -1254,12 +1258,12 @@ int[] CritterGetDamageResistanceImpl(Critter cr)
         result[DamageTypes::Radiation] += 75;
     }
 
-    // Drug effects
+    // Эффекты от препаратов
     for (int i = 0; i < CritterPropertyGroup::ResistsBase.length(); i++) {
         result[i] += Drugs::GetDrugEffect(cr, CritterPropertyGroup::ResistsBase[i]);
     }
 
-    // Clamp
+    // Ограничение диапазона
     for (int i = 0; i < result.length(); i++) {
         result[i] = Math::Clamp(result[i], 0, i != DamageTypes::Emp ? 90 : 999);
     }
@@ -1314,12 +1318,12 @@ int[] CritterGetDamageThreshold(Critter cr)
         0,
     };
 
-    // Drug effects
+    // Эффекты от препаратов
     for (int i = 0; i < CritterPropertyGroup::ThresholdsBase.length(); i++) {
         result[i] += Drugs::GetDrugEffect(cr, CritterPropertyGroup::ThresholdsBase[i]);
     }
 
-    // Clamp
+    // Ограничение диапазона
     for (int i = 0; i < result.length(); i++) {
         result[i] = Math::Clamp(result[i], 0, 999);
     }
@@ -1409,7 +1413,7 @@ bool WeaponIsRangedAttack(AbstractItem item, int mode)
            skill == CritterProperty::SkillThrowing;
 }
 
-// Engine callbacks
+// Колбэки движка
 
 int GetItemUseApCost(Critter cr, AbstractItem? item, int mode)
 {
@@ -1510,7 +1514,7 @@ int GetCritterAttackDistance(Critter cr, AbstractItem? item, int mode)
     return GetItemAttackDistance(cr, item, mode);
 }
 
-// Generic stuff
+// Прочее
 
 int GetNightPersonBonus()
 {

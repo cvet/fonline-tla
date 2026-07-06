@@ -187,13 +187,31 @@ jobs:
     - run: mv Workspace/output/TLA-Dev/TLA-Dev.zip TLA-Dev.zip
     - run: (cd Workspace/output/TLA-Test/TLA-Server-LocalTest && zip -0 -q -r - .) > TLA-Server.zip
     - run: (cd Workspace/output/TLA-Test/TLA-Client-LocalTest && zip -0 -q -r - .) > TLA-Client.zip
+    # GitHub Releases caps each asset at 2 GiB (2147483648 bytes). The full self-contained bundles can
+    # exceed that (the server bundle ships the client resource set too, dominated by FOArt ~5.4 GB raw),
+    # so split any oversized zip into <2 GiB parts. Reassemble before extracting:
+    #   Linux/macOS:  cat TLA-Server.zip.part* > TLA-Server.zip
+    #   Windows:      copy /b TLA-Server.zip.part00 + TLA-Server.zip.part01 TLA-Server.zip
+    - name: Split oversized release assets (GitHub 2 GiB per-asset cap)
+      shell: bash
+      run: |
+        set -euo pipefail
+        for f in TLA-Dev.zip TLA-Server.zip TLA-Client.zip; do
+          size=$(stat -c%s "$f")
+          if [ "$size" -ge 2100000000 ]; then
+            echo "Splitting $f ($size bytes) into <2 GiB parts"
+            split --numeric-suffixes=0 --suffix-length=2 -b 1900M "$f" "$f.part"
+            rm "$f"
+            ls -lh "$f".part*
+          fi
+        done
     - uses: actions/upload-artifact@v6
       with:
         name: TLA-Release
         path: |
-          TLA-Dev.zip
-          TLA-Server.zip
-          TLA-Client.zip
+          TLA-Dev.zip*
+          TLA-Server.zip*
+          TLA-Client.zip*
         if-no-files-found: error
         retention-days: 7
   release:
@@ -234,7 +252,13 @@ jobs:
         echo "Version: $version"
         echo "Tag: $tag"
         echo "Previous tag: ${previous_tag:-<none>}"
-        for file in TLA-Dev.zip TLA-Server.zip TLA-Client.zip; do
+        shopt -s nullglob
+        assets=(TLA-Dev.zip* TLA-Server.zip* TLA-Client.zip*)
+        if [[ ${#assets[@]} -eq 0 ]]; then
+          echo "::error::No release assets found"
+          exit 1
+        fi
+        for file in "${assets[@]}"; do
           if [[ ! -s "$file" ]]; then
             echo "::error file=$file::Missing or empty release asset"
             exit 1
@@ -252,7 +276,7 @@ jobs:
           echo "| Version | \`$version\` |"
           echo "| Tag | \`$tag\` |"
           echo "| Previous tag | \`${previous_tag:-none}\` |"
-          echo "| Assets | \`TLA-Dev.zip\`, \`TLA-Server.zip\`, \`TLA-Client.zip\` |"
+          echo "| Assets | ${assets[*]} |"
           if [[ "$publish" != "true" ]]; then
             echo
             echo "Dry-run only: no GitHub release or tag will be created in this run."
@@ -272,7 +296,7 @@ jobs:
         echo "Dry-run only: validated release metadata and assets."
         echo "A push to master would create release '${{ steps.release_version.outputs.tag }}' from commit '${{ github.sha }}'."
         echo "Release assets:"
-        ls -lh TLA-Dev.zip TLA-Server.zip TLA-Client.zip
+        ls -lh TLA-Dev.zip* TLA-Server.zip* TLA-Client.zip*
     - uses: softprops/action-gh-release@v2
       if: steps.release_version.outputs.publish == 'true'
       with:
@@ -284,7 +308,12 @@ jobs:
         make_latest: true
         fail_on_unmatched_files: true
         overwrite_files: false
+        body: |
+          Large bundles may be split into &lt;2 GiB parts (`*.zip.partNN`) to fit GitHub's 2 GiB
+          per-asset limit. Download all parts of a bundle and reassemble before extracting:
+          `cat TLA-Server.zip.part* > TLA-Server.zip` (Linux/macOS) or
+          `copy /b TLA-Server.zip.part00 + TLA-Server.zip.part01 TLA-Server.zip` (Windows).
         files: |
-          TLA-Dev.zip
-          TLA-Server.zip
-          TLA-Client.zip
+          TLA-Dev.zip*
+          TLA-Server.zip*
+          TLA-Client.zip*

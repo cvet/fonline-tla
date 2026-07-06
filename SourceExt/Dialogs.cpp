@@ -26,7 +26,7 @@ static auto IsDialogCommentOrEmpty(string_view line) -> bool
     return line[start] == '#' || (line[start] == '/' && start + 1 < line.size() && line[start + 1] == '/');
 }
 
-static auto TryNormalizeDialogLinkValue(const EngineMetadata* meta, int64_t link, int32_t& normalized_link) -> bool
+static auto TryNormalizeDialogLinkValue(ptr<const EngineMetadata> meta, int64_t link, int32_t& normalized_link) -> bool
 {
     FO_STACK_TRACE_ENTRY();
 
@@ -60,7 +60,7 @@ static auto TryNormalizeDialogLinkValue(const EngineMetadata* meta, int64_t link
     return true;
 }
 
-static auto TryResolveDialogAnswerLinkCanonical(const EngineMetadata* meta, int32_t link, string& canonical) -> bool
+static auto TryResolveDialogAnswerLinkCanonical(ptr<const EngineMetadata> meta, int32_t link, string& canonical) -> bool
 {
     FO_STACK_TRACE_ENTRY();
 
@@ -97,7 +97,7 @@ static auto TryResolveDialogAnswerLinkCanonical(const EngineMetadata* meta, int3
     return true;
 }
 
-static auto TryParseDialogLinkToken(const EngineMetadata* meta, string_view token, int32_t& value, string& canonical) -> bool
+static auto TryParseDialogLinkToken(ptr<const EngineMetadata> meta, string_view token, int32_t& value, string& canonical) -> bool
 {
     FO_STACK_TRACE_ENTRY();
 
@@ -149,7 +149,7 @@ static auto TryParseDialogLinkToken(const EngineMetadata* meta, string_view toke
     return false;
 }
 
-static auto TryParseDialogAnswerToken(const EngineMetadata* meta, string_view token, int32_t& link, string& token_for_hash) -> bool
+static auto TryParseDialogAnswerToken(ptr<const EngineMetadata> meta, string_view token, int32_t& link, string& token_for_hash) -> bool
 {
     FO_STACK_TRACE_ENTRY();
 
@@ -243,7 +243,7 @@ static auto CollectDialogLangSections(ConfigFile& fodlg, string_view pack_name) 
 
     vector<string> lang_sections;
 
-    for (const string_view section_name : fodlg.GetSections() | std::views::keys) {
+    for (const string_view section_name : *fodlg.GetSections() | std::views::keys) {
         if (StartsWithIgnoreCase(section_name, "Text") && section_name.size() >= 5 && std::isspace(static_cast<unsigned char>(section_name[4])) != 0) {
             const string_view lang = strvex(section_name.substr(5)).trim();
 
@@ -260,7 +260,7 @@ static auto CollectDialogLangSections(ConfigFile& fodlg, string_view pack_name) 
     return lang_sections;
 }
 
-static void LoadDialogTextSection(const EngineMetadata& meta, DialogPack* pack, string_view pack_name, const string& lang_section_name, const string& lang_buf)
+static void LoadDialogTextSection(const EngineMetadata& meta, ptr<DialogPack> pack, string_view pack_name, const string& lang_section_name, const string& lang_buf)
 {
     FO_STACK_TRACE_ENTRY();
 
@@ -271,13 +271,13 @@ static void LoadDialogTextSection(const EngineMetadata& meta, DialogPack* pack, 
         throw DialogParseException("One of the lang section not found", pack_name);
     }
 
-    TextPack temp_msg {meta.Hashes};
+    TextPack temp_msg {&meta.Hashes};
 
     if (!temp_msg.LoadFromString(lang_buf, "Dialogs")) {
         throw DialogParseException("Load MSG fail", pack_name);
     }
 
-    pack->Texts.emplace_back(lang_section_name, TextPack {meta.Hashes});
+    pack->Texts.emplace_back(lang_section_name, TextPack {&meta.Hashes});
     const size_t text_pack_index = pack->Texts.size() - 1;
 
     istringstream lang_lines {string(lang_buf)};
@@ -342,15 +342,15 @@ static void LoadDialogTextSection(const EngineMetadata& meta, DialogPack* pack, 
     }
 }
 
-static auto GetPropEnumIndex(const EngineMetadata* meta, string_view str, bool is_demand, uint8_t& type) -> int32_t
+static auto GetPropEnumIndex(ptr<const EngineMetadata> meta, string_view str, bool is_demand, uint8_t& type) -> int32_t
 {
     FO_STACK_TRACE_ENTRY();
 
-    const auto* prop_global = meta->GetPropertyRegistrator(GameProperties::ENTITY_TYPE_NAME)->FindProperty(str);
-    const auto* prop_critter = meta->GetPropertyRegistrator(CritterProperties::ENTITY_TYPE_NAME)->FindProperty(str);
-    const auto* prop_item = meta->GetPropertyRegistrator(ItemProperties::ENTITY_TYPE_NAME)->FindProperty(str);
-    const auto* prop_location = meta->GetPropertyRegistrator(LocationProperties::ENTITY_TYPE_NAME)->FindProperty(str);
-    const auto* prop_map = meta->GetPropertyRegistrator(MapProperties::ENTITY_TYPE_NAME)->FindProperty(str);
+    const auto* prop_global = meta->GetPropertyRegistrator(GameProperties::ENTITY_TYPE_NAME)->FindProperty(str).get();
+    const auto* prop_critter = meta->GetPropertyRegistrator(CritterProperties::ENTITY_TYPE_NAME)->FindProperty(str).get();
+    const auto* prop_item = meta->GetPropertyRegistrator(ItemProperties::ENTITY_TYPE_NAME)->FindProperty(str).get();
+    const auto* prop_location = meta->GetPropertyRegistrator(LocationProperties::ENTITY_TYPE_NAME)->FindProperty(str).get();
+    const auto* prop_map = meta->GetPropertyRegistrator(MapProperties::ENTITY_TYPE_NAME)->FindProperty(str).get();
 
     int32_t count = 0;
     count += prop_global != nullptr ? 1 : 0;
@@ -487,7 +487,7 @@ void DialogManager::AddDialog(refcount_ptr<DialogPack> pack)
     _dialogPacks.emplace(pack->PackId, pack);
 }
 
-auto DialogManager::GetDialog(hstring pack_id) -> DialogPack*
+auto DialogManager::GetDialog(hstring pack_id) -> nptr<DialogPack>
 {
     FO_STACK_TRACE_ENTRY();
 
@@ -533,7 +533,7 @@ auto DialogManager::ParseDialog(string_view pack_name, string_view data) const -
         const auto lang_section = strex("Text {}", lang_section_name);
         const string lang_buf = string(fodlg.GetSectionContent(lang_section));
 
-        LoadDialogTextSection(*_meta, pack.operator->(), pack_name, lang_section_name, lang_buf);
+        LoadDialogTextSection(*_meta, pack.as_ptr(), pack_name, lang_section_name, lang_buf);
     }
 
     const auto dlg_buf = fodlg.GetSectionContent("Dialog");
@@ -544,15 +544,14 @@ auto DialogManager::ParseDialog(string_view pack_name, string_view data) const -
 
     const string new_dlg_data = string(dlg_buf);
 
-    refcount_ptr<DialogSpeech> current_speech;
-    refcount_ptr<DialogAnswer> current_answer;
+    refcount_nptr<DialogSpeech> current_speech;
+    refcount_nptr<DialogAnswer> current_answer;
     bool has_speech = false;
 
     auto flush_answer = [&]() {
         if (current_answer != nullptr) {
             current_speech->AnswersCount++;
-            current_speech->Answers.emplace_back(current_answer);
-            current_answer.reset();
+            current_speech->Answers.emplace_back(current_answer.take_not_null());
         }
     };
 
@@ -560,8 +559,7 @@ auto DialogManager::ParseDialog(string_view pack_name, string_view data) const -
         if (current_speech != nullptr) {
             flush_answer();
             pack->SpeechesCount++;
-            pack->Speeches.emplace_back(current_speech);
-            current_speech.reset();
+            pack->Speeches.emplace_back(current_speech.take_not_null());
         }
     };
 
@@ -659,7 +657,7 @@ auto DialogManager::ParseDialog(string_view pack_name, string_view data) const -
                 args.emplace_back(arg);
             }
 
-            if (args.size() != 1 || !TryParseDialogAnswerToken(_meta.get(), args[0], link, answer_token_for_hash)) {
+            if (args.size() != 1 || !TryParseDialogAnswerToken(_meta, args[0], link, answer_token_for_hash)) {
                 throw DialogParseException("Dialog syntax: invalid Answer command", pack_name, args[0], link, answer_token_for_hash);
             }
 
@@ -809,7 +807,7 @@ auto DialogManager::LoadDemandResult(istringstream& input, bool is_demand) const
 
         // Name
         input >> name;
-        id_index = GetPropEnumIndex(_meta.get(), name, is_demand, type);
+        id_index = GetPropEnumIndex(_meta, name, is_demand, type);
 
         // Operator
         string oper_token;

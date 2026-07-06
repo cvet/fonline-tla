@@ -1,13 +1,19 @@
+// Radiation — серверная система облучения по образцу Fallout 2: накопление рем, стадии лучевой болезни и их эффекты.
+// Начисляет дозу с учётом сопротивления радиации, ведёт RadiationLevel/IsRadiated и по достижении порогов запускает
+// таймерное событие Radiation, которое временно снижает статы/HP по таблице стадий, а при смертельной дозе убивает.
+// Только SERVER (#if SERVER); AffectRadiation/DropRadiation вызывают внешние механики урона и окружения.
+
 namespace Radiation
 {
 
 #if SERVER
 
-// Original Fallout2 system
+// Оригинальная система радиации из Fallout 2
 
 const int RADIATION_STAGES = 6;
 const int RADIATION_STATS = 8;
-const int RADIATION_DURATION = 10080;
+const int RADIATION_DURATION =
+    10080 * 60; // 10080 игровых минут (неделя) в игровых секундах; при миграции потеряли множитель *60 → стадии спадали в ~60 раз быстрее
 const int RADIATION_DAMAGE_VALUE = 66;
 const int RADIATION_HIGH_DOSE = 66;
 const int RADIATION_DEAD_DOSE = 1800;
@@ -23,8 +29,8 @@ const int STR_RADIATION_HIGH_DOSE = 12807;
 
 const int[] RadiationEffects =
 {
-    1,  100,  200,  400,  600, 1000,                                                                 /*stages values*/
-    CritterProperty::Strength,    CritterProperty::StrengthBase,    0,    0,    0,    2,    4,    6, /*stats amount*/
+    1,  100,  200,  400,  600, 1000,                                                                 /*пороги стадий*/
+    CritterProperty::Strength,    CritterProperty::StrengthBase,    0,    0,    0,    2,    4,    6, /*величины изменения статов по стадиям*/
     CritterProperty::Perception,  CritterProperty::PerceptionBase,  0,    0,    1,    0,    3,    5,
     CritterProperty::Endurance,   CritterProperty::EnduranceBase,   0,    0,    0,    1,    3,    5,
     CritterProperty::Charisma,    CritterProperty::CharismaBase,    0,    0,    0,    0,    3,    5,
@@ -36,7 +42,7 @@ const int[] RadiationEffects =
 
 // clang-format on
 
-// Table offsets
+// Смещения внутри таблицы RadiationEffects
 int RadiationStageValue(int stage)
 {
     return RadiationEffects[(stage)-1];
@@ -51,7 +57,7 @@ CritterProperty RadiationStatWriteIndex(int stat)
 }
 int RadiationStatAmount(int stat, int stage)
 {
-    return RadiationEffects[6 + (stat) * 8 + (stage)];
+    return RadiationEffects[6 + (stat) * 8 + 1 + (stage)];
 }
 
 void AffectRadiation(Critter cr, int value)
@@ -90,7 +96,7 @@ void AffectRadiation(Critter cr, int value)
         }
     }
 
-    if (isActive) // Try begin event with new effects
+    if (isActive) // Событие уже идёт — обновляем стадию под новый уровень
     {
         /*int stage = rates[0];
         int newStage = GetRadiationStage(levelVal);
@@ -99,7 +105,7 @@ void AffectRadiation(Critter cr, int value)
         }*/
         cr.SetTimeEventData(Radiation, {GetRadiationStage(levelVal)});
     }
-    else // Try start new event
+    else // Событие ещё не запущено — стартуем с первой стадии
     {
         int stage1Val = RadiationStageValue(1);
         if (levelVal >= stage1Val) {
@@ -149,13 +155,13 @@ void Radiation(Critter cr, TimeEventContext event)
     int newStage = GetRadiationStage(cr.RadiationLevel);
     int duration = RADIATION_DURATION;
 
-    if (stage != newStage) // Set new effects
+    if (stage != newStage) // Стадия сменилась — снимаем старые эффекты и накладываем новые
     {
         ChangeStage(cr, stage, false);
         ChangeStage(cr, newStage, true);
         cr.SetTimeEventData(Radiation, {newStage});
     }
-    else // Erase effects
+    else // Уровень не изменился — снимаем эффекты стадии
     {
         ChangeStage(cr, stage, false);
         duration = 0;
@@ -197,7 +203,7 @@ void ChangeStage(Critter cr, int stage, bool gain)
 
         if (statAmount != 0) {
             int curVal = cr.GetAsInt(statPropRead);
-            if (gain) // Gain effect
+            if (gain) // Наложение эффекта: временно ухудшаем стат
             {
                 statAmount = -statAmount;
                 if (statPropRead == CritterProperty::CurrentHp) {
@@ -210,7 +216,7 @@ void ChangeStage(Critter cr, int stage, bool gain)
                     cr.SetAsInt(statPropWrite, cr.GetAsInt(statPropWrite) + statAmount);
                 }
             }
-            else // Reduce effect
+            else // Снятие эффекта: возвращаем стат к норме
             {
                 if (statPropRead != CritterProperty::CurrentHp) {
                     cr.SetAsInt(statPropWrite, cr.GetAsInt(statPropWrite) + statAmount);
@@ -221,36 +227,34 @@ void ChangeStage(Critter cr, int stage, bool gain)
 }
 
 /*
-   Radiation
-   And now for some stuff on radiation, which does play a small part in the Fallout world.
-   Sources of radiation include Fruit, golden geckos, and aliens and centaurs in random encounters.
-   Whenever you get a huge dose all at once, the message window says "You have received a large dose
-   of radiation." As explained in the patch notes, the radiation sign pops up once you've reached 66 rem.
+   Радиация (справочная выжимка по механике Fallout 2, на которой построен модуль).
+   Небольшая, но присутствующая в мире Fallout механика. Источники облучения — фрукты, золотые гекконы,
+   а также пришельцы и кентавры в случайных встречах. При большой разовой дозе в окно сообщений выводится
+   "You have received a large dose of radiation"; значок радиации появляется по достижении 66 рем.
 
-   As far as I can tell radiation damage works like this: some time after you absorb a dose of radiation,
-   you'll get one of the messages listed below, and you may temporarily lose stat points, Healing Rate and
-   current Hit Points. The severity of the "attack" depends on your total rem count, but also on the amount
-   of recent radiation that triggered the message. After 7 days, your stats will return to normal. A little
-   confusingly, this is signalled by another message identical to the first one. If you absorb more radiation
-   in the meanwhile, your current penalty may be replaced by a more severe one.
+   Урон от радиации работает так: через некоторое время после получения дозы криттер получает одно из
+   сообщений ниже и может временно потерять очки статов, Healing Rate и текущие Hit Points. Тяжесть "удара"
+   зависит от суммарного числа рем, а также от объёма недавней радиации, вызвавшей сообщение. Через 7 дней
+   статы возвращаются к норме — что, слегка сбивая с толку, сигнализируется тем же сообщением, что и первое.
+   Если за это время накопить ещё дозу, текущий штраф может смениться более тяжёлым.
 
-   Here's a list of the penalties you may suffer. The rem figures are rough approximations.
-   Rem	    Message	                  HR	CHP	ST	PE	EN	CH	IN	AG
-   >0	    "very nauseous"
-   >150	"slightly fatigued"			    -1
-   >300	"vomiting does not stop"	    -3		-1				-1
-   >450	"hair is falling out"	  -5	-5	-2		-1			-2
-   >600	"skin is falling off"	 -10	-15	-4	-3	-3	-3	-1	-5
-   >1000	"intense agony"	         -10	-20	-6	-5	-5	-5	-3	-6
+   Возможные штрафы (значения рем приблизительные).
+   Rem      Message                   HR   CHP  ST   PE   EN   CH   IN   AG
+   >0       "very nauseous"
+   >150     "slightly fatigued"             -1
+   >300     "vomiting does not stop"   -3        -1              -1
+   >450     "hair is falling out"  -5   -5   -2        -1        -2
+   >600     "skin is falling off" -10   -15  -4   -3   -3   -3   -1   -5
+   >1000    "intense agony"       -10   -20  -6   -5   -5   -5   -3   -6
 
 
-   You will expire from your condition if any of these stats except for Healing Rate (including CH) drops to 0
-   or below. This is checked only at the moment when they are lowered, so you may be able to use drugs to stay alive.
-   Assuming you don't die in this manner, you can live with any kind of rem count and still run around with no penalty
-   whatsoever. In any normal game, radiation is not a significant factor; in fact, in order to reach even 300 rem you'd
-   have to run several laps around the Gecko reactor room or purposely hang around the Toxic waste dump. From what I
-   can tell, there is never any permanent damage resulting from radiation.
+   Криттер умирает, если любой из этих статов, кроме Healing Rate (включая CH), падает до 0 или ниже.
+   Проверка выполняется только в момент понижения, поэтому препаратами можно успеть выжить. Если так не
+   погибнуть, жить можно с любым числом рем и бегать вообще без штрафа. В обычной игре радиация не является
+   значимым фактором: чтобы набрать даже 300 рем, пришлось бы нарезать круги по реакторному залу Гекко или
+   намеренно торчать у свалки токсичных отходов. Насколько можно судить, перманентного урона от радиации нет.
 
+   Ссылки на записи текст-пака Game (id -> английский текст):
    {12800}{}{You feel very nauseous.}
    {12801}{}{You feel very nauseous, and after some mild vomiting, slightly fatigued.}
    {12802}{}{You are very fatigued, the vomiting does not stop, and your recovery time is impaired.}

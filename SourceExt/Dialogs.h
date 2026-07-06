@@ -100,7 +100,7 @@ public:
     auto operator=(DialogManager&&) noexcept = delete;
     ~DialogManager() = default;
 
-    [[nodiscard]] auto GetDialog(hstring pack_id) -> DialogPack*;
+    [[nodiscard]] auto GetDialog(hstring pack_id) -> nptr<DialogPack>;
     [[nodiscard]] auto GetDialogs() -> vector<DialogPack*>;
 
     void LoadFromResources(const FileSystem& resources);
@@ -113,6 +113,6 @@ private:
 
     auto LoadDemandResult(istringstream& input, bool is_demand) const -> refcount_ptr<DialogAnswerReq>;
 
-    raw_ptr<EngineMetadata> _meta;
+    ptr<EngineMetadata> _meta;
     map<hstring, refcount_ptr<DialogPack>> _dialogPacks {};
 };

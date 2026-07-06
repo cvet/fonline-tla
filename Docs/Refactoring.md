@@ -201,3 +201,65 @@ For the record, the tiers considered:
 
 Per ScriptStyle.md §9. Do not commit/stage/push (owner reviews). Surface contentious or
 gameplay-affecting changes in each batch report rather than applying silently.
+
+## R2-2 progress — header coverage complete + verified bug batch (2026-07-03)
+
+**Headers/polish batch (workflow, 116 files).** All remaining `Scripts/*.fos` without a header block
+were taken through the strict-safe polish (Russian header above `namespace` + English→Russian comment
+translation), giving **header coverage across the whole tree**. 103 modules got the full comment
+polish; the 13 giants (Worldmap, Caravan, Combat, Poker, Parameters, Main, ClientMain, MapperMain,
+NpcPlanes, ChosenActions, FixBoy, GlobalmapGroup, Purgatory) got header-only — their full comment
+polish is deferred, to be done carefully in chunks. Machine-verified code-equivalent vs HEAD
+(`Build/_auditall_head.py`: no code / `///@`-tag / midline drift, CRLF); Format (changed 0) → Compile →
+Bake → `--ratchet` all green.
+
+**Verified bug batch (adversarial workflow).** The 264 suspicions the polish agents flagged were
+triaged: 111 bug/gameplay candidates run through a triage verifier + a 2-skeptic panel (consumer-contract
+and git-intent lenses, refute-by-default). **14 survived (97 refuted). 11 applied** (each re-checked by
+reading the code + git):
+
+- NoPvpMaps `NoPvpOff` — missing `return;` dropped PvP protection inside safe zones (mirrors Purgatory). *high*
+- QuestWarehouse `ProcessSubQuest1` — null-guard; an offline party member returned null → CreateLocation crash.
+- Perks `PerkBetterCriticals` — gated on effective stats, switched to `*Base` (drugs could flip availability).
+- V13ZSoldier `FriendlyFirePlane` / WarehouseTurret `TurretBeginPlane` — EventResult polarity (friendly/inactive → veto = `ContinueChain`).
+- VcGateGuard — removed a dead `removeAt(find == -1)` crash in the contraband branch.
+- MsgStr `StrKarmaGenDescription` 6001→6002 — id collided with the caption; the description text lives at 6002.
+- Radiation `RADIATION_DURATION` — restored the `*60` (stages wore off ~60× too fast). *[balance — playtest]*
+- Repair `SetItemCost` — no longer zeroes cost for good-condition items. *[economy — playtest]*
+- Scores `AddScore` — removed the record-holder early-return that froze the global top. *[leaderboard — playtest]*
+- ReddWanamingo — un-inverted the map-leave delete guard (was deleting the cavern while players were still on it). *[map lifecycle — playtest]*
+
+**Confirmed but NOT applied (owner follow-up):**
+
+- MsgStr id68 — the legacy numeric `*TextId` helpers (summed `.hstr().uhash`) resolve to empty text since
+  the post-#144 hash change; repointing the live callers (ClientMain SPECIAL panel, Drugs, GuiScreens PipBoy,
+  NrWriKidnap) to the two-key helpers is a cross-file migration that also touches generated `GuiScreens.fos`.
+- VcCommon `CheckIsBlackHere` passes an item proto to `GetCritters` (always empty) — but the function has
+  **no callers** (dead) and git never held a critter proto here; the verifier's suggested
+  `Content::Critter::vc_black_jack` is a **dialog** proto, not a critter, and does not compile. Left as-is
+  (needs the owner to name the real "Black" critter proto). Good reminder that even 3/3-verified fixes get
+  the compile gate.
+- Trap id90 — the "grenade explodes on failed setup" flavor never fires (guard needs Hidden+IsTrap); restoring
+  it adds player damage — a design decision.
+
+**Verification:** Compile + ForceBake (550 maps) + `--ratchet` + headless smoke → "Start server complete!"
+(0 exceptions). Only the 11 fix files changed code; the other 105 polished files are comment-only. Not
+committed (owner reviews). Full flag data lives in the workflow task journals / `Build/` scratch.
+
+**Giants comment polish (2026-07-03, follow-up workflow).** The 13 giants had header-only before; a chunked
+workflow (large files split into sequential ~2000-line ranges, files in parallel) translated their English
+comments to Russian — **776 comments** across the 13 modules (Worldmap 132, Combat 142+8, ClientMain 97,
+Main 115, GlobalmapGroup 81, NpcPlanes 52, Parameters 51, MapperMain 43, ChosenActions 40, Poker 13, Caravan
+9, FixBoy 1, Purgatory already-RU). One Combat chunk hit the account session limit; its residual (~8 real
+labels) was finished by hand, leaving `clang-format` directives / Fallout2.exe offset references / code
+breadcrumbs untranslated by design. Code-equivalence re-verified (still exactly the 11 fix files changed
+code; giants comment-only) + Compile + Bake + `--ratchet` green. So **every non-generated `Scripts/*.fos`
+now has a Russian header and Russian comments.**
+
+Those translation agents surfaced **69 more (unverified) flags**. Notable candidates for a future verify+fix
+pass (NOT applied): ChosenActions `cast<AbstractItem>` on possibly-null `GetItem` (nullability); Poker
+`ModChFr / GameNum` possible divide-by-zero (GameNum inits 0); ClientMain `SexTagFemale` double-assign around
+an empty `if (cr.IsChosen) {}`; Worldmap `CheckCompareAnyVar` is a byte-for-byte duplicate of
+`CheckCompareAnyParam` (the "Var" variant likely meant to read a different source); MapperMain `ConvertMaps`
+fail-counter never incremented. Plus content-table smells in Worldmap (weight-0 encounters, duplicate
+location pids, reused special-encounter ids) — designer review. Saved to `Build`/scratch.

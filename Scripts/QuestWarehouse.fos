@@ -1,3 +1,7 @@
+// QuestWarehouse — серверная логика группового квеста «Склад»: основной квест и два субквеста (поиск дочери/карты и поиск ключа).
+// Хранит состояние партии (5–7 игроков) на критере-держателе данных, ведёт машину состояний квестов и начисляет опыт.
+// По завершении первого субквеста порождает локацию склада со случайным замком двери, а второй субквест выдаёт ключ-пропуск.
+// Прогресс двигают демоны/результаты диалогов и триггер входа на финишный гекс (DoneHex); весь модуль под #if SERVER.
 namespace QuestWarehouse
 {
 
@@ -43,7 +47,7 @@ int GenerateWarehouseKeyId()
     return Game.Random(1000000, 10000000);
 }
 
-// Entry - Входная дверь в локации
+// Идентификатор точки входа — входная дверь локации склада
 const int ENTRY_LOC_DOOR = 100;
 
 // Переходы диалогов
@@ -58,7 +62,7 @@ int AdvertisementWaitTime()
     return Game.Random(10000, 15000);
 }
 
-// Texts
+// Тексты
 const int STR_ADVERTISMAN = 1200;
 
 ///@ Property Critter Common uint8 QWarehouse Mutable OwnerSync Persistent Group = Quests Quest = 3040 Max = 4
@@ -124,7 +128,7 @@ void SetLocId(Critter player, ident locId)
 
 void ChangeCrittersQuest(ident[] questCrIds, CritterProperty varId, int newVal, int exp)
 {
-    for (int i = 0, j = questCrIds.length(); i < j; i++) {
+    for (int i = 0; i < questCrIds.length(); i++) {
         Critter? cr = Game.GetCritter(questCrIds[i]);
         if (cr == null) {
             continue;
@@ -307,13 +311,13 @@ int ProcessMainQuest(Critter player, int newVal)
             return FD_MANY_PLAYERS;
         }
 
-        // Level check
+        // Проверка среднего уровня группы
         aproxLevel /= questCr.length();
         if (aproxLevel < MIN_APROX_LEVEL) {
             return FD_LOW_LEVEL;
         }
 
-        // Сохроняем данные о команде.
+        // Сохраняем данные о команде (лидер выступает держателем данных квеста).
         player.WarehouseQuestData = questData;
 
         // Отмечаем квест.
@@ -372,9 +376,11 @@ int ProcessSubQuest1(Critter player, int newVal)
 
     if (newVal == SUBQUEST1_DONE) {
         Critter[] critters = {};
-        for (int i = 0, j = questCrIds.length(); i < j; i++) {
+        for (int i = 0; i < questCrIds.length(); i++) {
             Critter? cr = Game.GetCritter(questCrIds[i]);
-            critters.insertLast(cr);
+            if (cr != null) { // оффлайн-участник партии даёт null — не пихаем его в список для CreateLocation (иначе SetKnownLoc падает)
+                critters.insertLast(cr);
+            }
         }
 
         hstring[] locPids = {Content::Location::warehouse,
@@ -556,6 +562,7 @@ int MainQuestGive(Critter player, Critter npc)
     return ProcessMainQuest(player, MAINQUEST_GIVED);
 }
 
+// Старый результат диалога для завершения основного квеста отключён: теперь его закрывает триггер входа DoneHex (см. ниже).
 // int r_MainQuest_Done(Critter player, Critter npc, int val)                   {return ProcessMainQuest(player,MAINQUEST_DONE);} // See DoneHex
 [[DialogResult]]
 int MainQuestMarkDone(Critter player, Critter npc, any val)

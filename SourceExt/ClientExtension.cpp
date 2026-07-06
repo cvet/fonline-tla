@@ -7,24 +7,24 @@ FO_USING_NAMESPACE();
 
 FO_BEGIN_NAMESPACE
 ///@ EngineHook
-FO_SCRIPT_API void ClientInitHook(ClientEngine* client);
+FO_SCRIPT_API void ClientInitHook(ptr<ClientEngine> client);
 ///@ ExportMethod
-FO_SCRIPT_API int32_t Client_Game_GetEmbeddedClientIndex(ClientEngine* client);
+FO_SCRIPT_API int32_t Client_Game_GetEmbeddedClientIndex(ptr<ClientEngine> client);
 ///@ ExportMethod
-FO_SCRIPT_API string Client_Game_FormatTags(ClientEngine* client, string_view text, string_view textArgs);
+FO_SCRIPT_API string Client_Game_FormatTags(ptr<ClientEngine> client, string_view text, string_view textArgs);
 ///@ ExportMethod
-FO_SCRIPT_API string Client_Game_FormatTags(ClientEngine* client, string_view text, string_view textArgs, FO_NULLABLE CritterView* talker);
+FO_SCRIPT_API string Client_Game_FormatTags(ptr<ClientEngine> client, string_view text, string_view textArgs, nptr<CritterView> talker);
 ///@ ExportMethod
-FO_SCRIPT_API bool Client_Critter_IsFree(CritterView* self);
+FO_SCRIPT_API bool Client_Critter_IsFree(ptr<CritterView> self);
 ///@ ExportMethod
-FO_SCRIPT_API bool Client_Critter_IsBusy(CritterView* self);
+FO_SCRIPT_API bool Client_Critter_IsBusy(ptr<CritterView> self);
 ///@ ExportMethod
-FO_SCRIPT_API void Client_Critter_Wait(CritterView* self, int32_t ms);
+FO_SCRIPT_API void Client_Critter_Wait(ptr<CritterView> self, int32_t ms);
 FO_END_NAMESPACE
 
 static std::atomic<int32_t> ClientEngineSpawnCounter {};
 
-void FO_NAMESPACE ClientInitHook(ClientEngine* client)
+void FO_NAMESPACE ClientInitHook(ptr<ClientEngine> client)
 {
     FO_STACK_TRACE_ENTRY();
 
@@ -38,7 +38,7 @@ void FO_NAMESPACE ClientInitHook(ClientEngine* client)
     }
 }
 
-int32_t FO_NAMESPACE Client_Game_GetEmbeddedClientIndex(ClientEngine* client)
+int32_t FO_NAMESPACE Client_Game_GetEmbeddedClientIndex(ptr<ClientEngine> client)
 {
     FO_STACK_TRACE_ENTRY();
 
@@ -47,17 +47,17 @@ int32_t FO_NAMESPACE Client_Game_GetEmbeddedClientIndex(ClientEngine* client)
 
 static auto ResolveTextArg(string_view name, string_view text_args) -> string;
 
-static auto HasFemaleSexTag(const CritterView* cr) -> bool
+static auto HasFemaleSexTag(nptr<const CritterView> cr) -> bool
 {
     if (cr == nullptr) {
         return false;
     }
 
-    const auto* sex_tag_female = cr->GetProperties().GetRegistrator()->FindProperty("SexTagFemale");
-    return sex_tag_female != nullptr && cr->GetProperties().GetValue<bool>(sex_tag_female);
+    const auto* sex_tag_female = cr->GetProperties()->GetRegistrator()->FindProperty("SexTagFemale").get();
+    return sex_tag_female != nullptr && cr->GetProperties()->GetValue<bool>(sex_tag_female);
 }
 
-static auto FormatTags(ClientEngine* client, string_view text, string_view text_args, CritterView* talker) -> string
+static auto FormatTags(ptr<ClientEngine> client, string_view text, string_view text_args, nptr<CritterView> talker) -> string
 {
     FO_STACK_TRACE_ENTRY();
 
@@ -66,7 +66,7 @@ static auto FormatTags(ClientEngine* client, string_view text, string_view text_
     vector<string> dialogs;
     string tag;
 
-    CritterView* chosen = client->GetChosen();
+    nptr<CritterView> chosen = client->GetChosen();
 
     for (size_t i = 0; i < new_text.length();) {
         switch (new_text[i]) {
@@ -241,21 +241,21 @@ static auto ResolveTextArg(string_view name, string_view text_args) -> string
     return "";
 }
 
-string FO_NAMESPACE Client_Game_FormatTags(ClientEngine* client, string_view text, string_view textArgs)
+string FO_NAMESPACE Client_Game_FormatTags(ptr<ClientEngine> client, string_view text, string_view textArgs)
 {
     FO_STACK_TRACE_ENTRY();
 
     return FormatTags(client, text, textArgs, nullptr);
 }
 
-string FO_NAMESPACE Client_Game_FormatTags(ClientEngine* client, string_view text, string_view textArgs, CritterView* talker)
+string FO_NAMESPACE Client_Game_FormatTags(ptr<ClientEngine> client, string_view text, string_view textArgs, nptr<CritterView> talker)
 {
     FO_STACK_TRACE_ENTRY();
 
     return FormatTags(client, text, textArgs, talker);
 }
 
-bool FO_NAMESPACE Client_Critter_IsFree(CritterView* self)
+bool FO_NAMESPACE Client_Critter_IsFree(ptr<CritterView> self)
 {
     FO_STACK_TRACE_ENTRY();
 
@@ -263,7 +263,7 @@ bool FO_NAMESPACE Client_Critter_IsFree(CritterView* self)
     return true;
 }
 
-bool FO_NAMESPACE Client_Critter_IsBusy(CritterView* self)
+bool FO_NAMESPACE Client_Critter_IsBusy(ptr<CritterView> self)
 {
     FO_STACK_TRACE_ENTRY();
 
@@ -271,7 +271,7 @@ bool FO_NAMESPACE Client_Critter_IsBusy(CritterView* self)
     return false;
 }
 
-void FO_NAMESPACE Client_Critter_Wait(CritterView* self, int32_t ms)
+void FO_NAMESPACE Client_Critter_Wait(ptr<CritterView> self, int32_t ms)
 {
     FO_STACK_TRACE_ENTRY();
 

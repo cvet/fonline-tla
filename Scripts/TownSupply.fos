@@ -1,9 +1,13 @@
+// TownSupply — механика "городской охраны": наёмные охотники за головами карают игрока за нападение на мирного NPC в городе.
+// Сторона SERVER. CallTownSupply запускает цепочку отложенных TimeEvent'ов, которые спавнят у входа на карту отряд
+// bounty hunter'ов и натравливают их на обидчика через боевые планы NpcPlanes; охрана уходит к выходу и деспавнится по завершении плана.
+// Связи: EnemyStack (стек врагов жертвы и охраны), Entrance (точки входа/выхода), Maps::IsCityLocation (только городские локации).
 namespace TownSupply
 {
 
 #if SERVER
 
-// Town supply
+// Городская охрана
 
 ///@ Property Critter Server ident TownSupplyVictimId Mutable Persistent
 ///@ Property Critter Server ident TownSupplyHostileId Mutable Persistent
@@ -53,7 +57,7 @@ void CallTownSupplyNext(any[] values)
 
 bool IsValidForSupply(Critter victim, Critter hostile)
 {
-    // Only for humanoids npc in cities
+    // Только для NPC-гуманоидов в городских локациях
     if (hostile.ControlledByPlayer && !victim.ControlledByPlayer && !victim.IsNoSupply) {
         int bt = victim.BodyType;
         if (bt >= BodyTypes::Men && bt <= BodyTypes::Ghoul) {
@@ -121,6 +125,7 @@ void GuardInit(Critter bountyHunter, bool firstTime)
     bountyHunter.StartTimeEvent(Time::Asap(), Time::Seconds(1), GuardIdle);
     bountyHunter.OnDead.Subscribe(GuardDead);
     bountyHunter.OnSomeCritterDead.Subscribe(GuardSmthDead);
+    // Подписка на атаку отключена: обработчик GuardSmthAttack — заглушка
     // bountyHunter.OnSomeCritterAttack.Subscribe(GuardSmthAttack);
     bountyHunter.OnNpcPlaneEnd.Subscribe(GuardPlaneEnd);
     bountyHunter.BonusLook = 100;
@@ -160,6 +165,7 @@ void GuardIdle(Critter bountyHunter)
 [[Event]]
 void GuardDead(Critter bountyHunter, Critter? killer)
 {
+    // Отключено: раньше смерть охотника могла поднимать новую волну поддержки против убийцы
     /*if (killer != null && IsValidForSupply(bountyHunter,killer)) {
         CallSupply(killer, 1);
     }*/
@@ -169,13 +175,13 @@ void GuardDead(Critter bountyHunter, Critter? killer)
 [[Event]]
 void GuardSmthDead(Critter bountyHunter, Critter fromCrit, Critter? killer)
 {
-    // Add to stack player who kills another guards
+    // Заносим в стек врагов охраны игрока, убивающего другого охотника
     if (killer != null && killer.ControlledByPlayer && fromCrit.NpcRole == ROLE_GUARD) {
         EnemyStack::AddEnemyToStack(bountyHunter, killer.Id);
         return;
     }
 
-    // Erase id from victim enemy stack
+    // Убираем id обидчика из стека врагов жертвы
     ident victimId = bountyHunter.TownSupplyVictimId;
     ident hostileId = bountyHunter.TownSupplyHostileId;
     if (victimId != ZERO_IDENT && hostileId == fromCrit.Id) {

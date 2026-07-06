@@ -1,3 +1,7 @@
+// NcrSiege — событие осады НКР: периодически вокруг города появляются лагеря рейдеров, которые игроки зачищают.
+// Сторона SERVER. Планирует осады отложенными TimeEvent, создаёт локации-лагеря вокруг НКР и заряжает мины,
+// ведёт счётчик убийств рейдеров и статус квеста NcrSiegeTerminate, выдаёт награду за зачистку,
+// рассылает радиосообщения Элизы по каналу осады и через NcrInvasion объявляет само нападение на город.
 namespace NcrSiege
 {
 
@@ -47,7 +51,7 @@ timespan FirstSiegeEventTime()
 timespan NextSiegeEventTime()
 {
     return Time::GameDays(30 * 6);
-} // первая осада через 6 месяцев
+} // интервал до следующей осады, 6 месяцев
 
 const int START_COMPELIXITY = 1; // стартовая сложность осады
 const int MAX_COMPLEXITY = 6;    // максимальная сложность осады
@@ -81,11 +85,11 @@ void DeclareSiegeEvent(Map map)
 // начало осады
 void BeginSiegeImpl(any value)
 {
-    // генерация локаций.
+    // сложность всегда сбрасывается в стартовую: масштабирование по value отключено (закомментированный Clamp)
     int complexity = START_COMPELIXITY; // Clamp(values[0], START_COMPELIXITY, MAX_COMPLEXITY);
     DebugLog("ncr siege compl =" + complexity);
 
-    // предыдущая осада закончилась
+    // если лагеря прошлой осады ещё не зачищены — откладываем начало новой на 12 часов
     if (Game.NCRSiegeCampsNum > 0) {
         DebugLog("Previous Siege not ended");
         Game.StartTimeEvent(GameTime::GameSeconds(60 * 60 * 12), BeginSiege, value); //SavedDeferredCall
@@ -163,10 +167,11 @@ void SayElizeRadio()
     Game.StartTimeEvent(NextRadioMessageTime(), SayElizeRadio); //SavedDeferredCall
 }
 
-// 21?8Teams::Bandit  Teams::Slaver
+// инициализация карты лагеря; рейдеры относятся к командам Teams::Bandit и Teams::Slaver
 void MapInit(Map map, bool firstTime)
 {
     int complexity = map.NcrSiegeComplexity;
+    // прежнее наполнение карты мобами через шаблоны отключено; бойцы расставляются в маппере
     // FighterPattern::SetMapMobsTemplate( map, Teams::Bandit, 5, 3, 2, 70, 1, 4, complexity );
     // FighterPattern::SetMapMobsTemplate( map, Teams::Slaver, 15, 7, 3, 50, 5, 10, complexity );
     map.OnCritterIn.Subscribe(MapCritterIn);
@@ -195,7 +200,7 @@ void MineInit(Item item, bool firstTime)
     item.Hidden = true;
 }
 
-// MAP_EVENT_IN_CRITTER
+// вход криттера на карту лагеря: показываем игроку пояснительное сообщение
 [[Event]]
 void MapCritterIn(Map map, Critter cr)
 {
@@ -215,7 +220,7 @@ void RaiderInit(Critter cr, bool firstTime)
     cr.OnDead.Subscribe(RaiderDead);
 }
 
-// CRITTER_EVENT_DEAD
+// смерть рейдера: засчитываем убийство игроку и, если лагерь зачищен, закрываем локацию и обновляем квест
 [[Event]]
 void RaiderDead(Critter cr, Critter? killer)
 {
@@ -277,7 +282,7 @@ void GrantPlayer(Critter player, Critter cr)
     player.NcrSiegeKillsCounter = 10;
 }
 
-// тестирование сркиптов
+// отладочные точки входа для ручного тестирования осады
 // ~run NcrSiege BS 0 0 0 p0 - сложность
 void BS(Critter cr, int p0, int p1, int p2)
 {

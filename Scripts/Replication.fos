@@ -1,3 +1,7 @@
+// Replication — серверная механика смерти и «репликации» (возрождения) криттеров в мире TLA.
+// Выбирает карту возрождения (ближайший репликатор, ад или нестандартную карту Чистилища), ведёт счётчик
+// визитов в ад и список PermanentDeath, сбрасывает состояние воскрешённого криттера и раскрывает новичку
+// стартовую область глобальной карты; целиком под #if SERVER, дёргается из таймаутов репликации и старта игрока.
 namespace Replication
 {
 
@@ -39,7 +43,7 @@ Map? GetNearReplicatorMap(Critter cr)
 {
     Map? nearMap = null;
     int nearDist = 0;
-    for (int i = 0, j = ReplicatorsMapPids.length(); i < j; i++) {
+    for (int i = 0; i < ReplicatorsMapPids.length(); i++) {
         Map? map = Game.GetMap(ReplicatorsMapPids[i]);
         if (map != null) {
             Location loc = map.GetLocation();
@@ -47,7 +51,7 @@ Map? GetNearReplicatorMap(Critter cr)
             int dy = int(cr.WorldPos.y) - int(loc.WorldPos.y);
             int dist = int(math::sqrt(dx * dx + dy * dy));
 
-            // GameEventReplicator.fos Restrict replication4 when event is on
+            // GameEventReplicator.fos: не даём реплицировать в replication4, пока идёт событие на станции
             if (loc.ProtoId == Content::Location::replication_4 && Game.GEReplStationStatus) {
                 continue;
             }
@@ -69,7 +73,7 @@ void SetStartLocation(Critter cr)
         return;
     }
 
-    // Hidden fog on default player position
+    // Полностью закрываем туманом область вокруг стартовой позиции игрока
     int zoneX = cr.WorldPos.x / Settings.GlobalMap.GlobalMapZoneLength;
     int zoneY = cr.WorldPos.y / Settings.GlobalMap.GlobalMapZoneLength;
     GlobalMapFog::SetFog(cr, zoneX, zoneY, GlobalMapFog::GM_FOG_FULL);
@@ -90,7 +94,7 @@ void SetStartLocation(Critter cr)
     if (replPid == Content::Location::replication_1) {
         Location::SetKnownLoc(cr, Content::Location::den);
         Location::SetKnownLoc(cr, Content::Location::klamath);
-        Location::SetKnownLoc(cr, Content::Location::arroyo); // TODO: remove arroyo after test s
+        Location::SetKnownLoc(cr, Content::Location::arroyo); // TODO: убрать arroyo после тестов
     }
     else if (replPid == Content::Location::replication_2) {
         Location::SetKnownLoc(cr, Content::Location::modoc);
@@ -120,16 +124,16 @@ void SetReplicationTime(Critter cr)
 {
     int replTime = cr.ReplicationTime;
     if (replTime < 0) {
-        return; // No respawn
+        return; // Возрождение отключено
     }
 
-    if (replTime == 0) // Take default values
+    if (replTime == 0) // Берём значения по умолчанию
     {
         if (cr.ControlledByPlayer) {
-            replTime = 3; // 3 minutes
+            replTime = 3; // 3 минуты
         }
         else {
-            replTime = Game.Random(90, 120); // 90-120 minutes
+            replTime = Game.Random(90, 120); // 90-120 минут
         }
     }
 
@@ -147,10 +151,10 @@ void ReplicateCritter(Critter cr)
     Map? map = null;
     mpos hex;
 
-    // Check car
+    // Проверяем наличие машины
     Item[] cars = cr.GetItems(ItemProperty::Type, ItemType::Car);
     if (cars.length() > 0) {
-        // Transit to random encounter
+        // Переносим на случайную встречу (энкаунтер)
         bool transferred = false;
         int encounterDescriptor = int(-1);
         bool waitForAnswer = false;
@@ -168,14 +172,14 @@ void ReplicateCritter(Critter cr)
             }
         }
 
-        // Encounter not founded or transfer fail, delete cars
+        // Встреча не найдена или перенос не удался — уничтожаем машины
         if (!transferred) {
             for (int i = 0; i < cars.length(); i++) {
                 Game.DestroyItem(cars[i]);
             }
         }
 
-        // Continue dead
+        // Остаёмся мёртвыми, повторим репликацию позже
         cr.TimeoutReplication = Game.SynchronizedTime + Time::Minutes(1);
         return;
     }
@@ -195,12 +199,12 @@ void ReplicateCritter(Critter cr)
             if (not dieMapIsHell) {
                 cr.HellVisits += 1;
 
-                // Show hell video
+                // Показываем ролик ада при первом попадании
                 if (cr.HellVisits == 1) {
                     Media::PlayVideo(cr, "TheLifeAfterHell.ogv|TheLifeAfterHell.ogg", false);
                 }
 
-                // Permanent death
+                // Окончательная смерть
                 if (Settings.Combat.PermanentDeath > 0 && cr.HellVisits > Settings.Combat.PermanentDeath) {
                     AddPermanentDeath(cr.Id);
                     Messaging::Info(cr, TextPackKey(TextPackName::Game, "" + (MsgStr::StrNetPermanentDeath)));
@@ -218,7 +222,7 @@ void ReplicateCritter(Critter cr)
         }
 
         if (map == null || not Entrance::GetEntryFreeHex(map, (customReplMap ? cr.NextReplicationEntry : Tla::ENTRY_REPLICATION), hex)) {
-            // Continue dead
+            // Остаёмся мёртвыми, повторим репликацию позже
             cr.TimeoutReplication = Game.SynchronizedTime + Time::Minutes(1);
             return;
         }
@@ -227,7 +231,7 @@ void ReplicateCritter(Critter cr)
             Map? dropMap = cr.GetMap();
             Item[] items = cr.GetItems();
 
-            // Disable drop of hidden items and delete gag items (sandbags)
+            // Скрытые предметы не роняем, а gag-предметы (мешки с песком) удаляем
             for (int i = 0; i < items.length(); i++) {
                 if (items[i].IsGag) {
                     Game.DestroyItem(items[i]);
@@ -238,7 +242,7 @@ void ReplicateCritter(Critter cr)
                 }
             }
 
-            // Drop
+            // Роняем предметы на землю
             if (dropMap != null) {
                 ItemMovement::MoveItems(items, dropMap, cr.Hex);
             }
@@ -252,7 +256,7 @@ void ReplicateCritter(Critter cr)
                 cr.ReplicationMoney -= cr.ReplicationCost;
                 cr.AddItem(Content::Item::flower, 1);
                 if (cr.ReplicationMoney >= 100) {
-                    cr.AddItem(Content::Item::radio, 1); // Add radio
+                    cr.AddItem(Content::Item::radio, 1); // Выдаём радио
                 }
             }
 
@@ -270,7 +274,7 @@ void ReplicateCritter(Critter cr)
         cr.LastWeaponId = ZERO_IDENT;
         cr.LastWeaponNotFound = false;
         map = cr.GetMap();
-        if (map == null) // On global, delete
+        if (map == null) // На глобальной карте — просто удаляем
         {
             Game.DestroyCritter(cr);
             return;
@@ -292,7 +296,7 @@ void ReplicateCritter(Critter cr)
             for (int x = -1; x <= 1; x++) {
                 for (int y = -1; y <= 1; y++) {
                     if (x == 0 && y == 0) {
-                        continue; // Skip direct position
+                        continue; // Пропускаем центральную клетку
                     }
 
                     if (Settings.Geometry.MapHexagonal) {
@@ -319,7 +323,7 @@ void ReplicateCritter(Critter cr)
             }
 
             if (not founded) {
-                // Continue dead
+                // Остаёмся мёртвыми, повторим репликацию позже
                 cr.TimeoutReplication = Game.SynchronizedTime + Time::Minutes(1);
                 return;
             }
@@ -349,7 +353,7 @@ void ReplicateCritter(Critter cr)
     Poison::DropPoison(cr);
     Radiation::DropRadiation(cr);
     if (!cr.ControlledByPlayer || map.ProtoId != HellMapPid) {
-        Drugs::DropDrugEffects(cr); // Note: This function clear effects of all active drugs/radiation/poison!
+        Drugs::DropDrugEffects(cr); // Внимание: снимает эффекты всех активных наркотиков/радиации/яда!
     }
 
     GlobalmapGroupExtended::DropTimers(cr);
@@ -361,7 +365,7 @@ void ReplicateCritter(Critter cr)
 }
 
 //
-// Turret
+// Турель
 //
 void TurretInit(Critter turret, bool firstTime)
 {
@@ -373,7 +377,7 @@ void TurretInit(Critter turret, bool firstTime)
 }
 
 //
-// Hubologist
+// Хабологист
 //
 void HubologistInit(Critter hubologist, bool firstTime)
 {

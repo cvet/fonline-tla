@@ -1,3 +1,8 @@
+// SmokeGrenade — серверная логика дымовых гранат и горчичного газа: облака, штрафы к меткости и урон.
+// Разворачивает расширяющееся кольцо дыма/газа по таймеру (SmokeBlast/DoSmokeBlast), ставит и через
+//  отложенный таймер удаляет предметы дыма, считает штраф к попаданию для стрелка/цели в облаке
+//  (GetSmokePenalty). Горчичный газ при проходе через хекс травит игроков (Poison) и ранит NPC (Combat)
+//  через подписку MustardGasWalk. Сторона исполнения — только SERVER.
 namespace SmokeGrenade
 {
 
@@ -60,6 +65,7 @@ void DoSmokeBlast(any[] values)
     int step = values[3];
     hstring pid = values[4];
     ident ownerId = values[5];
+    // Чем ниже навык метания у владельца, тем меньше шагов проживёт облако: штраф урезает радиус разлёта.
     int penaltyLowSkill = 0;
     if (ownerId != ZERO_IDENT) {
         Critter? cr = Game.GetCritter(ownerId);
@@ -76,6 +82,8 @@ void DoSmokeBlast(any[] values)
     Effects::PlaySound(map, "gas.wav", hex, 25);
     AddSmoke(map, hex, (step == 0 || (step < 2 && RandomRoll(1, 2))), pid, ownerId, smokeIds);
 
+    // Каждый шаг таймера достраивает очередное шестиугольное кольцо дыма вокруг эпицентра;
+    // ближние к внешнему краю хексы ставятся с вероятностью, чтобы облако выглядело рваным.
     for (int curStep = 1; curStep < step; curStep++) {
         hex = mpos(values[1], values[2]);
         map.MoveHexByDir(hex, 4, curStep);
@@ -106,7 +114,7 @@ void DoSmokeBlast(any[] values)
 [[TimeEvent]]
 void DeleteSmokes(any[] values)
 {
-    for (int i = 0, l = values.length(); i < l; i++) {
+    for (int i = 0; i < values.length(); i++) {
         if (values[i] == 0) {
             continue;
         }
@@ -130,6 +138,7 @@ void SmokeInit(Item item, bool firstTime)
             item.OnCritterWalk.Subscribe(MustardGasWalk);
         }
 
+        // Отключённая подписка на завершение предмета: оставлена как след прежней логики очистки дыма.
         // item.OnFinish.Subscribe(_SmokeFinish);
     }
 }

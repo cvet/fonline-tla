@@ -256,10 +256,63 @@ breadcrumbs untranslated by design. Code-equivalence re-verified (still exactly 
 code; giants comment-only) + Compile + Bake + `--ratchet` green. So **every non-generated `Scripts/*.fos`
 now has a Russian header and Russian comments.**
 
-Those translation agents surfaced **69 more (unverified) flags**. Notable candidates for a future verify+fix
-pass (NOT applied): ChosenActions `cast<AbstractItem>` on possibly-null `GetItem` (nullability); Poker
-`ModChFr / GameNum` possible divide-by-zero (GameNum inits 0); ClientMain `SexTagFemale` double-assign around
-an empty `if (cr.IsChosen) {}`; Worldmap `CheckCompareAnyVar` is a byte-for-byte duplicate of
-`CheckCompareAnyParam` (the "Var" variant likely meant to read a different source); MapperMain `ConvertMaps`
-fail-counter never incremented. Plus content-table smells in Worldmap (weight-0 encounters, duplicate
-location pids, reused special-encounter ids) — designer review. Saved to `Build`/scratch.
+Those translation agents surfaced **69 more (unverified) flags**. The five representative candidates
+originally listed here were verified in the follow-up batch below. The remaining content-table smells in
+Worldmap (weight-0 encounters, duplicate location pids, reused special-encounter ids) still need designer
+review; the full set remains in `Build`/scratch.
+
+**R2-2 follow-up verified batch (2026-07-10).** The five representative flags were independently checked
+against their consumers, engine contracts, and git history before applying anything:
+
+- **Worldmap `CheckChecks` AND-chain restored.** `CHECK_RANDOM`, `CHECK_HOUR`, `CHECK_PARAM_ANY`, and
+  `CHECK_PROPERTY_ANY` returned success from the whole function instead of continuing to later checks. Three
+  authored chains were affected: the android encounter ignored `SpecialAndroid`, the dead SF paladin ignored
+  the armour counter and player level, and the racing encounter ignored Sneak / the one-shot trap property.
+  The cases now return only on failure and otherwise continue. *[encounter/quest availability — playtest]*
+- **ClientMain chosen item views restored.** The obsolete `EngineCallback_ItemChanged(false)` had been removed
+  during the GUI migration but its empty `if (cr.IsChosen)` shell remained. It now refreshes the five chosen-side
+  item-view collections through `Gui::RefreshItemViewsByUserDataExts`; the duplicate `SexTagFemale` assignment
+  was removed.
+- **ChosenActions nullable casts made explicit.** The item lookup and the expected-to-fail `ProtoItem`→`Item`
+  downcast now use `cast<T?>`, matching the strong-nullability contract without changing runtime behavior.
+- **Vault 13 cleanup.** `V13ZGuard::DenyAccess` had an inverted guard: it did nothing for an allowed player and
+  attempted `removeAt(-1)` for a disallowed one. It now resolves the index once and removes only a present entry
+  (currently latent: the helper has no authored callers). Eight behavior-equivalent boolean-return warnings were
+  also removed across `V13ZGuard` and `V13Goris`.
+
+**Refuted/stale flags:** Poker's `ModChFr / GameNum` cannot see zero in a valid game/save flow (`InitGame`
+establishes 1 before the only caller and the 48-field blob preserves it); the duplicate Worldmap Param/Property
+helpers are intentional legacy names over the unified `CritterProperty` storage; MapperMain already increments
+the conversion failure counter.
+
+**Verification:** formatter check + nullable validator + quality `--ratchet` → Compile AngelScript → ForceBake
+(550 maps) → `TLA_Server`, `TLA_Client`, and `TLA_ServerHeadless` builds → headless smoke to
+`"Start server complete!"` with no exceptions. Engine unit tests exited 0. A focused AI-control client smoke
+registered a fresh character, entered `repl1`, and observed the chosen/map/inventory path without client or
+server exceptions. Not committed (owner reviews).
+
+**R2-2 crafting follow-up (2026-07-10).** A focused re-audit of the FixBoy triple protocol
+`(pid, count, orNext)` confirmed that `orNext = 1` joins the current entry to the next one as an alternative.
+The server had three divergent decoders for that protocol, so OR requirements were broken in different ways:
+
+- `NeedTools` checked only the first alternative. This made the later tools unusable in four live recipes:
+  leather armour (id 1), leather armour Mk II (id 2), cured leather armour (id 4), and sharpened pole (id 82).
+- The currently latent resource-OR path required every alternative during validation, used `>` instead of
+  `>=` during consumption, and never considered the terminal alternative. Validation and consumption now use
+  one group interpretation; resources consume the first sufficient alternative and tools remain reusable.
+- The FixBoy GUI dropped the final recipe because its list loop rejected an exact five-field tail record. Its
+  requirement text also read the connector flag from the wrong triple, used hard-coded Russian `и` / `или` on
+  the English client, and relabelled resources as tools after refresh. The `.fogui` source and generated
+  `GuiScreens.fos` now agree, use localized `StrAnd` / `STR_OR`, and preserve the final recipe.
+
+The live craft regression exposed an independent multithreading bug: the deferred
+`Parameters::UpdateExperienceLevel` time event did not inherit the crafting RPC's sync cover and accessed the
+critter from a worker without a lock. It is now `[[Async]]` and locks that critter before calculating level,
+skill points, health, and perk awards. The narrow critter-only lock matches the callback's actual access set.
+
+**Verification:** formatter/quality/nullability checks and Compile AngelScript passed; ForceBake rebuilt 550
+maps; `TLA_Server`, `TLA_Client`, and `TLA_ServerHeadless` built; startup reached `"Start server complete!"`.
+A fresh AI-control character on `repl1`, owning only the last tool alternative (`combat_knife`), crafted recipe
+1: exact resources went to zero, the tool remained, and one leather armour appeared. A threshold run advanced
+experience 900→1050, level 1→2, and max HP 33→38. The final server log contained no exception,
+access-without-sync, error, or assertion entries. Not committed (owner reviews).

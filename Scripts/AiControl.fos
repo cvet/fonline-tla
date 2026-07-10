@@ -1508,11 +1508,22 @@ void AiControlQaTeleportMap(Player player, hstring mapPid, mpos hex)
         Game.Log("AiControl QA teleport: lock failed for " + mapPid);
         return;
     }
-    // Перенос (TransferToMap/CritterTransferToMapEntry) читает сущность локации карты-назначения,
-    // а Sync::Lock заменяет весь набор блокировок — без явного покрытия локации перенос падает с
-    // EntitySyncException (валидация синка ужесточилась). Лочим cr + целевую карту + её локацию вместе.
-    Location targetLoc = targetMap.GetLocation();
-    if (!Sync::Lock(cr, targetMap, targetLoc)) {
+    // Перенос читает/меняет И карту-источник (текущую карту криттера, напр. repl1 сразу после
+    // регистрации), И целевую карту с их локациями. Sync::Lock заменяет весь набор блокировок: сначала
+    // лочим обе карты (cr уже залочен — можно взять его карту), чтобы прочитать их локации, затем полное
+    // покрытие cr+карты+локации — иначе EntitySyncException «Entity access without sync» внутри TransferToMap.
+    Map? srcMap = cr.GetMap();
+    if (srcMap != null && srcMap.Id != targetMap.Id) {
+        if (!Sync::Lock(array<Entity> = {cr, targetMap, srcMap})) {
+            Game.Log("AiControl QA teleport: lock failed for " + mapPid);
+            return;
+        }
+        if (!Sync::Lock(array<Entity> = {cr, targetMap, targetMap.GetLocation(), srcMap, srcMap.GetLocation()})) {
+            Game.Log("AiControl QA teleport: lock failed for " + mapPid);
+            return;
+        }
+    }
+    else if (!Sync::Lock(cr, targetMap, targetMap.GetLocation())) {
         Game.Log("AiControl QA teleport: lock failed for " + mapPid);
         return;
     }

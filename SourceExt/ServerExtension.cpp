@@ -219,9 +219,9 @@ isize32 FO_NAMESPACE Server_Game_LoadImage(ptr<ServerEngine> server, uint32_t im
     const auto height = reader.GetLEUInt16();
     [[maybe_unused]] const auto nx = reader.GetLEInt16();
     [[maybe_unused]] const auto ny = reader.GetLEInt16();
-    const auto* data = reader.GetCurBuf().get();
+    const const_span<uint8_t> data = reader.GetCurDataSpan(numeric_cast<size_t>(width) * height * 4);
 
-    reader.GoForward(numeric_cast<size_t>(width) * height * 4);
+    reader.GoForward(data.size());
 
     const auto check_number2 = reader.GetUInt8();
     FO_VERIFY_AND_THROW(check_number2 == 42, "Image trailing check number mismatch");
@@ -230,7 +230,7 @@ isize32 FO_NAMESPACE Server_Game_LoadImage(ptr<ServerEngine> server, uint32_t im
     simg->Width = width;
     simg->Height = height;
     simg->Data.resize(numeric_cast<size_t>(width) * height);
-    MemCopy(simg->Data.data(), data, simg->Data.size() * sizeof(ucolor));
+    MemCopy(simg->Data.data(), data.data(), simg->Data.size() * sizeof(ucolor));
 
     ext_data.ServerImages[imageSlot] = std::move(simg);
 

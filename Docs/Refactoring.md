@@ -174,7 +174,8 @@ live in [ScriptStyle.md](ScriptStyle.md); this section is the **plan and running
   translate/add Russian block comments → reorganize structure (radel 4) → format → naming →
   idiom/nullability cleanup → in-pass bug fixes → verify. Batches sized small (4–6 modules)
   to stay under server rate limits and keep review tractable. *(Status: pending.)*
-- **R2-3 — Tests.** Per the testing decision below. *(Status: blocked on owner decision.)*
+- **R2-3 — Tests.** Per the testing decision below. *(Status: initial harness and seven suites operational;
+  expand coverage with each gameplay batch.)*
 
 ## Testing strategy — decided (2026-06-20): B, lightweight harness
 
@@ -182,8 +183,8 @@ Owner chose tier **B**. Port a compact `Testing.fos` from lf-7 down to TLA's sys
 (RegisterTest / Expect / Pass / Fail + fixtures: isolated location, spawn NPC/player/item,
 cleanup with leak check), gated by a `Testing.Enabled` setting, plus a `Launch :: Tests`
 task. Then `Test_*` suites starting with pure helpers (Reputation, Math/Flags, GameTime,
-WeaponHelpers), growing into critical server flows. Done as phase R2-3 after the polish
-batches establish stable module shapes.
+WeaponHelpers), growing into critical server flows. The initial harness is now implemented;
+new suites remain an incremental part of each refactoring batch.
 
 For the record, the tiers considered:
 
@@ -316,3 +317,118 @@ A fresh AI-control character on `repl1`, owning only the last tool alternative (
 1: exact resources went to zero, the tool remained, and one leather armour appeared. A threshold run advanced
 experience 900→1050, level 1→2, and max HP 33→38. The final server log contained no exception,
 access-without-sync, error, or assertion entries. Not committed (owner reviews).
+
+## R2-3 harness and barter/GUI regression batch (2026-07-11)
+
+The lightweight `Testing.fos` harness is live behind `Testing.Enabled`, with the
+`Launch :: TLA_Tests [windows]` task, isolated location/NPC fixtures, cleanup, filtering,
+timeouts, and exit status. Seven suites now cover Flags, GameTime, Stdlib serialization,
+fixtures, WeaponHelpers, barter pricing/count bounds, and the NpcPlanes null-entry regression.
+The final server run completed **24 passed, 0 failed, 0 skipped**.
+
+The barter/container batch added authoritative transfer sessions, stale-RPC guards, duplicate/count/slot
+validation, bounded 64-bit cost and weight arithmetic, zero-cost sale rejection, shared client/server pricing,
+and an MCP `Dialog → Barter → Dialog` flow. A live run bought `healing_powder` for 27 caps, refreshed the
+same session, and returned to the same dialog. The GUI generator now enables draw callbacks for every authored
+`OnDraw` and for legacy sibling-cell `ItemView`s; this restored Barter panels, Inventory equipment slots,
+Credits motion, and other dynamic content.
+
+Screenshot verification now combines engine TGA integrity checks with per-screen ROI oracles. The final live
+matrix passed Options, Inventory, Character, PipBoy, FixBoy, Menu, and Credits (7/7); the barter oracle also
+requires four item panels and both totals. The quest runner completed Cassidy's monotonic 0→1→2 cycle through
+the exact `vault_city/vcity_courtyard` map target and reports how many transitions were genuinely exercised.
+Compile AngelScript, ForceBake (550 maps), native server/client builds, Python/unit/static MCP checks, and
+script quality gates were green for the batch. Not committed (owner reviews).
+
+## R2-3 contextual GUI/container mechanics batch (2026-07-12)
+
+The second R2-3 mechanics pass hardened the real server contracts behind contextual windows instead of
+treating screenshot setup as a client-only concern:
+
+- Container transfers now validate the complete session/transfer tuple, current map and range, ownership,
+  `NoLoot`/`NoSteal`, opened state, count, authoritative AP, and destination capacity. Volume/count arithmetic
+  is overflow-safe; moving a container into itself or one of its descendants is rejected. The server takes the
+  full synchronization cover before resolving the operation, closes stale sessions/snapshots, and the client
+  suppresses duplicate clicks until an authoritative refresh clears its pending marker.
+- `UseItemOn` now requires an item owned by the acting critter, accepts at most one real target, checks the
+  correct self/target capability, resolves targets only on the current map under the full lock cover, and keeps
+  the historical null-target contract for self-use. This fixes the Timer path that previously passed the chosen
+  as an explicit target and therefore failed to activate dynamite.
+- Radio editing now writes the parsed channel back on Enter, clamps it to `0..65535`, and keeps fixed-channel
+  radios read-only. Elevator validation rejects invalid types/maps/levels, fixes the level-count boundary and
+  Military 3/4/6 display mapping, and gives its buttons/indicator valid geometry. DialogBox now has a dynamic
+  layout, bounded answer count, expiry/session validation, and a three-argument answer contract; delayed answers
+  cannot act on a newer prompt.
+
+The AI-control surface grew with the same contracts. `tla_use_item` accepts only canonical, self-only
+`timer:<seconds>` values in `1..599`. `tla_ui_answer` accepts an exact `answer_N`/`level_N` or a zero-based
+index; DialogBox answers must include `expectedSession` from the same observation, so stale captures are
+rejected. `tla_qa_show_dialog_box` supplies a gated, server-backed two-answer fixture with a safe no-op choice.
+Map/inventory observation now includes real ownership, stackability, cost/weight, use/pick-up/timer capability,
+and door/container/locker state, allowing automation to reject unsafe candidates from data rather than proto-id
+guesses.
+
+`tla_show_context_screen` builds the genuine parameter contract for `SkillBox`, `Aim`, `Split`, `Timer`, and
+`Use`. `tla_context_gui_playtest.py` combines those with mechanic-owned `PickUp`, `Radio`, `Elevator`, and
+`DialogBox` for a nine-window, ROI-aware screenshot matrix. It requires owned/capable items, a safe visible
+container, an owned radio, an authored elevator trigger, and the gated DialogBox fixture; it does not preserve an
+explicit-id escape hatch around those checks. The `Aim` oracle follows the authored interface and recognizes its
+green labels (rather than the gold text used by several other windows).
+
+Live graphical verification is complete. A standalone DirectX client passed all eight Arroyo contexts available
+there (`SkillBox`, `Aim`, `Split`, `Timer`, `Use`, `PickUp`, `Radio`, and `DialogBox`) and a dedicated Mariposa
+run passed `Elevator`, for **9/9** contextual windows overall. The actual Timer command consumed one dynamite
+stack entry and created one `active_dynamite`; selecting semantic answer `level_2` in the real three-button
+Military elevator transferred the chosen from `mariposa_level1` to `mariposa_level2`. Embedded-headless captures
+were valid TGA files but contained a black framebuffer, so visual regression capture uses the standalone graphical
+client; the headless client remains suitable for non-visual protocol and gameplay checks.
+
+The same follow-up removed a systematic scenery-parameter migration hazard: authored `SceneryParams` are strings,
+so numeric fields are now parsed as signed decimal text (with explicitly allowed legacy `@` prefixes) instead of
+using string hashes, and content ids are normalized without treating a textual `0` sentinel as a proto id. The new
+content validator scanned **275 maps**, **169599 item sections**, and **141 known scenery contracts** with
+**0 errors**. It reports **3 non-failing warnings** for ambiguous legacy `Scenery::TransferToMap` records whose map
+proto is passed to an API that expects a location proto; these require content-owner decisions rather than an
+automatic rewrite.
+
+**Confirmed verification:** MCP Python discovery **89/89**, GUI-generator/formatter units **6/6**, and static
+MCP smoke **PASS**; formatter, quality-ratchet, nullable, and AngelScript compilation gates passed; ForceBake
+rebuilt **550 maps**; `TLA_Server`, `TLA_ServerHeadless`, and `TLA_Client` built; the script harness completed
+**61/61**; native `TLA_UnitTests` exited **0** in **433.7 s**. Not committed (owner reviews).
+
+## R2-3 trigger synchronization and prompt-safety follow-up (2026-07-13)
+
+A live Silo run exposed a strict-sync failure that static compilation could not see: the authored multihex trigger
+did fire, but `Silo::Transit` read `Location.SiloMissileLaunched` without holding the location. The callback is now
+async, locks the player/current map/location/target map as one cover, and revalidates the topology before transfer.
+The corrected mechanic was exercised from `q_silo2` at `39,83` through the trigger to `q_silo3` entry 1 at
+`116,77`.
+
+The same audit fixed eight other location-aware `ItemTrigger` callbacks in `GameEventReplicator`, `KlamTrappers`,
+`ModocVampire`, `NrWriKidnap`, and `SeAndroid`. Their covers now include the source and target maps, locations,
+affected NPCs, doors/containers, and inventory items as required. Script quality gained the zero-tolerance
+`item-trigger-location-sync` check plus four validator unit tests, so a callback that calls `GetLocation()` without
+both `[[Async]]` and an explicit `Sync::` cover is rejected before bake.
+
+Three NPC AI modules (`PatternMedic`, `PatternSlayer`, and `PatternTerm`) also had nullable global pattern handles
+instead of constructed instances; explicit construction removes the null dereferences seen while generating a fresh
+`silo_base`. A clean repeat location creation contained no pattern, null, sync, assertion, or error markers.
+
+DialogBox dispatch was hardened beyond the safe QA answer. NCR brahmin confirmation now locks the player, target
+brahmin, and both current maps with revalidation. Purgatory invite confirmation uses a dedicated
+`PurgatoryInviteSync` snapshot/cover for battle state, target/source maps, request critters, inventories, and the team
+container. The invite callback's `transit` flag is now a genuine `bool&` inout parameter, so `transit=false` actually
+prevents the unintended direct map transfer. Observed DialogBox buttons expose `answer_0` as
+`role=confirm, dangerous=true` and `answer_1` as the safe cancel choice.
+
+The scenery content validator now matches the runtime decoder bounds exactly (positive roles/net ids, NPC dialog
+line/radius lower bounds, wait `1..60`, radius `1..100`). Its **8/8** tests cover both valid boundaries and rejected
+runtime-invalid records; the full scan remains **275 maps / 169599 item sections / 141 contracts / 0 errors**, with
+the same three owner-decision `TransferToMap` warnings.
+
+**Final verification:** AngelScript compilation, formatter check, quality ratchet, nullable validation, ForceBake
+(**550 maps**), and `TLA_Server`/`TLA_ServerHeadless`/`TLA_Client` builds passed. The script harness completed
+**62/62**; MCP discovery completed **90/90** plus static smoke PASS; GUI/formatter/content-quality units completed
+**14/14**, and the new script-quality validator units completed **4/4**. A fresh live DialogBox cancel plus the Silo
+transition completed with no server/client exception, null, sync, assertion, or error markers. Not committed (owner
+reviews).

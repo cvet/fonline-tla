@@ -45,61 +45,120 @@ void Move(Critter npc, int p0, int p1, int p2)
 
 // Триггер входа траппера на первую карту Кламата: перебрасывает Майка/Брайана,
 // проставляет их пост-квестовые дом, диалог и инвентарь, а заодно переводит Эмму в пост-квестовое состояние.
-[[ItemTrigger]]
+[[Async]] [[ItemTrigger]]
 void Transit(Critter cr, StaticItem entry, bool entered, mdir dir)
 {
-    if (cr.NpcRole == MIKE_ROLE_ID || cr.NpcRole == BRIAN_ROLE_ID) {
-        Location? klamath = Game.GetLocation(Content::Location::klamath);
-        if (klamath == null) {
-            return;
-        }
-
-        // Переносим траппера на карту Кламата и закрепляем за ним домашнюю точку, направление и диалог.
-        Map map = klamath.GetMapByIndex(0);
-        Entrance::CritterTransferToMapEntry(cr, map.Id, Tla::EntryHash(1));
-        mpos hex;
-        Entrance::GetEntryFreeHex(map, cr.NpcRole == MIKE_ROLE_ID ? ENTRY_MOVE_EXIT_TRAP : BRIAN_ENTRY_HOME, hex);
-        cr.HomeMapId = map.Id;
-        cr.HomeHex = hex;
-        cr.HomeDir = (cr.NpcRole == MIKE_ROLE_ID ? 1 : 3);
-        cr.DialogId = (cr.NpcRole == MIKE_ROLE_ID ? Content::Dialog::klam_mike_post_quest : Content::Dialog::klam_bryan_post_quest);
-        cr.BagId = 51;
-        Entrance::GetEntryFreeHex(map, EMMA_ENTRY_START_HOME, hex);
-
-        // Среди криттеров рядом со стартовой точкой Эммы переключаем её на пост-квестовый диалог и новый дом.
-        Critter[] critters = map.GetCrittersInRadius(hex, 100, CritterFindType::Any);
-        for (int i = 0; i < critters.length(); i++) {
-            if (critters[i].DialogId == Content::Dialog::klam_emma) {
-                critters[i].DialogId = Content::Dialog::klam_emma_post_quest;
-                Entrance::GetEntryFreeHex(map, EMMA_ENTRY_END_HOME, hex);
-                critters[i].HomeMapId = map.Id;
-                critters[i].HomeHex = hex;
-                critters[i].HomeDir = 3;
-            }
-        }
+    if (!Sync::LockCritterWithMap(cr)) {
+        return;
     }
 
-    return;
+    Map? sourceMap = cr.GetMap();
+    if (sourceMap == null || (cr.NpcRole != MIKE_ROLE_ID && cr.NpcRole != BRIAN_ROLE_ID)) {
+        return;
+    }
+
+    Location? klamath = Game.GetLocation(Content::Location::klamath);
+    if (klamath == null || !Sync::Lock(array<Entity> = {cr, sourceMap, klamath})) {
+        return;
+    }
+
+    if (cr.MapId != sourceMap.Id) {
+        return;
+    }
+
+    Map map = klamath.GetMapByIndex(0);
+    Entity[] mapCover = {cr, sourceMap, klamath};
+    if (!(map is sourceMap)) {
+        mapCover.insertLast(map);
+    }
+    if (!Sync::Lock(mapCover)) {
+        return;
+    }
+
+    if (cr.MapId != sourceMap.Id || klamath.GetMapByIndex(0).Id != map.Id) {
+        return;
+    }
+
+    mpos emmaHex;
+    Entrance::GetEntryFreeHex(map, EMMA_ENTRY_START_HOME, emmaHex);
+    Critter[] critters = map.GetCrittersInRadius(emmaHex, 100, CritterFindType::Any);
+    Entity[] cover = mapCover;
+    for (int i = 0; i < critters.length(); i++) {
+        if (!(critters[i] is cr)) {
+            cover.insertLast(critters[i]);
+        }
+    }
+    if (!Sync::Lock(cover)) {
+        return;
+    }
+
+    if (cr.MapId != sourceMap.Id || klamath.GetMapByIndex(0).Id != map.Id) {
+        return;
+    }
+
+    // Переносим траппера на карту Кламата и закрепляем за ним домашнюю точку, направление и диалог.
+    Entrance::CritterTransferToMapEntry(cr, map.Id, Tla::EntryHash(1));
+    mpos hex;
+    Entrance::GetEntryFreeHex(map, cr.NpcRole == MIKE_ROLE_ID ? ENTRY_MOVE_EXIT_TRAP : BRIAN_ENTRY_HOME, hex);
+    cr.HomeMapId = map.Id;
+    cr.HomeHex = hex;
+    cr.HomeDir = (cr.NpcRole == MIKE_ROLE_ID ? 1 : 3);
+    cr.DialogId = (cr.NpcRole == MIKE_ROLE_ID ? Content::Dialog::klam_mike_post_quest : Content::Dialog::klam_bryan_post_quest);
+    cr.BagId = 51;
+
+    // Среди криттеров рядом со стартовой точкой Эммы переключаем её на пост-квестовый диалог и новый дом.
+    for (int i = 0; i < critters.length(); i++) {
+        if (critters[i].MapId == map.Id && critters[i].DialogId == Content::Dialog::klam_emma) {
+            critters[i].DialogId = Content::Dialog::klam_emma_post_quest;
+            Entrance::GetEntryFreeHex(map, EMMA_ENTRY_END_HOME, hex);
+            critters[i].HomeMapId = map.Id;
+            critters[i].HomeHex = hex;
+            critters[i].HomeDir = 3;
+        }
+    }
 }
 
 // Триггер входа на вторую карту Кламата: только Майк, закрепляет его финальную домашнюю точку.
-[[ItemTrigger]]
+[[Async]] [[ItemTrigger]]
 void TransitMike(Critter cr, StaticItem entry, bool entered, mdir dir)
 {
-    if (cr.NpcRole == MIKE_ROLE_ID) {
-        Location? klamath = Game.GetLocation(Content::Location::klamath);
-        if (klamath == null) {
-            return;
-        }
-
-        Map map = klamath.GetMapByIndex(1);
-        mpos hex;
-        Entrance::CritterTransferToMapEntry(cr, map.Id, Tla::EntryHash(2));
-        Entrance::GetEntryFreeHex(map, MIKE_ENTRY_HOME, hex);
-        cr.HomeMapId = map.Id;
-        cr.HomeHex = hex;
-        cr.HomeDir = 1;
+    if (!Sync::LockCritterWithMap(cr)) {
+        return;
     }
+
+    Map? sourceMap = cr.GetMap();
+    if (sourceMap == null || cr.NpcRole != MIKE_ROLE_ID) {
+        return;
+    }
+
+    Location? klamath = Game.GetLocation(Content::Location::klamath);
+    if (klamath == null || !Sync::Lock(array<Entity> = {cr, sourceMap, klamath})) {
+        return;
+    }
+
+    if (cr.MapId != sourceMap.Id) {
+        return;
+    }
+
+    Map map = klamath.GetMapByIndex(1);
+    Entity[] cover = {cr, sourceMap, klamath};
+    if (!(map is sourceMap)) {
+        cover.insertLast(map);
+    }
+    if (!Sync::Lock(cover)) {
+        return;
+    }
+
+    if (cr.MapId != sourceMap.Id || klamath.GetMapByIndex(1).Id != map.Id) {
+        return;
+    }
+
+    mpos hex;
+    Entrance::CritterTransferToMapEntry(cr, map.Id, Tla::EntryHash(2));
+    Entrance::GetEntryFreeHex(map, MIKE_ENTRY_HOME, hex);
+    cr.HomeMapId = map.Id;
+    cr.HomeHex = hex;
+    cr.HomeDir = 1;
 }
 
 // Результат диалога: ставит отложенное событие переселения траппера через START_MOVE_TIME.

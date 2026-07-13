@@ -772,6 +772,7 @@ namespace Registration
     {
         void OnConstruct() override
         {
+            SetHasOnDraw(true);
             SetSize(122, 13);
             SetTextFlags(FontFlag(int(FontFlag::CenterY)));
         }
@@ -1112,6 +1113,7 @@ namespace Registration
     {
         void OnConstruct() override
         {
+            SetHasOnDraw(true);
             SetPosition(22, -1);
             SetSize(200, 13);
             SetText("TXT");
@@ -1138,6 +1140,7 @@ namespace Registration
     {
         void OnConstruct() override
         {
+            SetHasOnDraw(true);
             SetPosition(225, -1);
             SetSize(40, 13);
             SetTextFlags(FontFlag(int(FontFlag::CenterY)));
@@ -1221,6 +1224,7 @@ namespace Registration
     {
         void OnConstruct() override
         {
+            SetHasOnDraw(true);
             SetPosition(342, 264);
         }
 
@@ -2823,6 +2827,7 @@ namespace Game
 
         void OnConstruct() override
         {
+            SetHasOnDraw(true);
             SetPosition(740, 64);
             SetBackgroundImage("art/intrface/combat.fofrm");
         }
@@ -2867,6 +2872,7 @@ namespace Game
     {
         void OnConstruct() override
         {
+            SetHasOnDraw(true);
             SetActive(false);
             SetPosition(10, 27);
             SetSize(38, 22);
@@ -2888,6 +2894,7 @@ namespace Game
     {
         void OnConstruct() override
         {
+            SetHasOnDraw(true);
             SetPosition(475, 40);
             SetCellPrototype("Led");
             SetGridSize(10);
@@ -2950,6 +2957,7 @@ namespace Game
     {
         void OnConstruct() override
         {
+            SetHasOnDraw(true);
             SetPosition(571, 40);
         }
 
@@ -3837,6 +3845,7 @@ namespace GlobalMap
 
         void OnConstruct() override
         {
+            SetHasOnDraw(true);
             SetPosition(-1, 2);
         }
 
@@ -4011,6 +4020,7 @@ namespace GlobalMap
     {
         void OnConstruct() override
         {
+            SetHasOnDraw(true);
         }
 
         void OnDraw() override
@@ -4067,6 +4077,7 @@ namespace GlobalMap
 
         void OnConstruct() override
         {
+            SetHasOnDraw(true);
             SetNotHittable(true);
         }
 
@@ -4332,6 +4343,7 @@ namespace GlobalMap
     {
         void OnConstruct() override
         {
+            SetHasOnDraw(true);
             SetPosition(52, 43);
             SetSize(58, 29);
             SetBackgroundImage("art/intrface/GlobalMap/WMDIAL/WMDIAL.fofrm");
@@ -4358,6 +4370,7 @@ namespace GlobalMap
 
         void OnConstruct() override
         {
+            SetHasOnDraw(true);
             SetPosition(23, 4);
             SetSize(119, 186);
             SetCropContent(true);
@@ -4572,6 +4585,7 @@ namespace GlobalMap
 
         void OnConstruct() override
         {
+            SetHasOnDraw(true);
             SetPosition(8, 227);
             SetSize(170, 220);
             SetCellPrototype("ProtoGroupGrid");
@@ -5033,8 +5047,38 @@ namespace Credits
 {
     class Credits : Gui::Screen
     {
+        nanotime CreditsTick;
+        timespan CreditsDeltaTick = Time::Milliseconds(35);
+
+        void RefreshCreditsLayout()
+        {
+            auto creditsText = GuiScreensExt::NeedText(FindText("CreditsText"));
+            creditsText.SetText(MsgStr::GetGameText(MsgStr::StrGameCredits));
+            verify(!creditsText.Text.isEmpty(), "Credits text must not be empty");
+
+            string speedText = MsgStr::GetGameText(MsgStr::StrGameCreditsSpeed);
+            int speed = 0;
+            if (speedText.tryToInt(speed) && speed > 0) {
+                CreditsDeltaTick = Time::Milliseconds(speed);
+            }
+
+            int tw = 0, th = 0, lines = 0;
+            Game.GetTextInfo(creditsText.Text,
+                             isize(Settings.View.ScreenWidth, 1000),
+                             TextFormat(FontType(int(creditsText.TextFont)), FontFlag(creditsText.TextFlags), 0),
+                             isize(tw, th),
+                             lines);
+            if (th <= 0) {
+                th = 1000;
+            }
+            creditsText.SetSize(Settings.View.ScreenWidth, th);
+            // Первая строка сразу входит в кадр; дальше весь блок прокручивается вверх.
+            creditsText.SetPosition(0, Settings.View.ScreenHeight - 60);
+        }
+
         void OnConstruct() override
         {
+            SetHasOnDraw(true);
             SetModal(true);
             SetAvailableCursors({});
             SetSize(1, 1);
@@ -5046,19 +5090,39 @@ namespace Credits
         {
             SetSize(Settings.View.ScreenWidth, Settings.View.ScreenHeight);
             Settings.Gui.HideCursor = true;
+            RefreshCreditsLayout();
+            CreditsTick = ZERO_NANOTIME;
         }
 
         void OnHide() override
         {
             Settings.Gui.HideCursor = false;
         }
+
+        void OnDraw() override
+        {
+            if (CreditsTick > Game.FrameTime) {
+                return;
+            }
+            CreditsTick = Game.FrameTime + CreditsDeltaTick;
+
+            auto creditsText = GuiScreensExt::NeedText(FindText("CreditsText"));
+            creditsText.SetPosition(creditsText.Pos.x, creditsText.Pos.y - 1);
+        }
+
+        void OnGlobalMouseDown(MouseButton button) override
+        {
+            Gui::HideScreen();
+        }
+
+        void OnGlobalInput(KeyCode key, string text) override
+        {
+            Gui::HideScreen();
+        }
     };
 
     class CreditsText : Gui::Text
     {
-        nanotime Tick;
-        timespan DeltaTick = Time::Seconds(1);
-
         void OnConstruct() override
         {
             SetText(MsgStr::GetGameText(MsgStr::StrGameCredits));
@@ -5069,35 +5133,6 @@ namespace Credits
         void OnRefreshText() override
         {
             SetText(MsgStr::GetGameText(MsgStr::StrGameCredits));
-        }
-
-        void OnInit() override
-        {
-            string text = MsgStr::GetGameText(MsgStr::StrGameCreditsSpeed);
-            int result = 0;
-            if (text.tryToInt(result)) {
-                DeltaTick = Time::Seconds(result);
-            }
-
-            int tw = 0, th = 0, lines = 0;
-            Game.GetTextInfo(Text, isize(Size.width, 1000), TextFormat(FontType(int(TextFont)), FontFlag(TextFlags), 0), isize(tw, th), lines);
-            SetSize(Size.width, th);
-        }
-
-        void OnShow(dict<string, any> params) override
-        {
-            SetSize(Settings.View.ScreenWidth, Size.height);
-            SetPosition(Pos.x, Settings.View.ScreenHeight);
-        }
-
-        void OnDraw() override
-        {
-            if (Tick > Game.FrameTime) {
-                return;
-            }
-            Tick = Game.FrameTime + DeltaTick;
-
-            SetPosition(Pos.x, Pos.y - 1);
         }
     };
 
@@ -6909,6 +6944,7 @@ namespace Inventory
     {
         void OnConstruct() override
         {
+            SetHasOnDraw(true);
             SetPosition(155, 287);
             SetCellPrototype(".SlotItem");
             SetGridSize(1);
@@ -6931,6 +6967,7 @@ namespace Inventory
     {
         void OnConstruct() override
         {
+            SetHasOnDraw(true);
             SetPosition(246, 287);
             SetCellPrototype(".SlotItem");
             SetGridSize(1);
@@ -6953,6 +6990,7 @@ namespace Inventory
     {
         void OnConstruct() override
         {
+            SetHasOnDraw(true);
             SetPosition(155, 184);
             SetCellPrototype(".SlotItem");
             SetGridSize(1);
@@ -7020,6 +7058,7 @@ namespace Inventory
     {
         void OnConstruct() override
         {
+            SetHasOnDraw(true);
             SetPosition(299, 48);
             SetSize(145, 182);
         }
@@ -7155,6 +7194,10 @@ namespace PickUp
 {
     class PickUp : Gui::Screen
     {
+        int ExpectedTransferType;
+        ident ExpectedContainerId;
+        uint ExpectedTransferSession;
+
         void OnConstruct() override
         {
             SetModal(true);
@@ -7169,9 +7212,17 @@ namespace PickUp
             if (!HasChosen) {
                 return;
             }
+            ExpectedTransferType = params["TransferType"];
+            ExpectedContainerId = params["TransferContainerId"];
+            ExpectedTransferSession = params["TransferSession"];
             TransferTypes transfer = Chosen.TransferType;
-            if (transfer == TransferTypes::CritSteal) {
-                GuiScreensExt::NeedButton(FindButton("TakeAllButton")).SetActive(false);
+            GuiScreensExt::NeedButton(FindButton("TakeAllButton")).SetActive(transfer != TransferTypes::CritSteal);
+        }
+
+        void OnHide() override
+        {
+            if (HasCurPlayer) {
+                CurPlayer.ServerCall.CloseTransfer(ExpectedTransferType, ExpectedContainerId, ExpectedTransferSession);
             }
         }
     };
@@ -7238,9 +7289,10 @@ namespace PickUp
         {
             any[] actions = {};
             ChosenActions::GetChosenActions(actions);
-            int[] useItemAction = {Tla::ChosenTakeAll, 0, 0, 0, 0, 0, 0};
+            PickUp pickUp = cast<PickUp>(GuiScreensExt::NeedScreen(Screen));
+            any[] useItemAction = {Tla::ChosenTakeAll, 0, 0, 0, pickUp.ExpectedTransferType, pickUp.ExpectedContainerId, pickUp.ExpectedTransferSession};
             for (int i = 0; i < useItemAction.length(); i++) {
-                actions.insertLast(any(useItemAction[i]));
+                actions.insertLast(useItemAction[i]);
             }
             ChosenActions::SetChosenActions(actions);
         }
@@ -7508,6 +7560,7 @@ namespace Character
     {
         void OnConstruct() override
         {
+            SetHasOnDraw(true);
             SetSize(122, 13);
             SetTextFlags(FontFlag(int(FontFlag::CenterY)));
         }
@@ -7641,6 +7694,7 @@ namespace Character
     {
         void OnConstruct() override
         {
+            SetHasOnDraw(true);
             SetPosition(22, -1);
             SetSize(200, 13);
             SetText("TXT");
@@ -7675,6 +7729,7 @@ namespace Character
     {
         void OnConstruct() override
         {
+            SetHasOnDraw(true);
             SetPosition(225, -1);
             SetSize(40, 13);
             SetTextFlags(FontFlag(int(FontFlag::CenterY)));
@@ -7722,6 +7777,7 @@ namespace Character
     {
         void OnConstruct() override
         {
+            SetHasOnDraw(true);
             SetPosition(245, -10);
             SetSize(43, 29);
             SetBackgroundImage("art/intrface/slider.png");
@@ -7874,6 +7930,7 @@ namespace Character
     {
         void OnConstruct() override
         {
+            SetHasOnDraw(true);
             SetPosition(342, 264);
         }
 
@@ -8216,6 +8273,7 @@ namespace Character
 
         void OnConstruct() override
         {
+            SetHasOnDraw(true);
             SetPosition(12, 328);
         }
 
@@ -9231,6 +9289,7 @@ namespace Dialog
     {
         void OnConstruct() override
         {
+            SetHasOnDraw(true);
             SetPosition(492, 59);
             SetSize(30, 10);
             SetTextFlags(FontFlag(int(FontFlag::CenterX) | int(FontFlag::CenterY)));
@@ -9303,6 +9362,7 @@ namespace Dialog
     {
         void OnConstruct() override
         {
+            SetHasOnDraw(true);
             SetSize(390, 10);
             SetTextFlags(FontFlag(int(FontFlag::CenterY)));
         }
@@ -9553,19 +9613,12 @@ namespace Barter
     class Barter : Gui::Screen
     {
         ident CritterId;
+        uint TransferSession;
+        bool ResumeDialogRequested;
 
         string GetItemsInfoStr(int collection)
         {
-            int weight = 0;
-            int volume = 0;
-            int cost = 0;
-
-            Item[] items = ClientItems::RefreshItemsCollection(collection);
-            for (int i = 0; i < items.length(); i++) {
-                cost += items[i].Cost * items[i].Count;
-            }
-
-            return "$" + cost;
+            return "$" + ClientItems::GetBarterCollectionCost(collection);
         }
 
         void SetDialogText(string msg)
@@ -9587,11 +9640,19 @@ namespace Barter
         void OnShow(dict<string, any> params) override
         {
             CritterId = params["CritterId"];
+            TransferSession = params["TransferSession"];
+            ResumeDialogRequested = false;
         }
 
         void OnHide() override
         {
             ClientItems::RefreshItemsCollection(ClientDefines::ITEMS_INVENTORY);
+            if (ResumeDialogRequested) {
+                ResumeDialogRequested = false;
+            }
+            else if (HasCurPlayer) {
+                CurPlayer.ServerCall.CloseTransfer(int(TransferTypes::CritBarter), CritterId, TransferSession);
+            }
         }
     };
 
@@ -9612,6 +9673,7 @@ namespace Barter
     {
         void OnConstruct() override
         {
+            SetHasOnDraw(true);
             SetSize(365, 95);
         }
 
@@ -9677,6 +9739,7 @@ namespace Barter
     {
         void OnConstruct() override
         {
+            SetHasOnDraw(true);
             SetPosition(105, 31);
             SetSize(70, 145);
             SetCropContent(true);
@@ -9737,6 +9800,7 @@ namespace Barter
     {
         void OnConstruct() override
         {
+            SetHasOnDraw(true);
             SetPosition(241, 10);
             SetSize(70, 160);
             SetCropContent(true);
@@ -9846,6 +9910,7 @@ namespace Barter
     {
         void OnConstruct() override
         {
+            SetHasOnDraw(true);
             SetPosition(241, 170);
             SetSize(70, 10);
             SetTextFlags(FontFlag(int(FontFlag::CenterX) | int(FontFlag::CenterY)));
@@ -9891,6 +9956,7 @@ namespace Barter
     {
         void OnConstruct() override
         {
+            SetHasOnDraw(true);
             SetPosition(144, 31);
             SetSize(70, 145);
             SetCropContent(true);
@@ -9951,6 +10017,7 @@ namespace Barter
     {
         void OnConstruct() override
         {
+            SetHasOnDraw(true);
             SetPosition(9, 10);
             SetSize(70, 160);
             SetCropContent(true);
@@ -10060,6 +10127,7 @@ namespace Barter
     {
         void OnConstruct() override
         {
+            SetHasOnDraw(true);
             SetPosition(9, 170);
             SetSize(70, 10);
             SetTextFlags(FontFlag(int(FontFlag::CenterX) | int(FontFlag::CenterY)));
@@ -10083,7 +10151,8 @@ namespace Barter
 
         void OnLMouseClick() override
         {
-            ClientItems::BarterOffer();
+            Barter barter = cast<Barter>(GuiScreensExt::NeedScreen(Screen));
+            ClientItems::BarterOffer(barter.TransferSession);
         }
     };
 
@@ -10115,9 +10184,9 @@ namespace Barter
 
         void OnLMouseClick() override
         {
-            //Barter@ barter = cast< Barter >( Screen );
-            //Game.CustomCall( "DialogAnswer true " + barter.CritterId + " " + 0xF1 );
-            CurPlayer.ServerCall.SpeechAnswer(0xF2);
+            Barter barter = cast<Barter>(GuiScreensExt::NeedScreen(Screen));
+            barter.ResumeDialogRequested = true;
+            CurPlayer.ServerCall.ResumeDialogFromBarter(barter.CritterId, barter.TransferSession);
             Gui::HideScreen();
         }
     };
@@ -10424,6 +10493,7 @@ namespace PipBoy
     {
         void OnConstruct() override
         {
+            SetHasOnDraw(true);
             SetPosition(250, 36);
             SetSize(360, 420);
         }
@@ -11057,6 +11127,7 @@ namespace PipBoy
 
         void OnConstruct() override
         {
+            SetHasOnDraw(true);
             SetActive(false);
             SetSize(360, 420);
         }
@@ -12192,6 +12263,7 @@ namespace FixBoy
     {
         void OnConstruct() override
         {
+            SetHasOnDraw(true);
             SetPosition(546, 169);
             SetSize(62, 47);
             SetPressedImage("art/intrface/fixboy_fix.png");
@@ -12912,6 +12984,9 @@ namespace Aim
         void OnHitLocationSelect(int loc)
         {
             Gui::HideScreen();
+            if (!HasChosen) {
+                return;
+            }
             ident targetCritterId = cast<Aim>(GuiScreensExt::NeedScreen(Screen)).TargetCritterId;
             Item? item = Chosen.GetItem(ItemProperty::CritterSlot, CritterItemSlot::Main);
             int use = (item == null ? Chosen.HandsItemMode : item.Mode) & 0xF;
@@ -12940,6 +13015,7 @@ namespace Aim
     {
         void OnConstruct() override
         {
+            SetHasOnDraw(true);
             SetPosition(170, 31);
             SetSize(170, 225);
             SetBackgroundImage("art/intrface/AimMan.png");
@@ -12953,7 +13029,6 @@ namespace Aim
                 return;
             }
             string name = CritterAnims::GetCritterAlias(cr.ModelName).str.replace("aa.frm", "na.frm");
-            Game.Log("name picture " + name);
             SetBackgroundImage(name);
         }
     };
@@ -12977,6 +13052,7 @@ namespace Aim
     {
         void OnConstruct() override
         {
+            SetHasOnDraw(true);
             SetPosition(40, -3);
             SetSize(80, 15);
             SetTextFlags(FontFlag(int(FontFlag::CenterY)));
@@ -13020,6 +13096,7 @@ namespace Aim
     {
         void OnConstruct() override
         {
+            SetHasOnDraw(true);
             SetPosition(40, -4);
             SetSize(80, 15);
             SetTextFlags(FontFlag(int(FontFlag::CenterY)));
@@ -13030,7 +13107,6 @@ namespace Aim
             Critter? cr = Game.GetCritter(cast<Aim>(GuiScreensExt::NeedScreen(Screen)).TargetCritterId);
             if (cr != null) {
                 Text = Game.GetText(TextPackKey(TextPackName::Combat, "" + (1000 + cr.CrTypeAlias * 10 + HitLocations::LocationEyes - 1)));
-                Game.Log("CrTypeAlias " + (1000 + cr.CrTypeAlias * 10 + HitLocations::LocationEyes - 1));
             }
         }
 
@@ -13064,6 +13140,7 @@ namespace Aim
     {
         void OnConstruct() override
         {
+            SetHasOnDraw(true);
             SetPosition(40, -4);
             SetSize(80, 15);
             SetTextFlags(FontFlag(int(FontFlag::CenterY)));
@@ -13107,6 +13184,7 @@ namespace Aim
     {
         void OnConstruct() override
         {
+            SetHasOnDraw(true);
             SetPosition(40, -5);
             SetSize(80, 15);
             SetTextFlags(FontFlag(int(FontFlag::CenterY)));
@@ -13150,6 +13228,7 @@ namespace Aim
     {
         void OnConstruct() override
         {
+            SetHasOnDraw(true);
             SetPosition(-100, -3);
             SetSize(80, 15);
             SetTextFlags(FontFlag(int(FontFlag::CenterY) | int(FontFlag::AlignRight)));
@@ -13193,6 +13272,7 @@ namespace Aim
     {
         void OnConstruct() override
         {
+            SetHasOnDraw(true);
             SetPosition(-100, -4);
             SetSize(80, 15);
             SetTextFlags(FontFlag(int(FontFlag::CenterY) | int(FontFlag::AlignRight)));
@@ -13236,6 +13316,7 @@ namespace Aim
     {
         void OnConstruct() override
         {
+            SetHasOnDraw(true);
             SetPosition(-100, -5);
             SetSize(80, 15);
             SetTextFlags(FontFlag(int(FontFlag::CenterY) | int(FontFlag::AlignRight)));
@@ -13279,6 +13360,7 @@ namespace Aim
     {
         void OnConstruct() override
         {
+            SetHasOnDraw(true);
             SetPosition(-100, -5);
             SetSize(80, 15);
             SetTextFlags(FontFlag(int(FontFlag::AlignRight) | int(FontFlag::AlignBottom)));
@@ -13482,6 +13564,9 @@ namespace Split
         ident TargetItemId;
         int SplitCount;
         int ItemsCollection;
+        int ExpectedTransferType;
+        ident ExpectedContainerId;
+        uint ExpectedTransferSession;
 
         Item? GetTargetItem()
         {
@@ -13508,6 +13593,9 @@ namespace Split
             SplitCount = 1;
             TargetItemId = params["TargetItemId"];
             ItemsCollection = params["ItemsCollection"];
+            ExpectedTransferType = params["TransferType"];
+            ExpectedContainerId = params["TransferContainerId"];
+            ExpectedTransferSession = params["TransferSession"];
         }
 
         void OnGlobalInput(KeyCode key, string text) override
@@ -13520,7 +13608,7 @@ namespace Split
                 if (count > 99999) {
                     count = count % 100000;
                 }
-                SplitCount = count;
+                SplitCount = count > 0 ? count : 1;
             }
         }
     };
@@ -13611,7 +13699,7 @@ namespace Split
         void OnLMousePressed() override
         {
             Split split = cast<Split>(GuiScreensExt::NeedScreen(Screen));
-            if (split.SplitCount < 999999) {
+            if (split.SplitCount < 99999) {
                 split.SplitCount++;
             }
         }
@@ -13649,7 +13737,7 @@ namespace Split
             Split split = cast<Split>(GuiScreensExt::NeedScreen(Screen));
             Item? item = split.GetTargetItem();
             if (item != null) {
-                split.SplitCount = item.Count;
+                split.SplitCount = ClientItems::NormalizeSplitCount(item.Count, item.Count);
             }
         }
     };
@@ -13687,20 +13775,25 @@ namespace Split
             Item? item = split.GetTargetItem();
 
             if (item != null) {
-                if (split.SplitCount > item.Count) {
-                    split.SplitCount = item.Count;
-                    return;
-                }
+                split.SplitCount = ClientItems::NormalizeSplitCount(split.SplitCount, item.Count);
 
                 if (split.ItemsCollection == ClientDefines::ITEMS_CHOSEN_ALL) {
                     ChosenActions::SetChosenActions({Tla::ChosenMoveItem, item.Id, split.SplitCount, CritterItemSlot::Outside, 0, 0, 0});
                 }
                 else if (split.ItemsCollection == ClientDefines::ITEMS_PICKUP || split.ItemsCollection == ClientDefines::ITEMS_PICKUP_FROM) {
-                    ChosenActions::SetChosenActions({Tla::ChosenMoveItemCont, item.Id, split.ItemsCollection, split.SplitCount, 0, 0, 0});
+                    ChosenActions::SetChosenActions({Tla::ChosenMoveItemCont,
+                                                     item.Id,
+                                                     split.ItemsCollection,
+                                                     split.SplitCount,
+                                                     split.ExpectedTransferType,
+                                                     split.ExpectedContainerId,
+                                                     split.ExpectedTransferSession});
                 }
                 else if (split.ItemsCollection == ClientDefines::ITEMS_BARTER || split.ItemsCollection == ClientDefines::ITEMS_BARTER_OFFER ||
                          split.ItemsCollection == ClientDefines::ITEMS_BARTER_OPPONENT || split.ItemsCollection == ClientDefines::ITEMS_BARTER_OPPONENT_OFFER) {
-                    ClientItems::BarterTransfer(split.TargetItemId, split.ItemsCollection, split.SplitCount);
+                    if (split.ExpectedTransferSession == ClientItems::ActiveBarterSession) {
+                        ClientItems::BarterTransfer(split.TargetItemId, split.ItemsCollection, split.SplitCount);
+                    }
                     //Game.CustomCall( "BarterMoveItem " + split.TargetItemId + " " + split.ItemsCollection + " " + split.SplitCount );
                 }
             }
@@ -14051,7 +14144,7 @@ namespace DialogBox
 {
     class DialogBox : Gui::Screen
     {
-        int BaseHeight;
+        uint Session;
         DialogBoxType DialogType;
         int Answers;
         string Lexems;
@@ -14060,22 +14153,21 @@ namespace DialogBox
         {
             SetModal(true);
             SetCanMove(true, false);
-            SetSize(302, 990);
+            SetSize(302, 99);
             SetBackgroundImage("art/intrface/dialogbox_top.png");
-        }
-
-        void OnInit() override
-        {
-            BaseHeight = Size.height;
         }
 
         void OnShow(dict<string, any> params) override
         {
-            int heightButtons = GuiScreensExt::NeedObject(Find("ButtonSlot")).Size.height;
+            Session = params["DialogBoxSession"];
             DialogType = DialogBoxType(int(params["DialogBoxType"]));
             Lexems = params["Lexems"];
             Answers = params["Answers"];
-            int height = BaseHeight + Answers * heightButtons;
+
+            Gui::Object buttons = GuiScreensExt::NeedObject(Find("Buttons"));
+            Gui::Object buttonSlot = GuiScreensExt::NeedObject(Find("ButtonSlot"));
+            Gui::Object bottom = GuiScreensExt::NeedObject(buttonSlot.Find("Bottom"));
+            int height = buttons.Pos.y + (Answers - 1) * buttonSlot.Size.height + bottom.Pos.y + bottom.Size.height;
             SetSize(Size.width, height);
         }
     };
@@ -14164,9 +14256,8 @@ namespace DialogBox
 
         void OnLMouseClick() override
         {
-            Dialogbox::AnswerDialog(
-                cast<DialogBox>(GuiScreensExt::NeedObject(GuiScreensExt::NeedObject(GuiScreensExt::NeedObject(Parent).Parent).Parent)).DialogType,
-                CellIndex);
+            DialogBox dialogBox = cast<DialogBox>(GuiScreensExt::NeedObject(GuiScreensExt::NeedObject(GuiScreensExt::NeedObject(Parent).Parent).Parent));
+            Dialogbox::AnswerDialog(dialogBox.Session, dialogBox.DialogType, CellIndex);
             Gui::HideScreen();
         }
     };
@@ -14267,6 +14358,7 @@ namespace Elevator
     {
         int Type;
         any[] Data = {};
+        bool Valid;
 
         void OnConstruct() override
         {
@@ -14277,15 +14369,27 @@ namespace Elevator
         void OnShow(dict<string, any> params) override
         {
             // Data[ 3 ]  -  main pic
+            Valid = false;
+            Data.clear();
             if (params.length() == 0) {
+                Gui::HideScreen();
                 return;
             }
             Type = params["ElevatorType"];
             if (!Elevator::GetElevator(Type, Data)) {
+                Gui::HideScreen();
                 return;
             }
 
+            SetSize(int(Data[4]), int(Data[5]));
             SetBackgroundImage(hstring(Data[3]));
+            if (BackgroundImage == null) {
+                Data.clear();
+                Gui::HideScreen();
+                return;
+            }
+
+            Valid = true;
         }
     };
 
@@ -14300,8 +14404,53 @@ namespace Elevator
             // Data[ 6 ]  -  additional pic offset
             // Data[ 7 - 8 ]  -  additional pic point
             Elevator elevator = cast<Elevator>(GuiScreensExt::NeedScreen(Screen));
-            SetBackgroundImage(hstring(elevator.Data[6]));
+            if (!elevator.Valid) {
+                SetActive(false);
+                return;
+            }
+
+            hstring imageName = hstring(elevator.Data[6]);
+            if (imageName == EMPTY_HSTRING) {
+                SetActive(false);
+                SetBackgroundImage(EMPTY_HSTRING);
+                return;
+            }
+
+            SetActive(true);
+            SetBackgroundImage(imageName);
+            if (BackgroundImage == null) {
+                SetActive(false);
+                return;
+            }
             SetPosition(int(elevator.Data[7]), int(elevator.Data[8]));
+        }
+    };
+
+    class IndicatorPanel : Gui::Panel
+    {
+        void OnConstruct() override
+        {
+            SetNotHittable(true);
+        }
+
+        void OnShow(dict<string, any> params) override
+        {
+            // Data[0] — физический этаж, Data[9] — анимация индикатора, Data[10 - 11] — её позиция.
+            Elevator elevator = cast<Elevator>(GuiScreensExt::NeedScreen(Screen));
+            if (!elevator.Valid) {
+                SetActive(false);
+                return;
+            }
+
+            SetActive(true);
+            SetBackgroundImage(hstring(elevator.Data[9]));
+            if (BackgroundImage == null) {
+                SetActive(false);
+                return;
+            }
+
+            SetPosition(int(elevator.Data[10]), int(elevator.Data[11]));
+            GuiScreensExt::NeedSprite(BackgroundImage).SetFrame(Elevator::GetElevatorIndicatorFrameTime(int(elevator.Data[0])));
         }
     };
 
@@ -14317,16 +14466,23 @@ namespace Elevator
             // Data[ 12 ]  -  button down pic offset ( 1 )
             // 14+ -  rect for every button  ( 4 )
             Elevator elevator = cast<Elevator>(GuiScreensExt::NeedScreen(Screen));
-            int count = int(elevator.Data[13]);
             _Children.clear();
+            if (!elevator.Valid) {
+                return;
+            }
+
+            int count = int(elevator.Data[13]);
             for (int i = 0; i < count; i++) {
                 ElevatorButton button = CreateElevatorButtonHierarchy(this);
                 button.Index = i;
-                button.SetPressedImage(hstring(elevator.Data[12]));
                 int index = 14 + i * 4;
-                int posX = elevator.Data[index];
-                int posY = elevator.Data[index + 1];
-                button.SetPosition(posX, posY);
+                int left = int(elevator.Data[index]);
+                int top = int(elevator.Data[index + 1]);
+                int right = int(elevator.Data[index + 2]);
+                int bottom = int(elevator.Data[index + 3]);
+                button.SetPosition(left, top);
+                button.SetSize(Elevator::GetElevatorRectExtent(left, right), Elevator::GetElevatorRectExtent(top, bottom));
+                button.SetPressedImage(hstring(elevator.Data[12]));
                 button.SetActive(true);
             }
         }
@@ -14345,6 +14501,11 @@ namespace Elevator
         {
             // Data[ 1 ]  -  start level
             Elevator elevator = cast<Elevator>(GuiScreensExt::NeedScreen(Screen));
+            if (!elevator.Valid || Index < 0 || Index >= int(elevator.Data[13]) || !HasCurPlayer) {
+                Gui::HideScreen();
+                return;
+            }
+
             CurPlayer.ServerCall.Rpc_SelectLevel(int(elevator.Data[1]) + Index, 0, 0);
             Gui::HideScreen();
         }
@@ -14354,6 +14515,7 @@ namespace Elevator
     {
         Elevator obj = Elevator();
         CreateAdditionalPanelHierarchy(obj);
+        CreateIndicatorPanelHierarchy(obj);
         CreateButtonsPanelHierarchy(obj);
         obj.Init(parent);
         return obj;
@@ -14362,6 +14524,13 @@ namespace Elevator
     AdditionalPanel CreateAdditionalPanelHierarchy(Gui::Object parent)
     {
         AdditionalPanel obj = AdditionalPanel();
+        obj.Init(parent);
+        return obj;
+    }
+
+    IndicatorPanel CreateIndicatorPanelHierarchy(Gui::Object parent)
+    {
+        IndicatorPanel obj = IndicatorPanel();
         obj.Init(parent);
         return obj;
     }
@@ -14998,7 +15167,7 @@ namespace SkillBox
             if (params.length() == 3) {
                 TargetCritterId = params["TargetCritterId"];
                 TargetItemId = params["TargetItemId"];
-                IsInventory = params["IsInventory"] == "true";
+                IsInventory = int(params["IsInventory"]) != 0;
             }
         }
     };
@@ -15511,6 +15680,7 @@ namespace Perk
     {
         void OnConstruct() override
         {
+            SetHasOnDraw(true);
             SetPosition(148, 50);
         }
 
@@ -15940,6 +16110,7 @@ namespace Cursor
 
         void OnConstruct() override
         {
+            SetHasOnDraw(true);
         }
 
         void OnInit() override
@@ -16440,25 +16611,16 @@ namespace Radio
             if (item == null) {
                 return;
             }
-            string t = Text;
 
             if (!item.Radio.FixedChannel) {
-                if (!t.isEmpty() && t[-1] == "\n") {
-                    t[-1] = "";
-                }
-
-                int channel = t.toInt(0);
-                channel = Math::Clamp(channel, 0, 0xFFFF);
-                t = "" + channel;
-
-                RadioChannel = channel;
+                SetChannel(Radio::ParseChannel(Text));
 
                 if (key == KeyCode::Return || key == KeyCode::Numpadenter) {
                     Radio::ChangeRadioChannel(item.Id, RadioChannel);
                 }
             }
             else {
-                t = "" + RadioChannel;
+                SetChannel(int(item.Radio.Channel));
                 Messaging::Info(TextPackKey(TextPackName::Game, "" + (MsgStr::Get("RadioCantShiftChannel"))));
             }
         }
@@ -16762,6 +16924,7 @@ namespace ItemsContainer
     {
         void OnConstruct() override
         {
+            SetHasOnDraw(true);
             SetPosition(76, 6);
             SetSize(22, 23);
             SetBackgroundImage("art/intrface/inv_scr_up_normal.png");
@@ -16786,6 +16949,7 @@ namespace ItemsContainer
     {
         void OnConstruct() override
         {
+            SetHasOnDraw(true);
             SetPosition(76, 29);
             SetSize(22, 23);
             SetBackgroundImage("art/intrface/inv_scr_dn_normal.png");
@@ -16881,6 +17045,7 @@ namespace Preview
 
         void OnConstruct() override
         {
+            SetHasOnDraw(true);
             SetSize(100, 100);
             SetCropContent(true);
         }

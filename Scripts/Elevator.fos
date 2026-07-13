@@ -9,6 +9,118 @@ namespace Elevator
 ///@ Property Map Server ident=>any[] ElevatorData Mutable Persistent
 
 const int RESET_DATA_AFTER = 60 * 60;
+const int ELEVATOR_DATA_HEADER_SIZE = 14;
+const int ELEVATOR_BUTTON_RECT_SIZE = 4;
+const int ELEVATOR_INDICATOR_LAST_FRAME = 12;
+
+bool IsElevatorTypeValid(int elevatorType)
+{
+    return elevatorType >= 0 && elevatorType <= 8;
+}
+
+int GetElevatorFirstLevel(int elevatorType)
+{
+    switch (elevatorType) {
+    case 0:
+    case 2:
+    case 4:
+    case 8:
+        return 1;
+    case 1:
+        return 0;
+    case 3:
+    case 5:
+    case 6:
+        return 3;
+    case 7:
+        return 4;
+    default:
+        return -1;
+    }
+}
+
+int GetElevatorExpectedLevelCount(int elevatorType)
+{
+    switch (elevatorType) {
+    case 0:
+        return 4;
+    case 1:
+    case 3:
+    case 5:
+        return 2;
+    case 2:
+    case 4:
+    case 6:
+    case 7:
+    case 8:
+        return 3;
+    default:
+        return 0;
+    }
+}
+
+bool IsElevatorMapCountValid(int elevatorType, int mapCount)
+{
+    return IsElevatorTypeValid(elevatorType) && mapCount == GetElevatorExpectedLevelCount(elevatorType);
+}
+
+// Military 346 использует третий порядковый индекс для физического шестого этажа.
+int GetElevatorDisplayLevel(int elevatorType, int mapIndex)
+{
+    int count = GetElevatorExpectedLevelCount(elevatorType);
+    int firstLevel = GetElevatorFirstLevel(elevatorType);
+    if (mapIndex < 0 || mapIndex >= count || firstLevel < 0) {
+        return -1;
+    }
+
+    if (elevatorType == 6 && mapIndex == 2) {
+        return 6;
+    }
+
+    return firstLevel + mapIndex;
+}
+
+bool IsElevatorDisplayLevelValid(int elevatorType, int displayLevel)
+{
+    int count = GetElevatorExpectedLevelCount(elevatorType);
+    for (int i = 0; i < count; i++) {
+        if (GetElevatorDisplayLevel(elevatorType, i) == displayLevel) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+bool IsElevatorLevelValid(int firstLevel, int mapCount, int level)
+{
+    return mapCount > 0 && level >= firstLevel && level < firstLevel + mapCount;
+}
+
+int GetElevatorMapParamIndex(int firstLevel, int level)
+{
+    return level - firstLevel + 2;
+}
+
+int GetElevatorRectExtent(int first, int last)
+{
+    return last >= first ? last - first + 1 : 0;
+}
+
+bool IsElevatorButtonRectValid(int left, int top, int right, int bottom)
+{
+    return left >= 0 && top >= 0 && GetElevatorRectExtent(left, right) > 0 && GetElevatorRectExtent(top, bottom) > 0;
+}
+
+int ClampElevatorIndicatorFrame(int displayLevel)
+{
+    return Math::Clamp(displayLevel, 0, ELEVATOR_INDICATOR_LAST_FRAME);
+}
+
+float GetElevatorIndicatorFrameTime(int displayLevel)
+{
+    return float(ClampElevatorIndicatorFrame(displayLevel)) / float(ELEVATOR_INDICATOR_LAST_FRAME);
+}
 
 #if SERVER
 
@@ -21,11 +133,12 @@ void Elevator4(Critter player, StaticItem trigger, bool entered, mdir dir)
     }
 
     auto params = trigger.SceneryParams;
-    hstring entryExit = params[0];
-    hstring map1Pid = params[1];
-    hstring map2Pid = params[2];
-    hstring map3Pid = params[3];
-    hstring map4Pid = params[4];
+    int entryExit = -1;
+    bool entryValid = Tla::TryParseSceneryInt(params[0], entryExit);
+    hstring map1Pid = Tla::NormalizeSceneryContentId(params[1], "Content::Map::");
+    hstring map2Pid = Tla::NormalizeSceneryContentId(params[2], "Content::Map::");
+    hstring map3Pid = Tla::NormalizeSceneryContentId(params[3], "Content::Map::");
+    hstring map4Pid = Tla::NormalizeSceneryContentId(params[4], "Content::Map::");
 
     if (Time::IsTimeoutActive(player.TimeoutTransfer)) {
         Messaging::Info(player, TextPackKey(TextPackName::Game, "" + (MsgStr::StrTimeoutTransferWait)));
@@ -35,7 +148,10 @@ void Elevator4(Critter player, StaticItem trigger, bool entered, mdir dir)
     }
     else {
         hstring[] pids = {map1Pid, map2Pid, map3Pid, map4Pid};
-        ShowElevator(player, 0, pids, entryExit.uhash);
+        if (!entryValid || entryExit < 0) {
+            throw("Invalid elevator entry", player, params[0]);
+        }
+        ShowElevator(player, 0, pids, entryExit);
     }
 }
 
@@ -48,11 +164,13 @@ void Elevator(Critter player, StaticItem trigger, bool entered, mdir dir)
     }
 
     auto params = trigger.SceneryParams;
-    int entryExit = params[0].hash;
-    int elevatorType = params[1].hash;
-    hstring map1Pid = params[2];
-    hstring map2Pid = params[3];
-    hstring map3Pid = params[4];
+    int entryExit = -1;
+    int elevatorType = -1;
+    bool entryValid = Tla::TryParseSceneryInt(params[0], entryExit);
+    bool typeValid = Tla::TryParseSceneryInt(params[1], elevatorType);
+    hstring map1Pid = Tla::NormalizeSceneryContentId(params[2], "Content::Map::");
+    hstring map2Pid = Tla::NormalizeSceneryContentId(params[3], "Content::Map::");
+    hstring map3Pid = Tla::NormalizeSceneryContentId(params[4], "Content::Map::");
 
     if (Time::IsTimeoutActive(player.TimeoutTransfer)) {
         Messaging::Info(player, TextPackKey(TextPackName::Game, "" + (MsgStr::StrTimeoutTransferWait)));
@@ -61,6 +179,9 @@ void Elevator(Critter player, StaticItem trigger, bool entered, mdir dir)
         Messaging::Info(player, TextPackKey(TextPackName::Game, "" + (MsgStr::StrTimeoutBattleWait)));
     }
     else {
+        if (!entryValid || !typeValid || entryExit < 0 || !IsElevatorTypeValid(elevatorType)) {
+            throw("Invalid elevator trigger parameters", player, params[0], params[1]);
+        }
         hstring[] pids = {map1Pid};
         if (map2Pid != EMPTY_HSTRING) {
             pids.insertLast(map2Pid);
@@ -85,34 +206,21 @@ void ShowElevator(Critter player, int elevatorType, hstring[] mapPids, int entry
         return;
     }
 
-    hstring mPid = playerMap.ProtoId;
-    int curLevel = 0; // Этаж, на котором находится игрок
-    switch (elevatorType) {
-    case 0:
-    case 2:
-    case 4:
-    case 8:
-        curLevel = 1;
-        break;
-    case 1:
-        curLevel = 0;
-        break;
-    case 3:
-    case 5:
-    case 6:
-        curLevel = 3;
-        break;
-    case 7:
-        curLevel = 4;
-        break;
+    int mapPidCount = int(mapPids.length());
+    if (!IsElevatorMapCountValid(elevatorType, mapPidCount)) {
+        throw("Invalid elevator map count", player, elevatorType, mapPidCount);
     }
 
-    any[] data = {any(entryNum), any(curLevel)};
-    for (int i = 0; i < mapPids.length(); i++) {
-        if (mapPids[i] == mPid) {
-            curLevel += i;
-        }
+    hstring mPid = playerMap.ProtoId;
+    int currentMapIndex = mapPids.find(mPid);
+    if (currentMapIndex < 0) {
+        throw("Current map is absent from elevator levels", player, elevatorType, mPid);
+    }
 
+    int firstLevel = GetElevatorFirstLevel(elevatorType);
+    int displayLevel = GetElevatorDisplayLevel(elevatorType, currentMapIndex);
+    any[] data = {any(entryNum), any(firstLevel)};
+    for (int i = 0; i < mapPidCount; i++) {
         data.insertLast(mapPids[i]);
     }
 
@@ -126,7 +234,7 @@ void ShowElevator(Critter player, int elevatorType, hstring[] mapPids, int entry
     Game.StartTimeEvent(GameTime::GameSeconds(RESET_DATA_AFTER), ResetData, values); // SavedDeferredCall
     // Старый путь показа экрана до перехода на RPC (оставлено как breadcrumb миграции):
     // player.ShowScreen( ShowScreenModes::Elevator, ElevatorPosition( elevatorType, curLevel ), "SelectLevel" );
-    player.PlayerClientCall.ShowScreenElevator(Tla::ElevatorPosition(elevatorType, curLevel), 0, 0);
+    player.PlayerClientCall.ShowScreenElevator(Tla::ElevatorPosition(elevatorType, displayLevel), 0, 0);
 }
 
 // Отложенная очистка сохранённого описания лифта, если игрок не выбрал этаж вовремя.
@@ -156,24 +264,25 @@ void SelectLevel(Critter player, int answerI, string answerS)
 
     any[] params = elevatorData[player.Id];
     elevatorData.remove(player.Id);
-    if (params.length() == 0) {
+    map.ElevatorData = elevatorData;
+    if (params.length() < 3) {
         return;
     }
 
-    int l = params.length();
     int entNum = int(params[0]);
-    int firstLevelNum = l <= 1 ? 0 : int(params[1]);
-    map.ElevatorData = elevatorData;
-    if (answerI < firstLevelNum || answerI > l + firstLevelNum) {
+    int firstLevelNum = int(params[1]);
+    int mapCount = int(params.length()) - 2;
+    if (!IsElevatorLevelValid(firstLevelNum, mapCount, answerI)) {
         return;
     }
+    int mapParamIndex = GetElevatorMapParamIndex(firstLevelNum, answerI);
 
     // Ищем карту нужного этажа по прото-id среди карт локации и переносим туда игрока.
     Location loc = map.GetLocation();
     for (int j = 0; j < loc.GetMapCount(); j++) {
         // breadcrumb миграции: раньше карта бралась напрямую — Game.GetMap(params[i-firstLevelNum+2]);
         Map newMap = loc.GetMapByIndex(j);
-        if (newMap.ProtoId == hstring(params[answerI - firstLevelNum + 2])) {
+        if (newMap.ProtoId == hstring(params[mapParamIndex])) {
             Entrance::CritterTransferToMapEntry(player, newMap.Id, Tla::EntryHash(entNum));
             return;
         }
@@ -205,17 +314,18 @@ void Rpc_SelectLevel(Player player, int level, int p1, int p2)
 
     any[] params = elevatorData[cr.Id];
     elevatorData.remove(cr.Id);
-    if (params.length() == 0) {
+    map.ElevatorData = elevatorData;
+    if (params.length() < 3) {
         return;
     }
 
-    int l = params.length();
     int entNum = int(params[0]);
-    int firstLevelNum = l <= 1 ? 0 : int(params[1]);
-    map.ElevatorData = elevatorData;
-    if (level < firstLevelNum || level > firstLevelNum + l - 3) {
+    int firstLevelNum = int(params[1]);
+    int mapCount = int(params.length()) - 2;
+    if (!IsElevatorLevelValid(firstLevelNum, mapCount, level)) {
         return;
     }
+    int mapParamIndex = GetElevatorMapParamIndex(firstLevelNum, level);
 
     Location loc = map.GetLocation();
     if (!Sync::Lock(cr, map, loc)) {
@@ -226,7 +336,7 @@ void Rpc_SelectLevel(Player player, int level, int p1, int p2)
     for (int i = 0, j = loc.GetMapCount(); i < j; i++) {
         // breadcrumb миграции: раньше карта бралась напрямую — Game.GetMap(params[i-firstLevelNum+2]);
         Map newMap = loc.GetMapByIndex(i);
-        if (newMap.ProtoId == hstring(params[level - firstLevelNum + 2])) {
+        if (newMap.ProtoId == hstring(params[mapParamIndex])) {
             Entrance::CritterTransferToMapEntry(cr, newMap.Id, Tla::EntryHash(entNum));
             return;
         }
@@ -259,31 +369,34 @@ void ShowScreenElevator(int elevatorType, int p1, int p2)
 // 4 прямоугольник для каждой кнопки						// 14+
 bool GetElevator(int type, any[] data)
 {
+    data.clear();
+
     // clang-format off
 
     const string iface = "art/intrface/Elevator/";
+    const hstring indicator = "art/intrface/elevator_indicator.FRM".hstr();
     const        any[][] elevators =
     {
         //	 Этаж: текущий, стартовый, число             Размер основной картинки                   Размер доп. картинки                               Размер анимации индикатора                Число кнопок
         //	         Основная картинка                          Доп. картинка                            Анимация индикатора                                  Картинка нажатой кнопки             Координаты кнопок
         // 0) BOS 1234
-        { 0, 1, 4,  (iface + "Bos.png").hstr(),       230, 284, 0,                                        0,  0,  (iface + "ElevatorIndicator.frm").hstr(), 121, 41,  (iface + "ElevatorButton.png").hstr(), 4, 11, 42, 58, 91, 11, 102, 58, 151, 11, 162, 58, 211, 11, 222, 58, 271 },
+        { 0, 1, 4,  (iface + "Bos.png").hstr(),       230, 284, EMPTY_HSTRING,                             0,  0,  indicator, 121, 41,  (iface + "ElevatorButton.png").hstr(), 4, 11, 42, 58, 91, 11, 102, 58, 151, 11, 162, 58, 211, 11, 222, 58, 271 },
         // 1) BOS G1
-        { 0, 0, 2,  (iface + "Bos.png").hstr(),       230, 284, (iface + "Bos2.png").hstr(),       0, 37,  (iface + "ElevatorIndicator.frm").hstr(), 121, 41,  (iface + "ElevatorButton.png").hstr(), 2, 11, 42, 58, 91, 11, 102, 58, 151 },
+        { 0, 0, 2,  (iface + "Bos.png").hstr(),       230, 284, (iface + "Bos2.png").hstr(),       0, 37,  indicator, 121, 41,  (iface + "ElevatorButton.png").hstr(), 2, 11, 42, 58, 91, 11, 102, 58, 151 },
         // 2) Master 123
-        { 0, 1, 3,  (iface + "Bos.png").hstr(),       230, 284, 0,                                        0,  0,  (iface + "ElevatorIndicator.frm").hstr(), 121, 41,  (iface + "ElevatorButton.png").hstr(), 3, 11, 42, 58, 91, 11, 102, 58, 151, 11, 162, 58, 211 },
+        { 0, 1, 3,  (iface + "Bos.png").hstr(),       230, 284, EMPTY_HSTRING,                             0,  0,  indicator, 121, 41,  (iface + "ElevatorButton.png").hstr(), 3, 11, 42, 58, 91, 11, 102, 58, 151, 11, 162, 58, 211 },
         // 3) Master 34
-        { 0, 3, 2,  (iface + "Bos.png").hstr(),       230, 284, (iface + "Bos2.png").hstr(),       0, 37,  (iface + "ElevatorIndicator.frm").hstr(), 121, 41,  (iface + "ElevatorButton.png").hstr(), 2, 11, 42, 58, 91, 11, 102, 58, 151 },
+        { 0, 3, 2,  (iface + "Bos.png").hstr(),       230, 284, (iface + "Bos2.png").hstr(),       0, 37,  indicator, 121, 41,  (iface + "ElevatorButton.png").hstr(), 2, 11, 42, 58, 91, 11, 102, 58, 151 },
         // 4) Military 123
-        { 0, 1, 3,  (iface + "Militeri1.png").hstr(), 231, 285, 0,                                        0,  0,  (iface + "ElevatorIndicator.frm").hstr(), 121, 41,  (iface + "ElevatorButton.png").hstr(), 3, 11, 42, 58, 91, 11, 102, 58, 151, 11, 162, 58, 211 },
+        { 0, 1, 3,  (iface + "Militeri1.png").hstr(), 231, 285, EMPTY_HSTRING,                             0,  0,  indicator, 121, 41,  (iface + "ElevatorButton.png").hstr(), 3, 11, 42, 58, 91, 11, 102, 58, 151, 11, 162, 58, 211 },
         // 5) Military 34
-        { 0, 3, 4,  (iface + "Militeri1.png").hstr(), 231, 285, (iface + "Militeri2.png").hstr(),  0, 37,  (iface + "ElevatorIndicator.frm").hstr(), 121, 41,  (iface + "ElevatorButton.png").hstr(), 2, 11, 42, 58, 91, 11, 102, 58, 151 },
+        { 0, 3, 2,  (iface + "Militeri1.png").hstr(), 231, 285, (iface + "Militeri2.png").hstr(),  0, 37,  indicator, 121, 41,  (iface + "ElevatorButton.png").hstr(), 2, 11, 42, 58, 91, 11, 102, 58, 151 },
         // 6) Military 346
-        { 0, 3, 3,  (iface + "Militeri1.png").hstr(), 231, 285, (iface + "Militeri3.png").hstr(),  0, 37,  (iface + "ElevatorIndicator.frm").hstr(), 121, 41,  (iface + "ElevatorButton.png").hstr(), 3, 11, 42, 58, 91, 11, 102, 58, 151, 11, 162, 58, 211 },
+        { 0, 3, 3,  (iface + "Militeri1.png").hstr(), 231, 285, (iface + "Militeri3.png").hstr(),  0, 37,  indicator, 121, 41,  (iface + "ElevatorButton.png").hstr(), 3, 11, 42, 58, 91, 11, 102, 58, 151, 11, 162, 58, 211 },
         // 7) Military 456
-        { 0, 4, 3,  (iface + "Militeri1.png").hstr(), 231, 285, (iface + "Militeri4.png").hstr(),  0, 37,  (iface + "ElevatorIndicator.frm").hstr(), 121, 41,  (iface + "ElevatorButton.png").hstr(), 3, 11, 42, 58, 91, 11, 102, 58, 151, 11, 162, 58, 211 },
+        { 0, 4, 3,  (iface + "Militeri1.png").hstr(), 231, 285, (iface + "Militeri4.png").hstr(),  0, 37,  indicator, 121, 41,  (iface + "ElevatorButton.png").hstr(), 3, 11, 42, 58, 91, 11, 102, 58, 151, 11, 162, 58, 211 },
         // 8) Vault 123
-        { 0, 1, 3,  (iface + "Militeri1.png").hstr(), 230, 284, 0,                                        0, 0,   (iface + "ElevatorIndicator.frm").hstr(), 121, 41,  (iface + "ElevatorButton.png").hstr(), 3, 11, 42, 58, 91, 11, 102, 58, 151, 11, 162, 58, 211 },
+        { 0, 1, 3,  (iface + "Militeri1.png").hstr(), 230, 284, EMPTY_HSTRING,                             0, 0,   indicator, 121, 41,  (iface + "ElevatorButton.png").hstr(), 3, 11, 42, 58, 91, 11, 102, 58, 151, 11, 162, 58, 211 },
     };
 
     // clang-format on
@@ -291,7 +404,7 @@ bool GetElevator(int type, any[] data)
     int index = (type & 0xFFFF);
     int currentLevel = (type >> 16);
 
-    if (index > 8) {
+    if (!IsElevatorTypeValid(index) || !IsElevatorDisplayLevelValid(index, currentLevel)) {
         return false;
     }
 
@@ -301,6 +414,34 @@ bool GetElevator(int type, any[] data)
     }
 
     data[0] = any(currentLevel);
+    return IsElevatorDataValid(index, data);
+}
+
+bool IsElevatorDataValid(int elevatorType, any[] data)
+{
+    int buttonCount = GetElevatorExpectedLevelCount(elevatorType);
+    if (!IsElevatorTypeValid(elevatorType) || int(data.length()) != ELEVATOR_DATA_HEADER_SIZE + buttonCount * ELEVATOR_BUTTON_RECT_SIZE) {
+        return false;
+    }
+    if (!IsElevatorDisplayLevelValid(elevatorType, int(data[0])) || int(data[1]) != GetElevatorFirstLevel(elevatorType) || int(data[2]) != buttonCount ||
+        int(data[4]) <= 0 || int(data[5]) <= 0 || hstring(data[3]) == EMPTY_HSTRING || hstring(data[9]) == EMPTY_HSTRING ||
+        hstring(data[12]) == EMPTY_HSTRING || int(data[13]) != buttonCount) {
+        return false;
+    }
+
+    int width = int(data[4]);
+    int height = int(data[5]);
+    for (int i = 0; i < buttonCount; i++) {
+        int index = ELEVATOR_DATA_HEADER_SIZE + i * ELEVATOR_BUTTON_RECT_SIZE;
+        int left = int(data[index]);
+        int top = int(data[index + 1]);
+        int right = int(data[index + 2]);
+        int bottom = int(data[index + 3]);
+        if (!IsElevatorButtonRectValid(left, top, right, bottom) || right >= width || bottom >= height) {
+            return false;
+        }
+    }
+
     return true;
 }
 #endif

@@ -660,6 +660,12 @@ bool VerifyUnarmedItem(Critter cr, hstring pid)
     return true;
 }
 
+// Только предметы с явным признаком таймера должны открывать окно выбора задержки.
+bool IsTimedUseItem(AbstractItem item)
+{
+    return item.IsCanUse && item.IsHasTimer;
+}
+
 #if CLIENT
 void SwitchUnarmedWeapon(Critter cr, bool next)
 {
@@ -750,8 +756,13 @@ void UseMainItem()
         Gui::Cursor = CursorType::UseItem;
     }
     else if (mode == WeaponHelpers::USE_USE && item.IsCanUse) {
-        // Отдельная ветка на юз с таймером
-        Gui::ShowScreen(GuiScreen::Timer, dict<string, any> = {{"TargetItemId", itemId}});
+        if (IsTimedUseItem(item)) {
+            Gui::ShowScreen(GuiScreen::Timer, dict<string, any> = {{"TargetItemId", itemId}});
+        }
+        else {
+            ChosenActions::SetChosenActions(
+                {Tla::ChosenUseItem, itemId, 0, ClientDefines::TARGET_SELF, 0, WeaponHelpers::MakeWeaponMode(WeaponHelpers::USE_USE, 0), 0});
+        }
     }
 }
 
@@ -1562,21 +1573,42 @@ int GetAimApCost(int hitLocation)
     return 0;
 }
 
-[[PropertyGetter]]
-int CritterGetItemsWeight(Critter cr)
+// Суммирует вес до заданного предела без переполнения. Значение limit + 1 означает,
+// что реальный вес заведомо выше интересующего вызывающего порога.
+int64 CritterGetItemsWeightLimited(Critter cr, int64 limit)
 {
 #if CLIENT
     if (!cr.IsChosen) {
         return 0; // TODO
     }
 #endif
+    if (limit < 0) {
+        return limit + 1;
+    }
+
     Item[] items = cr.GetItems();
-    int result = 0;
+    int64 result = 0;
     for (int i = 0; i < items.length(); i++) {
-        result += items[i].Weight * items[i].Count;
+        int count = items[i].Count;
+        verify(count > 0, "Invalid item count", items[i], count);
+
+        int64 unitWeight = items[i].Weight;
+        if (unitWeight > (limit - result) / count) {
+            return limit + 1;
+        }
+
+        result += unitWeight * count;
     }
 
     return result;
+}
+
+[[PropertyGetter]]
+int CritterGetItemsWeight(Critter cr)
+{
+    const int64 maxPropertyWeight = 2147483647;
+    int64 result = CritterGetItemsWeightLimited(cr, maxPropertyWeight);
+    return result > maxPropertyWeight ? int(maxPropertyWeight) : int(result);
 }
 
 #endif

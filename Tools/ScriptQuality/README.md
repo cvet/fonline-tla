@@ -19,6 +19,7 @@ Generated files (`Content.fos`, `GuiScreens.fos`) are always excluded.
 | `namespace-matches-filename` | error | no | First top-level `namespace X` must equal the file basename (allowlist: `ColorExt.fos` → `Color`). |
 | `preprocessor-guard-balance` | error | no | `#if`/`#ifdef`/`#ifndef` must balance with `#endif`. |
 | `component-null-probe` | error | yes | `x.Comp == null` / `!= null` on a component accessor → use `!x.HasComp` / `x.HasComp`. Component names are derived from `.HasXxx` usage across the tree. |
+| `item-trigger-location-sync` | error | no | An `ItemTrigger` callback reads a `Location` without both `[[Async]]` and an explicit `Sync::` lock cover. |
 | `banner-tags` | warning | yes | `// Author:` / `// ver x.y` header banners (git carries authorship). |
 | `textpack-magic-id` | warning | no | `"" + (1234)` magic text-pack ids → use a named `MsgStr`/`Enum` key. |
 | `hand-rolled-utils` | warning | no | Calls to `UtilsForArray::Find/Present/Merge`, `Tla::Min/Max/Clamp/Abs/Distance/Pow2`, `Stdlib::*Arr*` that duplicate engine APIs. |

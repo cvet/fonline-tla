@@ -1,11 +1,10 @@
 // DropMenuHandler — контекстное drop-меню действий над целью.
-// Ключевые обязанности: CLIENT — кнопки меню и Can*/Do* предикаты/действия; SERVER — ServerRemoteCall StartDialog/UseSkillOnItem.
+// Ключевые обязанности: CLIENT — кнопки меню и Can*/Do* предикаты/действия; SERVER — ServerRemoteCall StartDialog.
 // Сторона: MIXED. Связи: TlaFixedDropMenu, ChosenActions, Gui, Tla, Lockers, Dialogs, Sync.
 namespace DropMenuHandler
 {
 
 ///@ RemoteCall Server StartDialog(ident npcId)
-///@ RemoteCall Server UseSkillOnItem(ident itemId, CritterProperty skill)
 
 #if CLIENT
 
@@ -87,7 +86,6 @@ void DoUseItemFromInventory(Critter? cr, Item? item)
     else {
         if (cr != null) {
             critterId = cr.Id;
-            Game.Log("Target name " + cr.DisplayName);
         }
     }
 
@@ -170,8 +168,6 @@ void Use(Critter? cr, Item? item)
     // if(item.Ownership != ItemOwnership::MapHex )
     //    return;
     if (item != null && item.Ownership == ItemOwnership::MapHex) {
-        // оставлено для истории миграции: прежний прямой серверный вызов навыка по предмету
-        // CurPlayer.ServerCall.UseSkillOnItem( item.Id, CritterProperty::SpecialSkillPickOnGround );
         ChosenActions::SetChosenActions({Tla::ChosenPickItem, item.ProtoId, item.Hex.x, item.Hex.y, item.Id, 0, 0});
     }
 
@@ -180,9 +176,13 @@ void Use(Critter? cr, Item? item)
     }
 
     if (item != null && IsChosenAlive() && IsChosenItem(item) && (item.IsCanUse || item.IsCanUseOnSmth)) {
-        Game.Log("use on self");
-        ChosenActions::SetChosenActions(
-            {Tla::ChosenUseItem, item.Id, 0, ClientDefines::TARGET_SELF, 0, WeaponHelpers::MakeWeaponMode(WeaponHelpers::USE_USE, 0), 0});
+        if (Parameters::IsTimedUseItem(item)) {
+            Gui::ShowScreen(GuiScreen::Timer, dict<string, any> = {{"TargetItemId", item.Id}});
+        }
+        else {
+            ChosenActions::SetChosenActions(
+                {Tla::ChosenUseItem, item.Id, 0, ClientDefines::TARGET_SELF, 0, WeaponHelpers::MakeWeaponMode(WeaponHelpers::USE_USE, 0), 0});
+        }
     }
 }
 
@@ -205,7 +205,12 @@ void Drop(Critter? cr, Item? item)
         return;
     }
     if (item.Stackable && item.Count > 1) {
-        Gui::ShowScreen(GuiScreen::Split, dict<string, any> = {{"TargetItemId", item.Id}, {"ItemsCollection", ClientDefines::ITEMS_CHOSEN_ALL}});
+        Gui::ShowScreen(GuiScreen::Split,
+                        dict<string, any> = {{"TargetItemId", item.Id},
+                                             {"ItemsCollection", ClientDefines::ITEMS_CHOSEN_ALL},
+                                             {"TransferType", 0},
+                                             {"TransferContainerId", ZERO_IDENT},
+                                             {"TransferSession", uint(0)}});
     }
     else {
         ChosenActions::SetChosenActions({Tla::ChosenMoveItem, item.Id, item.Count, CritterItemSlot::Outside, 0, 0, 0});
@@ -249,19 +254,6 @@ void StartDialog(Player player, ident npcId)
     Critter? npc = Game.GetCritter(npcId);
     if (cr != null && npc != null && Sync::Lock(cr, npc) && cr.IsAlive() && npc.IsAlive() && !npc.ControlledByPlayer && !npc.IsNoTalk) {
         Dialogs::RunDialog(cr, npc, false);
-    }
-}
-
-// Серверное применение навыка к предмету: для контейнеров/дверей передаём в Lockers.
-[[ServerRemoteCall]] [[Async]]
-void UseSkillOnItem(Player player, ident itemId, CritterProperty skill)
-{
-    Critter? cr = player.GetControlledCritter();
-    Item? item = Game.GetItem(itemId);
-    if (cr != null && item != null && Sync::Lock(cr, item)) {
-        if (item.Type == ItemType::Container || item.Type == ItemType::Door) {
-            Lockers::UseSkillOnLocker(cr, item, CritterProperty::SpecialSkillPickOnGround);
-        }
     }
 }
 

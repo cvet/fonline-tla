@@ -9,10 +9,28 @@ namespace Trigger
 
 const int AI_PLANE_ATTACK_PRIORITY_MARK = NpcPlanes::AI_PLANE_ATTACK_PRIORITY + 1;
 
+bool TryGetNpcRole(StaticItem trigger, int& npcRole)
+{
+    return Tla::TryParseSceneryInt(trigger.SceneryParams[0], npcRole) && npcRole > 0;
+}
+
+bool IsDeathAnimation(int value)
+{
+    CritterActionAnim animation = CritterActionAnim(value);
+    return animation == CritterActionAnim::DeadProneFront || animation == CritterActionAnim::DeadProneBack || animation == CritterActionAnim::DeadFront ||
+           animation == CritterActionAnim::DeadBack || animation == CritterActionAnim::DeadBloodySingle || animation == CritterActionAnim::DeadBloodyBurst ||
+           animation == CritterActionAnim::DeadBurst || animation == CritterActionAnim::DeadPulse || animation == CritterActionAnim::DeadPulseDust ||
+           animation == CritterActionAnim::DeadLaser || animation == CritterActionAnim::DeadFused || animation == CritterActionAnim::DeadExplode ||
+           animation == CritterActionAnim::DeadBurn || animation == CritterActionAnim::DeadBurnRun;
+}
+
 [[ItemTrigger]]
 void Warn(Critter player, StaticItem trigger, bool entered, mdir dir)
 {
-    int npcRole = trigger.SceneryParams[0].hash;
+    int npcRole = 0;
+    if (!TryGetNpcRole(trigger, npcRole)) {
+        return;
+    }
     Stdlib::Warn(player, npcRole);
 }
 
@@ -23,7 +41,10 @@ void Attack(Critter player, StaticItem trigger, bool entered, mdir dir)
         return;
     }
 
-    int npcRole = trigger.SceneryParams[0].hash;
+    int npcRole = 0;
+    if (!TryGetNpcRole(trigger, npcRole)) {
+        return;
+    }
     Map? map = player.GetMap();
     if (map == null) {
         return;
@@ -42,7 +63,10 @@ void AttackStop(Critter player, StaticItem trigger, bool entered, mdir dir)
         return;
     }
 
-    int npcRole = trigger.SceneryParams[0].hash;
+    int npcRole = 0;
+    if (!TryGetNpcRole(trigger, npcRole)) {
+        return;
+    }
     Map? map = player.GetMap();
     if (map == null) {
         return;
@@ -67,20 +91,32 @@ void AttackStop(Critter player, StaticItem trigger, bool entered, mdir dir)
 
 void Kill(Critter player, StaticItem trigger, bool entered, mdir dir)
 {
-    CritterActionAnim type = CritterActionAnim(trigger.SceneryParams[0].hash);
-    Stdlib::Kill(player, type);
+    int type = 0;
+    if (!Tla::TryParseSceneryInt(trigger.SceneryParams[0], type) || !IsDeathAnimation(type)) {
+        return;
+    }
+
+    Stdlib::Kill(player, CritterActionAnim(type));
 }
 
 void Damage(Critter player, StaticItem trigger, bool entered, mdir dir)
 {
-    int dmg = trigger.SceneryParams[0].hash;
-    DamageTypes type = DamageTypes(trigger.SceneryParams[1].hash);
-    Stdlib::Damage(player, dmg, type, dir);
+    int damage = 0;
+    int type = 0;
+    if (!Tla::TryParseSceneryInt(trigger.SceneryParams[0], damage) || !Tla::TryParseSceneryInt(trigger.SceneryParams[1], type) || damage <= 0 ||
+        type < int(DamageTypes::Normal) || type > int(DamageTypes::Radiation)) {
+        return;
+    }
+
+    Stdlib::Damage(player, damage, DamageTypes(type), dir);
 }
 
 void DoorOpenTrigger(Critter player, StaticItem trigger, bool entered, mdir dir)
 {
-    int entryNum = trigger.SceneryParams[0].hash;
+    int entryNum = 0;
+    if (!Tla::TryParseSceneryInt(trigger.SceneryParams[0], entryNum, true) || entryNum < 0) {
+        return;
+    }
     Stdlib::DoorControl(player, entryNum, true);
 }
 
@@ -97,7 +133,10 @@ void DoorOpen(Critter player, StaticItem trigger, bool entered, mdir dir)
 
 void DoorCloseTrigger(Critter player, StaticItem trigger, bool entered, mdir dir)
 {
-    int entryNum = trigger.SceneryParams[0].hash;
+    int entryNum = 0;
+    if (!Tla::TryParseSceneryInt(trigger.SceneryParams[0], entryNum, true) || entryNum < 0) {
+        return;
+    }
     Stdlib::DoorControl(player, entryNum, false);
 }
 
@@ -114,14 +153,7 @@ void DoorClose(Critter player, StaticItem trigger, bool entered, mdir dir)
 [[ItemTrigger]]
 void Elevator4(Critter player, StaticItem trigger, bool entered, mdir dir)
 {
-    auto params = trigger.SceneryParams;
-    int entryExit = params[0].hash;
-    hstring map1Pid = (params[1]);
-    hstring map2Pid = (params[2]);
-    hstring map3Pid = (params[3]);
-    hstring map4Pid = (params[4]);
-    hstring[] pids = {map1Pid, map2Pid, map3Pid, map4Pid};
-    Elevator::ShowElevator(player, 0, pids, entryExit);
+    Elevator::Elevator4(player, trigger, entered, dir);
 }
 
 // лифт, в котором меньше чем 4 этажа
@@ -131,40 +163,17 @@ void Elevator4(Critter player, StaticItem trigger, bool entered, mdir dir)
 [[ItemTrigger]]
 void Elevator(Critter player, StaticItem trigger, bool entered, mdir dir)
 {
-    if (entered) {
-        auto params = trigger.SceneryParams;
-        int entryExit = params[0].hash;
-        int elevatorType = params[1].hash;
-        hstring map1Pid = params[2];
-        hstring map2Pid = params[3];
-        hstring map3Pid = params[4];
-
-        if (Time::IsTimeoutActive(player.TimeoutTransfer)) {
-            Messaging::Info(player, TextPackKey(TextPackName::Game, "" + (MsgStr::StrTimeoutTransferWait)));
-        }
-        else if (Time::IsTimeoutActive(player.TimeoutBattle)) {
-            Messaging::Info(player, TextPackKey(TextPackName::Game, "" + (MsgStr::StrTimeoutBattleWait)));
-        }
-        else {
-            hstring[] pids = {map1Pid};
-            if (map2Pid != EMPTY_HSTRING) {
-                pids.insertLast(map2Pid);
-            }
-
-            if (map3Pid != EMPTY_HSTRING) {
-                pids.insertLast(map3Pid);
-            }
-
-            Elevator::ShowElevator(player, elevatorType, pids, entryExit);
-        }
-    }
+    Elevator::Elevator(player, trigger, entered, dir);
 }
 
 // Диалог с НПЦ рядом с триггером,  с определенной ролью. 1 параметр - роль НПЦ.
 [[ItemTrigger]]
 void DialogNpc(Critter player, StaticItem trigger, bool entered, mdir dir)
 {
-    int npcRole = trigger.SceneryParams[0].hash;
+    int npcRole = 0;
+    if (!TryGetNpcRole(trigger, npcRole)) {
+        return;
+    }
     CritterState::Wait(player, 0);
     Stdlib::DialogNpc(player, npcRole);
 }

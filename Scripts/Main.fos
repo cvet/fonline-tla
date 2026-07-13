@@ -541,15 +541,17 @@ EventResult CritterUseSkill(Critter cr, CritterProperty skill, Critter? targetCr
                 break;
             }
 
-            int freeWeight = cr.CarryWeight - cr.ItemsWeight;
-            if (freeWeight >= int(item.Weight * item.Count)) {
+            int64 currentWeight = Parameters::CritterGetItemsWeightLimited(cr, int64(cr.CarryWeight));
+            int64 freeWeight = int64(cr.CarryWeight) - currentWeight;
+            int64 itemWeight = int64(item.Weight) * item.Count;
+            if (freeWeight >= itemWeight) {
                 // Берём целиком
                 ItemMovement::MoveItem(item, item.Count, cr);
             }
             else {
                 // Берём часть
-                if (item.Stackable && freeWeight >= int(item.Weight)) {
-                    ItemMovement::MoveItem(item, freeWeight / item.Weight, cr); //TODO: возможно, неверная формула, почему здесь вес, а не количество.
+                if (item.Stackable && item.Weight > 0 && freeWeight >= item.Weight) {
+                    ItemMovement::MoveItem(item, int(freeWeight / item.Weight), cr);
                 }
 
                 // Перегруз
@@ -1060,6 +1062,12 @@ void CritterInit(Critter cr, bool firstTime)
 [[Event]]
 void CritterFinish(Critter cr)
 {
+    // TransferType/ContainerId исторически сохраняются, а session — нет. Закрываем эфемерную
+    // capability при выходе, чтобы её нельзя было продолжить после переподключения/загрузки.
+    cr.TransferSession = cr.TransferSession + 1;
+    cr.TransferType = TransferTypes::Close;
+    cr.TransferContainerId = ZERO_IDENT;
+
     bool toDelete = true;
     if (toDelete && cr.DeadBlockerId != ZERO_IDENT) {
         Item? block = Game.GetItem(cr.DeadBlockerId);
@@ -1318,10 +1326,26 @@ void CritterRespawn(Critter cr)
 }
 
 // Вызывается при входе криттера на карту.
-[[Event]]
+[[Event]] [[Async]]
 void MapCritterIn(Map map, Critter cr)
 {
+    Entity[] previousSyncCover = Sync::Snapshot();
+    Location loc = map.GetLocation();
+    Entity[] eventSyncCover = previousSyncCover.clone();
+    eventSyncCover.insertLast(cr);
+    eventSyncCover.insertLast(map);
+    eventSyncCover.insertLast(loc);
+
+    if (!Sync::Lock(eventSyncCover)) {
+        Sync::Restore(previousSyncCover);
+        return;
+    }
+
     map.OnCritterIn.Fire(cr);
+    if (!Sync::Lock(eventSyncCover) || cr.MapId != map.Id) {
+        Sync::Restore(previousSyncCover);
+        return;
+    }
 
     cr.TimeoutTransfer = GameTime::TransferTimeout(cr);
 
@@ -1338,14 +1362,31 @@ void MapCritterIn(Map map, Critter cr)
         cr.HomeDir = cr.Dir.hex.value;
     }
 
-    cr.WorldPos = map.GetLocation().WorldPos;
+    cr.WorldPos = loc.WorldPos;
+    Sync::Restore(previousSyncCover);
 }
 
 // Вызывается при выходе криттера с карты.
-[[Event]]
+[[Event]] [[Async]]
 void MapCritterOut(Map map, Critter cr)
 {
+    Entity[] previousSyncCover = Sync::Snapshot();
+    Location loc = map.GetLocation();
+    Entity[] eventSyncCover = previousSyncCover.clone();
+    eventSyncCover.insertLast(cr);
+    eventSyncCover.insertLast(map);
+    eventSyncCover.insertLast(loc);
+
+    if (!Sync::Lock(eventSyncCover)) {
+        Sync::Restore(previousSyncCover);
+        return;
+    }
+
     map.OnCritterOut.Fire(cr);
+    if (!Sync::Lock(eventSyncCover) || cr.MapId != map.Id) {
+        Sync::Restore(previousSyncCover);
+        return;
+    }
 
     cr.TimeoutBattle = ZERO_SYNCTIME;
     NoPvpMaps::OnCritterMapOut(cr, map);
@@ -1358,7 +1399,8 @@ void MapCritterOut(Map map, Critter cr)
         }
     }
 
-    cr.WorldPos = map.GetLocation().WorldPos;
+    cr.WorldPos = loc.WorldPos;
+    Sync::Restore(previousSyncCover);
 }
 
 // Вызывается, когда игрок голосует за другого.
@@ -1395,7 +1437,7 @@ EventResult ItemsBarter(Item[] saleItems, int[] saleItemsCount, Item[] buyItems,
         for (int i = 0; i < saleItems.length(); i++) {
             Item item = saleItems[i];
             if (item.ProtoId != Content::Item::bottle_caps) {
-                Messaging::Info(npc, TextPackKey(TextPackName::Game, "" + (MsgStr::StrBarterOnlyCash)));
+                Messaging::Info(player, TextPackKey(TextPackName::Game, "" + (MsgStr::StrBarterOnlyCash)));
                 // Todo: npc.SayMsg(SAY_DIALOG, TextPackName::Game, MsgStr::StrBarterOnlyCash);
                 return EventResult::StopChain;
             }
@@ -1403,11 +1445,11 @@ EventResult ItemsBarter(Item[] saleItems, int[] saleItemsCount, Item[] buyItems,
     }
 
     if (!LimitedBarter::BarterAllowed(npc.Id, buyItems, saleItems)) {
-        Messaging::Info(npc, TextPackKey(TextPackName::Game, "" + (MsgStr::StrBarterItemNotAllowed)));
+        Messaging::Info(player, TextPackKey(TextPackName::Game, "" + (MsgStr::StrBarterItemNotAllowed)));
         return EventResult::StopChain;
     }
 
-    return EventResult::StopChain;
+    return EventResult::ContinueChain;
 }
 
 // Вызывается при попытке регистрации игрока
@@ -1467,6 +1509,9 @@ void OnPlayerEnter(Player player)
 
     verify(cr != null, "Player controlled critter must be available", player);
     Critter mainCritter = cr;
+    mainCritter.TransferSession = mainCritter.TransferSession + 1;
+    mainCritter.TransferType = TransferTypes::Close;
+    mainCritter.TransferContainerId = ZERO_IDENT;
     mainCritter.DisplayName = player.DisplayName;
 }
 

@@ -46,7 +46,7 @@ hstring[] LocPids = {Content::Location::den,           Content::Location::klamat
 
 interface IBattleTeamInviteCallback
 {
-    void OnInvite(Critter cr, bool transit, BattleTeam team);
+    void OnInvite(Critter cr, bool& transit, BattleTeam team);
     void OnTransit(Critter cr);
 };
 interface IBattleInfoStageChangedHandler
@@ -180,6 +180,7 @@ class BattleTeam
 
                 IBattleTeamInviteCallback? inviteCallback = CallBackInvite;
                 if (inviteCallback != null) {
+                    // Callback может отменить прямой перенос, например когда игрока нужно сначала убить и реплицировать.
                     inviteCallback.OnInvite(cr, transit, this);
                 }
 
@@ -453,8 +454,13 @@ class BattleInfo
 
 // Оповещения
 // Приглашение на участие
+[[Async]]
 void BattleInvite(Critter player, int answerI)
 {
+    if (!PurgatoryInviteSync::LockBattleInviteCover(player)) {
+        return;
+    }
+
     DebugLog("Answer called. Answ " + answerI);
     BattleTeam? bt = bInfo.GetCritterTeam(player.Id);
     if (bt != null && bt.LastPeekedRequestId == player.Id) {
@@ -470,11 +476,16 @@ void BattleInvite(Critter player, int answerI)
 }
 
 // Если по каким то причинам последняя заявка не получила ответа, или игрок слишком долго думает
-[[TimeEvent]]
+[[TimeEvent]] [[Async]]
 void CheckInvite(any[] values)
 {
-    BattleTeam bt = bInfo.Teams[values[0]];
     ident crId = values[1];
+    Critter? cr = Game.GetCritter(crId);
+    if (!PurgatoryInviteSync::LockBattleInviteCover(cr)) {
+        return;
+    }
+
+    BattleTeam bt = bInfo.Teams[values[0]];
     if (crId == bt.LastPeekedRequestId) {
         bt.SendTeamInvite();
     }
@@ -1041,7 +1052,7 @@ NeedReplicateCritterToBattle(Critter cr)
 
 class PurgatoryInviteCallback : IBattleTeamInviteCallback
 {
-    void OnInvite(Critter? cr, bool transit, BattleTeam? team)
+    void OnInvite(Critter? cr, bool& transit, BattleTeam? team)
     {
         if (cr != null && !cr.ControlledByPlayer) {
             return;

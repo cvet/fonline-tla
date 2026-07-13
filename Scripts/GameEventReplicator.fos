@@ -299,23 +299,34 @@ void DeleteSandbags(any value)
 }
 
 // Триггер люка: спускает игрока на подземную карту (индекс 2), пока эвент активен
-[[ItemTrigger]]
+[[Async]] [[ItemTrigger]]
 void ReplDoorTrigger(Critter player, StaticItem trigger, bool entered, mdir dir)
 {
-    if (player.ControlledByPlayer) {
-        if (Game.GEReplStationStatus) {
-            Map? playerMap = player.GetMap();
-            if (playerMap == null) {
-                return;
-            }
-
-            Location loc = playerMap.GetLocation();
-            if (loc.ProtoId == Content::Location::replication_4) {
-                Map map = loc.GetMapByIndex(2);
-                Entrance::CritterTransferToMapEntry(player, map.Id, Tla::EntryHash(ENTRY_0));
-            }
-        }
+    if (!Game.GEReplStationStatus || !Sync::LockCritterWithMapAndLocation(player)) {
+        return;
     }
+
+    Map? playerMap = player.GetMap();
+    if (playerMap == null) {
+        return;
+    }
+
+    Location loc = playerMap.GetLocation();
+    if (!player.ControlledByPlayer || loc.ProtoId != Content::Location::replication_4) {
+        return;
+    }
+
+    Map targetMap = loc.GetMapByIndex(2);
+    Entity[] cover = {player, playerMap, loc, targetMap};
+    if (!Sync::Lock(cover)) {
+        return;
+    }
+
+    if (player.MapId != playerMap.Id || playerMap.GetLocation().Id != loc.Id || loc.GetMapByIndex(2).Id != targetMap.Id) {
+        return;
+    }
+
+    Entrance::CritterTransferToMapEntry(player, targetMap.Id, Tla::EntryHash(ENTRY_0));
 }
 
 // Триггер агро: при входе игрока натравливает на него ближайших зомби (радиус 20)

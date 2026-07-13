@@ -60,6 +60,17 @@ NULLABLE_RETURN_RE = re.compile(
     r'(?m)^( *)([A-Z][\w:]*(?:\[\])?) +\? +([A-Za-z_]\w*)\(([^:;]*)\)( *)(?=\r?$)'
 )
 
+# Same nullable return type, but clang-format also broke the line after the `?`
+# (seen with an attribute such as `[[Async]]` above the signature):
+#     Location ?
+#         CreateTestLocation(...)
+# Rejoin to `Location? CreateTestLocation(...)`. The first line must contain ONLY
+# the bare type and `?`; joining a same-shaped ternary continuation would be a
+# semantic no-op (whitespace-only), so the pattern stays safe.
+NULLABLE_RETURN_SPLIT_RE = re.compile(
+    r'(?m)^( *)([A-Z][\w:]*(?:\[\])?) +\?[ \t]*\r?\n[ \t]+([A-Za-z_]\w*\()'
+)
+
 
 def fix_fos_nullable_suffix(text: str) -> str:
     """Repair the AngelScript nullable suffix `T?` / `cast<T?>` / `T?[]` after
@@ -69,6 +80,7 @@ def fix_fos_nullable_suffix(text: str) -> str:
     text = NULLABLE_ARRAY_RE.sub(r'\1?[]\2', text)
     text = NULLABLE_DECL_RE.sub(r'\1? \2\3', text)
     text = NULLABLE_RETURN_RE.sub(r'\1\2? \3(\4)\5', text)
+    text = NULLABLE_RETURN_SPLIT_RE.sub(r'\1\2? \3', text)
     return text
 
 

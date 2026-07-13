@@ -6,10 +6,17 @@
 namespace Dialogbox
 {
 
-///@ RemoteCall Client ShowDialogBox (int32 dialogBoxType, int32 numAnswers, string textArgs)
-///@ RemoteCall Server AnswerDialogBox (int32 dialogBoxType, int32 answer)
+///@ RemoteCall Client ShowDialogBox(uint32 dialogBoxSession, int32 dialogBoxType, int32 numAnswers, string textArgs)
+///@ RemoteCall Server AnswerDialogBox(uint32 dialogBoxSession, int32 dialogBoxType, int32 answer)
 
-///@ Property Critter Server nanotime LastDialogBoxShownTick Mutable Persistent
+// Состояние модалки привязано к Game.FrameTime, поэтому оно намеренно transient: после
+// перезапуска старый ответ клиента не должен стать валидным для нового процесса сервера.
+///@ Property Critter Server nanotime LastDialogBoxShownTick Mutable
+///@ Property Critter Server bool DialogBoxPending Mutable
+///@ Property Critter Server uint32 DialogBoxSession Mutable
+///@ Property Critter Server int32 DialogBoxPendingType Mutable
+///@ Property Critter Server int32 DialogBoxPendingAnswers Mutable
+///@ Property Critter Server nanotime DialogBoxPendingUntil Mutable
 
 ///@ Enum DialogBoxType None = 0
 ///@ Enum DialogBoxType AskFollowGlobalGroupRuler = 1
@@ -18,35 +25,107 @@ namespace Dialogbox
 
 const timespan DIALOG_PERIOD = Time::Seconds(30);
 const timespan NEXT_DIALOG_CALL = Time::Seconds(5);
+const int MIN_DIALOG_BOX_ANSWERS = 1;
+const int MAX_DIALOG_BOX_ANSWERS = 16;
+
+// Все текущие модалки используют первую кнопку как подтверждение действия с сайд-эффектом,
+// а вторую — как безопасный отказ. Остальные кнопки остаются обычными вариантами.
+bool IsDialogBoxAnswerDangerous(DialogBoxType type, int answer)
+{
+    return type != DialogBoxType::None && answer == 0;
+}
+
+string GetDialogBoxAnswerRole(DialogBoxType type, int answer)
+{
+    if (type != DialogBoxType::None && answer == 0) {
+        return "confirm";
+    }
+    if (type != DialogBoxType::None && answer == 1) {
+        return "cancel";
+    }
+
+    return "choice";
+}
 
 #if SERVER
 
+bool IsDialogBoxTypeSupported(int dialogBoxType)
+{
+    return dialogBoxType >= int(DialogBoxType::AskFollowGlobalGroupRuler) && dialogBoxType <= int(DialogBoxType::PurgatoryInvite);
+}
+
+bool IsDialogBoxAnswerCountValid(int answerCount)
+{
+    return answerCount >= MIN_DIALOG_BOX_ANSWERS && answerCount <= MAX_DIALOG_BOX_ANSWERS;
+}
+
+bool IsDialogBoxAnswerIndexValid(int answerCount, int answer)
+{
+    return IsDialogBoxAnswerCountValid(answerCount) && answer >= 0 && answer < answerCount;
+}
+
+uint NextDialogBoxSession(uint currentSession)
+{
+    uint nextSession = currentSession + 1;
+    return nextSession != 0 ? nextSession : 1;
+}
+
+// Чистая проверка wire-контракта. Время вычисляется вызывающим кодом отдельно, чтобы эту
+// функцию можно было покрыть тестами без сущностей и Game.FrameTime.
+bool IsDialogBoxAnswerContractValid(bool pending, uint expectedSession, uint receivedSession, int expectedType, int receivedType, int answerCount, int answer,
+                                    bool expired)
+{
+    return pending && !expired && expectedSession != 0 && expectedSession == receivedSession && expectedType == receivedType &&
+           IsDialogBoxTypeSupported(expectedType) && IsDialogBoxAnswerIndexValid(answerCount, answer);
+}
+
+void ClearPendingDialogBox(Critter cr)
+{
+    cr.DialogBoxPending = false;
+    cr.DialogBoxPendingType = int(DialogBoxType::None);
+    cr.DialogBoxPendingAnswers = 0;
+    cr.DialogBoxPendingUntil = ZERO_NANOTIME;
+}
+
 // Принимает ответ игрока на модалку и маршрутизирует его по типу диалога.
-// Окно валидно ограниченное время: ответ после истечения DIALOG_PERIOD считается просроченным.
+// Окно валидно ограниченное время; session/type/count связывают ответ именно с показанным
+// окном, а погашение pending до маршрутизации не допускает повторное выполнение результата.
 [[ServerRemoteCall]] [[Async]]
-void AnswerDialogBox(Player player, int dialogBoxType, int answer)
+void AnswerDialogBox(Player player, uint dialogBoxSession, int dialogBoxType, int answer)
 {
     Critter? cr = player.GetControlledCritter();
-    if (cr == null) {
+    if (cr == null || !Sync::Lock(cr)) {
+        return;
+    }
+
+    nanotime tick = Game.FrameTime;
+    bool expired = cr.DialogBoxPendingUntil == ZERO_NANOTIME || tick >= cr.DialogBoxPendingUntil;
+    if (cr.DialogBoxPending && expired) {
+        ClearPendingDialogBox(cr);
+        return;
+    }
+
+    if (!IsDialogBoxAnswerContractValid(cr.DialogBoxPending,
+                                        cr.DialogBoxSession,
+                                        dialogBoxSession,
+                                        cr.DialogBoxPendingType,
+                                        dialogBoxType,
+                                        cr.DialogBoxPendingAnswers,
+                                        answer,
+                                        expired)) {
         return;
     }
 
     auto type = DialogBoxType(dialogBoxType);
-
-    nanotime tick = Game.FrameTime;
-    if (tick < cr.LastDialogBoxShownTick + DIALOG_PERIOD) {
-        throw("Too late for dialog answer", cr, dialogBoxType, answer);
-    }
+    ClearPendingDialogBox(cr);
 
     if (type == DialogBoxType::AskFollowGlobalGroupRuler && answer == 0) {
         GlobalmapGroup::ProcessGlobalMapCommandImpl(player, 6 /*GM_CMD_FOLLOW*/, cr.FollowLeaderId, 0);
     }
-
-    if (type == DialogBoxType::NcrIllBrahmin) {
+    else if (type == DialogBoxType::NcrIllBrahmin) {
         NcrCommon::CureBrahmin(cr, answer);
     }
-
-    if (type == DialogBoxType::PurgatoryInvite) {
+    else if (type == DialogBoxType::PurgatoryInvite) {
         Purgatory::BattleInvite(cr, answer);
     }
 }
@@ -57,13 +136,27 @@ void RunDialogBox(Critter cr, DialogBoxType type, int numAnswers, string textArg
     if (!cr.ControlledByPlayer || cr.IsDead()) {
         throw("Critter is npc or dead", cr);
     }
+    if (!IsDialogBoxTypeSupported(int(type))) {
+        throw("Unsupported dialog box type", cr, type);
+    }
+    if (!IsDialogBoxAnswerCountValid(numAnswers)) {
+        throw("Invalid dialog box answer count", cr, type, numAnswers);
+    }
 
     nanotime tick = Game.FrameTime;
-    if (tick < cr.LastDialogBoxShownTick + NEXT_DIALOG_CALL) {
+    if (cr.LastDialogBoxShownTick != ZERO_NANOTIME && tick < cr.LastDialogBoxShownTick + NEXT_DIALOG_CALL) {
         throw("Too often dialog calls", cr, type);
     }
 
-    cr.PlayerClientCall.ShowDialogBox(type, numAnswers, textArgs);
+    uint session = NextDialogBoxSession(cr.DialogBoxSession);
+    cr.LastDialogBoxShownTick = tick;
+    cr.DialogBoxPending = true;
+    cr.DialogBoxSession = session;
+    cr.DialogBoxPendingType = int(type);
+    cr.DialogBoxPendingAnswers = numAnswers;
+    cr.DialogBoxPendingUntil = tick + DIALOG_PERIOD;
+
+    cr.PlayerClientCall.ShowDialogBox(session, type, numAnswers, textArgs);
 }
 
 #endif
@@ -79,15 +172,17 @@ int GetDialogTextStr(DialogBoxType dialogBoxType)
 
 // Открывает экран модалки с переданными типом, числом вариантов и лексемами текста.
 [[ClientRemoteCall]]
-void ShowDialogBox(int dialogBoxType, int numAnswers, string textArgs)
+void ShowDialogBox(uint dialogBoxSession, int dialogBoxType, int numAnswers, string textArgs)
 {
-    Gui::ShowScreen(GuiScreen::DialogBox, dict<string, any> = {{"DialogBoxType", dialogBoxType}, {"Answers", numAnswers}, {"Lexems", textArgs}});
+    Gui::ShowScreen(
+        GuiScreen::DialogBox,
+        dict<string, any> = {{"DialogBoxSession", dialogBoxSession}, {"DialogBoxType", dialogBoxType}, {"Answers", numAnswers}, {"Lexems", textArgs}});
 }
 
 // Отправляет выбранный игроком вариант на сервер.
-void AnswerDialog(DialogBoxType dialogBoxType, int answer)
+void AnswerDialog(uint dialogBoxSession, DialogBoxType dialogBoxType, int answer)
 {
-    CurPlayer.ServerCall.AnswerDialogBox(dialogBoxType, answer);
+    CurPlayer.ServerCall.AnswerDialogBox(dialogBoxSession, dialogBoxType, answer);
 }
 
 #endif

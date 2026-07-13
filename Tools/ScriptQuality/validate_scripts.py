@@ -13,6 +13,7 @@ Checks (severity):
   ERROR   namespace-matches-filename first top-level namespace == file basename
   ERROR   preprocessor-guard-balance #if/#ifdef/#ifndef balance with #endif
   ERROR   component-null-probe       `.Comp == null` instead of `!HasComp`
+  ERROR   item-trigger-location-sync ItemTrigger location access without Async + Sync
   WARNING banner-tags               `// Author:` / `// ver x.y` header banners
   WARNING textpack-magic-id         `"" + (1234)` magic text-pack ids
   WARNING hand-rolled-utils         calls to helpers that duplicate engine APIs
@@ -215,6 +216,13 @@ HAND_ROLLED = [
      "use native string.split / a short join loop"),
 ]
 
+ITEM_TRIGGER_FUNCTION_RE = re.compile(
+    r"(?P<attrs>(?:[ \t]*\[\[[^\]\n]+\]\][ \t\r\n]*)+)"
+    r"(?:[A-Za-z_]\w*(?:<[^>{}]+>)?[ \t]+)+"
+    r"[A-Za-z_]\w*[ \t]*\([^{};]*\)[ \t\r\n]*\{",
+    re.MULTILINE,
+)
+
 
 def check_trailing_blank_line(rel: str, raw: bytes) -> list[Violation]:
     if not raw:
@@ -278,6 +286,49 @@ def check_component_null_probe(rel: str, code: str, text: str, components: set[s
     return out
 
 
+def check_item_trigger_location_sync(rel: str, code: str, text: str) -> list[Violation]:
+    """Require worker-safe synchronization before ItemTrigger callbacks access a Location.
+
+    Static-item trigger dispatch covers the critter and current map, but not their Location.
+    Calling GetLocation without switching the callback to async execution and acquiring an
+    explicit Sync cover raises `Entity access without sync` at runtime.
+    """
+    out: list[Violation] = []
+    for match in ITEM_TRIGGER_FUNCTION_RE.finditer(code):
+        attrs = match.group("attrs")
+        if "[[ItemTrigger]]" not in attrs:
+            continue
+
+        opening_brace = match.end() - 1
+        depth = 1
+        cursor = opening_brace + 1
+        while cursor < len(code) and depth:
+            if code[cursor] == "{":
+                depth += 1
+            elif code[cursor] == "}":
+                depth -= 1
+            cursor += 1
+        body = code[opening_brace + 1:cursor - 1] if depth == 0 else code[opening_brace + 1:]
+        if not re.search(r"(?:\.|\b)GetLocation[ \t]*\(", body):
+            continue
+        if "[[Async]]" in attrs and "Sync::" in body:
+            continue
+
+        missing = []
+        if "[[Async]]" not in attrs:
+            missing.append("[[Async]]")
+        if "Sync::" not in body:
+            missing.append("an explicit Sync cover")
+        out.append(Violation(
+            "item-trigger-location-sync",
+            rel,
+            line_of(text, match.start()),
+            "ItemTrigger accesses a Location without " + " and ".join(missing),
+            SEVERITY_ERROR,
+        ))
+    return out
+
+
 def check_banner_tags(rel: str, text: str, kinds: str) -> list[Violation]:
     out: list[Violation] = []
     comment = mask_to(text, kinds, "LB")
@@ -301,6 +352,11 @@ def check_textpack_magic(rel: str, text: str, kinds: str) -> list[Violation]:
 
 
 def check_hand_rolled(rel: str, code: str, text: str) -> list[Violation]:
+    # Test suites (Scripts/Test_*.fos) legitimately call the helpers under test;
+    # the rule exists to steer gameplay code to native APIs, not to block coverage.
+    if rel.replace("\\", "/").rsplit("/", 1)[-1].startswith("Test_"):
+        return []
+
     out: list[Violation] = []
     for rx, hint in HAND_ROLLED:
         for m in rx.finditer(code):
@@ -372,6 +428,7 @@ def analyze() -> list[Violation]:
         violations += check_namespace(rel, f.name, text)
         violations += check_guard_balance(rel, code)
         violations += check_component_null_probe(rel, code, text, components)
+        violations += check_item_trigger_location_sync(rel, code, text)
         violations += check_banner_tags(rel, text, kinds)
         violations += check_textpack_magic(rel, text, kinds)
         violations += check_hand_rolled(rel, code, text)

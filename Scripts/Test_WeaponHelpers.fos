@@ -1,0 +1,53 @@
+// Test_WeaponHelpers — тесты упаковки режима оружия (MakeWeaponMode <-> WeaponModeUse/WeaponModeAim).
+namespace Test_WeaponHelpers
+{
+
+#if SERVER
+
+[[ModuleInit]]
+void InitTestWeaponHelpers()
+{
+    Game.OnTestingInit.Subscribe(OnTestingInit);
+}
+
+[[Event]]
+void OnTestingInit()
+{
+    Testing::RegisterTest("weapon_helpers", "mode_pack_roundtrip", ModePackRoundtrip);
+    Testing::RegisterTest("weapon_helpers", "mode_byte_bounds", ModeByteBounds);
+}
+
+// Свойство обратимости: распаковка возвращает исходные use/aim для всего диапазона полубайтов
+void ModePackRoundtrip(Testing::TestContext ctx)
+{
+    for (int use = 0; use <= 15; use++) {
+        for (int aim = 0; aim <= 15; aim++) {
+            int mode = WeaponHelpers::MakeWeaponMode(use, aim);
+            if (!Testing::ExpectEq(ctx, WeaponHelpers::WeaponModeUse(mode), use, "use должен пережить round-trip (use=" + use + ", aim=" + aim + ")")) {
+                return;
+            }
+
+            if (!Testing::ExpectEq(ctx, WeaponHelpers::WeaponModeAim(mode), aim, "aim должен пережить round-trip (use=" + use + ", aim=" + aim + ")")) {
+                return;
+            }
+        }
+    }
+}
+
+void ModeByteBounds(Testing::TestContext ctx)
+{
+    // Режим упакован в один байт: старшие биты аргументов отсекаются маской
+    if (!Testing::Expect(ctx, WeaponHelpers::MakeWeaponMode(15, 15) == 0xFF, "Максимальные полубайты дают 0xFF")) {
+        return;
+    }
+
+    if (!Testing::ExpectEq(ctx, WeaponHelpers::MakeWeaponMode(16, 0), 0, "Переполнение use отсекается маской 0xF")) {
+        return;
+    }
+
+    Testing::ExpectEq(ctx, WeaponHelpers::WeaponModeUse(WeaponHelpers::MakeWeaponMode(3, 16)), 3, "Переполнение aim не должно портить use");
+}
+
+#endif
+
+}

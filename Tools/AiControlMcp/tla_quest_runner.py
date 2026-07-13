@@ -23,6 +23,7 @@ import json
 import socket
 import sys
 import time
+from pathlib import Path
 
 # Per-quest specs. A "stage" navigates one NPC's dialog until the quest property reaches target_value.
 #   map        : location/map proto for qa_teleport_map
@@ -30,6 +31,7 @@ import time
 #   npc_hex    : optional [x, y] to teleport near (when the NPC is far from the map entry)
 #   prefer     : answer-substring priorities (the agent picks the first answer matching one of these)
 #   target     : quest-property value reached after this stage
+#   target_mode: "at_least" (default for monotonic quest stages) or "exact"
 QUESTS = {
     "cassidy_letter": {
         "quest": "ArroyoCassidyLetter",
@@ -41,7 +43,8 @@ QUESTS = {
                            "может и не сразу", "заглянуть", "конечно", "могу"],
             },
             {
-                "name": "deliver", "map": "vault_city", "npc": "vc_cindy", "npc_hex": [65, 55], "target": 2,
+                "name": "deliver", "map": "vault_city/vcity_courtyard", "npc": "vc_cindy",
+                "npc_hex": [65, 55], "target": 2,
                 "prefer": ["письмо", "кассиди", "кесседи", "касиди", "от ", "передать", "вот оно",
                            "держи", "привет", "да", "здравств", "меня зовут", "кто вы"],
             },
@@ -163,6 +166,10 @@ class BridgeError(Exception):
     pass
 
 
+class DialogOpenError(BridgeError):
+    pass
+
+
 class Bridge:
     def __init__(self, host, port, token="", timeout=10.0):
         self.host, self.port, self.timeout = host, port, timeout
@@ -215,6 +222,17 @@ def quest_value(obs, name):
     return None
 
 
+def quest_target_reached(value, target, mode="at_least"):
+    """Check a stage target without making completed monotonic quests impossible to rerun."""
+    if value is None:
+        return False
+    if mode == "at_least":
+        return value >= target
+    if mode == "exact":
+        return value == target
+    raise ValueError(f"unknown quest target mode: {mode}")
+
+
 def quest_value_server(b, name, timeout=6.0):
     """Authoritative server-side read of a critter property via the qa_get_prop round-trip. Needed for
     Server-scope quest flags (not OwnerSync) that never appear in the client observation. Returns int|None."""
@@ -245,25 +263,152 @@ def read_quest(b, name):
 def close_dialog(b):
     """Close any active dialog/modal so map transfers aren't blocked by an in-progress conversation."""
     o = b.observe_safe() or {}
-    if o.get("dialog", {}).get("active") or o.get("screen", {}).get("modalActive"):
-        b.act("dialog_answer", intArg=0xF2)  # advancing/closing answer
-        time.sleep(1)
+    if o.get("dialog", {}).get("active"):
+        b.act("close_dialog")
+    elif o.get("screen", {}).get("modalActive"):
         b.act("close_screen")
-        b.act("clear_actions")
-        time.sleep(1)
+    else:
+        return
+    time.sleep(1)
+    b.act("clear_actions")
+    time.sleep(1)
 
 
-def teleport_map(b, pid, timeout=30):
+def expected_map_proto(pid):
+    """Return the map proto expected in an observation for a QA location/map target."""
+    return pid.split("/", 1)[-1]
+
+
+def observed_map_proto(observation):
+    if not observation or not observation.get("hasMap"):
+        return None
+    map_info = observation.get("map") or {}
+    return map_info.get("protoId")
+
+
+def teleport_map(b, pid, timeout=30, poll_interval=2.0):
     close_dialog(b)
-    cur = (b.observe().get("map") or {}).get("protoId")
+    expected_proto = expected_map_proto(pid)
+    initial = b.observe()
+    if observed_map_proto(initial) == expected_proto:
+        return initial
+
     b.act("qa_teleport_map", stringArg=pid)
-    deadline = time.time() + timeout
-    while time.time() < deadline:
-        time.sleep(2)
-        o = b.observe_safe()
-        if o and o.get("hasMap") and (o.get("map") or {}).get("protoId") != cur:
-            return o
-    return b.observe()
+    deadline = time.monotonic() + timeout
+    last_observation = initial
+    observed_after_command = False
+    while time.monotonic() < deadline:
+        time.sleep(min(poll_interval, max(0.0, deadline - time.monotonic())))
+        observation = b.observe_safe()
+        if observation is not None:
+            last_observation = observation
+            observed_after_command = True
+        if observed_map_proto(observation) == expected_proto:
+            return observation
+
+    final_observation = b.observe_safe()
+    if final_observation is not None:
+        last_observation = final_observation
+        observed_after_command = True
+        if observed_map_proto(final_observation) == expected_proto:
+            return final_observation
+
+    actual_proto = observed_map_proto(last_observation)
+    if not observed_after_command or actual_proto is None:
+        raise BridgeError(
+            f"qa teleport to {pid} timed out: client/map observation unavailable after command "
+            f"(last observed map {actual_proto or '<none>'})"
+        )
+    raise BridgeError(
+        f"qa teleport to {pid} timed out: expected map {expected_proto}, observed {actual_proto}"
+    )
+
+
+def adjacent_hexes(x, y):
+    """Six neighbouring hexes in the engine's odd-column offset coordinate system."""
+    if x % 2 == 0:
+        offsets = ((1, 0), (1, 1), (0, 1), (-1, 1), (-1, 0), (0, -1))
+    else:
+        offsets = ((1, 0), (1, -1), (0, -1), (-1, -1), (-1, 0), (0, 1))
+    return [(x + dx, y + dy) for dx, dy in offsets]
+
+
+def npc_approach_hexes(npc, map_info=None):
+    candidates = adjacent_hexes(int(npc["hexX"]), int(npc["hexY"]))
+    map_info = map_info or {}
+    width = map_info.get("width")
+    height = map_info.get("height")
+    if isinstance(width, int) and isinstance(height, int):
+        candidates = [(x, y) for x, y in candidates if 0 <= x < width and 0 <= y < height]
+    return candidates
+
+
+def chosen_at_hex(observation, target_hex):
+    chosen = (observation or {}).get("chosen") or {}
+    return chosen.get("hexX") == target_hex[0] and chosen.get("hexY") == target_hex[1]
+
+
+def wait_for_observation(b, predicate, timeout, poll_interval=0.25):
+    deadline = time.monotonic() + timeout
+    while True:
+        observation = b.observe_safe()
+        if observation is not None and predicate(observation):
+            return observation
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return None
+        time.sleep(min(poll_interval, remaining))
+
+
+def open_dialog_near_npc(b, npc, teleport_timeout=3.0, dialog_timeout=5.0):
+    """Try every valid adjacent hex, accepting a teleport only after the chosen hex is observed."""
+    initial = b.observe_safe()
+    if initial is None:
+        raise DialogOpenError(f"cannot open dialog with NPC {npc['id']}: client observation unavailable")
+
+    visible_npc = next(
+        (cr for cr in (initial.get("critters") or []) if cr.get("id") == npc.get("id")),
+        npc,
+    )
+    candidates = npc_approach_hexes(visible_npc, initial.get("map"))
+    failures = []
+    for target_hex in candidates:
+        current = b.observe_safe()
+        if current is None:
+            raise DialogOpenError(
+                f"cannot open dialog with NPC {npc['id']}: client observation unavailable"
+            )
+        if not chosen_at_hex(current, target_hex):
+            b.act("qa_teleport_hex", x=target_hex[0], y=target_hex[1])
+            if wait_for_observation(
+                b, lambda observation: chosen_at_hex(observation, target_hex), teleport_timeout
+            ) is None:
+                if b.observe_safe() is None:
+                    raise DialogOpenError(
+                        f"cannot open dialog with NPC {npc['id']}: client observation unavailable "
+                        f"while checking teleport to {target_hex}"
+                    )
+                failures.append(f"{target_hex}: teleport not observed")
+                continue
+
+        b.act("clear_actions")
+        b.act("talk_to", targetId=npc["id"])
+        if wait_for_observation(
+            b,
+            lambda observation: bool((observation.get("dialog") or {}).get("active")),
+            dialog_timeout,
+        ) is not None:
+            return target_hex
+        if b.observe_safe() is None:
+            raise DialogOpenError(
+                f"cannot open dialog with NPC {npc['id']}: client observation unavailable "
+                f"while waiting for dialog at {target_hex}"
+            )
+        failures.append(f"{target_hex}: dialog did not open")
+        b.act("clear_actions")
+
+    details = "; ".join(failures) if failures else "no in-bounds adjacent hexes"
+    raise DialogOpenError(f"cannot open dialog with NPC {npc['id']}: {details}")
 
 
 def find_npc(b, dialog_id, hint_hex=None):
@@ -290,7 +435,7 @@ def _is_avoid(a):
     return any(w in al for w in AVOID)
 
 
-def navigate_dialog(b, npc, prefer, target, quest, max_steps=18, max_opens=4):
+def navigate_dialog(b, npc, prefer, target, quest, target_mode="at_least", max_steps=18, max_opens=4):
     """Talk to npc and walk the dialog until quest reaches target.
 
     Robust against the three things that break naive keyword navigation on complex NPCs:
@@ -301,25 +446,19 @@ def navigate_dialog(b, npc, prefer, target, quest, max_steps=18, max_opens=4):
       branch instead of repeating the same wrong turn.
     """
     def open_dialog():
-        b.act("qa_teleport_hex", x=npc["hexX"] + 1, y=npc["hexY"])
-        time.sleep(1.2)
-        b.act("talk_to", targetId=npc["id"])
-        t = time.time() + 14
-        while time.time() < t:
-            time.sleep(1.4)
-            if (b.observe_safe() or {}).get("dialog", {}).get("active"):
-                return True
-        return False
+        return open_dialog_near_npc(b, npc)
 
     steps = []
     seen = set()  # (speech-text prefix, answer-text) pairs already chosen — persists across re-opens
     for _ in range(max_opens):
-        if quest_value(b.observe_safe() or {}, quest) == target:
+        if quest_target_reached(quest_value(b.observe_safe() or {}, quest), target, target_mode):
+            close_dialog(b)
             return steps, True
         open_dialog()
         for _ in range(max_steps):
             o = b.observe_safe() or {}
-            if quest_value(o, quest) == target:
+            if quest_target_reached(quest_value(o, quest), target, target_mode):
+                close_dialog(b)
                 return steps, True
             d = o.get("dialog", {})
             if not d.get("active"):
@@ -348,9 +487,9 @@ def navigate_dialog(b, npc, prefer, target, quest, max_steps=18, max_opens=4):
         time.sleep(0.8)
         # Authoritative check once per open-cycle (cheap vs per-step): a terminal quest answer closes the
         # dialog, and Server-scope flags are invisible to the per-step client check inside the loop.
-        if read_quest(b, quest) == target:
+        if quest_target_reached(read_quest(b, quest), target, target_mode):
             return steps, True
-    return steps, read_quest(b, quest) == target
+    return steps, quest_target_reached(read_quest(b, quest), target, target_mode)
 
 
 def run(args):
@@ -371,6 +510,22 @@ def run(args):
         apply_setup(b, spec.get("setup"))  # quest-wide prerequisites (run once after entering game)
 
         for stage in spec["stages"]:
+            target_mode = stage.get("target_mode", spec.get("target_mode", "at_least"))
+            current_value = read_quest(b, spec["quest"])
+            if quest_target_reached(current_value, stage["target"], target_mode):
+                current_observation = b.observe_safe() or {}
+                report["stages"].append({
+                    "stage": stage["name"],
+                    "map": (current_observation.get("map") or {}).get("protoId"),
+                    "npc": stage["npc"],
+                    "npc_found": None,
+                    "ok": True,
+                    "quest_value": current_value,
+                    "dialog_steps": 0,
+                    "already_satisfied": True,
+                })
+                continue
+
             o = teleport_map(b, stage["map"])
             apply_setup(b, stage.get("setup"))  # per-stage prerequisites (after teleport, before talking)
             npc = find_npc(b, stage["npc"], stage.get("npc_hex"))
@@ -381,17 +536,36 @@ def run(args):
                 report["stages"].append(sr)
                 report["error"] = f"NPC {stage['npc']} not found on {stage['map']}"
                 return report
-            steps, reached = navigate_dialog(b, npc, stage["prefer"], stage["target"], spec["quest"])
+            try:
+                steps, reached = navigate_dialog(
+                    b, npc, stage["prefer"], stage["target"], spec["quest"], target_mode
+                )
+            except DialogOpenError as exc:
+                sr["ok"] = False
+                sr["quest_value"] = quest_value(b.observe_safe() or {}, spec["quest"])
+                sr["dialog_steps"] = 0
+                sr["error"] = str(exc)
+                report["stages"].append(sr)
+                report["error"] = str(exc)
+                return report
             sr["ok"] = reached
             sr["quest_value"] = read_quest(b, spec["quest"])
             sr["dialog_steps"] = len(steps)
+            sr["already_satisfied"] = False
             report["stages"].append(sr)
             if not reached:
                 report["error"] = f"stage {stage['name']} did not reach {spec['quest']}={stage['target']}"
                 return report
 
         report["final_quest_value"] = read_quest(b, spec["quest"])
+        report["transitions_verified"] = sum(
+            1 for stage in report["stages"] if stage.get("ok") and not stage.get("already_satisfied", False)
+        )
+        report["exercised"] = report["transitions_verified"] > 0
         report["ok"] = all(s["ok"] for s in report["stages"])
+        if getattr(args, "require_exercised", False) and not report["exercised"]:
+            report["ok"] = False
+            report["error"] = "quest state was already satisfied; no transition was exercised"
         return report
     except (BridgeError, OSError) as exc:
         report["error"] = str(exc)
@@ -408,7 +582,9 @@ def main():
     ap.add_argument("--timeout", type=float, default=10.0)
     ap.add_argument("--quest", default="cassidy_letter", choices=sorted(QUESTS.keys()))
     ap.add_argument("--name", default="QuestRunner")
-    ap.add_argument("--register", action="store_true", default=True)
+    ap.add_argument("--register", action="store_true")
+    ap.add_argument("--require-exercised", action="store_true",
+                    help="fail when all quest stages were already satisfied before the run")
     ap.add_argument("--login-timeout", type=float, default=45.0)
     ap.add_argument("--report", default="")
     ap.add_argument("--list", action="store_true", help="list known quest specs and exit")
@@ -427,8 +603,9 @@ def main():
     report = run(args)
     text = json.dumps(report, ensure_ascii=False, indent=2)
     if args.report:
-        with open(args.report, "w", encoding="utf-8") as fh:
-            fh.write(text)
+        report_path = Path(args.report)
+        report_path.parent.mkdir(parents=True, exist_ok=True)
+        report_path.write_text(text, encoding="utf-8")
     print(text)
     return 0 if report.get("ok") else 1
 

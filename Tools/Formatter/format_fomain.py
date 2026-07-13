@@ -238,7 +238,8 @@ def render_entry_block(entries: list[ConfigEntry]) -> list[str]:
             if lines and lines[-1] != '':
                 lines.append('')
             lines.extend(entry.comments)
-        lines.append(f'{entry.key} = {entry.value}')
+        value_suffix = f' {entry.value}' if entry.value else ''
+        lines.append(f'{entry.key} ={value_suffix}')
     return lines
 
 

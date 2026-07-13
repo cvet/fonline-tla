@@ -1,0 +1,84 @@
+// Test_NpcPlanes — регрессии хранилища AI-планов NPC.
+namespace Test_NpcPlanes
+{
+
+#if SERVER
+
+[[ModuleInit]]
+void InitTestNpcPlanes()
+{
+    Game.OnTestingInit.Subscribe(OnTestingInit);
+}
+
+[[Event]]
+void OnTestingInit()
+{
+    Testing::RegisterTest("npc_planes", "drop_then_add", DropThenAdd);
+}
+
+bool FindMovableHex(Map map, mpos& hex)
+{
+    mpos center = mpos(map.Size.width / 2, map.Size.height / 2);
+    for (int radius = 0; radius < 15; radius++) {
+        for (int dx = -radius; dx <= radius; dx++) {
+            for (int dy = -radius; dy <= radius; dy++) {
+                mpos probe = mpos(center.x + dx, center.y + dy);
+                if (probe.x > 0 && probe.y > 0 && int(probe.x) < map.Size.width - 1 && int(probe.y) < map.Size.height - 1 && map.IsHexMovable(probe)) {
+                    hex = probe;
+                    return true;
+                }
+            }
+        }
+    }
+
+    return false;
+}
+
+[[Async]]
+void DropThenAdd(Testing::TestContext ctx)
+{
+    Location? loc = Testing::CreateTestLocation(ctx, Content::Location::desert_12);
+    if (loc == null) {
+        Testing::Fail(ctx, "Тестовая локация должна создаваться");
+        return;
+    }
+
+    Map map = loc.GetMapByIndex(0);
+    mpos hex;
+    if (!Testing::Expect(ctx, FindMovableHex(map, hex), "На тестовой карте должен найтись проходимый гекс")) {
+        return;
+    }
+
+    Critter? npc = Testing::SpawnTestNpc(ctx, map, Content::Critter::Brahmin, hex);
+    if (npc == null) {
+        Testing::Fail(ctx, "NPC должен создаваться");
+        return;
+    }
+
+    NpcPlanes::NpcPlane seedPlane = NpcPlanes::CreatePlane();
+    NpcPlanes::NpcPlane[] seedPlanes = {seedPlane};
+    NpcPlanes::AllNpcPlanes.set(npc.Id, seedPlanes);
+
+    NpcPlanes::DropPlanes(npc);
+    bool removed = !NpcPlanes::AllNpcPlanes.exists(npc.Id);
+
+    // Раньше DropPlanes оставлял ключ с null, и следующий AddPlane падал при
+    // присваивании null не-nullable массиву. Воспроизводим и старую запись,
+    // которая могла остаться в уже работающем сервере после обновления.
+    NpcPlanes::AllNpcPlanes.set(npc.Id, null);
+    NpcPlanes::NpcPlane nextPlane = NpcPlanes::CreatePlane();
+    NpcPlanes::AddPlane(npc, nextPlane);
+
+    if (!Testing::Expect(ctx, removed, "DropPlanes должен удалять запись словаря, а не сохранять null")) {
+        return;
+    }
+
+    NpcPlanes::NpcPlane[]? storedPlanes = NpcPlanes::AllNpcPlanes.get(npc.Id, null);
+    Testing::Expect(ctx,
+                    storedPlanes != null && NpcPlanes::AllNpcPlanes.exists(npc.Id),
+                    "AddPlane должен обработать старую null-запись без исключения и восстановить массив");
+}
+
+#endif
+
+}

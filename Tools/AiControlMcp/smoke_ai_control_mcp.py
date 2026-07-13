@@ -31,6 +31,7 @@ REQUIRED_TOOLS = {
     "tla_save_screenshot",
     "tla_set_mouse_pos",
     "tla_show_screen",
+    "tla_show_context_screen",
     "tla_hide_screen",
     "tla_endpoints",
     "tla_status_all",
@@ -92,6 +93,14 @@ REQUIRED_TOOLS = {
     "tla_global_move_to",
     "tla_global_enter_interest",
     "tla_operate_container",
+    "tla_use_skill",
+    "tla_craft",
+    "tla_barter_transfer",
+    "tla_barter_offer",
+    "tla_barter_return_dialog",
+    "tla_close_dialog",
+    "tla_ui_answer",
+    "tla_qa_show_dialog_box",
     "tla_accept_agreement",
     "tla_generate_critter",
     "tla_finish_generation",
@@ -153,7 +162,11 @@ def run_static_checks(client: McpProcess) -> None:
     print("ok initialize")
 
     tools = require_result(client.request("tools/list"), "tools/list").get("tools", [])
-    assert_contains({tool["name"] for tool in tools}, REQUIRED_TOOLS, "tools/list")
+    tools_by_name = {tool["name"]: tool for tool in tools}
+    assert_contains(set(tools_by_name), REQUIRED_TOOLS, "tools/list")
+    use_skill_properties = tools_by_name["tla_use_skill"].get("inputSchema", {}).get("properties", {})
+    if "sceneryProtoId" not in use_skill_properties:
+        raise SmokeError("tla_use_skill does not expose the static scenery proto transport")
     print("ok tools/list")
 
     resources = require_result(client.request("resources/list"), "resources/list").get("resources", [])
@@ -175,6 +188,13 @@ def run_static_checks(client: McpProcess) -> None:
     if "typedTools" not in schema:
         raise SmokeError("command schema does not include typedTools")
     print("ok command schema")
+
+    observation_schema = tool_payload(client, "tla_schema", {"section": "observation"})
+    barter_fields = set(observation_schema.get("sharedShapes", {}).get("barter", []))
+    expected_barter_pricing = {"coefficient", "masterTrader", "playerOfferTotal", "traderOfferTotal"}
+    if not expected_barter_pricing <= barter_fields:
+        raise SmokeError("observation schema does not include complete barter pricing metadata")
+    print("ok observation schema")
 
     launch_options = tool_payload(client, "tla_launch_options")
     # TLA не использует сцен-систему lf; локальный тестовый профиль — субконфиг LocalTest из TLA.fomain.

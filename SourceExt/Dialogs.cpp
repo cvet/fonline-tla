@@ -402,7 +402,7 @@ static auto GetPropEnumIndex(ptr<const EngineMetadata> meta, string_view str, bo
     return prop->GetRegIndex();
 }
 
-auto DialogAnswer::GetDemand(int32_t index) -> DialogAnswerReq*
+auto DialogAnswer::GetDemand(int32_t index) -> ptr<DialogAnswerReq>
 {
     FO_STACK_TRACE_ENTRY();
 
@@ -410,10 +410,10 @@ auto DialogAnswer::GetDemand(int32_t index) -> DialogAnswerReq*
         throw DialogException("Dialog demand index out of range", index);
     }
 
-    return Demands.at(index).get();
+    return Demands.at(index);
 }
 
-auto DialogAnswer::GetResult(int32_t index) -> DialogAnswerReq*
+auto DialogAnswer::GetResult(int32_t index) -> ptr<DialogAnswerReq>
 {
     FO_STACK_TRACE_ENTRY();
 
@@ -421,10 +421,10 @@ auto DialogAnswer::GetResult(int32_t index) -> DialogAnswerReq*
         throw DialogException("Dialog result index out of range", index);
     }
 
-    return Results.at(index).get();
+    return Results.at(index);
 }
 
-auto DialogSpeech::GetAnswer(int32_t index) -> DialogAnswer*
+auto DialogSpeech::GetAnswer(int32_t index) -> ptr<DialogAnswer>
 {
     FO_STACK_TRACE_ENTRY();
 
@@ -432,10 +432,10 @@ auto DialogSpeech::GetAnswer(int32_t index) -> DialogAnswer*
         throw DialogException("Dialog answer index out of range", index);
     }
 
-    return Answers.at(index).get();
+    return Answers.at(index);
 }
 
-auto DialogPack::GetSpeech(int32_t index) -> DialogSpeech*
+auto DialogPack::GetSpeech(int32_t index) -> ptr<DialogSpeech>
 {
     FO_STACK_TRACE_ENTRY();
 
@@ -443,7 +443,7 @@ auto DialogPack::GetSpeech(int32_t index) -> DialogSpeech*
         throw DialogException("Dialog speech index out of range", index);
     }
 
-    return Speeches.at(index).get();
+    return Speeches.at(index);
 }
 
 DialogManager::DialogManager(EngineMetadata& meta) :

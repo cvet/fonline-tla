@@ -896,7 +896,7 @@ void CritterReloadWeapon(Critter cr, Item weapon, Item? ammo)
 
 // Вызывается при регистрации/входе игрока или создании/загрузке NPC.
 // Стартовая позиция игроков по умолчанию — центр глобальной карты.
-[[Event]]
+[[Event]] [[Async]]
 void CritterInit(Critter cr, bool firstTime)
 {
     if (firstTime) {
@@ -1471,9 +1471,18 @@ bool PlayerRegistration(Player player, string name)
 
 // Вызывается при попытке входа игрока
 // Вернуть true — разрешить, false — запретить
-[[Event]]
+[[Event]] [[Async]]
 EventResult PlayerLogin(Player player, Player? unloginedPlayer)
 {
+    Entity[] loginSyncCover = {player};
+    if (unloginedPlayer != null) {
+        loginSyncCover.insertLast(unloginedPlayer);
+    }
+
+    if (!Sync::Lock(loginSyncCover)) {
+        return EventResult::StopChain;
+    }
+
     if (Settings.Combat.PermanentDeath > 0 && Replication::IsPermanentDeath(player.Id)) {
         Messaging::Info(player, TextPackKey(TextPackName::Game, "" + (MsgStr::StrNetPermanentDeath)));
         return EventResult::StopChain;
@@ -1482,15 +1491,23 @@ EventResult PlayerLogin(Player player, Player? unloginedPlayer)
     player.DisplayName = unloginedPlayer != null ? unloginedPlayer.Name : player.Name;
 
     if (player.MainCritterId != ZERO_IDENT) {
-        OnPlayerEnter(player);
+        if (!OnPlayerEnter(player, loginSyncCover)) {
+            return EventResult::StopChain;
+        }
     }
 
     return EventResult::ContinueChain;
 }
 
-void OnPlayerEnter(Player player)
+[[Async]]
+bool OnPlayerEnter(Player player, Entity[] loginSyncCover)
 {
+    if (!Sync::Lock(loginSyncCover)) {
+        return false;
+    }
+
     Critter? cr = player.GetControlledCritter();
+    bool switchCritter = cr == null;
 
     if (cr == null) {
         if (player.MainCritterId == ZERO_IDENT) {
@@ -1504,15 +1521,40 @@ void OnPlayerEnter(Player player)
         }
 
         verify(cr != null, "Player main critter must be loaded", player);
-        player.SwitchCritter(cr);
     }
 
     verify(cr != null, "Player controlled critter must be available", player);
     Critter mainCritter = cr;
+
+    // SwitchCritter требует единое покрытие player + critter + map + location. Раздельные Sync-вызовы
+    // здесь недостаточны: каждый новый Game.Sync полностью заменяет предыдущий набор.
+    if (!Sync::LockCritterWithMapAndLocation(mainCritter, loginSyncCover)) {
+        return false;
+    }
+
+    if (switchCritter) {
+        Critter? controlledCritter = player.GetControlledCritter();
+        if (controlledCritter == null) {
+            player.SwitchCritter(mainCritter);
+
+            // SwitchCritter вызывает ре-энтрантные события отправки начального состояния; после них
+            // повторно захватываем и проверяем весь набор перед дальнейшим доступом к свойствам.
+            if (!Sync::LockCritterWithMapAndLocation(mainCritter, loginSyncCover)) {
+                return false;
+            }
+        }
+        else {
+            verify(controlledCritter.Id == mainCritter.Id, "Player controlled critter changed during login", player);
+        }
+    }
+
+    Critter? controlledCritter = player.GetControlledCritter();
+    verify(controlledCritter != null && controlledCritter.Id == mainCritter.Id, "Player main critter must be controlled after login", player);
     mainCritter.TransferSession = mainCritter.TransferSession + 1;
     mainCritter.TransferType = TransferTypes::Close;
     mainCritter.TransferContainerId = ZERO_IDENT;
     mainCritter.DisplayName = player.DisplayName;
+    return true;
 }
 
 [[Event]]

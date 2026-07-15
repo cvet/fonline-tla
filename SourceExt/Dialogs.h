@@ -52,8 +52,8 @@ public:
 class DialogAnswer : public RefCounted<DialogAnswer>
 {
 public:
-    auto GetDemand(int32_t index) -> DialogAnswerReq*;
-    auto GetResult(int32_t index) -> DialogAnswerReq*;
+    auto GetDemand(int32_t index) -> ptr<DialogAnswerReq>;
+    auto GetResult(int32_t index) -> ptr<DialogAnswerReq>;
 
     int32_t Link {};
     hstring TextId {};
@@ -67,7 +67,7 @@ public:
 class DialogSpeech : public RefCounted<DialogSpeech>
 {
 public:
-    auto GetAnswer(int32_t index) -> DialogAnswer*;
+    auto GetAnswer(int32_t index) -> ptr<DialogAnswer>;
 
     int32_t Id {};
     hstring TextId {};
@@ -80,7 +80,7 @@ public:
 class DialogPack : public RefCounted<DialogPack>
 {
 public:
-    auto GetSpeech(int32_t index) -> DialogSpeech*;
+    auto GetSpeech(int32_t index) -> ptr<DialogSpeech>;
 
     hstring PackId {};
     int32_t SpeechesCount {};

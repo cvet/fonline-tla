@@ -245,7 +245,7 @@ static auto EnsureAiControlData(ptr<ClientEngine> client) -> AiControlClientData
     ClientExtData& ext = GetClientExtData(client);
 
     if (!ext.AiControl) {
-        ext.AiControl = unique_del_ptr<AiControlClientData>(SafeAlloc::MakeRaw<AiControlClientData>(), [](AiControlClientData* ptr) FO_DEFERRED {
+        ext.AiControl = make_unique_del_ptr(SafeAlloc::MakeRaw<AiControlClientData>(), [](AiControlClientData* ptr) FO_DEFERRED {
             FO_STACK_TRACE_ENTRY();
 
             if (ptr != nullptr) {

@@ -66,10 +66,77 @@ Map? GetNearReplicatorMap(Critter cr)
     return nearMap;
 }
 
+void AddStartLocationSyncEntity(Entity[] & entities, Entity entity)
+{
+    for (int i = 0; i < entities.length(); i++) {
+        if (entities[i] is entity) {
+            return;
+        }
+    }
+
+    entities.insertLast(entity);
+}
+
+void AddStartKnownLocation(Location[] & locations, Entity[] & syncCover, Location? loc)
+{
+    if (loc == null) {
+        return;
+    }
+
+    for (int i = 0; i < locations.length(); i++) {
+        if (locations[i] is loc) {
+            return;
+        }
+    }
+
+    locations.insertLast(loc);
+    AddStartLocationSyncEntity(syncCover, loc);
+}
+
+// Перенос при создании и загрузке криттера вызывается из ре-энтрантного init-события. Сохраняем
+// его покрытие и одним набором блокируем криттера, карту репликатора и все изменяемые известные локации.
+[[Async]]
 void SetStartLocation(Critter cr)
 {
     Map? replicator = GetStartReplicatorMap();
     if (replicator == null) {
+        return;
+    }
+
+    Entity[] syncCover = Sync::Snapshot();
+    AddStartLocationSyncEntity(syncCover, cr);
+    AddStartLocationSyncEntity(syncCover, replicator);
+    if (!Sync::Lock(syncCover)) {
+        return;
+    }
+
+    Location replicatorLocation = replicator.GetLocation();
+    Location[] knownLocations = {};
+    AddStartKnownLocation(knownLocations, syncCover, replicatorLocation);
+    if (!Sync::Lock(syncCover) || replicator.GetLocation() !is replicatorLocation) {
+        return;
+    }
+
+    AddStartKnownLocation(knownLocations, syncCover, Game.GetLocation(Content::Location::replication_hell));
+
+    hstring replicatorPid = replicatorLocation.ProtoId;
+    if (replicatorPid == Content::Location::replication_1) {
+        AddStartKnownLocation(knownLocations, syncCover, Game.GetLocation(Content::Location::den));
+        AddStartKnownLocation(knownLocations, syncCover, Game.GetLocation(Content::Location::klamath));
+        AddStartKnownLocation(knownLocations, syncCover, Game.GetLocation(Content::Location::arroyo));
+    }
+    else if (replicatorPid == Content::Location::replication_2) {
+        AddStartKnownLocation(knownLocations, syncCover, Game.GetLocation(Content::Location::modoc));
+    }
+    else if (replicatorPid == Content::Location::replication_3) {
+        AddStartKnownLocation(knownLocations, syncCover, Game.GetLocation(Content::Location::redding));
+    }
+    else if (replicatorPid == Content::Location::replication_4) {
+        AddStartKnownLocation(knownLocations, syncCover, Game.GetLocation(Content::Location::broken_hills));
+        AddStartKnownLocation(knownLocations, syncCover, Game.GetLocation(Content::Location::new_reno));
+    }
+
+    if (!Sync::Lock(syncCover) || replicator.GetLocation() !is replicatorLocation) {
         return;
     }
 
@@ -86,25 +153,15 @@ void SetStartLocation(Critter cr)
     GlobalMapFog::SetFog(cr, zoneX, zoneY + 1, GlobalMapFog::GM_FOG_FULL);
     GlobalMapFog::SetFog(cr, zoneX + 1, zoneY + 1, GlobalMapFog::GM_FOG_FULL);
 
-    Entrance::CritterTransferToMapEntry(cr, replicator.Id, Tla::ENTRY_REPLICATION);
+    bool transferred = Entrance::CritterTransferToMapEntry(cr, replicator.Id, Tla::ENTRY_REPLICATION);
 
-    Location::SetKnownLoc(cr, replicator.GetLocation());
-    Location::SetKnownLoc(cr, Content::Location::replication_hell);
-    hstring replPid = replicator.GetLocation().ProtoId;
-    if (replPid == Content::Location::replication_1) {
-        Location::SetKnownLoc(cr, Content::Location::den);
-        Location::SetKnownLoc(cr, Content::Location::klamath);
-        Location::SetKnownLoc(cr, Content::Location::arroyo); // TODO: убрать arroyo после тестов
+    // TransferToMap запускает вложенные события, которые могут заменить набор Game.Sync.
+    if (!Sync::Lock(syncCover) || (transferred && (cr.MapId != replicator.Id || cr.GetMap() !is replicator)) || replicator.GetLocation() !is replicatorLocation) {
+        return;
     }
-    else if (replPid == Content::Location::replication_2) {
-        Location::SetKnownLoc(cr, Content::Location::modoc);
-    }
-    else if (replPid == Content::Location::replication_3) {
-        Location::SetKnownLoc(cr, Content::Location::redding);
-    }
-    else if (replPid == Content::Location::replication_4) {
-        Location::SetKnownLoc(cr, Content::Location::broken_hills);
-        Location::SetKnownLoc(cr, Content::Location::new_reno);
+
+    for (int i = 0; i < knownLocations.length(); i++) {
+        Location::SetKnownLoc(cr, knownLocations[i]);
     }
 
     zoneX = cr.WorldPos.x / Settings.GlobalMap.GlobalMapZoneLength;

@@ -2,7 +2,8 @@
 // Весь модуль — только SERVER (#if SERVER). Хелперы Sync::Lock(...) добавляют поверх Game.Sync политику
 // живучести: проверяют IsDestroyed до и после захвата и возвращают false для раннего выхода без обращения
 // к мёртвым хэндлам. Snapshot/Restore сохраняют покрытие блокировок вокруг ре-энтрантной работы, а
-// LockCritterWithMap[AndLocation] расширяют набор до карты/локации с повторами при миграции криттера.
+// LockCritterWithMap[AndLocation] расширяют набор до карты/локации с повторами при миграции криттера,
+// а перегрузка с fixedEntities сохраняет в том же покрытии дополнительные ведущие сущности.
 
 namespace Sync
 {
@@ -368,6 +369,67 @@ bool LockCritterWithMapAndLocation(Critter cr)
         }
 
         if (map.GetLocation().Id != locId) {
+            continue;
+        }
+
+        return true;
+    }
+
+    return false;
+}
+
+[[Async]]
+bool LockCritterWithMapAndLocation(Critter cr, Entity[] fixedEntities)
+{
+    while (true) {
+        if (cr.IsDestroyed) {
+            return false;
+        }
+
+        Entity[] critterCover = fixedEntities.clone();
+        critterCover.insertLast(cr);
+        if (!Lock(critterCover)) {
+            return false;
+        }
+
+        Map? map = cr.GetMap();
+
+        if (map == null) {
+            return true;
+        }
+
+        if (map.IsDestroyed) {
+            return false;
+        }
+
+        ident mapId = map.Id;
+
+        // Ведущие сущности должны оставаться в каждом наборе: Game.Sync полностью заменяет покрытие.
+        Entity[] mapCover = critterCover.clone();
+        mapCover.insertLast(map);
+        if (!Lock(mapCover)) {
+            continue;
+        }
+
+        if (cr.MapId != mapId) {
+            continue;
+        }
+
+        Location loc = map.GetLocation();
+        if (loc.IsDestroyed) {
+            return false;
+        }
+
+        ident locId = loc.Id;
+
+        Entity[] locationCover = mapCover.clone();
+        locationCover.insertLast(loc);
+        if (!Lock(locationCover)) {
+            continue;
+        }
+
+        // Карта или локация могли смениться, пока воркер ждал полный набор локов.
+        if (cr.MapId != mapId || map.GetLocation().Id != locId) {
             continue;
         }
 

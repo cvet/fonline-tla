@@ -4,15 +4,16 @@
 This is a *validator*, not an auto-formatter: by default it only reports.
 Autofixes for the unambiguous, safe checks are applied only on explicit
 `--fix`. It complements `Tools/NullableEstimate/validate_nullable.py`
-(which owns `?`/FO_NULLABLE placement and Event/RemoteCall signature
-parity); this tool owns the broader hygiene rules surfaced by the script
-refactoring audit.
+(which owns script `?`, native `ptr<T>`/`nptr<T>` ABI checks, and
+Event/RemoteCall signature parity); this tool owns the broader hygiene rules
+surfaced by the script refactoring audit.
 
 Checks (severity):
   ERROR   trailing-blank-line        exactly one terminator at EOF, no extra blank
   ERROR   namespace-matches-filename first top-level namespace == file basename
   ERROR   preprocessor-guard-balance #if/#ifdef/#ifndef balance with #endif
   ERROR   component-null-probe       `.Comp == null` instead of `!HasComp`
+  ERROR   item-static-signature      ItemStatic must match its engine callback ABI
   ERROR   item-trigger-location-sync ItemTrigger location access without Async + Sync
   WARNING banner-tags               `// Author:` / `// ver x.y` header banners
   WARNING textpack-magic-id         `"" + (1234)` magic text-pack ids
@@ -222,6 +223,23 @@ ITEM_TRIGGER_FUNCTION_RE = re.compile(
     r"[A-Za-z_]\w*[ \t]*\([^{};]*\)[ \t\r\n]*\{",
     re.MULTILINE,
 )
+ANNOTATED_DECL_RE = re.compile(
+    r"(?P<attrs>(?:[ \t]*\[\[[^\]\n]+\]\][ \t\r\n]*)+)"
+    r"(?P<header>[^{};]+?)[ \t\r\n]*(?:\{|;)",
+    re.MULTILINE,
+)
+ITEM_STATIC_ATTRIBUTE_RE = re.compile(r"\[\[[^\]\n]*\bItemStatic\b[^\]\n]*\]\]")
+FUNCTION_HEADER_RE = re.compile(
+    r"^[ \t\r\n]*(?P<return_type>.+?)[ \t\r\n]+(?P<name>[A-Za-z_]\w*)"
+    r"[ \t\r\n]*\((?P<params>.*)\)[ \t\r\n]*$",
+    re.DOTALL,
+)
+ITEM_STATIC_PARAM_RES = (
+    re.compile(r"^[ \t\r\n]*Critter[ \t\r\n]+[A-Za-z_]\w*[ \t\r\n]*$"),
+    re.compile(r"^[ \t\r\n]*StaticItem[ \t\r\n]+[A-Za-z_]\w*[ \t\r\n]*$"),
+    re.compile(r"^[ \t\r\n]*Item[ \t\r\n]*\?[ \t\r\n]+[A-Za-z_]\w*[ \t\r\n]*$"),
+    re.compile(r"^[ \t\r\n]*any[ \t\r\n]+[A-Za-z_]\w*[ \t\r\n]*$"),
+)
 
 
 def check_trailing_blank_line(rel: str, raw: bytes) -> list[Violation]:
@@ -283,6 +301,42 @@ def check_component_null_probe(rel: str, code: str, text: str, components: set[s
         out.append(Violation("component-null-probe", rel, line_of(text, m.start()),
                              f".{comp} {op} null — use {'!x.Has' if op == '==' else 'x.Has'}{comp} (component accessors are guarded by Has{comp})",
                              SEVERITY_ERROR))
+    return out
+
+
+def check_item_static_signature(rel: str, code: str, text: str) -> list[Violation]:
+    """Require the exact native callback contract for every ItemStatic function."""
+    out: list[Violation] = []
+    for match in ANNOTATED_DECL_RE.finditer(code):
+        attrs = match.group("attrs")
+        if not ITEM_STATIC_ATTRIBUTE_RE.search(attrs):
+            continue
+
+        header = match.group("header")
+        signature = FUNCTION_HEADER_RE.fullmatch(header)
+        valid = signature is not None
+        if signature is not None:
+            return_type = re.sub(r"[ \t\r\n]+", " ", signature.group("return_type").strip())
+            params_text = signature.group("params").strip()
+            params = [] if not params_text else params_text.split(",")
+            valid = (
+                return_type == "bool"
+                and len(params) == len(ITEM_STATIC_PARAM_RES)
+                and all(pattern.fullmatch(param) for pattern, param in zip(ITEM_STATIC_PARAM_RES, params))
+            )
+
+        if valid:
+            continue
+
+        actual = re.sub(r"[ \t\r\n]+", " ", header.strip())
+        out.append(Violation(
+            "item-static-signature",
+            rel,
+            line_of(text, match.start("attrs")),
+            "ItemStatic callback must have signature "
+            f"`bool NAME(Critter, StaticItem, Item?, any)`; got `{actual}`",
+            SEVERITY_ERROR,
+        ))
     return out
 
 
@@ -428,6 +482,7 @@ def analyze() -> list[Violation]:
         violations += check_namespace(rel, f.name, text)
         violations += check_guard_balance(rel, code)
         violations += check_component_null_probe(rel, code, text, components)
+        violations += check_item_static_signature(rel, code, text)
         violations += check_item_trigger_location_sync(rel, code, text)
         violations += check_banner_tags(rel, text, kinds)
         violations += check_textpack_magic(rel, text, kinds)

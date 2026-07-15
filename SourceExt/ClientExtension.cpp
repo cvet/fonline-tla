@@ -29,7 +29,7 @@ void FO_NAMESPACE ClientInitHook(ptr<ClientEngine> client)
     FO_STACK_TRACE_ENTRY();
 
     if (!client->UserData) {
-        client->UserData = unique_del_ptr<uint8_t>(reinterpret_cast<uint8_t*>(SafeAlloc::MakeRaw<ClientExtData>()), [](const uint8_t* ptr) FO_DEFERRED {
+        client->UserData = make_unique_del_ptr(SafeAlloc::MakeRaw<ClientExtData>().reinterpret_as<uint8_t>(), [](const uint8_t* ptr) FO_DEFERRED {
             const auto* ext_data_ptr = reinterpret_cast<const ClientExtData*>(ptr);
             delete ext_data_ptr;
         });

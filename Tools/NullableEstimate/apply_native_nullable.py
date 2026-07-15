@@ -1,14 +1,11 @@
 #!/usr/bin/env python3
-"""Strip dead defensive null guards in ///@ ExportMethod declarations.
+"""Legacy FO_NULLABLE migration helper for older engine revisions.
 
-Author intent is the source of truth for FO_NULLABLE placement — the
-analyzer does NOT add or remove FO_NULLABLE markers (the heuristic for
-inferring "this param can be null" from body shape is too unreliable and
-causes churn against curated code). Its only job is to delete `if (param
-== nullptr) throw ...;` guards on entity-pointer params that are NOT
-marked FO_NULLABLE, since codegen now emits
-`NativeDataProvider::CheckArgNotNull` for those before the body runs and
-the guard is dead.
+Current script-facing native declarations use `ptr<T>` / `nptr<T>` and are
+validated by `validate_nullable.py`; this script intentionally recognizes
+only the former raw-pointer + FO_NULLABLE syntax. Keep it for work against
+pre-migration engine history, but do not use it as the current native ABI
+gate or generator.
 
 Idempotent: re-applies on a file with existing guards correctly cleaned
 as a no-op.

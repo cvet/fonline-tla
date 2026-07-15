@@ -6,8 +6,8 @@ not a formatter**: by default it only reports. Autofixes for the few safe,
 unambiguous checks are applied only on explicit `--fix`.
 
 It complements `Tools/NullableEstimate/validate_nullable.py`, which owns
-`?`/`FO_NULLABLE` placement and Event/RemoteCall signature parity. The two do
-not overlap.
+script `?`, native `ptr<T>`/`nptr<T>` ABI checks, and Event/RemoteCall
+signature parity. The two do not overlap.
 
 Generated files (`Content.fos`, `GuiScreens.fos`) are always excluded.
 
@@ -19,6 +19,7 @@ Generated files (`Content.fos`, `GuiScreens.fos`) are always excluded.
 | `namespace-matches-filename` | error | no | First top-level `namespace X` must equal the file basename (allowlist: `ColorExt.fos` → `Color`). |
 | `preprocessor-guard-balance` | error | no | `#if`/`#ifdef`/`#ifndef` must balance with `#endif`. |
 | `component-null-probe` | error | yes | `x.Comp == null` / `!= null` on a component accessor → use `!x.HasComp` / `x.HasComp`. Component names are derived from `.HasXxx` usage across the tree. |
+| `item-static-signature` | error | no | Every `[[ItemStatic]]` callback must exactly match `bool(Critter, StaticItem, Item?, any)`; this catches native callback ABI drift before baking. |
 | `item-trigger-location-sync` | error | no | An `ItemTrigger` callback reads a `Location` without both `[[Async]]` and an explicit `Sync::` lock cover. |
 | `banner-tags` | warning | yes | `// Author:` / `// ver x.y` header banners (git carries authorship). |
 | `textpack-magic-id` | warning | no | `"" + (1234)` magic text-pack ids → use a named `MsgStr`/`Enum` key. |

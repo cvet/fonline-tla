@@ -2937,6 +2937,33 @@ def unwrap_observation_payload(payload: Any) -> dict[str, Any]:
     return {}
 
 
+def normalize_observation_hexes(observation: dict[str, Any]) -> dict[str, Any]:
+    result = dict(observation)
+
+    chosen = observation.get("chosen")
+    if isinstance(chosen, dict):
+        result["chosen"] = normalize_observation_entry_hex(chosen)
+
+    for collection_name in ("critters", "mapItems"):
+        collection = observation.get(collection_name)
+        if isinstance(collection, list):
+            result[collection_name] = [
+                normalize_observation_entry_hex(entry) if isinstance(entry, dict) else entry
+                for entry in collection
+            ]
+
+    return result
+
+
+def normalize_observation_entry_hex(entry: dict[str, Any]) -> dict[str, Any]:
+    xy = safe_hex_value_xy(entry.get("hex"))
+    if xy is None and "hexX" in entry and "hexY" in entry:
+        xy = safe_xy_pair(entry.get("hexX"), entry.get("hexY"))
+    if xy is None:
+        return entry
+    return {**entry, "hex": {"x": xy[0], "y": xy[1]}}
+
+
 def readiness_missing(observation: dict[str, Any], arguments: dict[str, Any]) -> list[str]:
     missing: list[str] = []
 
@@ -7072,6 +7099,34 @@ def environment_query(bridge: Bridge, query_type: str, arguments: dict[str, Any]
         result["accepted"] = accepted
         result["queryId"] = query_id
     return {"jsonrpc": "2.0", "id": None, "result": result}
+
+
+def environment_query_failure_message(response: dict[str, Any]) -> str | None:
+    error = response.get("error")
+    if isinstance(error, str):
+        return error
+    if isinstance(error, dict) and isinstance(error.get("message"), str):
+        return error["message"]
+
+    payload = response.get("result") if isinstance(response.get("result"), dict) else {}
+    for entry in (payload.get("event"), payload.get("accepted"), payload):
+        if isinstance(entry, dict) and entry.get("success") is False and isinstance(entry.get("message"), str):
+            return entry["message"]
+    return None
+
+
+def unsupported_environment_query_message(response: dict[str, Any]) -> str | None:
+    message = environment_query_failure_message(response)
+    if message is None:
+        return None
+    if message.strip().casefold() in {
+        "unknown_environment_query",
+        "unsupported_environment_query",
+        "unknown environment query",
+        "unsupported environment query",
+    }:
+        return message
+    return None
 
 
 def default_environment_query_timeout_ms(query_type: str) -> int:
@@ -11308,7 +11363,14 @@ def nav_plan_state(bridge: Any, arguments: dict[str, Any]) -> dict[str, Any]:
     query_type = "path" if bool(arguments.get("simplePath")) else "tactical_path"
     query_args = nav_query_arguments(arguments, target, query_type)
     query_response = environment_query(selected_bridge, query_type, query_args)
-    if "error" in query_response:
+    query_fallback: dict[str, str] | None = None
+    fallback_reason = unsupported_environment_query_message(query_response) if query_type == "tactical_path" else None
+    if fallback_reason is not None:
+        query_fallback = {"from": "tactical_path", "to": "path", "reason": fallback_reason}
+        query_type = "path"
+        query_args = nav_query_arguments(arguments, target, query_type)
+        query_response = environment_query(selected_bridge, query_type, query_args)
+    if "error" in query_response or environment_query_failure_message(query_response) is not None:
         return query_response
 
     query_payload = query_response.get("result", {}) if isinstance(query_response.get("result"), dict) else {}
@@ -11353,6 +11415,7 @@ def nav_plan_state(bridge: Any, arguments: dict[str, Any]) -> dict[str, Any]:
         "target": target,
         "plan": {
             "query": query_type,
+            "queryFallback": query_fallback,
             "reachable": route_reachable(route),
             "score": route_score(route),
             "adjustedScore": adjusted_route_score(route, route_memory),
@@ -11475,12 +11538,19 @@ def find_safe_step_state(bridge: Any, arguments: dict[str, Any]) -> dict[str, An
         candidate_query = nav_query_arguments(arguments, candidate, "tactical_path")
         candidate_query["searchRadius"] = 0
         response = environment_query(selected_bridge, "tactical_path", candidate_query)
-        if "error" in response:
+        fallback_reason = unsupported_environment_query_message(response)
+        if fallback_reason is not None:
+            candidate_query = nav_query_arguments(arguments, candidate, "path")
+            candidate_query["includeDirections"] = False
+            response = environment_query(selected_bridge, "path", candidate_query)
+        if "error" in response or environment_query_failure_message(response) is not None:
             return response
         payload = response.get("result", {}) if isinstance(response.get("result"), dict) else {}
         route = payload.get("result") if isinstance(payload.get("result"), dict) else {}
-        route = route_with_query(route, "tactical_path")
+        route = route_with_query(route, "path" if fallback_reason is not None else "tactical_path")
         assessment = nav_candidate_assessment(candidate, route, payload, observation, profile, memory, arguments)
+        if fallback_reason is not None:
+            assessment["queryFallback"] = {"from": "tactical_path", "to": "path", "reason": fallback_reason}
         if candidate.get("source") == "local_safe_step":
             apply_safe_step_threat_adjustment(assessment, candidate, current_threat_distance, threat_hexes)
         checks.append(assessment)
@@ -11503,7 +11573,7 @@ def find_safe_step_state(bridge: Any, arguments: dict[str, Any]) -> dict[str, An
             "candidates": checks,
             "checked": len(checks),
             "totalCandidates": len(candidates),
-            "guidance": "Safe-step candidates are local reachable hexes by default and are scored with tla_env_tactical_path; pass useVisibleLandmarks for the legacy landmark mode.",
+            "guidance": "Safe-step candidates are local reachable hexes by default and use tla_env_tactical_path when supported; an explicitly unsupported tactical query falls back to tla_env_path. Pass useVisibleLandmarks for the legacy landmark mode.",
         },
     }
 
@@ -11682,7 +11752,7 @@ def observe_with_action_suggestions(bridge: Any, arguments: dict[str, Any]) -> t
     selected_bridge, observe_error, observation_payload, observation = observe_target_payload(bridge, arguments)
     if observe_error is not None:
         return selected_bridge, observe_error, {}, {}, {}
-    observation = unwrap_observation_payload(observation_payload)
+    observation = normalize_observation_hexes(unwrap_observation_payload(observation_payload))
     action_suggestions = available_actions_payload(observation_payload, observation, arguments)
     return selected_bridge, None, observation_payload, observation, action_suggestions
 

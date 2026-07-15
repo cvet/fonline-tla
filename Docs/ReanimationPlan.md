@@ -110,7 +110,7 @@ parameterized `SOAK` profile (§2.2) is the single definition of "soak clean" re
 | G4 | **Engine unit tests** | `Launch :: TLA_UnitTests` | 296/296 PASS | native/engine-facing changes, engine bumps |
 | G5 | **Headless startup, 0 exceptions** | `Prepare :: TLA_ServerHeadless` then run `--ApplySubConfig LocalTest` | exactly one `"Start server complete!"`; 0 `EntitySyncException`/`Assertion`/`Fatal`. (The extended `SOAK` profile, §2.2, is the CI-side form.) | any server-side behavior change |
 | G6 | **Script quality ratchet** | `Analyze :: Script Quality (Ratchet)` → `validate_scripts.py --ratchet` | no (check,file) pair above `Tools/ScriptQuality/baseline.json` | every `Scripts/*.fos` change |
-| G7 | **Nullable markers & placement** | `Analyze :: Nullable Markers (Scripts/Engine)` + `validate_nullable.py` | exact, no errors | every `?`/`FO_NULLABLE`-touching change |
+| G7 | **Nullable contracts & native ABI** | `Analyze :: Nullable All` (`validate_nullable.py` plus focused tests/analyzers) | exact, no errors | every `?`/`ptr<T>`/`nptr<T>`-touching change |
 | G8 | **Formatting** | `Format :: All` (or `:: Scripts`/`:: Prototypes`/`:: Main Config`) | no dirty files after format | before handoff |
 | G9 | **Quest regression suite** | `tla_quest_runner.py` over the verified set | all green specs still green | content/script/dialog changes; nightly |
 
@@ -135,7 +135,7 @@ tier from the change class; the inner loop (§5.1) references these tiers.
 | Tier | Change class | Required gates (inner loop) | Notes |
 |------|--------------|-----------------------------|-------|
 | **T0** | Pure spec/data edit — `tla_quest_runner` specs, `catalog.yaml`, `quest_critical_path.json`, doc-only, no `.fos`/native/content change | **G9** (quest regression) only | No compile/bake needed; the spec change *is* the test. |
-| **T1** | Comment / header / format-only refactor in `.fos` (no behavior, no symbol rename, no `///@` move) | **G1** compile + **G6** ScriptQuality ratchet + **G8** format (+ **G7** if any `?`/`FO_NULLABLE` touched) | No bake, no headless — behavior is provably unchanged. |
+| **T1** | Comment / header / format-only refactor in `.fos` (no behavior, no symbol rename, no `///@` move) | **G1** compile + **G6** ScriptQuality ratchet + **G8** format (+ **G7** if any nullable contract is touched) | No bake, no headless — behavior is provably unchanged. |
 | **T2** | Behavior change, symbol rename, `///@ Property`/contract move, content edit, native change | **Full G-set** applicable to the surface: G1→G2→G3→(G4 if native/engine)→G5 headless→G6→G7→G8→G9 | The only tier that runs bake + headless in the inner loop. |
 
 **Incremental-bake fast path.** Default to incremental `Bake Resources` in the inner loop. Reserve
@@ -564,7 +564,7 @@ The automated run resumes across sessions by reading the progress log and the da
                English contracts. Never bulk-delete commented code.
 4. VERIFY    — run the TIER's gate set (§2.1), not blindly all of G1–G9:
                  T0 → G9 only.
-                 T1 → G1 compile + G6 ratchet + G8 format (+ G7 if ?/FO_NULLABLE touched).
+                 T1 → G1 compile + G6 ratchet + G8 format (+ G7 if a nullable contract is touched).
                  T2 → G1 → G2 incremental bake (Force Bake only if a ///@ Property moved) → G3 →
                       G5 headless (if server behavior) → G6 → G7 → G8 → G9.
                Expensive gates (full bake, SOAK, G4 unit tests unless native) run in CI, not here.
@@ -867,11 +867,11 @@ The standing gates (G1–G9) remain green at all times throughout — that is th
   pending); **subsumed** by Track D here.
 - [Docs/ScriptStyle.md](ScriptStyle.md) — headers, Russian comments, structure, idioms, formatting.
 - [Docs/AiControl.md](AiControl.md) — AI control bridge protocol, commands, observation, verified quests.
-- [Docs/Nullability.md / Nullability.md](../Nullability.md) — `T?`/`FO_NULLABLE` strong-nullable rules.
+- [Docs/Nullability.md / Nullability.md](../Nullability.md) — script `T?` and native `ptr<T>`/`nptr<T>` strong-nullable rules.
 - `Tools/AiControlMcp/` — bridge MCP adapter, `tla_quest_runner.py`, `tla_mechanics_playtest.py`,
   `smoke_ai_control_mcp.py` (+ planned `tla_batch_quest_runner.py`, `aggregate_quest_results.py`).
 - `Tools/ScriptQuality/` — `validate_scripts.py`, `baseline.json` (`--ratchet`/`--fix`), `render_audit.py`.
-- `Tools/NullableEstimate/` — `validate_nullable.py`, `apply_nullables.py`, `apply_native_nullable.py`.
+- `Tools/NullableEstimate/` — `validate_nullable.py`, its focused unit tests, and the script-side nullable analyzers.
 - `.vscode/tasks.json` — authoritative build/bake/format/launch/analyze tasks.
 - `Build/_audit/` — per-module audit docs + `progress.md`; `Build/_artifacts/` — test reports/screenshots.
 - `H:/lf-30` (and active `lf-NN` sibling) — migration reference on the same engine.

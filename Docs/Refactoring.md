@@ -432,3 +432,109 @@ the same three owner-decision `TransferToMap` warnings.
 **14/14**, and the new script-quality validator units completed **4/4**. A fresh live DialogBox cancel plus the Silo
 transition completed with no server/client exception, null, sync, assertion, or error markers. Not committed (owner
 reviews).
+
+## Latest Engine compatibility bump (2026-07-13)
+
+The Engine submodule was fast-forwarded by 15 upstream commits from `67ee893ae721d149cd44ff314abd8036adfd3821`
+to the current `origin/master`, `0bdb06bb59fef02b58496ef89105f66d7a243f32`. The range contains the smart-pointer
+and exception-safety refactors, nullable `ItemStatic` marshalling, resource-pack glob filters, finite-float/font
+changes, and the additive `OnCritterPreLoad` lifecycle event.
+
+TLA's native script boundary now follows the new borrow-wrapper ABI. Export receivers and dialog accessors use
+`ptr<T>`/`nptr<T>`; dialog `FindFunc`/`CheckFunc` signatures preserve a non-null actor and nullable talker; and the
+three `SafeAlloc::MakeRaw` ownership hand-offs use `make_unique_del_ptr` (with `reinterpret_as<uint8_t>` for opaque
+engine user data). Internal raw pointers that do not cross the script ABI remain unchanged. The nullable validator
+was extended with focused tests so these forbidden raw script-boundary pointers fail before CMake code generation.
+
+All 25 TLA `[[ItemStatic]]` callbacks now expose the engine's exact
+`bool(Critter, StaticItem, Item?, any)` contract. The mining entrypoint narrows the nullable item before calling its
+non-null tool helper; callbacks that do not consume an item retain their behavior. `CompileAngelScript` alone does
+not validate this attribute signature, so the baker and a dedicated static quality check are part of the gate.
+
+Resource packs were migrated from the removed `RecursiveInput` setting. Directories are recursive in the new
+engine, while `Metadata` and `Scripts` use `IncludePatterns = *` to preserve their former top-level-only behavior
+and avoid mounting `Scripts/Json` twice. `OnCritterPreLoad` needs no TLA subscriber for this bump; existing
+`OnCritterInit` handlers were deliberately left in place because several require an attached map/world.
+
+Persistent-login testing exposed two strict-sync regressions that the compile/bake gates could not see. TLA's
+`PlayerLogin` is now async and preserves the complete `player + optional unloginedPlayer + main critter + map +
+location` cover while loading or switching the controlled critter; the map/location links are revalidated after
+each replacement `Game.Sync`. This fixes login after the previous client has disconnected and the main critter
+must be loaded or rebound.
+
+The simultaneous reconnect path also exposed an upstream Engine gap after `OnPlayerLogin`: native
+`SendCritterInitialInfo` ran with only the two login players covered, so a controlled critter on a local map failed
+on the first map access. The local Engine follow-up preserves both login entities for rollback, acquires the
+critter/map/location chain in two validated stages, bounds topology retries, and delays destruction of the
+displaced login entity until the new player job is scheduled. A focused `PlayerRegistrationCppApi` regression
+covers this exact live-player/local-map reconnect.
+
+**Verification:** Compile AngelScript and the build-hash-triggered full bake passed (**550 maps**), followed by
+`TLA_Server`, `TLA_ServerHeadless`, `TLA_Client`, and `TLA_UnitTests` builds. The full native suite exited **0**;
+its focused reconnect case passed **144 assertions**, and the full run passed **355538 assertions in 335 test
+cases**. The live script harness completed **62/62**; MCP discovery completed **90/90** and both static and live
+bridge smokes passed. Script-quality and nullable gates passed, and the scenery scan remained at **0 errors**
+with the same three owner-decision warnings. A standalone DirectX client registered `EngBot7`, entered and
+QA-transferred to Arroyo, reached a real dialog, and passed the seven parameterless GUI screenshot oracles plus
+`SkillBox` and safe-cancel `DialogBox` (**9/9** captures). A second persisted session verified disconnected
+relogin for `LiveBot7`, while a fresh `GreenBot7` session verified online-client replacement, observation, and
+movement; the post-relogin GUI matrix passed another **7/7** content oracles without server/client sync or
+exception markers. Reports are under
+`Workspace/AiControlScreenshots/engine-bump-20260713` and
+`Workspace/AiControlScreenshots/engine-bump-context-20260713`, with reconnect reports and captures under
+`Workspace/AiControlScreenshots/engine-bump-relogin-20260713`. Not committed (owner reviews).
+
+## Latest Engine updater cutover follow-up (2026-07-15)
+
+The Engine submodule was fast-forwarded by another 16 upstream commits from
+`0bdb06bb59fef02b58496ef89105f66d7a243f32` to the current `origin/master`,
+`2f4fc0adfdabf71316f087bf36ceb6baf49c81da`. The functional range through `1bcf6e101` completes the
+smart-pointer refactor, hardens AngelScript synchronization and deferred `ScriptFunc` return cleanup,
+synchronizes the player argument for inbound server RPCs, updates movement call sites to the implicit borrow
+form, and replaces the client updater bootstrap with the host/runtime selector. It also raises the forced
+migration version to `0.0.30`; the final `2f4fc0adf` commit only strengthens an upstream test. No TLA-facing
+script API, hook, event, setting, CMake, or native export signature changed. The resulting TLA compatibility hash
+is `93b603081c433c36`.
+
+Two local Engine synchronization fixes remain necessary. Reconnect now acquires and stabilizes the complete
+player/unlogged-player/critter/map/location cover before controlled-critter initial state is sent, while keeping
+the displaced player alive until the login can no longer roll back. `LoadCritter` now restores and stabilizes the
+critter/map/location cover after the re-entrant `OnCritterInit` callback before processing visible critters and
+items; it also stops cleanly if the critter is destroyed while the cover is being rebuilt. Both paths have focused
+lifecycle regressions in `Test_EntityLifecycle.cpp`.
+
+On the game side, newly registered player critters are now explicitly persistent. Previously their only
+persistence came from map attachment, so offline unload removed that implicit flag and deleted the critter
+document before a later login. Strict synchronization exposed four additional reconnect boundaries: dynamic
+`KnownLocations` serialization, global-map group movement data, replication transfer/map-location access, and
+the `PlayerLogin`/`SwitchCritter` chain. These paths now preserve the caller cover, lock the complete dependent
+entity set, and reacquire it after re-entrant transfers or switches.
+
+The updater change is an intentional deployment cutover: `FO_UPDATER_VERSION` is now 2 and the client runtime
+host ABI is now 3. The Windows build therefore includes both `TLA_Client.exe` and the separately built
+`TLA_Client.dll`; the host accepted DLL build hash `586344806a74f05a03ddcc9c785a5dbcb1c9b1bc` with matching
+compatibility and ABI 3 metadata. Generation-1 clients are rejected before `InitData`, and an ABI-2 host cannot
+load the ABI-3 runtime, so this engine version must be shipped as a complete client package and existing
+installations require a one-time manual replacement rather than an in-place self-update.
+
+**Verification:** Compile AngelScript passed; ForceBake rebuilt **550 maps**; `TLA_Server`,
+`TLA_ServerHeadless`, `TLA_Client`, `TLA_ClientLib`, and `TLA_UnitTests` built. Focused reconnect, runtime-ABI,
+handshake, update-list, and obsolete-updater rejection tests passed **308 assertions in 5 test cases**; the final
+lifecycle and registration regressions independently passed **219** and **158 assertions**. The exact final full
+native suite passed **355727 assertions in 341 test cases** and exited **0** in **246.624 s**. The live script
+harness completed **62/62**; script-quality, nullable, and content gates remained green; MCP tests passed
+**96/96**; and the scenery scan remained at **0 errors** with the same three owner-decision warnings.
+
+The MCP navigation adapter now normalizes TLA's flat `hexX` / `hexY` observations and lets both navigation plan
+and safe-step queries fall back from unsupported `tactical_path` to `path` without hiding other query failures.
+A standalone client registered `Persist10`, moved, disconnected, survived offline unload, then logged into the
+same critter, observed the restored map, passed reachability, and moved again without sync, exception, assertion,
+or missing-document markers. Reports and preserved logs are under
+`Workspace/AiControlScreenshots/engine-2f4f-20260715/persistence-final`. The seven parameterless GUI screenshot
+oracles plus `SkillBox` and safe-cancel `DialogBox` remain green under
+`Workspace/AiControlScreenshots/engine-1bcf-20260715`; the only later upstream commit is test-only.
+
+The Windows installed-client staged restart and Linux runtime DSO paths remain release/CI checks. Registration
+still has a same-name race between parallel requests, and a failed post-creation login can leave an orphaned
+persistent critter; those need a transactional follow-up. The local Engine fixes and game changes are intentionally
+left uncommitted for owner review.

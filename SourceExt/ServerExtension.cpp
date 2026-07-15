@@ -69,7 +69,7 @@ void FO_NAMESPACE ServerInitHook(ptr<ServerEngine> server)
 {
     FO_STACK_TRACE_ENTRY();
 
-    server->UserData = unique_del_ptr<uint8_t>(reinterpret_cast<uint8_t*>(SafeAlloc::MakeRaw<ServerExtData>()), [](const uint8_t* ptr) FO_DEFERRED {
+    server->UserData = make_unique_del_ptr(SafeAlloc::MakeRaw<ServerExtData>().reinterpret_as<uint8_t>(), [](const uint8_t* ptr) FO_DEFERRED {
         const auto* ext_data_ptr = reinterpret_cast<const ServerExtData*>(ptr);
         delete ext_data_ptr;
     });
@@ -281,10 +281,10 @@ string FO_NAMESPACE Server_Game_RunSpeechScript(ptr<ServerEngine> server, ptr<Di
     if (speech->DlgScriptFuncName) {
         bool failed = false;
 
-        if (auto func = server->FindFunc<void, Critter*, Critter*, string&>(speech->DlgScriptFuncName); func && !func.Call(cr.get(), talker.get(), textArgs)) {
+        if (auto func = server->FindFunc<void, ptr<Critter>, nptr<Critter>, string&>(speech->DlgScriptFuncName); func && !func.Call(cr, talker, textArgs)) {
             failed = true;
         }
-        if (auto func = server->FindFunc<uint32_t, Critter*, Critter*, string&>(speech->DlgScriptFuncName); func && !func.Call(cr.get(), talker.get(), textArgs)) {
+        if (auto func = server->FindFunc<uint32_t, ptr<Critter>, nptr<Critter>, string&>(speech->DlgScriptFuncName); func && !func.Call(cr, talker, textArgs)) {
             failed = true;
         }
 
@@ -302,12 +302,12 @@ bool FO_NAMESPACE Server_Game_DialogScriptDemand(ptr<ServerEngine> server, ptr<D
 
     ServerEngine* server_ptr = server.get();
     DialogAnswerReq* demand_ptr = demand.get();
-    Critter* master_ptr = master.get();
-    Critter* slave_ptr = slave.get();
+    const auto master_arg = master;
+    const auto slave_arg = slave;
 
-    const auto call_demand = [server_ptr, demand_ptr, master_ptr, slave_ptr]<typename... TArgs>(const TArgs&... args) -> bool {
-        auto func = server_ptr->FindFunc<bool, Critter*, Critter*, TArgs...>(demand_ptr->AnswerScriptFuncName);
-        return func && func.HasAttribute("DialogDemand") && func.Call(master_ptr, slave_ptr, args...) && func.GetResult();
+    const auto call_demand = [server_ptr, demand_ptr, master_arg, slave_arg]<typename... TArgs>(const TArgs&... args) -> bool {
+        auto func = server_ptr->FindFunc<bool, ptr<Critter>, nptr<Critter>, TArgs...>(demand_ptr->AnswerScriptFuncName);
+        return func && func.HasAttribute("DialogDemand") && func.Call(master_arg, slave_arg, args...) && func.GetResult();
     };
 
     switch (demand->ValuesCount) {
@@ -334,22 +334,22 @@ int32_t FO_NAMESPACE Server_Game_DialogScriptResult(ptr<ServerEngine> server, pt
 
     ServerEngine* server_ptr = server.get();
     DialogAnswerReq* result_ptr = result.get();
-    Critter* master_ptr = master.get();
-    Critter* slave_ptr = slave.get();
+    const auto master_arg = master;
+    const auto slave_arg = slave;
 
-    const auto call_result_int = [server_ptr, result_ptr, master_ptr, slave_ptr]<typename... TArgs>(const TArgs&... args) -> optional<int32_t> {
-        auto func = server_ptr->FindFunc<int32_t, Critter*, Critter*, TArgs...>(result_ptr->AnswerScriptFuncName);
+    const auto call_result_int = [server_ptr, result_ptr, master_arg, slave_arg]<typename... TArgs>(const TArgs&... args) -> optional<int32_t> {
+        auto func = server_ptr->FindFunc<int32_t, ptr<Critter>, nptr<Critter>, TArgs...>(result_ptr->AnswerScriptFuncName);
 
-        if (func && func.HasAttribute("DialogResult") && func.Call(master_ptr, slave_ptr, args...)) {
+        if (func && func.HasAttribute("DialogResult") && func.Call(master_arg, slave_arg, args...)) {
             return func.GetResult();
         }
 
         return std::nullopt;
     };
 
-    const auto call_result_void = [server_ptr, result_ptr, master_ptr, slave_ptr]<typename... TArgs>(const TArgs&... args) -> bool {
-        auto func = server_ptr->FindFunc<void, Critter*, Critter*, TArgs...>(result_ptr->AnswerScriptFuncName);
-        return func && func.HasAttribute("DialogResult") && func.Call(master_ptr, slave_ptr, args...);
+    const auto call_result_void = [server_ptr, result_ptr, master_arg, slave_arg]<typename... TArgs>(const TArgs&... args) -> bool {
+        auto func = server_ptr->FindFunc<void, ptr<Critter>, nptr<Critter>, TArgs...>(result_ptr->AnswerScriptFuncName);
+        return func && func.HasAttribute("DialogResult") && func.Call(master_arg, slave_arg, args...);
     };
 
     switch (result->ValuesCount) {

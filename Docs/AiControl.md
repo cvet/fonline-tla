@@ -229,6 +229,13 @@ Core MCP tools include `tla_ping`, `tla_status`, `tla_observe`, `tla_step`, `tla
 tools were carried over from the sibling project and still assume sibling-project content; treat them as
 provisional until adapted to TLA content.
 
+TLA observations expose map positions as flat `hexX` / `hexY` fields. The navigation adapter normalizes those
+fields to its generic `hex: {x, y}` shape for the chosen critter, visible critters, and map items before planning.
+The current TLA bridge implements `path`, but not the sibling project's `tactical_path` query. `tla_nav_plan` and
+`tla_find_safe_step` therefore fall back to `path` only when the bridge explicitly reports
+`unknown_environment_query` or `unsupported_environment_query`; the result records `queryFallback`, while every
+other environment-query failure is returned unchanged.
+
 ### Verified engine screenshots
 
 `tla_save_screenshot` captures the composed render target (world plus GUI). Use a standalone graphical client for

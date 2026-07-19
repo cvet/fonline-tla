@@ -33,7 +33,8 @@ EventResult NpcPlaneBegin(Critter npc, int planeId, int reason, Critter someCr, 
 {
     NpcPlanes::NpcPlane? plane = NpcPlanes::GetCritterPlane(npc, planeId);
 
-    return EventResult::StopChain;
+    // ContinueChain — план разрешён, StopChain — вето
+    return EventResult::ContinueChain;
 }
 
 // Вызывается при завершении плана.
@@ -655,7 +656,8 @@ bool CogitateFiring(Critter cr, ident targetId, int& mode, int& aim)
             }
             else {
                 // Messaging::Say(cr, "Second mode available");
-                if (ValidateBurst(cr, target, weapon, mode)) {
+                // Проверяем именно режим очереди (1), к которому переключаемся, а не одиночный (mode==0)
+                if (ValidateBurst(cr, target, weapon, 1)) {
                     // Messaging::Say(cr, "Burst forced by check");
                     forceBurst = true;
                     mode = 1;
@@ -729,21 +731,24 @@ int ChooseAim(Critter cr, Critter target, Item? weapon, int mode, ProtoItem ammo
     val[5] = aps <= maxap ? 1300 * Math::Clamp(th, 5, 95) : 0;
     val[5] /= aps;
 
-    // ищем лучший выстрел, с шансом 1/3 берём второй по ценности
-    int max = 0, next = 0;
+    // ищем лучший выстрел, с шансом 1/3 берём второй по ценности.
+    // next ищем отдельным проходом среди всех зон, КРОМЕ выбранной max, иначе он всегда
+    // сходился к самому max и «второй по ценности» никогда не выбирался. Сентинел -1 — «не найден».
+    int max = 0;
     for (int i = 1; i < 6; i++) {
         if (val[i] >= val[max]) {
             max = i;
         }
     }
 
-    for (int i = 1; i < 6; i++) {
-        if (val[i] >= val[next] && val[next] < val[max]) {
+    int next = -1;
+    for (int i = 0; i < 6; i++) {
+        if (i != max && (next == -1 || val[i] >= val[next])) {
             next = i;
         }
     }
 
-    if (Game.Random(0, 2) == 2) {
+    if (next != -1 && Game.Random(0, 2) == 2) {
         max = next;
     }
 
@@ -798,17 +803,24 @@ class CTraceFirstCritter : LineTracer::ITraceContext
             return true;
         }
 
-        Critter? cr = map.GetCritterOnHex(hex);
-        if (cr != null) {
-            Cr = Game.GetCritter(cr.Id);
+        Critter? onHex = map.GetCritterOnHex(hex);
+        if (onHex == null) {
+            return false;
         }
 
-        Critter? found = Cr;
+        Critter? found = Game.GetCritter(onHex.Id);
         if (found == null) {
             return false;
         }
 
-        return found.Condition == CritterCondition::Alive && Game.GetDistance(GHex, found.Hex) >= MinDist;
+        // Публикуем критера только если он прошёл проверку: иначе Cr «залипал» на отвергнутом
+        // (труп/слишком близко) и возвращался как блокирующий, когда дальше подходящего нет
+        if (found.Condition == CritterCondition::Alive && Game.GetDistance(GHex, found.Hex) >= MinDist) {
+            Cr = found;
+            return true;
+        }
+
+        return false;
     }
 
     void StartExec(Map map, mpos hexFrom, mpos hexTo, int maxDist) override

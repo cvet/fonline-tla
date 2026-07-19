@@ -93,28 +93,28 @@ void AddStartKnownLocation(Location[] & locations, Entity[] & syncCover, Locatio
     AddStartLocationSyncEntity(syncCover, loc);
 }
 
-// Перенос при создании и загрузке криттера вызывается из ре-энтрантного init-события. Сохраняем
-// его покрытие и одним набором блокируем криттера, карту репликатора и все изменяемые известные локации.
+// Перенос вызывается после возврата CreateCritter/LoadCritter. Сохраняем покрытие вызывающего
+// и одним набором блокируем криттера, карту репликатора и все изменяемые известные локации.
 [[Async]]
-void SetStartLocation(Critter cr)
+bool SetStartLocation(Critter cr)
 {
     Map? replicator = GetStartReplicatorMap();
     if (replicator == null) {
-        return;
+        return false;
     }
 
-    Entity[] syncCover = Sync::Snapshot();
-    AddStartLocationSyncEntity(syncCover, cr);
+    Entity[] syncCover = Sync::SurvivingSnapshot();
     AddStartLocationSyncEntity(syncCover, replicator);
-    if (!Sync::Lock(syncCover)) {
-        return;
+    if (!Sync::LockCritterWithMapAndLocation(cr, syncCover)) {
+        return false;
     }
+    syncCover = Sync::Snapshot();
 
     Location replicatorLocation = replicator.GetLocation();
     Location[] knownLocations = {};
     AddStartKnownLocation(knownLocations, syncCover, replicatorLocation);
     if (!Sync::Lock(syncCover) || replicator.GetLocation() !is replicatorLocation) {
-        return;
+        return false;
     }
 
     AddStartKnownLocation(knownLocations, syncCover, Game.GetLocation(Content::Location::replication_hell));
@@ -137,7 +137,7 @@ void SetStartLocation(Critter cr)
     }
 
     if (!Sync::Lock(syncCover) || replicator.GetLocation() !is replicatorLocation) {
-        return;
+        return false;
     }
 
     // Полностью закрываем туманом область вокруг стартовой позиции игрока
@@ -156,8 +156,8 @@ void SetStartLocation(Critter cr)
     bool transferred = Entrance::CritterTransferToMapEntry(cr, replicator.Id, Tla::ENTRY_REPLICATION);
 
     // TransferToMap запускает вложенные события, которые могут заменить набор Game.Sync.
-    if (!Sync::Lock(syncCover) || (transferred && (cr.MapId != replicator.Id || cr.GetMap() !is replicator)) || replicator.GetLocation() !is replicatorLocation) {
-        return;
+    if (!transferred || !Sync::Lock(syncCover) || cr.MapId != replicator.Id || cr.GetMap() !is replicator || replicator.GetLocation() !is replicatorLocation) {
+        return false;
     }
 
     for (int i = 0; i < knownLocations.length(); i++) {
@@ -175,6 +175,7 @@ void SetStartLocation(Critter cr)
     GlobalMapFog::SetFog(cr, zoneX - 1, zoneY + 1, GlobalMapFog::GM_FOG_HALF);
     GlobalMapFog::SetFog(cr, zoneX, zoneY + 1, GlobalMapFog::GM_FOG_HALF);
     GlobalMapFog::SetFog(cr, zoneX + 1, zoneY + 1, GlobalMapFog::GM_FOG_HALF);
+    return true;
 }
 
 void SetReplicationTime(Critter cr)
@@ -213,10 +214,12 @@ void ReplicateCritter(Critter cr)
     if (cars.length() > 0) {
         // Переносим на случайную встречу (энкаунтер)
         bool transferred = false;
-        int encounterDescriptor = int(-1);
+        // Признак «встречи нет» у FindEncounter — ноль, а не -1: со старой проверкой
+        // InviteToEncounter вызывался с пустым дескриптором
+        int encounterDescriptor = 0;
         bool waitForAnswer = false;
         Worldmap::FindEncounter(GlobalmapGroupExtended::GetGlobalGroup(cr), cars[0], cr.WorldPos.x, cr.WorldPos.y, encounterDescriptor, waitForAnswer, true);
-        if (encounterDescriptor != int(-1)) {
+        if (encounterDescriptor != 0) {
             ident mapId;
             uint8 dir = 0;
             Worldmap::InviteToEncounter(GlobalmapGroupExtended::GetGlobalGroup(cr), cars[0], encounterDescriptor, 0, mapId, hex, dir);
@@ -288,23 +291,25 @@ void ReplicateCritter(Critter cr)
             Map? dropMap = cr.GetMap();
             Item[] items = cr.GetItems();
 
-            // Скрытые предметы не роняем, а gag-предметы (мешки с песком) удаляем
+            // Скрытые предметы не роняем, а gag-предметы (мешки с песком) удаляем.
+            // Собираем отдельный список: и MoveItems, и DestroyItems разыменовывают элементы без проверки,
+            // поэтому запись null в исходный массив приводила к обращению по нулевой ссылке
+            Item[] toDrop = {};
             for (int i = 0; i < items.length(); i++) {
                 if (items[i].IsGag) {
                     Game.DestroyItem(items[i]);
-                    items[i] = null;
                 }
-                else if (items[i].Hidden) {
-                    items[i] = null;
+                else if (!items[i].Hidden) {
+                    toDrop.insertLast(items[i]);
                 }
             }
 
             // Роняем предметы на землю
             if (dropMap != null) {
-                ItemMovement::MoveItems(items, dropMap, cr.Hex);
+                ItemMovement::MoveItems(toDrop, dropMap, cr.Hex);
             }
             else {
-                Game.DestroyItems(items);
+                Game.DestroyItems(toDrop);
             }
         }
 

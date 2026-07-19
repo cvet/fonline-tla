@@ -20,14 +20,14 @@ const int GM_FOG_NONE = 3;
 // Возвращает степень тумана зоны (x, y) для криттера; за пределами карты зона считается полностью закрытой.
 int GetFog(Critter cr, int x, int y)
 {
-    if (x >= Settings.GlobalMap.GlobalMapWidth || y >= Settings.GlobalMap.GlobalMapHeight) {
+    if (x < 0 || y < 0 || x >= Settings.GlobalMap.GlobalMapWidth || y >= Settings.GlobalMap.GlobalMapHeight) {
         return GM_FOG_FULL;
     }
 
     auto offsetx = x * 2;
-    auto mask = cr.GlobalMapFog.get(y, 0);
+    int64 mask = cr.GlobalMapFog.get(y, 0);
     auto value = (mask >> offsetx) & 3;
-    return value;
+    return int(value);
 }
 
 #if SERVER
@@ -40,13 +40,17 @@ void SetFog(Critter cr, int x, int y, int value)
     }
 
     auto data = cr.GlobalMapFog.clone();
-    if (x >= Settings.GlobalMap.GlobalMapWidth || y >= Settings.GlobalMap.GlobalMapHeight) {
+    if (x < 0 || y < 0 || x >= Settings.GlobalMap.GlobalMapWidth || y >= Settings.GlobalMap.GlobalMapHeight) {
         return;
     }
 
+    // Сдвиг обязан быть 64-битным: ширина карты 28, offsetx доходит до 54, а 32-битный сдвиг
+    // (литерал int слева) заворачивался и портил туман дальних столбцов
     auto offsetx = x * 2;
-    auto mask = data.get(y, 0);
-    data[y] = (mask & ~(3 << offsetx)) | (value << offsetx);
+    int64 mask = data.get(y, 0);
+    int64 bits = 3;
+    int64 v = value;
+    data[y] = (mask & ~(bits << offsetx)) | (v << offsetx);
     cr.GlobalMapFog = data;
 }
 

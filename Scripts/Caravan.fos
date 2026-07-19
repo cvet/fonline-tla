@@ -361,7 +361,9 @@ class CaravanLootItem
     // признак, появилось или нет в этот раз
     bool IsAppear()
     {
-        return Game.Random(1, 100) < int(ItemAppearChance);
+        // Диапазон Random включает границы, поэтому сравнение нестрогое:
+        // со строгим шанс 100 давал 99%, а шанс 1 не срабатывал никогда
+        return Game.Random(1, 100) <= int(ItemAppearChance);
     }
 };
 
@@ -3031,41 +3033,42 @@ void FindCabPlace(Map map, int maxCabs, mpos[] hexes)
     int oY2 = 0;
 
     mpos hex, hex1, hex2;
-    // i - индекс номер гекса в массиве entries
-    // j = индекс гекса среди найденных на карте
+    // j - индекс номера гекса в массиве entries
+    // i - индекс гекса среди найденных на карте для текущего номера
     // l - число гексов данного номера
-    // ents - число номеров гекса в массиве entries
-    // tries - число попыток найти место для кабов
-    for (int i = 0, j = 0, tries = 0, l = Entrance::MapCountEntry(map, entries[j]), ents = entries.length(); i < l && j < ents && tries < 30; i++) {
-        tries++;
-        if (Entrance::MapGetEntryCoords(map, entries[j], i, hex)) {
-            // координаты гекса нашли
-            // находим позицию в половинном расстоянии
-            oX1 = int(hex.x - (MIN_DIST_CABS_DIST / 2));                               // смещение по оси х на запад
-            oY1 = int(hex.y + (MIN_DIST_CABS_DIST / 2) * (1 - Game.Random(0, 1) * 2)); // смещение по оси y на юг или на север
-            hex1 = mpos(oX1, oY1);
-            if (Entrance::GetFreeHex(map, 1, hex1)) {
-                // считаем, что первая точка найдена
-                oX2 = int(hex.x + (MIN_DIST_CABS_DIST / 2));                               // смещение по оси х на запад
-                oY2 = int(hex.y + (MIN_DIST_CABS_DIST / 2) * (1 - Game.Random(0, 1) * 2)); // смещение по оси y на юг или на север
-                hex2 = mpos(oX2, oY2);
-                if (Entrance::GetFreeHex(map, 1, hex2)) {
-                    // вторая точка тоже найдена
-                    // помещаем координаты в массивы
-                    hexes.insertLast(hex1);
-                    hexes.insertLast(hex2);
-                    if (maxCabs > 0 && hexes.length() > maxCabs) {
-                        break;
+    // tries - общий бюджет попыток на все номера
+    // Раньше границы цикла брались только по первому номеру: если гексов "243" на карте нет,
+    // то l == 0 и до 244 / "0" дело не доходило, а сброс i внутри тела вместе с i++ заголовка
+    // пропускал нулевой индекс у всех последующих номеров
+    int tries = 0;
+    bool enough = false;
+    for (int j = 0, ents = entries.length(); j < ents && tries < 30 && !enough; j++) {
+        int l = Entrance::MapCountEntry(map, entries[j]);
+        for (int i = 0; i < l && tries < 30; i++) {
+            tries++;
+            if (Entrance::MapGetEntryCoords(map, entries[j], i, hex)) {
+                // координаты гекса нашли
+                // находим позицию в половинном расстоянии
+                oX1 = int(hex.x - (MIN_DIST_CABS_DIST / 2));                               // смещение по оси х на запад
+                oY1 = int(hex.y + (MIN_DIST_CABS_DIST / 2) * (1 - Game.Random(0, 1) * 2)); // смещение по оси y на юг или на север
+                hex1 = mpos(oX1, oY1);
+                if (Entrance::GetFreeHex(map, 1, hex1)) {
+                    // считаем, что первая точка найдена
+                    oX2 = int(hex.x + (MIN_DIST_CABS_DIST / 2));                               // смещение по оси х на запад
+                    oY2 = int(hex.y + (MIN_DIST_CABS_DIST / 2) * (1 - Game.Random(0, 1) * 2)); // смещение по оси y на юг или на север
+                    hex2 = mpos(oX2, oY2);
+                    if (Entrance::GetFreeHex(map, 1, hex2)) {
+                        // вторая точка тоже найдена
+                        // помещаем координаты в массивы
+                        hexes.insertLast(hex1);
+                        hexes.insertLast(hex2);
+                        if (maxCabs > 0 && hexes.length() > maxCabs) {
+                            enough = true;
+                            break;
+                        }
                     }
                 }
             }
-        }
-
-        // к следующему номеру гексов, если на предыдушем не нашли ничего
-        if (i + 1 == l && j + 1 < ents) {
-            j++;
-            l = Entrance::MapCountEntry(map, entries[j]);
-            i = 0;
         }
     }
 }
@@ -3725,7 +3728,9 @@ bool IsFullPartyImpl(Critter player, Critter caravaneer)
         return true;
     }
 
-    return (ci.PlayersRequested.length() > ci.MaxPlayers);
+    // Партия полна уже при MaxPlayers заявок: с ">" записывался лишний игрок,
+    // которого затем молча отбрасывал StartCaravanImpl
+    return (ci.PlayersRequested.length() >= ci.MaxPlayers);
 }
 
 [[DialogDemand]]

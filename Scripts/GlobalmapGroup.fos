@@ -214,52 +214,79 @@ void OnGlobalMapCritterIn(Critter cr)
     }
 
     int tripId = cr.GlobalMapTripId;
-
+    bool createdGroup = false;
+    Game.Lock();
     if (!AllGlobalGroups.exists(tripId)) {
-        GlobalMapGroup group = GlobalMapGroup(cr);
+        AllGlobalGroups.set(tripId, GlobalMapGroup(cr));
+        createdGroup = true;
+    }
+    Game.Unlock();
 
-        AllGlobalGroups.set(tripId, group);
+    if (createdGroup) {
         GroupStartMove(cr);
     }
     else {
-        GlobalMapGroup group = AllGlobalGroups.get(tripId);
+        Critter[] members = {};
+        Entity[] groupCover = Sync::SurvivingSnapshot();
+        if (!LockGroupForMutation(cr, tripId, groupCover, members)) {
+            return;
+        }
 
-        group.CritMove.insertLast(cr);
+        Game.Lock();
+        if (AllGlobalGroups.exists(tripId)) {
+            GlobalMapGroup group = AllGlobalGroups.get(tripId);
+            if (SameCritterGroup(members, group.CritMove) && group.CritMove.findByRef(cr) == -1) {
+                group.CritMove.insertLast(cr);
+            }
+        }
+        Game.Unlock();
     }
 }
 
-[[Event]]
+[[Event]] [[Async]]
 void OnGlobalMapCritterOut(Critter cr)
 {
     int tripId = cr.GlobalMapTripId;
-    GlobalMapGroup group = AllGlobalGroups.get(tripId);
+    Critter[] members = {};
+    Entity[] groupCover = Sync::SurvivingSnapshot();
+    if (!LockGroupForMutation(cr, tripId, groupCover, members)) {
+        return;
+    }
 
-    int index = group.CritMove.findByRef(cr);
-    verify(index != -1, "Assertion failed");
-    group.CritMove.removeAt(index);
+    Game.Lock();
+    if (AllGlobalGroups.exists(tripId)) {
+        GlobalMapGroup group = AllGlobalGroups.get(tripId);
+        if (SameCritterGroup(members, group.CritMove)) {
+            int index = group.CritMove.findByRef(cr);
+            if (index != -1) {
+                group.CritMove.removeAt(index);
 
-    if (!group.CritMove.isEmpty()) {
-        if (cr.Id == group.Rule.Id) {
-            // Передаём лидерство криттеру с наибольшей харизмой
-            Critter newRule;
-            int maxCharisma = 0;
+                if (!group.CritMove.isEmpty()) {
+                    if (cr.Id == group.Rule.Id) {
+                        // Передаём лидерство криттеру с наибольшей харизмой
+                        Critter newRule;
+                        int maxCharisma = 0;
 
-            for (int i = 0; i < group.CritMove.length(); i++) {
-                Critter cr2 = group.CritMove[i];
-                int charisma = cr2.Charisma;
+                        for (int i = 0; i < group.CritMove.length(); i++) {
+                            Critter cr2 = group.CritMove[i];
+                            int charisma = cr2.Charisma;
 
-                if (maxCharisma == 0 || charisma > maxCharisma) {
-                    newRule = cr2;
-                    maxCharisma = charisma;
+                            if (maxCharisma == 0 || charisma > maxCharisma) {
+                                newRule = cr2;
+                                maxCharisma = charisma;
+                            }
+                        }
+
+                        group.Rule = newRule;
+                    }
+                }
+                else {
+                    AllGlobalGroups.remove(tripId);
                 }
             }
-
-            group.Rule = newRule;
         }
     }
-    else {
-        AllGlobalGroups.remove(tripId);
-    }
+    Game.Unlock();
 }
 
 // int processType    - см. события глобальной карты в _defines.fos;
@@ -868,6 +895,120 @@ GlobalMapGroup GetGlobalMapGroup(Critter cr)
     return AllGlobalGroups[tripId];
 }
 
+bool SameCritterGroup(Critter[] left, Critter[] right)
+{
+    if (left.length() != right.length()) {
+        return false;
+    }
+
+    for (int i = 0; i < left.length(); i++) {
+        if (left[i] !is right[i]) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+bool SnapshotCritterGroup(int tripId, Critter[] & members)
+{
+    Game.Lock();
+    bool exists = AllGlobalGroups.exists(tripId);
+    if (exists) {
+        members = AllGlobalGroups.get(tripId).CritMove.clone();
+    }
+    Game.Unlock();
+    return exists;
+}
+
+bool IsCritterGroupSnapshotCurrent(int tripId, Critter[] members)
+{
+    Game.Lock();
+    bool current = AllGlobalGroups.exists(tripId) && SameCritterGroup(members, AllGlobalGroups.get(tripId).CritMove);
+    Game.Unlock();
+    return current;
+}
+
+// Любое изменение CritMove захватывает прежний состав целиком. Поэтому стабилизированный набор,
+// подготовленный перед login/initial-info, не может измениться до выхода из движковой функции.
+[[Async]]
+bool LockGroupForMutation(Critter cr, int tripId, Entity[] baseCover, Critter[] & members)
+{
+    for (int attempt = 0; attempt < 16; attempt++) {
+        if (!SnapshotCritterGroup(tripId, members)) {
+            return false;
+        }
+
+        Entity[] groupCover = Sync::SurvivingEntities(baseCover);
+        Sync::AddUniqueEntity(groupCover, cr);
+        for (int i = 0; i < members.length(); i++) {
+            Sync::AddUniqueEntity(groupCover, members[i]);
+        }
+
+        if (!Sync::Lock(groupCover)) {
+            if (cr.IsDestroyed) {
+                return false;
+            }
+
+            continue;
+        }
+
+        if (int(cr.GlobalMapTripId) != tripId) {
+            return false;
+        }
+
+        if (IsCritterGroupSnapshotCurrent(tripId, members)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+// На локальной карте lock карты покрывает её дочерних криттеров. На глобальной карте общего
+// родителя нет, поэтому перед SendCritterInitialInfo/SwitchCritter явно блокируем всю группу.
+[[Async]]
+bool LockInitialInfoGroup(Critter cr, Entity[] baseCover)
+{
+    for (int attempt = 0; attempt < 16; attempt++) {
+        if (!Sync::LockCritterWithMapAndLocation(cr, baseCover)) {
+            return false;
+        }
+
+        if (cr.GetMap() != null) {
+            return true;
+        }
+
+        Critter[] members = {};
+        int tripId = int(cr.GlobalMapTripId);
+        if (!SnapshotCritterGroup(tripId, members)) {
+            return false;
+        }
+        Entity[] groupCover = Sync::Snapshot();
+        for (int i = 0; i < members.length(); i++) {
+            Sync::AddUniqueEntity(groupCover, members[i]);
+        }
+
+        if (!Sync::Lock(groupCover)) {
+            if (cr.IsDestroyed) {
+                return false;
+            }
+
+            continue;
+        }
+
+        if (cr.GetMap() != null) {
+            continue;
+        }
+
+        if (int(cr.GlobalMapTripId) == tripId && IsCritterGroupSnapshotCurrent(tripId, members)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
 // Начало движения группы на глобальной карте для лидера группы. Он может быть одним криттером в составе группы.
 void GroupStartMove(Critter cr)
 {
@@ -1096,7 +1237,8 @@ bool GroupToMap(GlobalMapGroup group, Map? map, hstring entry, mpos hexMap, int 
                 return false;
             }
 
-            Entrance::MapGetEntryCoords(map, Tla::ENTRY_CAR, entryNum, hex);
+            // car_hex и hex уже разрешены в цикле для выбранного entryNum: повторное чтение ENTRY_CAR
+            // затирало бы гекс высадки пассажиров гексом самой машины
             if (!map.CheckPlaceForItem(car_hex, car.ProtoId)) {
                 Messaging::Info(rule, TextPackKey(TextPackName::Game, "" + (MsgStr::STR_GLOBAL_CAR_PLACE_NOT_FOUND)));
                 return false;
@@ -1107,7 +1249,9 @@ bool GroupToMap(GlobalMapGroup group, Map? map, hstring entry, mpos hexMap, int 
             }
         }
         else {
-            if (!Entrance::GetEntryFreeHex(map, Tla::ENTRY_DEFAULT, hex)) {
+            // Используем вход, выбранный в GroupToLoc, а не ENTRY_DEFAULT, иначе группа всегда
+            // появляется у главных ворот независимо от выбранного входа
+            if (!Entrance::GetEntryFreeHex(map, entry, hex)) {
                 Messaging::Info(rule, TextPackKey(TextPackName::Game, "" + (MsgStr::STR_GLOBAL_PLACE_NOT_FOUND)));
                 return false;
             }
@@ -1232,7 +1376,8 @@ bool GroupToLoc(Critter rule, ident locId, int entrance, bool force = false) // 
         return false;
     }
 
-    if (entrance >= loc.MapEntrances.length()) {
+    // entrance — порядковый номер входа, а MapEntrances хранит по два элемента на вход
+    if (entrance < 0 || entrance >= int(loc.MapEntrances.length()) / 2) {
         Game.Log(" - Invalid entrance.");
         return false;
     }
@@ -1633,11 +1778,14 @@ void ProcessGlobalMapCommandImpl(Player player, int command, any param1, any par
 
         Game.Log("loc.MapEntrances " + loc.MapEntrances.length());
 
+        // MapEntrances — плоский массив пар (прототип карты, вход), поэтому порядковый номер входа это i / 2.
+        // Раньше в CheckEntrance уходил сырой индекс, и подписчики сверялись не с тем номером входа
         for (int i = 0; i < loc.MapEntrances.length(); i += 2) {
             Game.Log("Entrance " + i + " - " + loc.MapEntrances[i]);
             Game.Log("Entrance " + (i + 1) + " - " + loc.MapEntrances[i + 1]);
-            if (CheckEntrance(loc, group.CritMove, i)) {
-                allowedEntrances.insertLast(i / 2);
+            int entranceIndex = i / 2;
+            if (CheckEntrance(loc, group.CritMove, entranceIndex)) {
+                allowedEntrances.insertLast(entranceIndex);
             }
         }
 
@@ -1666,7 +1814,8 @@ void ProcessGlobalMapCommandImpl(Player player, int command, any param1, any par
 
         int entrance = param2;
 
-        if (entrance >= loc.MapEntrances.length()) {
+        // entrance — порядковый номер входа, а MapEntrances хранит по два элемента на вход
+        if (entrance < 0 || entrance >= int(loc.MapEntrances.length()) / 2) {
             break;
         }
 

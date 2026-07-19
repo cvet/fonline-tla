@@ -823,13 +823,14 @@ string GenericDescription(int descType, int& offsX, int& offsY)
     if (descType == GenericDescriptionsTypes::InventoryMain) {
         result += chosen.Name + "\n";
         result += "---------------------\n";
-        result += Game.GetText(TextPackKey(TextPackName::Game, "" + (MsgStr::InvShortSpecialTextId(CritterProperty::Strength)))) + "\n";
-        result += Game.GetText(TextPackKey(TextPackName::Game, "" + (MsgStr::InvShortSpecialTextId(CritterProperty::Perception)))) + "\n";
-        result += Game.GetText(TextPackKey(TextPackName::Game, "" + (MsgStr::InvShortSpecialTextId(CritterProperty::Endurance)))) + "\n";
-        result += Game.GetText(TextPackKey(TextPackName::Game, "" + (MsgStr::InvShortSpecialTextId(CritterProperty::Charisma)))) + "\n";
-        result += Game.GetText(TextPackKey(TextPackName::Game, "" + (MsgStr::InvShortSpecialTextId(CritterProperty::Intellect)))) + "\n";
-        result += Game.GetText(TextPackKey(TextPackName::Game, "" + (MsgStr::InvShortSpecialTextId(CritterProperty::Agility)))) + "\n";
-        result += Game.GetText(TextPackKey(TextPackName::Game, "" + (MsgStr::InvShortSpecialTextId(CritterProperty::Luck)))) + "\n";
+        // Двухтокенный хелпер вместо суммы хешей: иначе блок SPECIAL рисовался семью пустыми строками
+        result += MsgStr::GetInventoryShortSpecialText(CritterProperty::Strength) + "\n";
+        result += MsgStr::GetInventoryShortSpecialText(CritterProperty::Perception) + "\n";
+        result += MsgStr::GetInventoryShortSpecialText(CritterProperty::Endurance) + "\n";
+        result += MsgStr::GetInventoryShortSpecialText(CritterProperty::Charisma) + "\n";
+        result += MsgStr::GetInventoryShortSpecialText(CritterProperty::Intellect) + "\n";
+        result += MsgStr::GetInventoryShortSpecialText(CritterProperty::Agility) + "\n";
+        result += MsgStr::GetInventoryShortSpecialText(CritterProperty::Luck) + "\n";
         result += "---------------------\n";
 
         AbstractItem weaponMain = CritterItem::GetActive(chosen);
@@ -1073,11 +1074,14 @@ string ItemDescription(Item item, ItemLookTypes lookType)
     return result;
 }
 
-int GetTextNumUpperCompat(TextPackName textPack, uint strNum)
+// Эмуляция удалённого Game.GetTextNumUpper: первый существующий ключ СТРОГО БОЛЬШЕ strNum,
+// не выходя за endNum. Раньше цикл шёл ВНИЗ, что инвертировало смысл upper_bound (возраст
+// определялся на одну ступень моложе, а 14–15 лет попадали в чужой блок).
+int GetTextNumUpperCompat(TextPackName textPack, uint strNum, uint endNum)
 {
-    for (uint cur = strNum; cur != 0; cur--) {
+    for (uint cur = strNum + 1; cur <= endNum; cur++) {
         if (Game.IsTextPresent(TextPackKey(textPack, "" + (cur)))) {
-            return cur;
+            return int(cur);
         }
     }
 
@@ -1109,7 +1113,8 @@ string CritterDescription(Critter& cr, CritterLookTypes lookType)
             result += Game.GetText(TextPackKey(TextPackName::Game, "" + (MsgStr::CritLook1TextId(gender))));
 
             // Возраст
-            int ageStr = GetTextNumUpperCompat(TextPackName::Game, MsgStr::CritLookAgeTextId(gender, cr.Age));
+            // Верхняя граница — конец возрастного блока пола (11199 / 12199), чтобы не захватить чужие ключи
+            int ageStr = GetTextNumUpperCompat(TextPackName::Game, MsgStr::CritLookAgeTextId(gender, cr.Age), 11199 + gender * 1000);
             if (ageStr != 0) {
                 result += Game.GetText(TextPackKey(TextPackName::Game, "" + (ageStr)));
             }
@@ -1199,7 +1204,8 @@ string CritterDescription(Critter& cr, CritterLookTypes lookType)
         {
             result += Game.GetText(TextPackKey(TextPackName::Game, "" + (MsgStr::CritLookHpTextId(gender))));
             result = Game.ReplaceText(result, "CUR", cr.CurrentHp);
-            result = Game.ReplaceText(result, "Max", cr.MaxLife);
+            // В текст-паке плейсхолдер называется MAX (не Max) — иначе максимум HP не подставлялся
+            result = Game.ReplaceText(result, "MAX", cr.MaxLife);
 
             AbstractItem item = CritterItem::GetActive(cr);
             if (Tla::IsCritterInjured(cr)) {
@@ -1216,7 +1222,8 @@ string CritterDescription(Critter& cr, CritterLookTypes lookType)
                     result += Game.GetText(TextPackKey(TextPackName::Game, "" + (MsgStr::StrCritLookWeapAmmo)));
                     result = Game.ReplaceText(result, "WEAPON", Game.GetText(MsgStr::ItemNameKey(item)));
                     result = Game.ReplaceText(result, "CUR", item.AmmoCount);
-                    result = Game.ReplaceText(result, "Max", item.Weapon_MaxAmmoCount);
+                    // В текст-паке плейсхолдер называется MAX (не Max) — иначе максимум патронов не подставлялся
+                    result = Game.ReplaceText(result, "MAX", item.Weapon_MaxAmmoCount);
                     result = Game.ReplaceText(result, "AMMO", Game.GetText(TextPackKey(TextPackName::Game, "" + (MsgStr::CaliberTextId(item.Weapon_Caliber)))));
                 }
             }
@@ -1298,7 +1305,9 @@ void CritterAction(bool localCall, Critter cr, CritterAction action, int actionE
     }
 
     AbstractItem proto = (item != null ? item : CritterItem::GetActive(cr));
-    if ((action >= CritterAction::MoveItem && action <= CritterAction::OperateContainer) || action == CritterAction::StandUp) {
+    // Пауза касается только своего персонажа: без проверки IsChosen действие любого видимого
+    // критера ставило паузу локальному игроку и подвешивало его в бою/толпе
+    if (cr.IsChosen && ((action >= CritterAction::MoveItem && action <= CritterAction::OperateContainer) || action == CritterAction::StandUp)) {
         CurPlayer.ServerCall.Rpc_Wait(Settings.Movement.Breaktime);
     }
 

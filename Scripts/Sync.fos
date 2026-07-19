@@ -10,6 +10,17 @@ namespace Sync
 
 #if SERVER
 
+void AddUniqueEntity(Entity[] & entities, Entity entity)
+{
+    for (int i = 0; i < entities.length(); i++) {
+        if (entities[i] is entity) {
+            return;
+        }
+    }
+
+    entities.insertLast(entity);
+}
+
 // Game.Sync(...) — нативный примитив блокировки: он только захватывает локи, полностью заменяя набор
 // блокировок SyncContext ровно перечисленными сущностями. Возврата у него нет: если ожидание лока
 // прерывается остановкой сервера (после истечения окна дренажа Server.ShutdownGraceMs), он бросает
@@ -94,6 +105,25 @@ bool Lock(Entity[] entities)
 Entity[] Snapshot()
 {
     return Game.GetHeldSyncEntities();
+}
+
+Entity[] SurvivingEntities(Entity[] entities)
+{
+    Entity[] survivors = {};
+    for (int i = 0; i < entities.length(); i++) {
+        if (!entities[i].IsDestroyed) {
+            survivors.insertLast(entities[i]);
+        }
+    }
+
+    return survivors;
+}
+
+// Для rollback после исключения часть удерживаемых хэндлов уже может быть уничтожена. Такой снимок
+// сохраняет живое покрытие, но не передаёт destroyed-сущности в следующий Game.Sync.
+Entity[] SurvivingSnapshot()
+{
+    return SurvivingEntities(Snapshot());
 }
 
 [[Async]]
@@ -387,7 +417,7 @@ bool LockCritterWithMapAndLocation(Critter cr, Entity[] fixedEntities)
         }
 
         Entity[] critterCover = fixedEntities.clone();
-        critterCover.insertLast(cr);
+        AddUniqueEntity(critterCover, cr);
         if (!Lock(critterCover)) {
             return false;
         }
@@ -406,7 +436,7 @@ bool LockCritterWithMapAndLocation(Critter cr, Entity[] fixedEntities)
 
         // Ведущие сущности должны оставаться в каждом наборе: Game.Sync полностью заменяет покрытие.
         Entity[] mapCover = critterCover.clone();
-        mapCover.insertLast(map);
+        AddUniqueEntity(mapCover, map);
         if (!Lock(mapCover)) {
             continue;
         }
@@ -423,7 +453,7 @@ bool LockCritterWithMapAndLocation(Critter cr, Entity[] fixedEntities)
         ident locId = loc.Id;
 
         Entity[] locationCover = mapCover.clone();
-        locationCover.insertLast(loc);
+        AddUniqueEntity(locationCover, loc);
         if (!Lock(locationCover)) {
             continue;
         }

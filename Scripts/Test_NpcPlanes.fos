@@ -14,6 +14,8 @@ void InitTestNpcPlanes()
 void OnTestingInit()
 {
     Testing::RegisterTest("npc_planes", "drop_then_add", DropThenAdd);
+    Testing::RegisterTest("npc_planes", "add_plane_without_subscriber", AddPlaneWithoutSubscriber);
+    Testing::RegisterTest("npc_planes", "get_planes_null_out", GetPlanesNullOut);
 }
 
 bool FindMovableHex(Map map, mpos& hex)
@@ -77,6 +79,74 @@ void DropThenAdd(Testing::TestContext ctx)
     Testing::Expect(ctx,
                     storedPlanes != null && NpcPlanes::AllNpcPlanes.exists(npc.Id),
                     "AddPlane должен обработать старую null-запись без исключения и восстановить массив");
+}
+
+// У большинства нпц нет покриттерного обработчика OnNpcPlaneBegin. Движок на событии без
+// подписчиков возвращает ContinueChain, поэтому при трактовке ContinueChain как вето AddPlane
+// стирал только что добавленный план и такие нпц не получали планов вообще.
+[[Async]]
+void AddPlaneWithoutSubscriber(Testing::TestContext ctx)
+{
+    Location? loc = Testing::CreateTestLocation(ctx, Content::Location::desert_12);
+    if (loc == null) {
+        Testing::Fail(ctx, "Тестовая локация должна создаваться");
+        return;
+    }
+
+    Map map = loc.GetMapByIndex(0);
+    mpos hex;
+    if (!Testing::Expect(ctx, FindMovableHex(map, hex), "На тестовой карте должен найтись проходимый гекс")) {
+        return;
+    }
+
+    Critter? npc = Testing::SpawnTestNpc(ctx, map, Content::Critter::Brahmin, hex);
+    if (npc == null) {
+        Testing::Fail(ctx, "NPC должен создаваться");
+        return;
+    }
+
+    NpcPlanes::DropPlanes(npc);
+
+    NpcPlanes::NpcPlane plane = NpcPlanes::CreatePlane();
+    bool added = NpcPlanes::AddPlane(npc, plane);
+    if (!Testing::Expect(ctx, added, "AddPlane должен принять план у нпц без покриттерного обработчика")) {
+        return;
+    }
+
+    NpcPlanes::NpcPlane[] planes = {};
+    NpcPlanes::GetPlanes(npc, planes);
+    Testing::Expect(ctx, planes.length() == 1, "Добавленный план должен сохраниться, а не стираться сразу после вставки");
+}
+
+// Часть вызывающего кода (GuardLib и др.) использует только счётчик планов и передаёт null
+// вместо массива-приёмника. Проверяем, что перегрузка GetPlanes с out-параметром это переносит.
+[[Async]]
+void GetPlanesNullOut(Testing::TestContext ctx)
+{
+    Location? loc = Testing::CreateTestLocation(ctx, Content::Location::desert_12);
+    if (loc == null) {
+        Testing::Fail(ctx, "Тестовая локация должна создаваться");
+        return;
+    }
+
+    Map map = loc.GetMapByIndex(0);
+    mpos hex;
+    if (!Testing::Expect(ctx, FindMovableHex(map, hex), "На тестовой карте должен найтись проходимый гекс")) {
+        return;
+    }
+
+    Critter? npc = Testing::SpawnTestNpc(ctx, map, Content::Critter::Brahmin, hex);
+    if (npc == null) {
+        Testing::Fail(ctx, "NPC должен создаваться");
+        return;
+    }
+
+    NpcPlanes::DropPlanes(npc);
+    NpcPlanes::AddPlane(npc, NpcPlanes::CreatePlane());
+
+    // Не должно бросать исключение на null-приёмнике и должно вернуть верный счётчик
+    int count = NpcPlanes::GetPlanes(npc, null);
+    Testing::Expect(ctx, count == 1, "GetPlanes с null-приёмником должен вернуть число планов, а не падать");
 }
 
 #endif

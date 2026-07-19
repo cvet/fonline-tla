@@ -457,19 +457,22 @@ and avoid mounting `Scripts/Json` twice. `OnCritterPreLoad` needs no TLA subscri
 `OnCritterInit` handlers were deliberately left in place because several require an attached map/world.
 
 Persistent-login testing exposed two strict-sync regressions that the compile/bake gates could not see. TLA's
-`PlayerLogin` is now async and preserves the complete `player + optional unloginedPlayer + main critter + map +
-location` cover while loading or switching the controlled critter; the map/location links are revalidated after
-each replacement `Game.Sync`. This fixes login after the previous client has disconnected and the main critter
-must be loaded or rebound.
+async registration/login path now owns the caller cover across Engine calls: it holds the request and an existing
+live player before an offline load, then stabilizes the main critter, its map and location, dynamic
+`KnownLocations`, and every member of its global-map group before login. Each topology-dependent set is
+revalidated after replacement `Game.Sync` calls. This fixes login after the previous client has disconnected and
+the main critter must be loaded or rebound.
 
-The simultaneous reconnect path also exposed an upstream Engine gap after `OnPlayerLogin`: native
-`SendCritterInitialInfo` ran with only the two login players covered, so a controlled critter on a local map failed
-on the first map access. The local Engine follow-up preserves both login entities for rollback, acquires the
-critter/map/location chain in two validated stages, bounds topology retries, and delays destruction of the
-displaced login entity until the new player job is scheduled. A focused `PlayerRegistrationCppApi` regression
-covers this exact live-player/local-map reconnect.
+The simultaneous reconnect path also exposed a failure after `OnPlayerLogin`: native `SendCritterInitialInfo`
+needs more than the two login players when the controlled critter is on a local map or in a global-map group. An
+initial Engine-side cover-rebuild attempt was superseded by the caller-owned contract documented in the 2026-07-15
+follow-up below. `LoginPlayerToExistentRecord` now only validates the cover prepared by AngelScript and fails fast;
+it never narrows or expands that cover. The remaining native change is rollback hardening: destruction of the
+displaced login entity is delayed until the new player job has been scheduled. Focused `PlayerRegistrationCppApi`
+regressions exercise local-map and global-group reconnects with an explicitly prepared caller cover.
 
-**Verification:** Compile AngelScript and the build-hash-triggered full bake passed (**550 maps**), followed by
+**Historical 2026-07-13 verification (before the later synchronization ownership correction):** Compile
+AngelScript and the build-hash-triggered full bake passed (**550 maps**), followed by
 `TLA_Server`, `TLA_ServerHeadless`, `TLA_Client`, and `TLA_UnitTests` builds. The full native suite exited **0**;
 its focused reconnect case passed **144 assertions**, and the full run passed **355538 assertions in 335 test
 cases**. The live script harness completed **62/62**; MCP discovery completed **90/90** and both static and live
@@ -486,55 +489,365 @@ exception markers. Reports are under
 
 ## Latest Engine updater cutover follow-up (2026-07-15)
 
-The Engine submodule was fast-forwarded by another 16 upstream commits from
+The Engine submodule was fast-forwarded by another 17 upstream commits from
 `0bdb06bb59fef02b58496ef89105f66d7a243f32` to the current `origin/master`,
-`2f4fc0adfdabf71316f087bf36ceb6baf49c81da`. The functional range through `1bcf6e101` completes the
+`81748b948a36b5737107bea9d87e03982cc4b3cc`. The functional range through `1bcf6e101` completes the
 smart-pointer refactor, hardens AngelScript synchronization and deferred `ScriptFunc` return cleanup,
 synchronizes the player argument for inbound server RPCs, updates movement call sites to the implicit borrow
 form, and replaces the client updater bootstrap with the host/runtime selector. It also raises the forced
-migration version to `0.0.30`; the final `2f4fc0adf` commit only strengthens an upstream test. No TLA-facing
-script API, hook, event, setting, CMake, or native export signature changed. The resulting TLA compatibility hash
-is `93b603081c433c36`.
+migration version to `0.0.30`; `2f4fc0adf` only strengthens an upstream test. The final `81748b948` commit adds
+the common `Game.GetModelAnimDuration` script API and always emits model-animation metadata in 3D-enabled model
+bakes. TLA has `FO_ENABLE_3D=OFF` and no `ModelInfo` pack, so it needs no authored config/content migration; the
+missing `ModelAnimInfo.foinfo` startup line is informational and duration lookup falls back to zero. The resulting
+TLA compatibility hash is `d4721a8cce1d01c0`.
 
-Two local Engine synchronization fixes remain necessary. Reconnect now acquires and stabilizes the complete
-player/unlogged-player/critter/map/location cover before controlled-critter initial state is sent, while keeping
-the displaced player alive until the login can no longer roll back. `LoadCritter` now restores and stabilizes the
-critter/map/location cover after the re-entrant `OnCritterInit` callback before processing visible critters and
-items; it also stops cleanly if the critter is destroyed while the cover is being rebuilt. Both paths have focused
-lifecycle regressions in `Test_EntityLifecycle.cpp`.
+The final synchronization boundary is script-owned. Neither `LoadCritter` nor
+`LoginPlayerToExistentRecord` calls `SyncEntities`, narrows the held set, or discovers and adds dependent
+entities. TLA AngelScript owns the required cover in the outer async context before every Engine call. The offline
+path holds the request and any existing live player before `LoadCritter`; because the loaded critter does not exist
+in memory before that call, `OnCritterInit` no longer performs topology-changing placement. Immediately after
+`LoadCritter` returns, the caller adds the critter and performs placement under an explicit source/target cover.
+Before login and initial-info delivery it stabilizes the full graph: request player, existing live account player
+when present, main critter, current map and location, dynamic `KnownLocations`, and every member of the
+global-map group. Topology snapshots are checked after each replacement `Game.Sync`, with bounded retries. The
+Engine only validates access through the caller-provided cover and fails fast when the contract is violated. Its
+reconnect-only change is unrelated rollback hardening: the displaced player remains alive until login scheduling
+succeeds, so a thrown callback can still restore the connection. Focused lifecycle tests model the script caller
+by explicitly synchronizing the local-map or global-group cover before entering the Engine API.
 
-On the game side, newly registered player critters are now explicitly persistent. Previously their only
-persistence came from map attachment, so offline unload removed that implicit flag and deleted the critter
-document before a later login. Strict synchronization exposed four additional reconnect boundaries: dynamic
-`KnownLocations` serialization, global-map group movement data, replication transfer/map-location access, and
-the `PlayerLogin`/`SwitchCritter` chain. These paths now preserve the caller cover, lock the complete dependent
-entity set, and reacquire it after re-entrant transfers or switches.
+Newly registered player critters are now explicitly persistent. Previously their only persistence came from map
+attachment, so offline unload removed that implicit flag and deleted the critter document before a later login.
+Topology-changing placement was also removed from `CritterInit`: the caller performs it only after
+`CreateCritter` or `LoadCritter` returns, while it still owns the surrounding synchronization context. Replication
+and story-intro transfers preserve both the source graph and the target map/location (including dynamically
+created intro locations), then reacquire and validate them after the re-entrant transfer. The registration/login
+and `SwitchCritter` paths likewise retain the player/request entities, critter graph, known locations, and
+global-map group through initial-info delivery.
 
 The updater change is an intentional deployment cutover: `FO_UPDATER_VERSION` is now 2 and the client runtime
 host ABI is now 3. The Windows build therefore includes both `TLA_Client.exe` and the separately built
-`TLA_Client.dll`; the host accepted DLL build hash `586344806a74f05a03ddcc9c785a5dbcb1c9b1bc` with matching
+`TLA_Client.dll`; the host accepted DLL build hash `62be3ea7d6d7138f0ac198a89c3566ff839b8061` with matching
 compatibility and ABI 3 metadata. Generation-1 clients are rejected before `InitData`, and an ABI-2 host cannot
 load the ABI-3 runtime, so this engine version must be shipped as a complete client package and existing
 installations require a one-time manual replacement rather than an in-place self-update.
 
-**Verification:** Compile AngelScript passed; ForceBake rebuilt **550 maps**; `TLA_Server`,
-`TLA_ServerHeadless`, `TLA_Client`, `TLA_ClientLib`, and `TLA_UnitTests` built. Focused reconnect, runtime-ABI,
-handshake, update-list, and obsolete-updater rejection tests passed **308 assertions in 5 test cases**; the final
-lifecycle and registration regressions independently passed **219** and **158 assertions**. The exact final full
-native suite passed **355727 assertions in 341 test cases** and exited **0** in **246.624 s**. The live script
-harness completed **62/62**; script-quality, nullable, and content gates remained green; MCP tests passed
-**96/96**; and the scenery scan remained at **0 errors** with the same three owner-decision warnings.
+**Current script-owned synchronization verification:** Compile AngelScript passed with **0 warnings**; ForceBake
+rebuilt **550 maps**; `TLA_Server`, `TLA_ServerHeadless`, `TLA_Client`, `TLA_ClientLib`, and `TLA_UnitTests`
+built. Focused model-animation, player-registration, and server-script regressions passed **672 assertions in 3
+test cases**. The exact final full native suite passed **355733 assertions in 342 test cases** and exited **0**.
+The live script harness completed **62/62**; script-quality, nullable ABI, formatting, build-warning, and diff
+gates remained green; and MCP tests passed **96/96**. The live compatibility probe also caught and corrected a
+stale unpackaged `TLA_Client.dll`, confirming that `TLA_ClientLib` is a required build/deployment artifact after
+an Engine compatibility change. The TLA CMake finalization hook now makes `TLA_Client` depend on
+`TLA_ClientLib`, and a clean `Build :: TLA_Client` verification rebuilt/copied the runtime before the host.
 
 The MCP navigation adapter now normalizes TLA's flat `hexX` / `hexY` observations and lets both navigation plan
 and safe-step queries fall back from unsupported `tactical_path` to `path` without hiding other query failures.
-A standalone client registered `Persist10`, moved, disconnected, survived offline unload, then logged into the
-same critter, observed the restored map, passed reachability, and moved again without sync, exception, assertion,
-or missing-document markers. Reports and preserved logs are under
-`Workspace/AiControlScreenshots/engine-2f4f-20260715/persistence-final`. The seven parameterless GUI screenshot
-oracles plus `SkillBox` and safe-cancel `DialogBox` remain green under
-`Workspace/AiControlScreenshots/engine-1bcf-20260715`; the only later upstream commit is test-only.
+A standalone MCP-controlled client registered `SyncLatest`, disconnected, reached server-side offline unload,
+then loaded the same persisted critter (`1233`), passed observation and reachability probes, and moved again
+without sync, exception, assertion, or missing-document markers. MCP discovery and a live command round-trip
+passed on the relogged client. The post-relogin GUI screenshot matrix passed Options, Inventory, Character,
+PipBoy, FixBoy, Menu, and Credits (**7/7**). Reports, captures, and preserved logs are under
+`Workspace/AiControlScreenshots/engine-81748-20260715/script-owned-sync-final`.
 
-The Windows installed-client staged restart and Linux runtime DSO paths remain release/CI checks. Registration
-still has a same-name race between parallel requests, and a failed post-creation login can leave an orphaned
-persistent critter; those need a transactional follow-up. The local Engine fixes and game changes are intentionally
-left uncommitted for owner review.
+The Windows installed-client staged restart and Linux runtime DSO paths remain release/CI checks. At this point
+registration still had a same-name race between parallel requests, and a failed post-creation login could leave
+an orphaned persistent critter; the 2026-07-18 registration transaction follow-up below resolves both. The
+caller-owned script synchronization, native rollback hardening, and game changes are intentionally left
+uncommitted for owner review.
+
+## Latest Engine server follow-up (2026-07-18)
+
+The Engine working tree was fast-forwarded in two steps by twelve `origin/master` commits from `5ce19ec24`
+through `260c3d883` to `14bb6c85e33cd55fede7e7bac3a5d124d51031f6`. The first server-facing range adds strict
+init-script resolution failures, `Map.FindPathToAny` with target validation, lifecycle tracking for sent
+messages, and retention of already covered player/critter and singleton-owned entity links within the current
+script chain. The retention changes do not discover topology or call blocking `SyncEntities`; TLA remains
+responsible for preparing the complete cover with `Game.Sync` before entering the Engine API. Generated build
+configuration now uses macros instead of a re-includable typed constants header, and malformed compressed
+transport input now disconnects cleanly through `DecompressException`.
+
+The final server update tracks every accepted interthread, TCP, UDP, and WebSocket connection across concurrent
+accept/shutdown boundaries. `NetworkServer::Shutdown` closes registration, snapshots and disconnects live
+connections, and only then stops the transport implementation. A new `ServerNetwork.LoginTimeout` independently
+limits pre-login connections that make no handshake, authentication, or updater progress, so ping-only peers
+cannot occupy unauthenticated slots forever. TLA enables a five-minute timeout (`300000` ms) for normal/public
+configuration and explicitly disables it in the `Unpackaged` and `LocalTest` profiles for long local debugging
+and MCP sessions. This network/unlogged-player job path is not script-initiated and does not acquire entity
+synchronization locks. The
+upstream `d94f6d9e8` commit also absorbed the temporary local `NetworkClient.h` include-guard fix, leaving the
+Engine working tree clean. The resulting compatibility version is `806044423476dc46`.
+
+**Verification:** `BakeResources` updated the three config outputs; `TLA_Server`, `TLA_ServerHeadless`,
+`TLA_Client`, and `TLA_UnitTests` built without compiler warnings. Focused login-timeout and concurrent-shutdown
+coverage passed **38 assertions in 3 test cases**. The complete native test executable exited **0** in **440.2
+seconds**. A `LocalTest` headless run reached `Start server complete!`, completed the live script harness with
+**62 passed, 0 failed, 0 skipped**, and shut down all three active connection servers cleanly. Main-config
+formatting/check, script-quality ratchet, nullable ABI validation, and the nullable validator's **7/7** self-tests
+passed. Runtime initialization still reports execution-overrun timings for the data-heavy `CritterTypes`,
+`NpcBags`, trader, and world-generation setup; there were no runtime exceptions or failed tests.
+
+## Registration transaction follow-up (2026-07-18)
+
+New-account registration now claims the `PlayerNames` key while the request still holds the shared start-map
+cover and before the next replacement `Game.Sync`. This placement matters: replacing a cover releases the old
+set before acquiring the new one, so merely retaining the same map in successive calls still leaves a scheduling
+window. A parallel request now observes the reservation before it can create a second critter. Reservations carry
+the expected `CritterId`; a mismatched request cannot publish or remove another registration's name.
+
+`PlayerId` publication moved from after `LoginPlayerToNewRecord` into a dedicated `OnPlayerLogin` subscriber.
+That event runs inside the Engine's new-player rollback scope: if publication or any later login subscriber
+fails, the Engine removes the new `Players` record and detaches the player before the outer registration handler
+rolls back the persistent critter. The script removes the name reservation only after critter rollback succeeds;
+if cleanup cannot be proven, the reservation remains claimed instead of allowing a second account to reuse a
+possibly orphaned character. Display/generation properties are prepared before login, leaving no fallible
+persistence step after the Engine transaction returns.
+
+A focused script regression covers reservation visibility, critter ownership checks, `PlayerId` publication,
+and owner-only rollback. A two-client MCP race submitted the same fresh name concurrently: exactly one client
+entered the game, the loser disconnected back to Login, the server created exactly one player critter, and no
+script/sync/assertion error was logged. The winner then disconnected and the losing client successfully logged
+into the same account and controlled the same critter id. MCP discovery/live smoke passed, and the graphical
+client screenshot audit verified Options, Inventory, Character, PipBoy, FixBoy, Menu, and Credits (**7/7**) with
+content-specific oracles. Captures and the manifest are under
+`Workspace/AiControlScreenshots/registration-transaction-20260718`.
+
+**Verification:** AngelScript compilation, incremental baking, and `TLA_Server`, `TLA_ServerHeadless`, and
+`TLA_Client` builds passed without warnings. The focused reservation test passed, then the complete live script
+harness finished with **63 passed, 0 failed, 0 skipped**. Script formatting was idempotent, the quality ratchet
+and nullable ABI validator passed, `git diff --check` was clean, and the final headless log contained no test
+failure, script/sync exception, assertion, or fatal marker.
+
+## R3 adversarial bug hunt over under-audited giants (2026-07-19)
+
+A workflow re-audited the modules whose round-1 coverage was thinnest (the giants: Combat, Worldmap, Caravan,
+Poker, GlobalmapGroup, Parameters, EnergyBarier, Purgatory, NpcPlanes, ChosenActions, FixBoy, Dialog, Main) in
+line-range chunks, and separately re-validated the deferred medium/low backlog in `Build/_audit/`. Every candidate
+went through a three-lens skeptic panel (consumer contract / engine API / git history, refute-by-default);
+**44 of 123 candidates survived unanimously**. The session limit killed part of the verify phase, so the
+split-vote and unverified remainder is still open — see "Remaining" below.
+
+**Applied (each re-read against the code before editing):**
+
+- **NPC AI was globally disabled.** `AddPlane` treated `ContinueChain` as a veto, but the engine's
+  `Entity::FireEvent` returns `ContinueChain` for an event with **no** subscribers. Only a handful of critters
+  subscribe a per-critter `OnNpcPlaneBegin`, so every other NPC had each freshly inserted plane erased on the
+  spot — no attack, walk, pick or misc plane ever survived. The polarity is now engine-idiomatic (`StopChain` =
+  veto) across `NpcPlanes` and all ten handlers (`MainPlanes`, `Eli`, `MapKlamath`, `Mob`, `Patrol`, `Pet`, and
+  the four `Pattern*` wrappers), applied as one atomic change. *[AI-wide — playtest]*
+- **`GetPlanes(..., NpcPlane[] planes)` never filled its out-parameter** (found by the new regression test, not
+  by the hunt): all three overloads did `planes = crPlanes`, rebinding the local handle, so callers in `Combat`,
+  `Item`, `EncounterNpc` and `Patrol` got the right count but an empty array. Now filled in place.
+- `AddWalkPlane` 8-arg overload called itself (infinite recursion, dropped `cut`); attack repositioning cancelled
+  its own successful manoeuvre via an unconditional `NextPlane(REASON_POSITION_NOT_FOUND)`.
+- **Poker was unplayable and leaked caps.** Nested per-NPC state arrays were declared `{{}}`, so the first
+  pokerman indexed a zero-length row and threw; `Replace()` dealt the same card to several players; `BetCall`
+  destroyed the player's caps without adding them to the pot; the all-in `WinKoef` truncated to 0 so a winning
+  all-in paid nothing; the NPC bet-chance ratio collapsed via integer division; `TwoPairReplace` picked a pair
+  card as the kicker and passed 0-based indices to a 1-based `SetBit5` (negative shift). `Roulette` had the same
+  `{{}}` declaration defect. *[economy/minigame — playtest]*
+- **FixBoy workbench charges were never seeded**, so every workbench-gated recipe was permanently uncraftable;
+  "no entry" now means "full workbench" (seeded at the timeout check, which keeps the craft count exact).
+- `GlobalmapGroup`: entrance ordinals were validated against the flat `MapEntrances` length (client-supplied,
+  out-of-bounds reachable) in `GroupToLoc` and `GM_CMD_VIEW_MAP`; `GM_CMD_ENTRANCES` passed the raw index to
+  `CheckEntrance` so town-screen and entry rules disagreed; `GroupToMap` overwrote the passenger hex with the car
+  hex and ignored its `entry` parameter (all entrances arrived at the main gate).
+- `Combat`: burst central line clamped to-hit *before* the knockout/multihex bonuses (95% cap bypassed, a
+  knocked-out bystander soaked the whole volley); `HF_DEATH` raised damage only to exactly `CurrentHp`, which
+  lands in the knockdown branch because `DeadHitPoints` is -20, so instant-death criticals never killed; the
+  flamethrower left line was missing the `- 1` that excludes the victim from the blocker count.
+- `Parameters`: `UseMainItem` branched on the packed weapon mode instead of the decoded use-slot, so every aimed
+  attack was a no-op; drug resistance bonuses were written one `DamageTypes` slot too low (Psycho gave nothing,
+  Rad-X gave poison resistance); `ProcessSkillsUp` wrote a client-supplied property id without checking it is a
+  skill; the name language-mixing scan skipped the last character.
+- `Main` / `Replication`: the corpse drop filter wrote `null` into the array it then passed to `MoveItems`,
+  aborting the whole death handler for any critter carrying a gag/hidden item; steal XP used a stale `StealCount`
+  after a streak reset (up to 12× the intended award).
+- `Purgatory`: nullable `killer` was forwarded into `OnCritterDead`, which dereferenced it (deaths from
+  overdose/poison/radiation on a battle map threw and the winner was never checked); `GetTeamPlayers` indexed
+  `Players[]` with a `Requests[]` index; the invite watchdog re-invited after the player had already accepted,
+  silently dropping him; `TeamCount` emitted four duplicate `team` lexemes instead of `team0..team3`.
+- `Dialog`: `TimeoutCheck` read `player.DialogTimeout` while `TimeoutSet` writes `npc.DialogTimeout`, so all 23
+  `TimeoutCheck` / 18 `NotTimeoutCheck` gates were constants; `GetCurrentDialogNumber` used the throwing
+  single-argument `dict.get`. *[quest cooldowns now actually gate — playtest]*
+- `ChosenActions`: reload deducted AP twice; a vanished move target sent the character to hex (0,0).
+- `Worldmap`: `RotatePosition` permanently rotated the module-global formation table (aliased handle, not a
+  copy); the weighted encounter roll could exceed the candidate pool and select nothing.
+- `Caravan`: `FindCabPlace` took its loop bound from the first entry name only (no wagons placed when entry 243
+  is absent); `IsFullParty` accepted one player past `MaxPlayers`, who was then silently truncated at departure.
+- `FavoriteItem`: an inverted slot check made NPC favorite-item auto-equip a permanent no-op (NPCs undressed and
+  never re-equipped); `EnergyBarier::GetGuards` compared a Location proto against an Item proto.
+
+**New regression test.** `Test_NpcPlanes::add_plane_without_subscriber` covers the exact broken case (an NPC with
+no per-critter subscriber must keep an added plane). It was validated as a negative control: reverting only the
+`AddPlane` polarity makes it fail on its first assertion, and it is what exposed the `GetPlanes` out-parameter bug.
+
+**Deferred (need an owner decision, not a mechanical fix):**
+
+- `Caravan::CaravanLeaderOnGlobal` assigns to by-value event parameters (`toX/toY/speed/waitForAnswer`, plus
+  `x/y/encounterDescriptor` via `Worldmap::FindEncounter`), so caravan global-map movement never reaches the
+  group. Fixing it means marking the args mutable in the `///@ Event` declaration and updating every subscriber.
+- `Purgatory::TeamContainerId` is never assigned, so the invite flow kills the player without stashing his
+  inventory while telling him it was stashed. Both the reporter's and the verifier's placements have problems
+  (a location-owned container is garbage-collected with the arena).
+- `FixBoy::CheckOnCraft` builds the craft list through the interactive `FixboyButton` path, spamming failure
+  messages and mutating persistent map state; a side-effect-free query state is the right fix.
+- `GlobalmapGroup::GetGlobalMapGroup` reads `AllGlobalGroups` unlocked and uses `opIndex`, which inserts a
+  phantom entry on a miss; failing loudly would widen the return type across ~16 call sites.
+- `Combat` `ForceFlags`-only hits send critical-message id 0 (broken combat text); the verifier refuted both
+  proposed fixes and points at a client-side guard instead.
+
+**Verification:** Compile AngelScript (0 warnings) → formatter idempotent (changed 0) → quality ratchet →
+nullable ABI validator → bake → `TLA_Server`, `TLA_ServerHeadless`, `TLA_Client` builds, all without warnings.
+The live script harness finished **64 passed, 0 failed, 0 skipped** (63 + the new regression), the headless run
+reached `Start server complete!`, and the log contained no exception, sync, assertion, or fatal marker.
+`git diff --check` is clean. Not committed (owner reviews).
+
+The gameplay-affecting entries above are flagged for playtest: NPC AI overall, poker/roulette economy, workbench
+crafting, dialog cooldowns, town entrances, and instant-death criticals.
+
+### R3 second pass — the candidates the session limit had dropped (2026-07-19)
+
+The first R3 run lost 164 of 397 verify agents to an account session limit. Reconstructing the finder output from
+the workflow journal showed that **67 candidates had never been adjudicated at all** (the post-processing counted
+them as neither confirmed nor split, because they had zero votes). A follow-up workflow re-ran them against the
+already-patched tree with two independent lenses (consumer contract, engine API + git history), unanimity
+required: **17 confirmed, 11 split, 6 already fixed** by the first pass. All 134 agents completed.
+
+**Applied:**
+
+- **FixBoy expired-timeout branch.** `CheckWorkbenchTimeOut` refilled via `SetWorkbenchCharges`, which is a
+  *decrement-or-refill* helper, and never cleared `FixBoyWorkBenchTimeout`. So after the first expiry the branch
+  ran on every later check and **consumed** a charge instead of refilling — and since `CheckOnCraft` runs once per
+  listed recipe, merely opening the FixBoy screen next to a shared workbench (11 recipes share `SCENERY_AMMO_PRESS`)
+  drained it. Split out a dedicated `RefillWorkbenchCharges` and reset the timeout.
+- `Replication`: the post-`FindEncounter` guard tested the `-1` sentinel, but `FindEncounter` uses `0` for "none"
+  (`-1` is an unrelated global-map convention), so `InviteToEncounter` ran with a blank descriptor.
+- `MapBarterGround`: the same null-into-`Item[]`-then-`MoveItems` pattern fixed earlier in `Main`/`Replication`.
+- `PatternSniper` / `PatternTerm`: `MsgReact` returns true for "should react", but both guards returned early on
+  true — snipers and terminators ignored ally help calls *within* range and answered only out-of-range ones.
+- **Racing quest was uncompletable.** `Coords` has 13 checkpoints so `player.RacingCheckPoints` tops out at 13,
+  while `Win()` requires >= 14. The dialog's final result wrote `RacingCheckpointNumber` — which resolves to the
+  *Location* property, not the Critter counter `Win()` reads. Fixed in `Dialogs/den_racing_mechanic.fodlg`.
+- `Explode`: an unlinked `toggle_switch` passed `ZERO_IDENT` to `Game.GetItem`, which throws rather than
+  returning null (the `!= null` guard could never help).
+- `Combat::CriticalFailure` ignored the `IsNoKnock` immunity (turrets, Horrigan, bodyguards, spore plants were
+  knocked down); the flag is now stripped at entry so clients also stop playing the knockdown reaction.
+- `Poker`: `NpcAction` advanced `MHod` twice when seats had folded, ending the betting round early — it now
+  returns the seat that acts next; `ManyWinsCheck` compared a game-time lockout against real-time `Time::Days`.
+- `Parameters::CritterSetPropertyQuests` built the Quest text-pack id by summing hashes into one numeric key,
+  but the pack is two-token `{CritterProperty::X}{value}` — quest-update messages never fired. Now uses
+  `MsgStr::PropPrefix`, matching the post-migration helpers.
+- `MirelurkCombat`: the move-out emote fired once per search iteration and `GetFreeHex` was called with radius 0.
+- `MapArroyoRaydersCamp`: the XP actually granted was 10 higher than the amount reported to the player, in both
+  quest stages (duplicated round-up expression).
+- `Caravan::IsAppear` used `<` against the inclusive `Game.Random(1, 100)`, so 100%-chance loot appeared 99% of
+  the time and 1%-chance loot never appeared; `NpcPlanes` go-home passed a toggled 0/1 facing instead of `HomeDir`.
+
+**Deferred (owner decision — these are feature/data work, not regressions):**
+
+- `Item::ChangeProto` is an unimplemented `TODO` stub that returns its input unchanged, while `Sandbag` and
+  `EnergyBarier` assign its result expecting a different proto. Implementing it means destroying and recreating a
+  persisted map item, which can break handles held elsewhere (e.g. the barrier's `Blockers` registry) — it needs an
+  ownership/migration decision rather than a blind fix.
+- `Resources::MakeDataKey` silently drops its `pid` argument, so different-proto sceneries on one hex share a
+  single depletion counter (each yields about half its intended resources). Mixing the proto into the key orphans
+  every existing `Map.ResourcesData` entry, and orphans are never erased — so this needs a migration that clears
+  the property, not just a code change.
+
+**Verification:** Compile AngelScript (0 warnings) → formatter idempotent (changed 0) → quality ratchet →
+nullable ABI validator → bake (the `.fodlg` change is baked content) → `TLA_Server`, `TLA_ServerHeadless`,
+`TLA_Client` builds without warnings → live script harness **64 passed, 0 failed, 0 skipped** → headless reached
+`Start server complete!` with no exception, sync, assertion or fatal marker. The native suite passed
+**356029 assertions in 346 test cases**, exit 0. Not committed (owner reviews).
+
+Playtest additions from this pass: workbench charge economy, the Den racing quest end-to-end, sniper/terminator
+assist behaviour, poker betting rounds, and caravan loot rates.
+
+### R3 wave 3 — the previously unhunted modules (2026-07-19)
+
+A third workflow hunted the ~254 modules that had had no R3 deep pass (client bootstrap/HUD, mapper, text,
+critter actions, drugs/perks, economy, items, maps, AI support, mobs, guards, events, replication, quests,
+dialogs, devices). The session limit again killed part of the verify phase (178/398 agents), but **38 candidates
+survived unanimous verification** (36 at full 3-vote, 2 at 2-vote). The unverified remainder is recovered from the
+journal and re-queued for the next pass.
+
+**A self-inflicted regression fixed first.** The earlier `GetPlanes(...)` out-parameter fix (`planes.clear();
+planes.insertLast(...)`) broke the ~8 call sites that pass `null` as the out-array to use only the count
+(`GetPlanes(guard, null)` in GuardLib, GameEventReplicator, NcrInvasion, EncounterNpc, SlaversHunt,
+PatternMedic). All three overloads now take `NpcPlane[]? planes` and guard the fill. Covered by a new
+`Test_NpcPlanes::get_planes_null_out` regression (negative-control verified). **Also**: the first-session
+`OnNpcPlaneBegin` polarity flip had missed **WarehouseTurret** and **V13ZSoldier** (the grep was truncated at 20
+lines) — under the new AddPlane contract both were inverted, so active warehouse turrets and V13 guardians could
+never attack. Both flipped to match.
+
+**Applied (contained, high-confidence):**
+
+- **ClientMain freeze/grief.** `CritterAction` sent `Rpc_Wait(1200)` for *every visible critter's* action, so any
+  nearby NPC firing/reloading/looting stamped the local player's own `WaitEndTick` 1.2 s ahead and starved the
+  action pump — a player in a firefight or crowd was continuously frozen, and any client could grief a bystander.
+  Gated on `cr.IsChosen`. *critical*
+- **Drugs null-array crash.** `DropDrugEffects` stored `null` into `AllActiveDrugEffects`, so the next drug use
+  after any respawn/antidote dereferenced null. Now removes the key. *critical*
+- **Repair re-break loop.** `DeteriorateItem` never set `IsBroken`, so a worn-out item re-ran the break block on
+  every subsequent hit — cost repeatedly divided by 3, BrokenCount inflated to unrepairable. Now latches the flag. *critical*
+- **GlobalMapFog 32-bit shift.** `SetFog` packed with a 32-bit shift while the property is `int64` and the map is
+  28 wide (offset reaches 54), so the right ~43% of the world map was permanently black; also added the missing
+  negative-coord guard both callers rely on. *critical*
+- `MainPlanes`: `CTraceFirstCritter.Cr` was sticky (a rejected corpse/too-close critter was still returned as a
+  burst blocker); `ValidateBurst` was called with the single-shot mode while deciding to switch to burst;
+  `ChooseAim`'s "1/3 pick second-best zone" always converged on the max (dead diversification).
+- `CritterActions`: `Attack` accepted an unvalidated client aim value (free aimed shots + out-of-range crit-table
+  reads) — now range-checked and masked; `ReloadWeapon` unload called `AddItem` with count 0 on an empty weapon
+  (server exception).
+- `ClientItems::BarterTransfer` double-subtracted the offer, blocking a second transfer from the same stack.
+- `ClientMain` text/casing: age-bracket scan ran downward (wrong bracket, unrelated text for ages 14–15); the
+  look description replaced `Max` but the pack uses `MAX` (max HP/ammo never shown); the inventory SPECIAL block
+  used a summed-hash key (seven blank lines) — switched to the existing two-token helper.
+- `Drugs`: stat-change messages built a summed-hash `@text` tag (blank stat name) — now the 3-token form; drug
+  stage durations are game-minute table values but were scheduled with `Time::Seconds` (~3× too fast) — now
+  `Time::GameMinutes`. *[drug pacing — playtest]*
+- `Repair`: a successful repair left the `BrokenLow/Norm/High` severity flags set (item read as broken forever,
+  next break re-applied the old severity) — factored a `ClearBrokenLevel` helper used by both repair and
+  `SetDeterioration`.
+- `MapTime`: the game-time offset truncated to int32, wrapping the in-game calendar backwards ~49.7 days every
+  ~30 h of uptime — now built as a 64-bit `timespan`.
+- `GameEventRacing::RacingWhen` always overwrote the "Никогда" fallback with a zero timestamp.
+
+**Deferred — flagged for the owner (feature-work, cross-file migration, or serialized-contract change):**
+
+- **`Item::OnCritterUseSkill` and `Resources::OnCritterUseOn` are never fired** (Item.fos:23, Resources.fos:380).
+  These are whole dormant subsystems — wiring the events would activate ~18 sealed quest doors, the entire
+  resource-gathering module, Navarro scanner/collar handlers, etc. The verifiers themselves note subscribers
+  return `StopChain` unconditionally and need coordinated changes; this is feature activation, not a contained fix.
+- **`ItemMovement` free-ammo exploit** (empty weapon refilled on every inventory entry): the correct fix moves the
+  initial load to `OnItemInit(firstTime)`, a new event subscription — deferred to keep it deliberate.
+- **MsgStr legacy hash keys** (MsgStr.fos:164/513/1155 — radio messages, the whole PipBoy quest tab, NPC look
+  names/descriptions render blank): the known cross-file text-pack migration that also touches generated
+  `GuiScreens.fos` + the owning `.fogui`, previously flagged as owner follow-up.
+- **Radiation stage bookkeeping** (AffectRadiation/DropRadiation, Radiation.fos:106/126): permanent stat loss or a
+  free permanent buff. The fix needs a redesign of how the applied stage is tracked (no `GetTimeEventData` API
+  exists), so it is not a one-liner.
+- **Repair `SetItemCost`** compounds a persistent per-instance cost discount that is never restored — the correct
+  fix makes it a pure read-path accessor and must preserve `ReplicationTrader`'s authored per-instance prices.
+- **Repairer stack loss** (whole hand stack destroyed, one item returned): needs a new `RepairItemCount` serialized
+  property.
+- **GMTown RPCs** (`Rpc_TransferToMap`/`Rpc_ShowTownView`/`Rpc_ShowGMTown`): an arbitrary-teleport map-unlock
+  exploit on dead inbound RPCs with no client caller — the clean fix deletes the `ServerRemoteCall` surface, a
+  network-contract change for the owner.
+- **CritterIcons follow-icon** (CritterProps.fos:107 `FollowLeaderId` is `OwnerSync`, so the group-member icon is
+  never drawn): the fix flips it to `PublicSync`, a serialized/network-sync contract change.
+- **Hunter/Lourence barter** dead-locked by `IsBarterOnlyCash` + a buy whitelist omitting caps — a content/design
+  decision on whether Lourence trades for caps or pelts.
+- **Resources respawn** rebuilds the scenery proto id from a numeric uhash (over-caps regrowth), and `ToolAxe`
+  grants count 0 on the last chop — both live only if the Resources module is wired (see the deferred event above),
+  and the respawn fix additionally needs a persisted-time-event migration.
+
+**Verification:** Compile AngelScript (0 warnings) → formatter idempotent → quality ratchet → nullable ABI →
+bake → `TLA_Server`/`TLA_ServerHeadless`/`TLA_Client` builds without warnings → live script harness **65 passed,
+0 failed, 0 skipped** (added `get_planes_null_out`) → headless reached `Start server complete!` with no exception,
+sync, assertion or fatal marker. `git diff --check` clean. Not committed (owner reviews).
+
+Playtest additions from this wave: general responsiveness in crowds/combat (the ClientMain freeze), drug
+durations, NPC aimed-shot behaviour and burst decisions, warehouse-turret / V13-guardian aggression, weapon repair
+display and severity, and world-map fog coverage.

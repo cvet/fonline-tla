@@ -31,6 +31,28 @@ void DebugLog(string s)
 {
     Game.Log("" + s);
 }
+
+void AddPlacementSyncEntity(Entity[] & entities, Entity entity)
+{
+    for (int i = 0; i < entities.length(); i++) {
+        if (entities[i] is entity) {
+            return;
+        }
+    }
+
+    entities.insertLast(entity);
+}
+
+// Динамическая сюжетная локация появляется только после CreateLocation, поэтому перед движковым
+// переносом явно расширяем покрытие вызывающего криттером, картой и локацией.
+[[Async]]
+bool LockPlacement(Critter player, Map map, Location loc, Entity[] callerCover)
+{
+    Entity[] cover = Sync::SurvivingEntities(callerCover);
+    AddPlacementSyncEntity(cover, map);
+    AddPlacementSyncEntity(cover, loc);
+    return Sync::LockCritterWithMapAndLocation(player, cover) && map.GetLocation() is loc;
+}
 // breadcrumb миграции: прежде DebugLog был макросом-заглушкой, отключающим лог; оставлено как ссылка
 // #define DebugLog                         # (s)
 
@@ -48,13 +70,24 @@ bool CheckPlayerCompleteIntro(Critter player)
 
 // Создание локации начала игры для персонажа, который только что был зарегистрирован
 // Возвращает истину если локация нужна, создалась и игрок телепортирован на карту
+[[Async]]
 bool SetPlayerStartLocation(Critter player)
 {
+    Entity[] callerCover = Sync::SurvivingSnapshot();
+
     // Стартовые локации не нужно сохранять. Иначе, если регистрировать тучу персонажей, для каждого придется сохранить свою локацию
     Location loc = Location::CreateLocation(Content::Location::intro_martin, ipos(INTRO_WORLD_X, INTRO_WORLD_Y), null);
     Map map = loc.GetMapByIndex(0);
 
+    if (!LockPlacement(player, map, loc, callerCover)) {
+        return false;
+    }
+
     if (!Entrance::CritterTransferToMapEntry(player, map.Id, (Game.Random(0, 1) == 0 ? ENTRY_ENTRANCE1 : ENTRY_ENTRANCE2))) {
+        return false;
+    }
+
+    if (!LockPlacement(player, map, loc, callerCover) || player.GetMap() !is map) {
         return false;
     }
 
@@ -73,17 +106,25 @@ bool SetPlayerStartLocation(Critter player)
 
 // Отправляет игрока на вторую локацию
 // Возвращает истину если локация нужна, создалась и игрок телепортирован на карту
+[[Async]]
 bool SetPlayerIntroLocation(Critter player)
 {
+    Entity[] callerCover = Sync::SurvivingSnapshot();
     Location loc = Location::CreateLocation(Content::Location::hubologists_initialization, ipos(INTRO_WORLD_X, INTRO_WORLD_Y), null);
     Map map = loc.GetMapByIndex(0);
-    Entrance::CritterTransferToMapEntry(player, map.Id, ENTRY_ENTRANCE1);
-    return true;
+
+    if (!LockPlacement(player, map, loc, callerCover)) {
+        return false;
+    }
+
+    bool transferred = Entrance::CritterTransferToMapEntry(player, map.Id, ENTRY_ENTRANCE1);
+    return transferred && LockPlacement(player, map, loc, callerCover) && player.GetMap() is map;
 }
 
 // Пытается установить начальную локацию для игрока (либо стартовая карта с виком/кессиди итд, либо вторая карта с убийством
 // true - локация была установлена
 // false - не получилось установить, или уже не требуется
+[[Async]]
 bool SetPlayerStoryLineLocation(Critter player)
 {
     // Игрок уже завершил вступление
@@ -102,10 +143,14 @@ bool SetPlayerStoryLineLocation(Critter player)
 }
 
 // Перенос игрока со стартовой локации в результате диалога с ключевым персонажем
-[[DialogResult]]
+[[DialogResult]] [[Async]]
 void TransferToIntro(Critter player, Critter npc)
 {
-    SetPlayerIntroLocation(player);
+    if (!SetPlayerIntroLocation(player)) {
+        Game.Log("Main intro transfer failed for player " + player.Id);
+        return;
+    }
+
     player.MainQuest = MAINQ_ST_START_COMPLETE;
 }
 

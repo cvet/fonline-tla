@@ -317,8 +317,11 @@ EventResult CritterStealing(Critter cr, Critter thief, Item item, int count)
             thief.StealCount = stealCount;
         }
         else {
+            // Серия сбрасывается — обнуляем и локальную копию, иначе опыт ниже начисляется
+            // по индексу от предыдущей серии
             thief.LastStealCrId = cr.Id;
-            thief.StealCount = 0;
+            stealCount = 0;
+            thief.StealCount = stealCount;
         }
 
         thief.TimeoutStealing = GameTime::StealTimeout(thief);
@@ -979,16 +982,6 @@ void CritterInit(Critter cr, bool firstTime)
             cr.ReplicationCount = 0;
             cr.TeamId = 1;
             cr.DamageType = DamageTypes::Normal;
-
-            Replication::SetStartLocation(cr);
-
-            // Основной квест
-            if (Settings.Story.MainStoryLineActive) {
-                MainIntro::SetPlayerStoryLineLocation(cr);
-            }
-            else {
-                Replication::SetStartLocation(cr);
-            }
         }
         else {
             cr.ModelNameBase = cr.ModelName;
@@ -1002,14 +995,6 @@ void CritterInit(Critter cr, bool firstTime)
         }
     }
     else {
-        // Основной квест
-        if (cr.ControlledByPlayer && Settings.Story.MainStoryLineActive) {
-            MainIntro::SetPlayerStoryLineLocation(cr);
-        }
-        else {
-            Replication::SetStartLocation(cr);
-        }
-
         // Проверка текущего скина
         Item? armor = cr.GetItem(ItemProperty::CritterSlot, CritterItemSlot::Armor);
         if (armor == null) {
@@ -1077,6 +1062,24 @@ void CritterFinish(Critter cr)
 
         cr.DeadBlockerId = ZERO_IDENT;
     }
+}
+
+// Перенос меняет топологию сущностей и потому выполняется вызывающим скриптом только после
+// возврата Game.CreateCritter/Game.LoadCritter, а не из вложенного OnCritterInit-контекста.
+[[Async]]
+bool PlacePlayerAfterInitialization(Critter cr)
+{
+    verify(cr.ControlledByPlayer, "Only a player critter can use the login placement flow", cr);
+
+    if (Settings.Story.MainStoryLineActive) {
+        if (MainIntro::CheckPlayerCompleteIntro(cr)) {
+            return true;
+        }
+
+        return MainIntro::SetPlayerStoryLineLocation(cr);
+    }
+
+    return Replication::SetStartLocation(cr);
 }
 
 // Вызывается каждый тик Settings.Critter.CritterIdleTick.
@@ -1183,18 +1186,19 @@ void CritterDead(Critter cr, Critter? killer)
         items.insertLast(cr.GetItems(ItemProperty::CritterSlot, CritterItemSlot::Main));
         items.insertLast(cr.GetItems(ItemProperty::CritterSlot, CritterItemSlot::Secondary));
         if (map != null) {
-            // Запрещаем выпадение скрытых предметов
+            // Запрещаем выпадение скрытых предметов. Собираем отдельный список вместо записи null
+            // в исходный массив: MoveItems разыменовывает каждый элемент без проверки
+            Item[] toDrop = {};
             for (int i = 0; i < items.length(); i++) {
                 if (items[i].IsGag) {
                     Game.DestroyItem(items[i]);
-                    items[i] = null;
                 }
-                else if (items[i].Hidden) {
-                    items[i] = null;
+                else if (!items[i].Hidden) {
+                    toDrop.insertLast(items[i]);
                 }
             }
 
-            ItemMovement::MoveItems(items, map, cr.Hex);
+            ItemMovement::MoveItems(toDrop, map, cr.Hex);
         }
         else {
             Game.DestroyItems(items);
@@ -1515,12 +1519,7 @@ bool OnPlayerEnter(Player player, Entity[] loginSyncCover)
         }
 
         cr = Game.GetCritter(player.MainCritterId);
-
-        if (cr == null) {
-            cr = Game.LoadCritter(player.MainCritterId, true);
-        }
-
-        verify(cr != null, "Player main critter must be loaded", player);
+        verify(cr != null, "Player main critter must be loaded before Game.LoginPlayerToExistentRecord", player);
     }
 
     verify(cr != null, "Player controlled critter must be available", player);
@@ -1532,6 +1531,16 @@ bool OnPlayerEnter(Player player, Entity[] loginSyncCover)
         return false;
     }
 
+    Entity[] initialInfoCover = Sync::Snapshot();
+    if (!GlobalMapLocations::LockKnownLocations(mainCritter, initialInfoCover)) {
+        return false;
+    }
+
+    initialInfoCover = Sync::Snapshot();
+    if (!GlobalmapGroup::LockInitialInfoGroup(mainCritter, initialInfoCover)) {
+        return false;
+    }
+
     if (switchCritter) {
         Critter? controlledCritter = player.GetControlledCritter();
         if (controlledCritter == null) {
@@ -1540,6 +1549,16 @@ bool OnPlayerEnter(Player player, Entity[] loginSyncCover)
             // SwitchCritter вызывает ре-энтрантные события отправки начального состояния; после них
             // повторно захватываем и проверяем весь набор перед дальнейшим доступом к свойствам.
             if (!Sync::LockCritterWithMapAndLocation(mainCritter, loginSyncCover)) {
+                return false;
+            }
+
+            initialInfoCover = Sync::Snapshot();
+            if (!GlobalMapLocations::LockKnownLocations(mainCritter, initialInfoCover)) {
+                return false;
+            }
+
+            initialInfoCover = Sync::Snapshot();
+            if (!GlobalmapGroup::LockInitialInfoGroup(mainCritter, initialInfoCover)) {
                 return false;
             }
         }

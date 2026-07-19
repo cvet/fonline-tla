@@ -55,7 +55,8 @@ interface IBattleInfoStageChangedHandler
 };
 interface IBattleInfoCallBack
 {
-    void OnCritterDead(Critter dead, Critter killer);
+    // killer может быть null: смерть от передозировки, яда, радиации и прочих безличных причин
+    void OnCritterDead(Critter dead, Critter? killer);
 };
 
 class BattleTeam
@@ -486,7 +487,9 @@ void CheckInvite(any[] values)
     }
 
     BattleTeam bt = bInfo.Teams[values[0]];
-    if (crId == bt.LastPeekedRequestId) {
+    // Сторожевой таймер не должен срабатывать, если приглашение уже принято: иначе SendTeamInvite
+    // перезапишет LastPeekedRequestId и согласившийся игрок выпадет и из Requests, и из Players
+    if (crId == bt.LastPeekedRequestId && !bt.LastRequestAccepted) {
         bt.SendTeamInvite();
     }
 }
@@ -547,7 +550,7 @@ void SaveRequest(Critter player, Critter npc, any team)
 }
 
 // генерация лексем: Количество поданных заявок, за команду и всего
-// число заявок в команде пишется в виде lex team1
+// число заявок в команде пишется в виде lex team0..team3 (нумерация с нуля, как в purg_gate_keeper.fodlg)
 // общее число заявок lex total
 void TeamCount(Critter player, Critter npc, string& textArgs)
 {
@@ -558,7 +561,8 @@ void TeamCount(Critter player, Critter npc, string& textArgs)
     textArgs = "";
     int total = 0;
     for (int i = 0; i < bInfo.Teams.length(); i++) {
-        textArgs = textArgs + "|team:" + i + bInfo.Teams[i].Requests.length();
+        // Номер команды входит в имя ключа, а не в значение: иначе получались четыре одинаковых ключа "team"
+        textArgs = textArgs + "|team" + i + ":" + bInfo.Teams[i].Requests.length();
         total += bInfo.Teams[i].Requests.length();
     }
 
@@ -759,7 +763,10 @@ string GetTeamPlayers(BattleTeam? team)
         }
         else {
             for (int i = 0; i < l; i++) {
-                cr = Game.GetCritter(bInfo.Stage >= STAGE_BEGIN ? team.Players[i] : team.Requests[i]);
+                // Индекс принадлежит тому же списку, что и длина цикла: до начала боя Players пуст,
+                // поэтому обращение к team.Players[i] в оффлайн-ветке выходило за границы массива
+                ident memberId = bInfo.Stage >= STAGE_BEGIN ? team.Players[i] : team.Requests[i];
+                cr = Game.GetCritter(memberId);
                 if (cr != null) {
                     teamText += GetPlayerName(cr) + " (" + cr.Level + ")";
                     if (cr.IsDead()) {
@@ -769,7 +776,7 @@ string GetTeamPlayers(BattleTeam? team)
                     teamText += "\n";
                 }
                 else {
-                    teamText += PlayerRegistration::GetPlayerName(team.Players[i]) + "[Offline]\n";
+                    teamText += PlayerRegistration::GetPlayerName(memberId) + "[Offline]\n";
                     // оффлайн персонаж
                 }
             }
@@ -1012,8 +1019,12 @@ class PurgatoryStageChangedHandler : IBattleInfoStageChangedHandler, IBattleInfo
         }
     }
 
-    void OnCritterDead(Critter dead, Critter killer)
+    void OnCritterDead(Critter dead, Critter? killer)
     {
+        if (killer == null) {
+            return;
+        }
+
         BattleTeam? btDead = bInfo.GetCritterTeam(dead.Id);
         BattleTeam? btKiller = bInfo.GetCritterTeam(killer.Id);
         if (btKiller != null && btDead != null && killer.ControlledByPlayer) {

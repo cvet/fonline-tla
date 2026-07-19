@@ -120,6 +120,12 @@ DefinePackage(LinuxTest
 # ---------------------------------------------------------------------------
 
 function(_tla_post_target_setup)
+    # The desktop host prefers the external runtime module when it is present. Build it before the
+    # executable so source/config changes cannot leave Build :: TLA_Client with a stale compatibility hash.
+    if(TARGET ${FO_DEV_NAME}_Client AND TARGET ${FO_DEV_NAME}_ClientLib)
+        add_dependencies(${FO_DEV_NAME}_Client ${FO_DEV_NAME}_ClientLib)
+    endif()
+
     CopyTargetRuntimeToTarget(${FO_DEV_NAME}_Client ${FO_DEV_NAME}_BakerLib)
     CopyTargetRuntimeToTarget(${FO_DEV_NAME}_Server ${FO_DEV_NAME}_BakerLib)
     CopyTargetRuntimeToTarget(${FO_DEV_NAME}_ServerHeadless ${FO_DEV_NAME}_BakerLib)

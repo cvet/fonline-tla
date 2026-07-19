@@ -846,9 +846,10 @@ void ReloadWeapon(Critter cr, ident weaponId, ident ammoId)
         throw("Weapon is full", cr, weapon, ammo);
     }
 
-    // Выгрузка текущего боезапаса
+    // Выгрузка текущего боезапаса. Только при ненулевом остатке: AddItem с нулём бросает
+    // исключение "Count arg must be positive" на уже пустом оружии
     if (ammo == null || (weapon.AmmoCount > 0 && weapon.AmmoPid != ammo.ProtoId)) {
-        if (weapon.AmmoPid != EMPTY_HSTRING) {
+        if (weapon.AmmoPid != EMPTY_HSTRING && weapon.AmmoCount > 0) {
             Item? existAmmo = cr.GetItem(weapon.AmmoPid);
             if (existAmmo == null) {
                 cr.AddItem(weapon.AmmoPid, weapon.AmmoCount);
@@ -887,7 +888,13 @@ void Attack(Critter cr, ident targetId, int mode)
 
     // Распаковываем режим использования и зону прицеливания из mode
     int use = mode & 0xF;
-    int aim = mode >> 4;
+    int aim = (mode >> 4) & 0xF;
+
+    // mode приходит от клиента: без проверки диапазона зона прицела 10..15 давала бесплатный
+    // прицельный выстрел (нулевой AP/штраф) и уводила чтение таблицы критов в чужие строки
+    if (aim < HitLocations::LocationNone || aim > HitLocations::LocationUncalled) {
+        throw("Invalid aim location", cr, mode, aim);
+    }
 
     AbstractItem weapon = CritterItem::GetActive(cr);
     if (weapon.Type != ItemType::Weapon) {

@@ -1297,17 +1297,47 @@ bool CheckWorkbenchTimeOut(Critter player, hstring pidWorkbench, int maxCharges)
 
     synctime time = map.FixBoyWorkBenchTimeout.get(pidWorkbench, ZERO_SYNCTIME);
     if (time == ZERO_SYNCTIME) {
+        // Станок ещё ни разу не использовался на этой карте — значит заряды полные.
+        // Без этой инициализации CheckWorkbenchCharges всегда видел 0, и рецепты со станком
+        // не крафтились вообще: единственная запись зарядов была недостижима
+        if (!map.FixBoyWorkBenchCharges.exists(pidWorkbench)) {
+            RefillWorkbenchCharges(player, pidWorkbench, maxCharges);
+        }
+
         return true;
     }
 
     if (Game.SynchronizedTime < time) {
         return false;
     }
-    else {
-        SetWorkbenchCharges(player, pidWorkbench, maxCharges);
+
+    // Таймаут истёк: заряжаем станок заново и обязательно сбрасываем таймаут.
+    // Без сброса эта ветка выполнялась при каждой следующей проверке, а SetWorkbenchCharges
+    // при ненулевых зарядах списывает заряд, а не пополняет — станок опустошался от одного
+    // только открытия экрана Фиксбоя
+    RefillWorkbenchCharges(player, pidWorkbench, maxCharges);
+
+    auto fixBoyWorkBenchTimeout = map.FixBoyWorkBenchTimeout.clone();
+    fixBoyWorkBenchTimeout[pidWorkbench] = ZERO_SYNCTIME;
+    map.FixBoyWorkBenchTimeout = fixBoyWorkBenchTimeout;
+    return true;
+}
+
+// Пополняет заряды станка до максимума. В отличие от SetWorkbenchCharges не списывает заряд.
+void RefillWorkbenchCharges(Critter player, hstring pidWorkbench, int chargesMax)
+{
+    if (chargesMax <= 0) {
+        return;
     }
 
-    return true;
+    Map? map = player.GetMap();
+    if (map == null) {
+        return;
+    }
+
+    auto fixBoyWorkBenchCharges = map.FixBoyWorkBenchCharges.clone();
+    fixBoyWorkBenchCharges[pidWorkbench] = chargesMax;
+    map.FixBoyWorkBenchCharges = fixBoyWorkBenchCharges;
 }
 
 // Проверяет, есть ли заряды в станке

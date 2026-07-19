@@ -14,6 +14,217 @@ namespace PlayerRegistration
 #if SERVER
 
 const hstring PlayerNamesCollectionName = "PlayerNames".hstr();
+const int LoginSyncMaxAttempts = 16;
+
+void AddLoginSyncEntity(Entity[] & entities, Entity entity)
+{
+    for (int i = 0; i < entities.length(); i++) {
+        if (entities[i] is entity) {
+            return;
+        }
+    }
+
+    entities.insertLast(entity);
+}
+
+ident ResolveStoredMainCritterId(ident playerId)
+{
+    dict<string, string> playerData = Game.DbGetPlayerData(playerId);
+    if (!playerData.exists("MainCritterId")) {
+        return ZERO_IDENT;
+    }
+
+    ident crId = ZERO_IDENT;
+    crId.value = playerData["MainCritterId"].toInt64();
+    return crId;
+}
+
+bool SameLivePlayer(Player? expected, Player? actual)
+{
+    return (expected == null && actual == null) || (expected != null && actual is expected);
+}
+
+[[Async]]
+void DisconnectIfAliveSynced(Player player)
+{
+    if (player.IsDestroyed || !Sync::Lock(player)) {
+        return;
+    }
+
+    player.Disconnect();
+}
+
+// Оставляет во внешнем remote-call контексте полный граф, который LoginPlayerToExistentRecord
+// использует после вложенного OnPlayerLogin: оба Player, криттер, его карта и локация.
+[[Async]]
+bool LockExistingLoginGraph(Player requestPlayer, Player? livePlayer, Critter cr)
+{
+    Entity[] fixedCover = {requestPlayer};
+    if (livePlayer != null) {
+        AddLoginSyncEntity(fixedCover, livePlayer);
+    }
+
+    if (!Sync::LockCritterWithMapAndLocation(cr, fixedCover)) {
+        return false;
+    }
+
+    Entity[] initialInfoCover = Sync::Snapshot();
+    if (!GlobalMapLocations::LockKnownLocations(cr, initialInfoCover)) {
+        return false;
+    }
+
+    initialInfoCover = Sync::Snapshot();
+    return GlobalmapGroup::LockInitialInfoGroup(cr, initialInfoCover);
+}
+
+// При неудаче подготовки возвращаем загруженный этим запросом экземпляр в состояние unloaded.
+// Документ существующего персонажа сохраняется; следующий login загрузит его заново.
+[[Async]]
+void CleanupLoadedLoginCritter(Critter? loadedCritter)
+{
+    if (loadedCritter == null || loadedCritter.IsDestroyed) {
+        return;
+    }
+
+    Critter cr = loadedCritter;
+    Entity[] cover = Sync::SurvivingSnapshot();
+    if (!Sync::LockCritterWithMapAndLocation(cr, cover)) {
+        return;
+    }
+
+    Critter? registeredCritter = Game.GetCritter(cr.Id);
+    if (registeredCritter !is cr || cr.GetPlayer() != null) {
+        return;
+    }
+
+    Game.UnloadCritter(cr);
+}
+
+[[Async]]
+bool FailPreparedExistingLogin(Critter? loadedCritter)
+{
+    CleanupLoadedLoginCritter(loadedCritter);
+    return false;
+}
+
+// Новый криттер ещё не связан с Player record. Любой отказ до LoginPlayerToNewRecord должен
+// удалить и live-сущность, и созданный persistent-документ, иначе в базе останется orphan.
+[[Async]]
+bool RollbackUnregisteredCritter(Critter cr, ident crId)
+{
+    if (!cr.IsDestroyed) {
+        if (!Sync::LockCritterWithMapAndLocation(cr)) {
+            Game.Log("Unable to lock an unregistered critter for rollback " + crId);
+            return false;
+        }
+
+        if (cr.GetPlayer() != null) {
+            return false;
+        }
+
+        Game.UnloadCritter(cr);
+    }
+
+    if (Game.GetCritter(crId) != null) {
+        return false;
+    }
+
+    Game.DestroyUnloadedCritter(crId);
+    return true;
+}
+
+// Подготавливает граф до входа в движковую функцию. Загруженный криттер размещается уже после
+// возврата LoadCritter, поэтому OnCritterInit больше не меняет топологию в отдельном SyncContext.
+[[Async]]
+bool PrepareExistingLogin(Player requestPlayer, ident playerId, Critter? & loadedByRequest)
+{
+    loadedByRequest = null;
+
+    for (int attempt = 0; attempt < LoginSyncMaxAttempts; attempt++) {
+        Player? livePlayer = Game.GetPlayer(playerId);
+        Entity[] baseCover = {requestPlayer};
+        if (livePlayer != null) {
+            AddLoginSyncEntity(baseCover, livePlayer);
+        }
+
+        if (!Sync::Lock(baseCover)) {
+            return FailPreparedExistingLogin(loadedByRequest);
+        }
+
+        Player? currentLivePlayer = Game.GetPlayer(playerId);
+        if (!SameLivePlayer(livePlayer, currentLivePlayer)) {
+            continue;
+        }
+
+        ident mainCritterId = livePlayer != null ? livePlayer.MainCritterId : ResolveStoredMainCritterId(playerId);
+        if (mainCritterId == ZERO_IDENT) {
+            return FailPreparedExistingLogin(loadedByRequest);
+        }
+
+        Critter? cr = livePlayer != null ? livePlayer.GetControlledCritter() : null;
+        if (cr != null && cr.Id != mainCritterId) {
+            return FailPreparedExistingLogin(loadedByRequest);
+        }
+
+        if (cr == null) {
+            cr = Game.GetCritter(mainCritterId);
+        }
+
+        bool loadedCritter = false;
+        if (cr == null) {
+            try {
+                cr = Game.LoadCritter(mainCritterId, true);
+                loadedCritter = true;
+                loadedByRequest = cr;
+            }
+            catch {
+                // Допустим только race с другим запросом, уже зарегистрировавшим тот же id.
+                cr = Game.GetCritter(mainCritterId);
+                if (cr == null) {
+                    throw("LoadCritter failed without a concurrently registered critter", mainCritterId);
+                }
+            }
+        }
+
+        if (cr == null) {
+            return FailPreparedExistingLogin(loadedByRequest);
+        }
+
+        Critter mainCritter = cr;
+        Entity[] loadedCover = baseCover.clone();
+        AddLoginSyncEntity(loadedCover, mainCritter);
+        if (!Sync::Lock(loadedCover)) {
+            return FailPreparedExistingLogin(loadedByRequest);
+        }
+
+        if (loadedCritter && !Main::PlacePlayerAfterInitialization(mainCritter)) {
+            return FailPreparedExistingLogin(loadedByRequest);
+        }
+
+        if (!LockExistingLoginGraph(requestPlayer, livePlayer, mainCritter)) {
+            continue;
+        }
+
+        currentLivePlayer = Game.GetPlayer(playerId);
+        if (!SameLivePlayer(livePlayer, currentLivePlayer)) {
+            continue;
+        }
+        if (livePlayer != null) {
+            if (livePlayer.MainCritterId != mainCritterId) {
+                continue;
+            }
+
+            Critter? controlledCritter = livePlayer.GetControlledCritter();
+            if (controlledCritter != null && controlledCritter !is mainCritter) {
+                continue;
+            }
+        }
+
+        return true;
+    }
+
+    return FailPreparedExistingLogin(loadedByRequest);
+}
 
 Player? GetPlayerByName(string playerName)
 {
@@ -37,18 +248,105 @@ ident ResolvePlayerIdByName(string playerName)
     return playerId;
 }
 
-void UpsertPlayerName(string playerName, ident playerId)
+bool IsPlayerNameClaimed(string playerName)
+{
+    return Game.DbHasRecord(PlayerNamesCollectionName, playerName);
+}
+
+void CreatePlayerNameReservation(string playerName, ident crId)
+{
+    Game.DbInsertRecord(PlayerNamesCollectionName, playerName, {{"_Name", playerName}, {"CritterId", "" + crId.value}});
+}
+
+bool CommitPlayerNameReservation(string playerName, ident crId, ident playerId)
 {
     if (!Game.DbHasRecord(PlayerNamesCollectionName, playerName)) {
-        Game.DbInsertRecord(PlayerNamesCollectionName, playerName, {{"_Name", playerName}});
+        return false;
+    }
+
+    dict<string, string> linkEntry = Game.DbGetRecord(PlayerNamesCollectionName, playerName);
+    if (linkEntry.exists("PlayerId")) {
+        ident storedPlayerId = ZERO_IDENT;
+        storedPlayerId.value = linkEntry["PlayerId"].toInt64();
+        return storedPlayerId == playerId;
+    }
+    if (!linkEntry.exists("CritterId")) {
+        return false;
+    }
+
+    ident storedCritterId = ZERO_IDENT;
+    storedCritterId.value = linkEntry["CritterId"].toInt64();
+    if (storedCritterId != crId) {
+        return false;
     }
 
     Game.DbUpdateRecordInt64(PlayerNamesCollectionName, playerName, "PlayerId", playerId.value);
+    return true;
+}
+
+void RemovePlayerNameReservation(string playerName, ident crId)
+{
+    if (!Game.DbHasRecord(PlayerNamesCollectionName, playerName)) {
+        return;
+    }
+
+    dict<string, string> linkEntry = Game.DbGetRecord(PlayerNamesCollectionName, playerName);
+    if (!linkEntry.exists("CritterId")) {
+        return;
+    }
+
+    ident storedCritterId = ZERO_IDENT;
+    storedCritterId.value = linkEntry["CritterId"].toInt64();
+    if (storedCritterId == crId) {
+        Game.DbRemoveRecord(PlayerNamesCollectionName, playerName);
+    }
+}
+
+[[Async]]
+void RollbackNewPlayerRegistration(string playerName, Critter cr, ident crId)
+{
+    if (!RollbackUnregisteredCritter(cr, crId)) {
+        Game.Log("Player name reservation retained because critter rollback failed " + crId);
+        return;
+    }
+
+    RemovePlayerNameReservation(playerName, crId);
+}
+
+// Публикует PlayerId внутри OnPlayerLogin. Если этот обработчик или следующий подписчик
+// откажет во входе, движок ещё откатит Player record, а внешний registration-вызов удалит резерв.
+[[Event]] [[Async]]
+EventResult CommitReservedPlayerNameOnLogin(Player player, Player? unloginedPlayer)
+{
+    if (!Sync::Lock(player)) {
+        return EventResult::StopChain;
+    }
+
+    string playerName = player.Name;
+    if (!Game.DbHasRecord(PlayerNamesCollectionName, playerName)) {
+        return EventResult::ContinueChain;
+    }
+
+    dict<string, string> linkEntry = Game.DbGetRecord(PlayerNamesCollectionName, playerName);
+    if (linkEntry.exists("PlayerId") || !linkEntry.exists("CritterId")) {
+        return EventResult::ContinueChain;
+    }
+
+    ident crId = ZERO_IDENT;
+    crId.value = linkEntry["CritterId"].toInt64();
+    if (crId != player.MainCritterId || !CommitPlayerNameReservation(playerName, crId, player.Id)) {
+        Game.Log("Player name reservation does not match the registering player");
+        return EventResult::StopChain;
+    }
+
+    return EventResult::ContinueChain;
 }
 
 [[ModuleInit]]
 void InitPlayerRegistration()
 {
+    Game.OnPlayerLogin.Subscribe(CommitReservedPlayerNameOnLogin);
+
     // RegProperties — Persistent-массив; очищаем перед заполнением, иначе на каждом старте сервера накапливаются дубли
     Game.RegProperties = {};
     AddRegistrationProperty(CritterProperty::StrengthBase);
@@ -76,7 +374,7 @@ void AddRegistrationProperty(CritterProperty prop)
     Game.RegProperties = properies;
 }
 
-[[ServerRemoteCall]]
+[[ServerRemoteCall]] [[Async]]
 void LoginExistingPlayer(Player player, string name)
 {
     ident playerId = ResolvePlayerIdByName(name);
@@ -86,8 +384,21 @@ void LoginExistingPlayer(Player player, string name)
         return;
     }
 
+    Critter? loadedByRequest = null;
+    if (!PrepareExistingLogin(player, playerId, loadedByRequest)) {
+        Game.Log("Player login rejected because the entity sync graph could not be stabilized");
+        DisconnectIfAliveSynced(player);
+        return;
+    }
+
     player.SetName(name);
-    Game.LoginPlayerToExistentRecord(player, playerId);
+    try {
+        Game.LoginPlayerToExistentRecord(player, playerId);
+    }
+    catch {
+        CleanupLoadedLoginCritter(loadedByRequest);
+        throw("Existing player login failed after sync preparation", playerId);
+    }
 }
 
 bool ValidateRegistrationProps(Player player, string name, dict<CritterProperty, int> props)
@@ -157,7 +468,7 @@ void RegisterNewPlayer(Player player, string name, dict<CritterProperty, int> pr
         return;
     }
 
-    if (ResolvePlayerIdByName(name) != ZERO_IDENT) {
+    if (IsPlayerNameClaimed(name)) {
         Messaging::Info(player, TextPackKey(TextPackName::Game, "" + (MsgStr::STR_NET_ACCOUNT_ALREADY)));
         player.Disconnect();
         return;
@@ -176,18 +487,46 @@ void RegisterNewPlayer(Player player, string name, dict<CritterProperty, int> pr
     }
 
     if (!Sync::Lock(player, startMap)) {
+        DisconnectIfAliveSynced(player);
         return;
     }
 
     Location startLocation = startMap.GetLocation();
     if (!Sync::Lock(player, startMap, startLocation)) {
+        DisconnectIfAliveSynced(player);
+        return;
+    }
+
+    // Все регистрации проходят через одну стартовую карту. Резерв имени ниже создаётся под этим
+    // Game.Sync до следующей замены покрытия: второй запрос увидит запись после разблокировки карты,
+    // даже если оба запроса прошли раннюю проверку.
+    if (IsPlayerNameClaimed(name)) {
+        Messaging::Info(player, TextPackKey(TextPackName::Game, "" + (MsgStr::STR_NET_ACCOUNT_ALREADY)));
+        player.Disconnect();
         return;
     }
 
     player.SetName(name);
     Critter cr = Game.CreateCritter(Content::Critter::Player, true, critterProps);
+    ident crId = cr.Id;
+
+    try {
+        CreatePlayerNameReservation(name, crId);
+    }
+    catch {
+        RollbackUnregisteredCritter(cr, crId);
+        if (IsPlayerNameClaimed(name)) {
+            Messaging::Info(player, TextPackKey(TextPackName::Game, "" + (MsgStr::STR_NET_ACCOUNT_ALREADY)));
+            player.Disconnect();
+            return;
+        }
+
+        throw("Unable to reserve a new player name", crId);
+    }
 
     if (!Sync::Lock(array<Entity> = {player, cr, startMap, startLocation})) {
+        DisconnectIfAliveSynced(player);
+        RollbackNewPlayerRegistration(name, cr, crId);
         return;
     }
 
@@ -195,16 +534,49 @@ void RegisterNewPlayer(Player player, string name, dict<CritterProperty, int> pr
     // отменяет только неявный флаг Persistent и иначе удаляет его документ из базы.
     cr.MakePersistent(true);
 
+    if (!Main::PlacePlayerAfterInitialization(cr)) {
+        Game.Log("Player registration placement failed");
+        DisconnectIfAliveSynced(player);
+        RollbackNewPlayerRegistration(name, cr, crId);
+        return;
+    }
+
+    Entity[] newLoginCover = {player};
+    if (!Sync::LockCritterWithMapAndLocation(cr, newLoginCover)) {
+        DisconnectIfAliveSynced(player);
+        RollbackNewPlayerRegistration(name, cr, crId);
+        return;
+    }
+
+    Entity[] initialInfoCover = Sync::Snapshot();
+    if (!GlobalMapLocations::LockKnownLocations(cr, initialInfoCover)) {
+        DisconnectIfAliveSynced(player);
+        RollbackNewPlayerRegistration(name, cr, crId);
+        return;
+    }
+
+    initialInfoCover = Sync::Snapshot();
+    if (!GlobalmapGroup::LockInitialInfoGroup(cr, initialInfoCover)) {
+        DisconnectIfAliveSynced(player);
+        RollbackNewPlayerRegistration(name, cr, crId);
+        return;
+    }
+
     // MainCritterId нужно задать до LoginPlayerToNewRecord — движок отвергает пустой документ
     // игрока при вставке, а сериализуются только Persistent-свойства. Побочный эффект: движок
     // сам привязывает криттера при логине, поэтому вызов SwitchCritter не требуется.
     player.MainCritterId = cr.Id;
-    Player loginedPlayer = Game.LoginPlayerToNewRecord(player);
-
-    UpsertPlayerName(name, loginedPlayer.Id);
-    loginedPlayer.DisplayName = loginedPlayer.Name;
-    cr.DisplayName = loginedPlayer.DisplayName;
+    cr.DisplayName = name;
     cr.IsGenerated = true;
+
+    try {
+        Game.LoginPlayerToNewRecord(player);
+    }
+    catch {
+        RollbackNewPlayerRegistration(name, cr, crId);
+        throw("New player login failed after critter creation", crId);
+    }
+
     Game.Log("Player registered and entered the game");
 }
 

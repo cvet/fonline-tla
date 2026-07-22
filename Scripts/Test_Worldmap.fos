@@ -1,0 +1,40 @@
+// Test_Worldmap — регрессии серверной загрузки изображения рельефа глобальной карты.
+namespace Test_Worldmap
+{
+
+#if SERVER
+
+[[ModuleInit]]
+void InitTestWorldmap()
+{
+    Game.OnTestingInit.Subscribe(OnTestingInit);
+}
+
+[[Event]]
+void OnTestingInit()
+{
+    Testing::RegisterTest("worldmap", "relief_image_full_size", ReliefImageFullSize);
+}
+
+// Рельеф (relief_tla.png, 1400x1500) грузится в WorldmapInit на инициализации модулей и читается
+// GetGlobalMapRelief по абсолютным координатам без проверки границ. Движок сменил бинарный формат
+// спрайтов и умеет обрезать прозрачные поля кадра — при обрезке абсолютные координаты рельефа
+// уехали бы, и вся вода/суша/горы карты читались бы не из тех пикселей. Пробуем дальний угол:
+// на обрезанном (уменьшенном) изображении обращение к нему бросило бы исключение.
+void ReliefImageFullSize(Testing::TestContext ctx)
+{
+    const int reliefWidth = 1400;
+    const int reliefHeight = 1500;
+
+    // Углы должны читаться без исключения: подтверждает, что изображение не обрезано меньше исходного.
+    Game.GetImageColor(Tla::ImageRelief, ipos(0, 0));
+    Game.GetImageColor(Tla::ImageRelief, ipos(reliefWidth - 1, reliefHeight - 1));
+
+    // Значение младших бит по контракту GetGlobalMapRelief (0 — вода).
+    int relief = Worldmap::GetGlobalMapRelief(reliefWidth - 1, reliefHeight - 1);
+    Testing::Expect(ctx, relief >= 0 && relief <= 0xF, "Рельеф должен укладываться в младшие 4 бита");
+}
+
+#endif
+
+}

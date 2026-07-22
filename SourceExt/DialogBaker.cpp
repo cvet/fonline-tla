@@ -18,7 +18,7 @@ static auto HasDialogScriptAttribute(ScriptSystem& engine, hstring func_name, st
 }
 
 DialogBaker::DialogBaker(shared_ptr<BakingContext> ctx) :
-    BaseBaker(std::move(ctx))
+    BaseBaker(std::move(ctx), NAME)
 {
     FO_STACK_TRACE_ENTRY();
 }
@@ -168,7 +168,7 @@ void DialogBaker::BakeFiles(const FileCollection& files, string_view target_path
 }
 
 DialogTextBaker::DialogTextBaker(shared_ptr<BakingContext> ctx) :
-    BaseBaker(std::move(ctx))
+    BaseBaker(std::move(ctx), NAME)
 {
     FO_STACK_TRACE_ENTRY();
 }

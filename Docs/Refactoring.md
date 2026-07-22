@@ -556,6 +556,85 @@ an orphaned persistent critter; the 2026-07-18 registration transaction follow-u
 caller-owned script synchronization, native rollback hardening, and game changes are intentionally left
 uncommitted for owner review.
 
+## Latest Engine sprite/3D/baker bump (2026-07-22)
+
+The Engine submodule was fast-forwarded by 23 `origin/master` commits from
+`236165de4c55c041a9cc532ab617756ea3d022f2` to `0109fee5a` (four upstream merges plus the `#186` 3D-subsystem
+and `#187` polygonal-sprites PRs, `small_vector`/perf refactors, sprite/atlas/font rework, MapperEngine
+`std::string` buffers, socket-error message stabilisation, and BakeFiles/BakerDataSource changes). Pre-scan
+confirmed **no script-API export was removed** and **no `EngineHook`/native-bridge signature changed**; the risk
+was concentrated in the baker ABI, the baked sprite format, new settings, and the two changed Core `.fofx`
+shaders.
+
+Three concrete migrations were required:
+
+1. **`SourceExt/DialogBaker.cpp` — baker ctor.** `BaseBaker`'s constructor gained a `string_view baker_name`
+   second parameter (each engine baker passes its `NAME`). Both `DialogBaker` and `DialogTextBaker` (whose
+   headers already declare `static constexpr string_view_nt NAME` and a `GetName()` override) now pass `NAME` to
+   the base ctor.
+2. **`SourceExt/ServerExtension.cpp` — `Server_Game_LoadImage` baked-sprite format.** This was the load-bearing
+   fix: the module-init call `Game.LoadImage(ImageRelief, "relief_tla.png")` (GlobalmapGroup/Worldmap) crashed
+   startup with `ScriptException: File is not image`. The atlas/sprite rework replaced the old hand-parsed header
+   (single `42` magic byte) with a formalised container (`SPRITE_RESOURCE_MAGIC` 43 + `SPRITE_RESOURCE_VERSION`,
+   per-frame mesh payload, footer magic) read by the new `Common/SpriteResource.h` API. TLA's hand-rolled parser
+   was replaced by `ReadSpriteResource(file.GetData())` + `ExtractSpriteResourceFrameImage(<dir 0, frame 0>)`,
+   storing `image.Size`/`image.Pixels` into `ServerImage`. Correctness verified against the baker: cropping only
+   occurs for non-`Quad` frames (ImageBaker `CropSpriteFrameToMeshBounds` is gated on `mesh.Kind != Quad`), and
+   TLA runs `SpriteMesh.Enabled = false`, so every frame is `Quad` and stored at full logical size — so
+   `relief_tla.png` loads at its exact 1400×1500, keeping the absolute-coordinate relief lookup
+   (`GetGlobalMapRelief`, which does no bounds check) correct.
+3. **`TLA.fomain` — new required settings.** The polygonal-sprites PR added `FIXED_SETTING`s that are
+   Uninitialized-fatal at bake; added with engine defaults: `SpriteMesh.Enabled = False`,
+   `SpriteMesh.AlphaThreshold = 0`, `SpriteMesh.MaxTriangles = 4096`, `SpriteMesh.AreaSavingsWeight = 32.0`, and
+   `Render.DrawWireframe = False`. The two changed Core `.fofx` shaders (`2D_Default`, `2D_WithoutEgg`) baked
+   within the minimal profile (no `gl_FragCoord`/X4502).
+
+A new **`Scripts/Test_Worldmap::relief_image_full_size`** regression pins the migration: it samples the loaded
+relief image at `(0,0)` and the far corner `(1399,1499)` — a cropped/shrunk image would throw
+`Invalid coords arg` there — and checks the `GetGlobalMapRelief` low-nibble contract.
+
+**Verification:** Baker rebuilt first (after the DialogBaker fix) → Compile AngelScript 0 warnings → full
+compatibility-triggered bake (all packs + 550 maps) → `TLA_Server`, `TLA_ServerHeadless`, `TLA_Client`,
+`TLA_ClientLib`, `TLA_Mapper`, `TLA_UnitTests` built without warnings (`ServerExtension.cpp` and the sprite/3D
+client rework included). Native `TLA_UnitTests` passed **419310 assertions in 360 test cases** (up from
+355962/346 — the new sprite-resource/mesh suites), exit 0. `LocalTest` headless reached `Start server
+complete!`; the live script harness completed **66 passed, 0 failed, 0 skipped** (added the relief regression),
+with no exception/sync/assertion/fatal marker. Formatter idempotent, quality ratchet and nullable ABI green,
+`git diff --check` clean. Not committed (owner reviews); this bump sits on top of the still-uncommitted R3
+bug-fix working tree.
+
+## Latest Engine handle-only Destroy bump (2026-07-19)
+
+The Engine submodule was fast-forwarded by eight `origin/master` commits from
+`14bb6c85e33cd55fede7e7bac3a5d124d51031f6` to `236165de4c55c041a9cc532ab617756ea3d022f2`. Seven are build/test
+housekeeping (`f667a85d9` third-party update, `3accf133e` rpmalloc C-standard macro, `65dfb851c` MSVC /W4 shadow
+fix, `42b038cf5` effect-baker warning suppression, `998eefcbf` internal `ResolveTargetHex` fallback-hex fix, plus
+two merges) and need no game-layer change. The load-bearing one is **`845bdcce4` "Remove id-based entity Destroy*
+script exports (handle-only)"**: it drops the `ident_t` overloads of
+`Game.Destroy{Entity,Entities,Item,Items,Critter,Critters,Location,Map}`, leaving only the live-handle (and
+handle-array) forms. `Game.DestroyUnloadedCritter(id)` is intentionally kept, since an unloaded critter has no
+live handle.
+
+TLA had exactly **eight** id-based call sites, all `Game.DestroyLocation(<handle>.Id)` where the `Location`
+handle was already resolved and in scope (five plain `loc.Id` in deferred/quest cleanup — `ArroyoMynocDefence`,
+`GameEventStorehouse`, `KlamSmily`, `Purgatory`, `ReddWanamingo`, `VcGuardsman`; plus `SeAndroid`
+`map.GetLocation().Id` and `SfCommon` `locations[i].Id`). Each now passes the handle directly. A tree-wide scan of
+every `Game.Destroy*` call confirmed no other id-based form (no `ident`-typed variable, `.Id`, or `ZERO_IDENT`
+argument) reaches these methods; all remaining calls already pass handles or handle arrays. The removed exports
+change the script-API surface, so the compatibility hash advanced to `221e34cf740c6ba0` and the bake rebuilt the
+full tree (all packs + 550 maps).
+
+**Verification:** Baker rebuilt first, then Compile AngelScript passed with 0 warnings (it pinpointed exactly the
+eight `DestroyLocation(ident)` sites, and reported clean after the fix). Full bake (550 maps, compatibility-hash
+triggered) → `TLA_Server`, `TLA_ServerHeadless`, `TLA_Client`, `TLA_ClientLib`, and `TLA_UnitTests` built without
+warnings (`TLA_Client` correctly rebuilt/copied `TLA_ClientLib` after the compatibility change). A `LocalTest`
+headless run reached `Start server complete!`, the live script harness completed **65 passed, 0 failed, 0
+skipped**, and the log contained no exception, sync, assertion, or fatal marker (only the benign
+`DestroyInnerEntities`/`DestroyAllEntities` shutdown-stage lines). The native `TLA_UnitTests` suite passed
+**355962 assertions in 346 test cases**, exit 0 (the single `Map baking error` line is a negative test that
+feeds the baker an invalid map to confirm it is rejected). Not committed (owner reviews); this bump sits on top
+of the still-uncommitted R3 bug-fix working tree.
+
 ## Latest Engine server follow-up (2026-07-18)
 
 The Engine working tree was fast-forwarded in two steps by twelve `origin/master` commits from `5ce19ec24`

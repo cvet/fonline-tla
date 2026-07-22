@@ -2,6 +2,7 @@
 
 #include "Dialogs.h"
 #include "Server.h"
+#include "SpriteResource.h"
 
 FO_USING_NAMESPACE();
 
@@ -187,54 +188,25 @@ isize32 FO_NAMESPACE Server_Game_LoadImage(ptr<ServerEngine> server, uint32_t im
         throw ScriptException("File not found", imageName);
     }
 
-    auto reader = file.GetReader();
+    // Читаем спрайт через движковый парсер: движок сменил бинарный формат
+    // (SPRITE_RESOURCE_MAGIC/VERSION, помимо старого одиночного байта 42), поэтому ручной разбор
+    // больше не подходит. Берём первый кадр первого направления и разворачиваем его в логическое изображение.
+    const auto file_data = file.GetData();
+    auto resource = ReadSpriteResource(file_data);
 
-    const auto check_number = reader.GetUInt8();
+    FO_VERIFY_AND_THROW(!resource.Directions.empty(), "Image contains no directions", imageName);
+    FO_VERIFY_AND_THROW(!resource.Directions.front().Frames.empty(), "Image contains no frames", imageName);
 
-    if (check_number != 42) {
-        throw ScriptException("File is not image", imageName);
-    }
-
-    const auto frames_count = reader.GetLEUInt16();
-
-    if (frames_count != 1) {
-        throw ScriptException("File must contain only one frame", imageName);
-    }
-
-    [[maybe_unused]] const auto ticks = reader.GetLEUInt16();
-
-    const auto dirs = reader.GetUInt8();
-
-    if (dirs != 1) {
-        throw ScriptException("File must contain only one dir", imageName);
-    }
-
-    [[maybe_unused]] const auto ox = reader.GetLEInt16();
-    [[maybe_unused]] const auto oy = reader.GetLEInt16();
-
-    const auto is_spr_ref = reader.GetUInt8();
-    FO_VERIFY_AND_THROW(is_spr_ref == 0, "Sprite reference images are not supported");
-
-    const auto width = reader.GetLEUInt16();
-    const auto height = reader.GetLEUInt16();
-    [[maybe_unused]] const auto nx = reader.GetLEInt16();
-    [[maybe_unused]] const auto ny = reader.GetLEInt16();
-    const const_span<uint8_t> data = reader.GetCurDataSpan(numeric_cast<size_t>(width) * height * 4);
-
-    reader.GoForward(data.size());
-
-    const auto check_number2 = reader.GetUInt8();
-    FO_VERIFY_AND_THROW(check_number2 == 42, "Image trailing check number mismatch");
+    auto image = ExtractSpriteResourceFrameImage(std::move(resource.Directions.front().Frames.front()));
 
     auto simg = SafeAlloc::MakeUnique<ServerImage>();
-    simg->Width = width;
-    simg->Height = height;
-    simg->Data.resize(numeric_cast<size_t>(width) * height);
-    MemCopy(simg->Data.data(), data.data(), simg->Data.size() * sizeof(ucolor));
+    simg->Width = image.Size.width;
+    simg->Height = image.Size.height;
+    simg->Data = std::move(image.Pixels);
 
     ext_data.ServerImages[imageSlot] = std::move(simg);
 
-    return {width, height};
+    return image.Size;
 }
 
 ucolor FO_NAMESPACE Server_Game_GetImageColor(ptr<ServerEngine> server, uint32_t imageSlot, ipos32 pos)

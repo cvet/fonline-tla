@@ -556,6 +556,56 @@ an orphaned persistent critter; the 2026-07-18 registration transaction follow-u
 caller-owned script synchronization, native rollback hardening, and game changes are intentionally left
 uncommitted for owner review.
 
+## Latest Engine nested-sections/Effekseer bump (2026-07-24)
+
+The Engine submodule was fast-forwarded by 7 `origin/master` commits from `0109fee5a` to
+`4883d25c4c` (`#185` Effekseer particle integration, `#188` nested config sections, `#190` non-const
+locals, plus baker-order/FlushMap-effect/FileSystem changes). No script export was removed and no
+engine-hook signature changed, but this bump was **not** a small-fallout bump — `#188` changed the
+`.fomap` file format, requiring a migration of all authored maps (owner-approved before executing).
+
+Five migrations:
+
+1. **`.fomap` format — all 275 maps migrated (the big one).** `#188` reworked config parsing so a
+   `.fomap` is a `[ProtoMap]` anchor that **owns nested, `/`-addressed instance sections**; the baker
+   now reads maps with `SkipNestedSections` and rejects flat top-level `[Critter]`/`[Item]` sections
+   (`ProtoTextBakerException: Invalid proto section name`). Validated the exact contract against
+   `Common/MapLoader.cpp` (`MAP_ANCHOR_SECTION = "ProtoMap"`, `CONTEXT_PREFIX = "$Name"` = "the anchor
+   above"; nested types restricted to `Critter`/`Item`). A line-anchored byte-level script rewrote
+   every top-level `[Critter]`→`[$Name/Critter]` and `[Item]`→`[$Name/Item]` across all 275 maps
+   (3522 critter + 169599 item headers) preserving CRLF; pre-checked that the only top-level section
+   names in TLA maps are `ProtoMap`/`Critter`/`Item` and each file has exactly one `[ProtoMap]`. No
+   engine converter exists and the lf repos are all on older engines (no reference), so this was a
+   from-scratch content migration.
+2. **`SourceExt/ContentMigration.cpp` removed.** It implemented the engine hooks
+   `ConfigSectionParseHook`/`ConfigEntryParseHook`, which `#188` **deleted** from the engine (codegen:
+   `Invalid engine hook ConfigSectionParseHook`). Those hooks migrated legacy authored formats at
+   parse time (`[Tile]`→`[Item]`, `HexX/HexY`→`Hex`, `OffsetX/Y`→`Offset`, `Width/Height`→`Size`,
+   `PicMap`→`$Proto` under `Tile`, etc.). A tree-wide scan showed the migration was already dead
+   except one entry — `Items/bike.foitem` still had `OffsetY = 30` — so that was converted permanently
+   to `Offset = 0 30` (exactly what the hook produced) and the file + its `CMakeLists.txt`
+   registration were removed. (`PicMap`, 819 uses, is a current engine Item property — the hook only
+   touched it under `[Tile]`, of which there are none — so those are untouched.)
+3. **`SourceExt/Dialogs.cpp` — `ConfigFile` ctor.** `#188` dropped the `string_view name_hint` first
+   parameter (it only fed the removed hooks); `DialogManager::ParseDialog` now calls
+   `ConfigFile(string(data), ConfigFileOption::CollectContent)`.
+4. **`TLA.fomain` — new settings.** Four `Mapper.ParticlePreview*` VARIABLE settings (Effekseer) are
+   Uninitialized-fatal at bake; added with engine defaults (`ParticlePreviewEffect`=,
+   `ParticlePreviewSeed`=0, `ParticlePreviewScale`=1.0, `ParticlePreviewPrewarm`=False).
+5. **No build change for Effekseer** — `#185` is gated behind `FO_EFFEKSEER_PARTICLES` (default OFF);
+   the engine files self-guard, so TLA's CMake needs nothing. `DialogBaker`'s ctor from the prior bump
+   is stable; `Baker.h` changes were additive.
+
+**Verification:** Baker rebuilt first → codegen clean (hooks gone) → Compile AngelScript 0 warnings →
+full bake **550 map files** (275 maps × 2 langs, MapBaker validated the nested format) → `TLA_Server`,
+`TLA_ServerHeadless`, `TLA_Client`, `TLA_ClientLib`, `TLA_Mapper`, `TLA_UnitTests` built without
+warnings → `LocalTest` headless reached `Start server complete!`, **generated the world with 1233
+entities** (consistent with the prior bump's ~1226 — the migrated maps instantiate critters/items
+correctly, not just parse), live script harness **66 passed, 0 failed, 0 skipped**, no
+exception/sync/assertion/`Invalid map`/`Unknown nested` marker. Native `TLA_UnitTests` result recorded
+below. Script-quality ratchet and nullable ABI green. Not committed (owner reviews); this bump sits on
+top of the still-uncommitted R3 bug-fix tree. **This changeset includes all 275 `Maps/*.fomap`.**
+
 ## Latest Engine sprite/3D/baker bump (2026-07-22)
 
 The Engine submodule was fast-forwarded by 23 `origin/master` commits from

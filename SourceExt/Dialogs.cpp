@@ -513,7 +513,7 @@ auto DialogManager::ParseDialog(string_view pack_name, string_view data) const -
     FO_STACK_TRACE_ENTRY();
 
     auto pack = SafeAlloc::MakeRefCounted<DialogPack>();
-    auto fodlg = ConfigFile(strex("{}.fodlg", pack_name), string(data), ConfigFileOption::CollectContent);
+    auto fodlg = ConfigFile(string(data), ConfigFileOption::CollectContent);
 
     pack->PackId = _meta->Hashes.ToHashedString(pack_name);
 

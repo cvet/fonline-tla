@@ -75,7 +75,6 @@ AddIncludeDirectories("Engine/ThirdParty/Asio/include")
 
 AddEngineSources(
     COMMON SourceExt/CommonExtension.cpp
-    COMMON SourceExt/ContentMigration.cpp
     COMMON SourceExt/Dialogs.h
     COMMON SourceExt/Dialogs.cpp
     SERVER SourceExt/ServerExtension.cpp

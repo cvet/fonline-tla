@@ -556,6 +556,25 @@ an orphaned persistent critter; the 2026-07-18 registration transaction follow-u
 caller-owned script synchronization, native rollback hardening, and game changes are intentionally left
 uncommitted for owner review.
 
+## Latest Engine draw-tuning follow-up (2026-07-24)
+
+The Engine submodule was fast-forwarded by 4 `origin/master` commits from `4883d25c4` to `fda8ee32a`
+(`#191` draw tuning, deterministic Effekseer depth sort [gated OFF for TLA], ModelInstance/CritterHexView
+render refactor, ClientConnection message-history deque). All client/rendering internals — no script
+export removed, no engine-hook change, no shader change. **One config fallout:** the new FIXED setting
+`Render.ModelLayerProperties` (vector<string>, empty default — "critter properties feeding model layers"
+for tooling) is Uninitialized-fatal at bake; added empty to `TLA.fomain` next to the other `Render.Model*`
+settings. `Script.DebuggerBindHost` also changed its engine default (0.0.0.0→127.0.0.1) but TLA.fomain
+already supplies its own value (and `Script.DebuggerEnabled = False`), so no action. `Render.DrawWireframe`
+was already present from the sprite bump.
+
+**Verification:** Baker rebuilt → codegen clean → Compile AngelScript 0 warnings → full bake (550 map
+files) → `TLA_Server`, `TLA_ServerHeadless`, `TLA_Client`, `TLA_ClientLib`, `TLA_Mapper`, `TLA_UnitTests`
+built without warnings → `LocalTest` headless reached `Start server complete!`, world generated **1226
+entities**, live script harness **66 passed, 0 failed, 0 skipped**, no exception/sync/assertion marker.
+Script-quality ratchet and nullable ABI green. Native `TLA_UnitTests` result recorded below. Uncommitted
+(owner reviews): `Engine` gitlink + `TLA.fomain` (one line).
+
 ## Latest Engine nested-sections/Effekseer bump (2026-07-24)
 
 The Engine submodule was fast-forwarded by 7 `origin/master` commits from `0109fee5a` to
@@ -602,9 +621,12 @@ full bake **550 map files** (275 maps × 2 langs, MapBaker validated the nested 
 warnings → `LocalTest` headless reached `Start server complete!`, **generated the world with 1233
 entities** (consistent with the prior bump's ~1226 — the migrated maps instantiate critters/items
 correctly, not just parse), live script harness **66 passed, 0 failed, 0 skipped**, no
-exception/sync/assertion/`Invalid map`/`Unknown nested` marker. Native `TLA_UnitTests` result recorded
-below. Script-quality ratchet and nullable ABI green. Not committed (owner reviews); this bump sits on
-top of the still-uncommitted R3 bug-fix tree. **This changeset includes all 275 `Maps/*.fomap`.**
+exception/sync/assertion/`Invalid map`/`Unknown nested` marker. Native `TLA_UnitTests` passed **419447
+assertions in 361 test cases**, exit 0. Script-quality ratchet and nullable ABI green. **This changeset
+includes all 275 `Maps/*.fomap`.** The owner subsequently committed this bump together with the R3
+bug-fix tree; a re-verification on the committed tree (Compile AngelScript → full bake 550 maps →
+Server/ServerHeadless/Client/ClientLib/Mapper builds → headless `Start server complete!` + harness
+66/66 → ratchet/nullable green) confirmed it clean.
 
 ## Latest Engine sprite/3D/baker bump (2026-07-22)
 

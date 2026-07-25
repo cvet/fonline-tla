@@ -572,8 +572,8 @@ was already present from the sprite bump.
 files) → `TLA_Server`, `TLA_ServerHeadless`, `TLA_Client`, `TLA_ClientLib`, `TLA_Mapper`, `TLA_UnitTests`
 built without warnings → `LocalTest` headless reached `Start server complete!`, world generated **1226
 entities**, live script harness **66 passed, 0 failed, 0 skipped**, no exception/sync/assertion marker.
-Script-quality ratchet and nullable ABI green. Native `TLA_UnitTests` result recorded below. Uncommitted
-(owner reviews): `Engine` gitlink + `TLA.fomain` (one line).
+Script-quality ratchet and nullable ABI green. Native `TLA_UnitTests` passed **419476 assertions in 363
+test cases**, exit 0. Uncommitted (owner reviews): `Engine` gitlink + `TLA.fomain` (one line).
 
 ## Latest Engine nested-sections/Effekseer bump (2026-07-24)
 
@@ -922,6 +922,37 @@ critter actions, drugs/perks, economy, items, maps, AI support, mobs, guards, ev
 dialogs, devices). The session limit again killed part of the verify phase (178/398 agents), but **38 candidates
 survived unanimous verification** (36 at full 3-vote, 2 at 2-vote). The unverified remainder is recovered from the
 journal and re-queued for the next pass.
+
+**R3 wave-3 recovery batch (2026-07-24).** The 77 wave-3 candidates the session limit never adjudicated were
+recovered from the workflow journal; the 30 critical/high ones were re-verified against the current (already
+heavily patched) tree with a two-lens panel that explicitly filters already-fixed and dormant-feature findings.
+Result: **11 confirmed-live, 1 already-fixed, 14 dormant, 4 refuted**. The 14 dormant correctly caught the
+disabled-feature backlog (racing/`GameEvent` scheduling, `BulletinBoard`, un-fired item/critter events,
+`Item::ChangeProto` stub) and the already-fixed null-to-`GetPlanes` cases. The 11 live fixes applied:
+
+- **Sync-cover crashes on live paths** (would throw `Entity access without sync` at runtime): `NpcDialog::NpcTimerDialog`
+  (two-NPC timed banter — `[[Async]]` + `LockCritterWithMapAndLocation`), `Dialogs::SpeechAnswer` (took *no* cover
+  when a dialog had no talker — now an unconditional `cr`+map+talker cover, needed by map/location-reading
+  demands/results), `HostileLocationQuest::AllyIdle` (read the quest player's props before locking him — reordered),
+  `SpyMission::BeginReport` (global time event with no cover — `[[Async]]` + `LockCritterWithMap`, re-arm on lock miss).
+- **`ReplicationBank` keeper** — inverted `Opened` check: the keeper "closed" already-closed bank containers and left
+  open ones open (mirror of the correct door block).
+- **`Roulette::LoadSettings`** — `NpcRole == 0` produced a negative `RTables` index → croupier init threw; clamped.
+- **`TownSupply::GuardIdle`** — re-queued a non-deduplicated walk plane every tick until `AddPlane` hit `MAX_PLANES`
+  and the bounty hunter self-destructed ~9 s after spawn; now guarded on an existing exit plane.
+- **`Merc::MercIdleImpl`** — called `GetGlobalGroup(merc)` on a merc still on a local map (throws every tick); guarded
+  on the merc being off-map.
+- **`Dialogs::UseAnswerResults`** — `AddItem(pid, 0)` when target count already equalled current (engine throws
+  "Count arg must be positive"); skip the no-op.
+- **`Sandbag::AddSandBag`** — destroyed the pre-existing barricade *before* the door/container and critter-on-hex
+  validations, so a rejected placement lost both the old stack and the new bag; restructured to validate-then-mutate.
+- **`Monologue::RunMonologue`** — blind-cast the authored say-type; `den_joshua.fodlg` passed out-of-range `6` so
+  Joshua's ballad rendered as nothing. Added a range clamp and corrected the authored value to `3` (Emote).
+
+**Verification:** Compile AngelScript 0 warnings → formatter idempotent → quality ratchet + nullable ABI green →
+bake (the `.fodlg` change) → headless `Start server complete!` + harness **66 passed, 0 failed, 0 skipped**, no
+exception/sync/assertion marker. Native `TLA_UnitTests` had already passed **419476 assertions / 363 cases** on
+this tree. Not committed (owner reviews).
 
 **A self-inflicted regression fixed first.** The earlier `GetPlanes(...)` out-parameter fix (`planes.clear();
 planes.insertLast(...)`) broke the ~8 call sites that pass `null` as the out-array to use only the count

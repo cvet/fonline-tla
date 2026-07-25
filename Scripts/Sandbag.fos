@@ -32,52 +32,53 @@ bool AddSandBag(Map map, Critter player, mpos hex, Item sandBag)
         return false;
     }
 
+    // Первый проход — ТОЛЬКО проверки, без разрушения. Собираем существующие мешки и уровень стопки.
+    // Разрушать старую стопку до всех проверок нельзя: при отказе (дверь/контейнер, игрок на гексе)
+    // терялись бы и старая стопка, и новый мешок.
+    Item[] existingSandbags = {};
     Item[] items = map.GetItemsOnHex(hex);
-    if (!items.isEmpty()) {
-        for (int i = 0; i < items.length(); i++) {
-            // На нужном нам гексе может быть неизвестное число мешков
-            // Все мешки удаляем
-            // - остальные предметы не трогаем, за исключением контейнеров или дверей
-            // - мешок в дверной проем поставить нельзя, на контейнер положить нельзя
-            //   в этом случае новый мешок просто удаляется и выдается сообщение
-            Item item = items[i];
-            if (item.Id == sandBag.Id) {
-                continue;
-            }
+    for (int i = 0; i < items.length(); i++) {
+        // На нужном нам гексе может быть неизвестное число мешков
+        // - остальные предметы не трогаем, за исключением контейнеров или дверей
+        // - мешок в дверной проем поставить нельзя, на контейнер положить нельзя
+        //   в этом случае новый мешок просто удаляется и выдается сообщение
+        Item item = items[i];
+        if (item.Id == sandBag.Id) {
+            continue;
+        }
 
-            if (item.Type == ItemType::Container || item.Type == ItemType::Door) {
-                // Найдена дверь или контейнер в нужных координатах, удаляем мешок, которым игрок пытался заблокировать проход или контейнер
-                Game.DestroyItem(sandBag);
-                Messaging::Info(player, TextPackKey(TextPackName::Text, "" + (STR_TEAR_SANDBAG)));
-                return false;
-            }
+        if (item.Type == ItemType::Container || item.Type == ItemType::Door) {
+            // Найдена дверь или контейнер в нужных координатах, удаляем мешок, которым игрок пытался заблокировать проход или контейнер
+            Game.DestroyItem(sandBag);
+            Messaging::Info(player, TextPackKey(TextPackName::Text, "" + (STR_TEAR_SANDBAG)));
+            return false;
+        }
 
-            // TODO:       Если будет большое число эксплоитов с огораживанием сеток выхода и дверей, в этом месте можно будет добавить удаление
-            // мешка, если в некоем радиусе есть дверь, стена итд
+        // TODO:       Если будет большое число эксплоитов с огораживанием сеток выхода и дверей, в этом месте можно будет добавить удаление
+        // мешка, если в некоем радиусе есть дверь, стена итд
 
-            hstring iPid = item.ProtoId;
-            if (iPid == Content::Item::sandbag_1) {
-                pidCur = Content::Item::sandbag_2;
-                Game.DestroyItem(item);
-            }
-            else if (iPid == Content::Item::sandbag_2) {
-                pidCur = Content::Item::sandbag_3;
-                Game.DestroyItem(item);
-            }
-            else if (iPid == Content::Item::sandbag_3) {
-                pidCur = Content::Item::sandbag_4;
-                Game.DestroyItem(item);
-            }
-            else if (iPid == Content::Item::sandbag_4) {
-                pidCur = Content::Item::sandbag_5;
-                Game.DestroyItem(item);
-            }
-            else if (iPid == Content::Item::sandbag_5) {
-                Messaging::Info(player, TextPackKey(TextPackName::Text, "" + (STR_CANT_PLACE_SANDBAG)));
-                Messaging::Info(player, TextPackKey(TextPackName::Text, "" + (STR_TEAR_SANDBAG)));
-                Game.DestroyItem(sandBag);
-                return true;
-            }
+        hstring iPid = item.ProtoId;
+        if (iPid == Content::Item::sandbag_1) {
+            pidCur = Content::Item::sandbag_2;
+            existingSandbags.insertLast(item);
+        }
+        else if (iPid == Content::Item::sandbag_2) {
+            pidCur = Content::Item::sandbag_3;
+            existingSandbags.insertLast(item);
+        }
+        else if (iPid == Content::Item::sandbag_3) {
+            pidCur = Content::Item::sandbag_4;
+            existingSandbags.insertLast(item);
+        }
+        else if (iPid == Content::Item::sandbag_4) {
+            pidCur = Content::Item::sandbag_5;
+            existingSandbags.insertLast(item);
+        }
+        else if (iPid == Content::Item::sandbag_5) {
+            Messaging::Info(player, TextPackKey(TextPackName::Text, "" + (STR_CANT_PLACE_SANDBAG)));
+            Messaging::Info(player, TextPackKey(TextPackName::Text, "" + (STR_TEAR_SANDBAG)));
+            Game.DestroyItem(sandBag);
+            return true;
         }
     }
 
@@ -85,10 +86,15 @@ bool AddSandBag(Map map, Critter player, mpos hex, Item sandBag)
         // Проверка, что на гексе с мешком не стоит игрок
         // иначе его можно заложить мешками и он будет непростреливаемым
         if (map.GetCritterOnHex(hex) != null) {
-            // в этом гексе уже лежит мешок, и на нем стоит человек
+            // в этом гексе уже лежит мешок, и на нем стоит человек — старую стопку ещё не трогали
             Game.DestroyItem(sandBag);
             Messaging::Info(player, TextPackKey(TextPackName::Text, "" + (STR_TEAR_SANDBAG)));
             return false;
+        }
+
+        // Все проверки пройдены — теперь можно снести старую стопку и повысить уровень
+        for (int i = 0; i < existingSandbags.length(); i++) {
+            Game.DestroyItem(existingSandbags[i]);
         }
 
         sandBag = ChangeSandBagProto(sandBag, pidCur);

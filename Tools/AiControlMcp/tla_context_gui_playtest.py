@@ -18,6 +18,7 @@ import os
 import sys
 import time
 from pathlib import Path
+from collections.abc import Callable
 from typing import Any
 
 from ai_control_runner import (
@@ -47,13 +48,18 @@ WORKSPACE_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_SCREENS = ("SkillBox", "Aim", "Split", "Timer", "Use", "PickUp", "Radio", "Elevator", "DialogBox")
 BRIDGE_CONTEXT_SCREENS = frozenset({"SkillBox", "Aim", "Split", "Timer", "Use"})
 SUPPORTED_SCREENS = BRIDGE_CONTEXT_SCREENS | {"PickUp", "Radio", "Elevator", "DialogBox"}
+# How many nearest safe containers to path-probe before giving up on the PickUp context (one bridge
+# round-trip each). Nearest-first ordering does NOT correlate with reachability — on arroyo the first
+# reachable container sits at rank 12 of 20, behind eleven nearer ones walled off inside buildings — so
+# this has to cover a whole map's worth of visible containers, not just the closest handful.
+PICKUP_REACHABILITY_PROBE_LIMIT = 32
 CONTEXT_REQUIREMENTS = {
     "Aim": "visible living non-chosen critter",
     "Split": "inventory stack with count greater than one",
     "Timer": "owned dynamite (the authored timer-capable item)",
     "Use": "inventory item with canUseOnSmth=true and a visible critter or item target",
     "SkillBox": "chosen critter on a map",
-    "PickUp": "safe visible unopened container or locker",
+    "PickUp": "safe unopened container or locker the chosen critter can path adjacent to",
     "Radio": "owned inventory item with protoId=radio or hasRadio=true",
     "Elevator": "already-open elevator or explicit --elevator-trigger-hex X Y",
     "DialogBox": "AiControl.AllowQaCommands and a chosen critter",
@@ -166,6 +172,59 @@ def item_id_matches(item: dict[str, Any], requested_id: str) -> bool:
     return str(item.get("id") or "") == requested_id
 
 
+def container_is_reachable(client: McpProcess, item: dict[str, Any], timeout_ms: int) -> bool:
+    """Can the chosen critter path adjacent to this container? `cut=1` mirrors the client's own pick
+    distance (`useDist` in ChosenActions::ChosenPickItem), so this answers exactly the question the game
+    asks before it queues the approach walk."""
+    target = item_hex(item)
+    if target is None:
+        return False
+
+    payload = call_tool(client, "tla_env_path", {
+        "toX": target[0],
+        "toY": target[1],
+        "cut": 1,
+        "waitForCompletion": True,
+        "timeoutMs": timeout_ms,
+    })
+    result = payload.get("result") if isinstance(payload, dict) else None
+    return bool(result.get("reachable")) if isinstance(result, dict) else False
+
+
+def describe_pickup_approach(client: McpProcess, item: dict[str, Any], timeout_ms: int) -> dict[str, Any] | None:
+    """Measure where the chosen critter ended up relative to the container it was sent to open.
+
+    `blocked` is True when the critter is out of pick range (`directDistance > 1`) and no path closes the
+    remaining gap — i.e. the approach is over and it did not arrive, so no screen can ever appear.
+    """
+    target = item_hex(item)
+    if target is None:
+        return None
+
+    payload = call_tool(client, "tla_env_path", {
+        "toX": target[0],
+        "toY": target[1],
+        "cut": 1,
+        "waitForCompletion": True,
+        "timeoutMs": timeout_ms,
+    })
+    result = payload.get("result") if isinstance(payload, dict) else None
+    if not isinstance(result, dict):
+        return None
+
+    distance = result.get("directDistance")
+    reachable = bool(result.get("reachable"))
+    out_of_range = isinstance(distance, int) and distance > 1
+    return {
+        "from": result.get("from"),
+        "to": result.get("to"),
+        "directDistance": distance,
+        "pathLength": result.get("pathLength"),
+        "reachable": reachable,
+        "blocked": bool(out_of_range and not reachable),
+    }
+
+
 def pickup_candidate_is_safe(item: dict[str, Any]) -> bool:
     """Only choose a real unopened container; never pick up an ordinary ground item or a door."""
     required_fields = {
@@ -211,7 +270,9 @@ def chosen_hex(observation: dict[str, Any]) -> tuple[int, int] | None:
     return item_hex(chosen) if isinstance(chosen, dict) else None
 
 
-def select_pickup_candidate(observation: dict[str, Any], requested_id: str = "") -> dict[str, Any] | None:
+def select_pickup_candidate(observation: dict[str, Any], requested_id: str = "",
+                            is_reachable: Callable[[dict[str, Any]], bool] | None = None,
+                            probe_limit: int = PICKUP_REACHABILITY_PROBE_LIMIT) -> dict[str, Any] | None:
     items = [item for item in observation.get("mapItems", []) if isinstance(item, dict)]
     if requested_id:
         selected = next((item for item in items if item_id_matches(item, requested_id)), None)
@@ -231,7 +292,18 @@ def select_pickup_candidate(observation: dict[str, Any], requested_id: str = "")
         return distance, str(item.get("id") or "")
 
     candidates.sort(key=sort_key)
-    return candidates[0] if candidates else None
+    if is_reachable is None:
+        return candidates[0] if candidates else None
+
+    # Visibility is not reachability: a container can be fully observable through a window or across a
+    # wall while no path reaches it. Interacting with such a target is a legitimate no-op in game (the
+    # chosen critter never starts walking), so probe nearest-first and take the first target the client
+    # can actually path adjacent to. Probing costs a round-trip each, hence the bounded scan.
+    for item in candidates[:probe_limit]:
+        if is_reachable(item):
+            return item
+
+    return None
 
 
 def select_radio_candidate(observation: dict[str, Any]) -> dict[str, Any] | None:
@@ -630,9 +702,20 @@ def run_pickup(client: McpProcess, output_relative: str, settle_ms: int, timeout
             if modal:
                 entry.update(status="skipped", reason=f"blocking_modal:{modal}")
                 return entry
-            candidate = select_pickup_candidate(observation, requested_item_id)
+            safe_visible = sum(1 for item in observation.get("mapItems", [])
+                               if isinstance(item, dict) and pickup_candidate_is_safe(item))
+            candidate = select_pickup_candidate(
+                observation,
+                requested_item_id,
+                is_reachable=lambda item: container_is_reachable(client, item, timeout_ms),
+            )
             if candidate is None:
-                entry.update(status="skipped", reason="no_safe_visible_container")
+                # Separate the two prerequisite misses: nothing usable in sight vs. everything in sight
+                # walled off. Both are missing context, not a client defect.
+                entry["safeVisibleContainers"] = safe_visible
+                entry["reachabilityProbeLimit"] = PICKUP_REACHABILITY_PROBE_LIMIT
+                reason = "no_reachable_container" if safe_visible else "no_safe_visible_container"
+                entry.update(status="skipped", reason=reason)
                 return entry
             entry["target"] = {
                 key: candidate.get(key)
@@ -683,6 +766,18 @@ def run_pickup(client: McpProcess, output_relative: str, settle_ms: int, timeout
             timeout_ms,
         )
         if active is None:
+            # The client walks the chosen critter to the container before opening it. If the approach
+            # stalls out of pick range — a nearer hex freed up during the probe, a critter parked on the
+            # only approach hex, a target reachable from afar but boxed in up close — the client silently
+            # stops and no screen ever appears. That is the map's fault, not the GUI's, so report it as a
+            # missing prerequisite with the measured geometry instead of an indistinguishable failure.
+            approach = describe_pickup_approach(client, candidate, timeout_ms) if candidate else None
+            if approach is not None:
+                entry["approach"] = approach
+                if approach["blocked"]:
+                    entry.update(status="skipped", reason="approach_blocked")
+                    return entry
+
             entry["reason"] = "pickup_collection_did_not_open"
             return entry
 

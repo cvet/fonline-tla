@@ -556,6 +556,66 @@ an orphaned persistent critter; the 2026-07-18 registration transaction follow-u
 caller-owned script synchronization, native rollback hardening, and game changes are intentionally left
 uncommitted for owner review.
 
+## Latest Engine EntitySync-refactor bump (2026-07-25)
+
+The Engine submodule was fast-forwarded by 1 commit from `fda8ee32a` to `8e9b0e4ae` (`#189` "Generic
+fixes" — a substantial rework of `EntitySync`/`EntityManager`/`Critter`/`TimeEvents`, +4 additive
+`///@ ExportMethod`s, no export removals/hook/setting/shader changes). Native compile, bake, and all six
+targets built clean (SourceExt unaffected). **But `#189` changed a runtime contract that the compile/bake
+gates cannot see.**
+
+**The regression (an engine bug, fixed in the engine — see below).** `#189` removed `EnsureEntitySynced`'s
+contended-lock retry (the old `MAX_CONTENDED_EXPANSION_ATTEMPTS = 16` back-off) and made the acquisition a
+single non-blocking attempt that throws `EntitySyncException: covered entity lock is contended` the moment
+the covered entity's own lock is momentarily touched by another pool thread.
+
+This surfaced in the **parallel test harness**: `Testing.fos::CleanupTest` destroys each fixture location,
+and `MapManager::DestroyLocation` retains each child map via `EnsureEntitySynced`. Concurrent NPC idle events
+under that same location threw the retention off, aborting `FinishTest` so the run hung (500 s timeout)
+instead of the usual `66 passed`. It was **flaky**, ~5 hangs per 9 runs.
+
+**Note the initial misdiagnosis (do not repeat it).** The first reading was "the caller must now cover the
+location's maps too", which produced a `Sync::LockLocationWithMaps` helper wired into `CleanupTest` and
+`LocationGarbager`. **That was wrong and has been fully reverted** — the owner's ruling is that syncing a
+location is sufficient to destroy it, and expanding the script-side cover was masking an engine bug rather
+than fixing it (engine AGENTS.md: *"Fix the source, never mask"*). `Sync::Lock(loc)` before
+`Game.DestroyLocation(loc)` is correct; the quest `DestroyLocation` call sites need no cover changes.
+
+**Root cause, established by instrumenting the throw** (temporary per-lock diagnostic, since removed).
+Failures came in two shapes, both on a map whose location we already held **exclusively**:
+
+- foreign **descendant-mark** still counted — a worker mid-`ReleaseLocks` had dropped its location-mark
+  before its map-mark, because marks release in lock-**address** order, not hierarchy order;
+- foreign **exclusive owner** / busy state mutex — a worker's `AcquireLocks` stage-1 pass had taken the map
+  as part of its ascending-address prefix and was about to fail on our held location and roll back.
+
+Both are microsecond-scale windows of a foreign thread mid-flight through its own non-blocking protocol; a
+covering exclusive ancestor makes a *settled* foreign holder impossible, so neither is a real conflict.
+`#189`'s own comment even acknowledged the "transient try-window race" while deliberately failing it.
+
+**Fixed in the engine** (`Engine/Source/Server/EntitySync.cpp`): the batch acquisition inside
+`EnsureEntitySyncedImpl` — try-lock every op's state mutex, then preflight compatibility with all of them
+held — is retried **as a unit** with bounded back-off until it lands, rolling the partial batch back before
+each back-off and **never releasing the caller's cover**. The former `TryAcquireEnsureOpsAtomically` helper
+was folded into its single caller as an explicitly scoped transaction (so state mutexes drop right after the
+ownership commit) and now throws instead of returning a bool: for a covered entity the acquisition is
+*mandatory* and must land, so `MAX_SYNC_RETRIES` is a livelock valve whose only meaning is a corrupt
+covered-cover invariant. Engine `AGENTS.md` / `Docs/Scripting.md` wording updated to match, and the four
+`Test_ServerEngine.cpp` assertions that pinned the old fail-fast timing were rewritten to pin the new
+contract (sustained synthetic hold → bounded self-terminating throw; **transient hold → absorbed, retention
+lands** — two new cases covering both the target's own lock and an intermediate ancestor mark).
+
+**Verification:** Baker rebuilt → Compile AngelScript 0 warnings → full bake (550 map files) → `TLA_Server`,
+`TLA_ServerHeadless`, `TLA_Client`, `TLA_ClientLib`, `TLA_Mapper`, `TLA_UnitTests` built without warnings →
+`LocalTest` headless reached `Start server complete!`, live script harness **66 passed, 0 failed, 0 skipped**
+with **0 `contended`/sync/exception markers**, repeated **6/6 consecutive clean runs** (the pre-fix binary
+hung ~5 runs in 9, so the repeat count is the actual evidence here — a single green run proves nothing
+against a flaky race). Native `TLA_UnitTests`: **all 419677 assertions in 366 test cases passed**, exit 0.
+Because the engine itself was changed, `Engine/` is dirty too — uncommitted (owner reviews):
+`Engine/Source/Server/EntitySync.{h,cpp}`, `Engine/Source/Tests/Test_ServerEngine.cpp`,
+`Engine/AGENTS.md`, `Engine/Docs/Scripting.md`. No `Scripts/*.fos` changes remain from this bump (the
+`LockLocationWithMaps` attempt was reverted).
+
 ## Latest Engine draw-tuning follow-up (2026-07-24)
 
 The Engine submodule was fast-forwarded by 4 `origin/master` commits from `4883d25c4` to `fda8ee32a`

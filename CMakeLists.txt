@@ -95,7 +95,6 @@ DefinePackage(Dev
     BINARY Server Windows win64 NoRes+Root+SingleZip
     BINARY Client Windows win64 NoRes+Root+SingleZip
     BINARY Mapper Windows win64 NoRes+Root+SingleZip
-    BINARY Editor Windows win64 NoRes+Root+SingleZip
     BINARY Baker Windows win64 Lib+NoRes+Root+SingleZip)
 
 DefinePackage(Test
@@ -107,7 +106,6 @@ DefinePackage(LinuxTest
     CONFIG LocalTest
     BINARY Client Linux x64 Raw
     BINARY Server Linux x64 Raw
-    BINARY Editor Linux x64 Raw
     BINARY Mapper Linux x64 Raw)
 
 # ---------------------------------------------------------------------------
@@ -130,7 +128,6 @@ function(_tla_post_target_setup)
     CopyTargetRuntimeToTarget(${FO_DEV_NAME}_ServerHeadless ${FO_DEV_NAME}_BakerLib)
     CopyTargetRuntimeToTarget(${FO_DEV_NAME}_ServerService ${FO_DEV_NAME}_BakerLib)
     CopyTargetRuntimeToTarget(${FO_DEV_NAME}_Mapper ${FO_DEV_NAME}_BakerLib)
-    CopyTargetRuntimeToTarget(${FO_DEV_NAME}_Editor ${FO_DEV_NAME}_BakerLib)
     CopyTargetRuntimeToTarget(${FO_DEV_NAME}_ASCompiler ${FO_DEV_NAME}_BakerLib)
 endfunction()
 

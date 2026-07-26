@@ -49,7 +49,7 @@ Warnings are treated as failures. Keep script compilation, resource baking, nati
 | `Bake Resources` | After edits in `Scripts/`, `Dialogs/`, `Maps/`, `Items/`, `Critters/`, `Texts/`, `Gui/`, or `TLA.fomain`. |
 | `Force Bake Resources` | When incremental baking may be stale. Use sparingly. |
 | `Compile AngelScript` | Fast script syntax/API check. |
-| `Build :: TLA_Server`, `Build :: TLA_ServerHeadless`, `Build :: TLA_Client`, `Build :: TLA_Mapper`, `Build :: TLA_Editor`, `Build :: TLA_Baker`, `Build :: TLA_ASCompiler`, `Build :: TLA_UnitTests` | Build one target in `Build/Auto`, `RelWithDebInfo`. |
+| `Build :: TLA_Server`, `Build :: TLA_ServerHeadless`, `Build :: TLA_Client`, `Build :: TLA_Mapper`, `Build :: TLA_Baker`, `Build :: TLA_ASCompiler`, `Build :: TLA_UnitTests` | Build one target in `Build/Auto`, `RelWithDebInfo`. |
 | `Prepare :: TLA_*` | `Bake Resources` plus the corresponding build target. |
 | `Launch :: TLA_Server [windows]` / `[linux]` | Build, bake, then run the server with `LocalTest`. |
 | `Launch :: TLA_UnitTests [windows]` / `[linux]` | Build, bake, then run engine unit tests. |

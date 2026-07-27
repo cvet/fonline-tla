@@ -1,0 +1,61 @@
+// Test_DictShutdownStress — ВРЕМЕННЫЙ диагностический модуль для отлова падения на выключении сервера
+// (StrongAssertationException: _ptr != nullptr в ScriptDict::Clear, вызов из ShutDownAndRelease).
+// Гипотеза: гонка/порча при массовом освобождении словарей со скриптовыми хэндлами, когда сборщик мусора
+// AngelScript (ReleaseAllHandles -> Clear) работает одновременно с разрушением бэкенда.
+// Модуль наполняет память словарями с циклическими ссылками и НЕ чистит их, чтобы к моменту
+// ShutDownAndRelease их было много. Намеренно не трогает данные из воркеров: цель — нагрузить штатный путь
+// освобождения, а не создать собственную скриптовую гонку (иначе падение было бы артефактом теста).
+// Только SERVER, включается лишь при Testing.Enabled. УДАЛИТЬ после диагностики.
+namespace Test_DictShutdownStress
+{
+
+#if SERVER
+
+// Узел с обратной ссылкой: пара узлов образует цикл, поэтому освободить их может только сборщик мусора,
+// а не простой подсчёт ссылок — это и втягивает GC в путь выключения.
+class StressNode
+{
+    StressNode? Peer;
+    int[] Payload;
+};
+
+// Живут до конца процесса: ссылка из глобальной области не даёт освободить их раньше выключения.
+dict<int, StressNode>[] StressDicts = {};
+
+const int DICT_COUNT = 400;
+const int ENTRIES_PER_DICT = 100;
+
+[[ModuleInit]]
+void InitDictShutdownStress()
+{
+    if (!Settings.Testing.Enabled) {
+        return;
+    }
+
+    for (int d = 0; d < DICT_COUNT; d++) {
+        dict<int, StressNode> entries = {};
+
+        for (int i = 0; i < ENTRIES_PER_DICT; i += 2) {
+            StressNode first = StressNode();
+            StressNode second = StressNode();
+
+            first.Payload = {i, d};
+            second.Payload = {i + 1, d};
+
+            // Замыкаем пару друг на друга — получается недостижимый для refcount цикл.
+            first.Peer = second;
+            second.Peer = first;
+
+            entries[i] = first;
+            entries[i + 1] = second;
+        }
+
+        StressDicts.insertLast(entries);
+    }
+
+    Game.Log("[DictStress] prepared " + DICT_COUNT + " dicts x " + ENTRIES_PER_DICT + " entries");
+}
+
+#endif
+
+}

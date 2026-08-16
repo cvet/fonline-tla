@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import hashlib
 import json
 import os
 import re
@@ -127,7 +128,7 @@ AGENT_RUN_FORBIDDEN_TOOLS = {
     "tla_stop_process",
     "tla_agent_stop_all",
 }
-AGENT_RUN_FORBIDDEN_PREFIXES = ("tla_launch_", "tla_admin_")
+AGENT_RUN_FORBIDDEN_PREFIXES = ("tla_launch_", "tla_admin_", "tla_qa_")
 AGENT_DISTRESS_KEYWORDS = (
     "stop",
     "leave me alone",
@@ -261,6 +262,8 @@ RELOADABLE_WEAPON_MARKERS = ("gun", "pistol", "rifle", "shotgun", "smg", "secm",
 BREACH_VISUAL_LABEL = "BRCH"
 DEVICE_OVERRIDE_VISUAL_LABEL = "OVR"
 DEFAULT_EXPLOSIVE_TIMER_SECONDS = 30
+MIN_EXPLOSIVE_TIMER_SECONDS = 1
+MAX_EXPLOSIVE_TIMER_SECONDS = 599
 DANGEROUS_TARGET_MARKERS = (
     "raider",
     "bandit",
@@ -363,6 +366,7 @@ AUTHORED_STATIC_SCRIPT_ITEM_CACHE: dict[str, list[dict[str, Any]]] = {}
 LAUNCH_ROLES = ("server", "server_headless", "client", "client_headless")
 SAY_TYPE_VALUES = {"normal": 0, "shout": 1, "whisper": 2, "emote": 3}
 INTEREST_TYPE_VALUES = {"self": 0, "group": 1, "unknown_place": 2, "known_place": 3, "camp": 4, "encounter": 5, "quest_giver": 6, "death_stash": 7}
+BARTER_TRANSFER_SOURCES = ("player_inventory", "player_offer", "trader_inventory", "trader_offer")
 SKILL_PROPERTY_NAMES = (
     "SkillMelee",
     "SkillSmallGuns",
@@ -720,14 +724,27 @@ COMMAND_CATALOG: list[dict[str, Any]] = [
     },
     {
         "type": "use_item",
-        "description": "Use an inventory item, optionally on a target critter or item.",
+        "description": "Use an inventory item on self or one target; timer mode is self-only and accepts 1..599 seconds.",
         "required": ["itemId"],
         "parameters": {
             "itemId": "Inventory item id.",
             "targetId": "Optional target critter id.",
             "auxId": "Optional target item id.",
-            "stringArg": "Optional use-mode string.",
+            "stringArg": "Optional self-only timer:<seconds> mode, with seconds in 1..599.",
             "append": "Append to current action queue.",
+        },
+    },
+    {
+        "type": "use_skill",
+        "description": "Use a TLA skill on exactly one critter, item, or static scenery target; omit all target fields to use it on the chosen critter.",
+        "required": ["stringArg"],
+        "parameters": {
+            "stringArg": "CritterProperty skill name, such as SkillFirstAid or SkillRepair.",
+            "targetId": "Optional target critter id.",
+            "itemId": "Optional target item id.",
+            "sceneryProtoId": "Optional static scenery proto id; use together with x and y.",
+            "x": "Static scenery map hex X; valid only with sceneryProtoId and y.",
+            "y": "Static scenery map hex Y; valid only with sceneryProtoId and x.",
         },
     },
     {
@@ -764,6 +781,34 @@ COMMAND_CATALOG: list[dict[str, Any]] = [
         },
     },
     {
+        "type": "craft",
+        "description": "Run a FixBoy recipe through the normal server crafting checks.",
+        "required": ["intArg"],
+        "parameters": {"intArg": "Positive FixBoy craft recipe id."},
+    },
+    {
+        "type": "barter_transfer",
+        "description": "Move an item stack between one side of the active barter screen and its offer.",
+        "required": ["itemId", "stringArg", "intArg"],
+        "parameters": {
+            "itemId": "Source item id from the active barter collection.",
+            "stringArg": "Source collection: player_inventory, player_offer, trader_inventory, or trader_offer.",
+            "intArg": "Positive item count to move.",
+        },
+    },
+    {
+        "type": "barter_offer",
+        "description": "Submit the currently assembled active barter offer through the normal client/server path.",
+        "required": [],
+        "parameters": {},
+    },
+    {
+        "type": "barter_return_dialog",
+        "description": "Return from the active NPC barter screen to its dialog through the validated transfer session.",
+        "required": [],
+        "parameters": {},
+    },
+    {
         "type": "toggle_sneak",
         "description": "Toggle sneak mode.",
         "required": [],
@@ -782,10 +827,20 @@ COMMAND_CATALOG: list[dict[str, Any]] = [
         "parameters": {"intArg": "Zero-based answer index from observation.dialog.answers."},
     },
     {
-        "type": "ui_answer",
-        "description": "Answer the active semantic GUI prompt, such as confirm/yes-no/DialogBox/elevator, without raw mouse coordinates.",
+        "type": "close_dialog",
+        "description": "Close the active dialog through the semantic SpeechAnswer close link.",
         "required": [],
-        "parameters": {"intArg": "Zero-based answer index from observation.uiPrompt.buttons; either intArg or stringArg satisfies this command.", "stringArg": "Button id when an index is not known; substitutes for intArg."},
+        "parameters": {},
+    },
+    {
+        "type": "ui_answer",
+        "description": "Answer the active semantic DialogBox or elevator prompt without raw mouse coordinates.",
+        "required": [],
+        "parameters": {
+            "intArg": "Zero-based answer index from observation.uiPrompt.buttons; either intArg or stringArg satisfies this command.",
+            "stringArg": "Exact semantic button id: answer_N for DialogBox or level_N for an elevator.",
+            "auxId": "DialogBox session copied from observation.uiPrompt.dialogBoxSession; zero for an elevator.",
+        },
     },
     {
         "type": "say",
@@ -890,6 +945,23 @@ COMMAND_CATALOG: list[dict[str, Any]] = [
         "parameters": {},
     },
     {
+        "type": "show_context_screen",
+        "description": "Open a supported parameterized GUI screen against real visible/client entities for layout and interaction QA.",
+        "required": ["stringArg"],
+        "parameters": {
+            "stringArg": "Supported GuiScreen name: Aim, Use, Timer, Split, or SkillBox.",
+            "targetId": "Visible critter target for Aim/Use/SkillBox.",
+            "itemId": "Visible or owned item target for Use/Timer/Split/SkillBox.",
+            "intArg": "Split collection (0 = chosen inventory) or optional SkillBox ownership assertion (-1 = derive only).",
+        },
+    },
+    {
+        "type": "qa_show_dialog_box",
+        "description": "Test-only fixture: ask the server to open a real two-answer DialogBox contract when AiControl.AllowQaCommands is enabled.",
+        "required": [],
+        "parameters": {},
+    },
+    {
         "type": "set_resolution",
         "description": "QA diagnostic: set the client logical resolution through Game.SetResolution without resizing virtual host layout.",
         "required": ["x", "y"],
@@ -933,6 +1005,7 @@ MODAL_BLOCKED_COMMAND_TYPES = {
     "group_invite",
     "loot_critter",
     "use_item",
+    "use_skill",
     "reload",
     "unload",
     "move_item",
@@ -980,7 +1053,7 @@ EVENT_CATALOG: list[dict[str, Any]] = [
     {"type": "faction_state_changed", "description": "The chosen critter's owner-visible faction membership or reputation changed.", "fields": ["faction", "pdaFactions"]},
     {"type": "level_changed", "description": "The chosen critter's public level changed; owner-visible experience progress is included for planning.", "fields": ["critterId", "level", "previousLevel", "experience", "nextLevelExperience", "experienceToNextLevel", "levelCap"]},
     {"type": "screen_size_changed", "description": "Client viewport size changed.", "fields": ["size"]},
-    {"type": "screen_changed", "description": "A GUI screen was shown or hidden.", "fields": ["show", "screen", "uiPrompt"]},
+    {"type": "screen_change", "description": "A GUI screen was shown or hidden.", "fields": ["show", "screen", "uiPrompt"]},
     {"type": "ui_prompt_opened", "description": "A semantic GUI prompt opened and can be handled with tla_ui_answer.", "fields": ["screen", "uiPrompt"]},
     {"type": "ui_prompt_closed", "description": "A semantic GUI prompt closed.", "fields": ["screen", "uiPrompt"]},
     {"type": "console_message", "description": "Client console/message text.", "fields": ["text"]},
@@ -2864,6 +2937,33 @@ def unwrap_observation_payload(payload: Any) -> dict[str, Any]:
     return {}
 
 
+def normalize_observation_hexes(observation: dict[str, Any]) -> dict[str, Any]:
+    result = dict(observation)
+
+    chosen = observation.get("chosen")
+    if isinstance(chosen, dict):
+        result["chosen"] = normalize_observation_entry_hex(chosen)
+
+    for collection_name in ("critters", "mapItems"):
+        collection = observation.get(collection_name)
+        if isinstance(collection, list):
+            result[collection_name] = [
+                normalize_observation_entry_hex(entry) if isinstance(entry, dict) else entry
+                for entry in collection
+            ]
+
+    return result
+
+
+def normalize_observation_entry_hex(entry: dict[str, Any]) -> dict[str, Any]:
+    xy = safe_hex_value_xy(entry.get("hex"))
+    if xy is None and "hexX" in entry and "hexY" in entry:
+        xy = safe_xy_pair(entry.get("hexX"), entry.get("hexY"))
+    if xy is None:
+        return entry
+    return {**entry, "hex": {"x": xy[0], "y": xy[1]}}
+
+
 def readiness_missing(observation: dict[str, Any], arguments: dict[str, Any]) -> list[str]:
     missing: list[str] = []
 
@@ -3016,6 +3116,245 @@ def process_window_screenshot(bridge: Any, arguments: dict[str, Any]) -> dict[st
             result["base64"] = None
             result["base64OmittedReason"] = f"Screenshot is {size} bytes; maxBase64Bytes is {max_bytes}"
 
+    return {"jsonrpc": "2.0", "id": None, "result": result}
+
+
+def resolve_engine_screenshot_path(workspace_root: Path, requested_path: Any) -> Path:
+    root = workspace_root.resolve()
+    default_name = f"{time.strftime('%Y%m%d-%H%M%S')}-{time.time_ns() % 1_000_000:06d}.tga"
+
+    if requested_path is None or (isinstance(requested_path, str) and not requested_path.strip()):
+        path = root / "Workspace" / "AiControlScreenshots" / default_name
+    else:
+        if not isinstance(requested_path, str):
+            raise ValueError("path must be a string")
+        path = Path(requested_path.strip())
+        if not path.is_absolute():
+            path = root / path
+
+    path = path.resolve()
+    if path.suffix.lower() != ".tga":
+        raise ValueError("Screenshot path must end with .tga")
+    if not is_path_under(path, root):
+        raise ValueError("Screenshot path must stay inside the workspace")
+    return path
+
+
+def inspect_uncompressed_true_color_tga(data: bytes) -> dict[str, Any]:
+    if len(data) < 18:
+        raise ValueError("TGA header is truncated")
+
+    id_length = data[0]
+    color_map_type = data[1]
+    image_type = data[2]
+    width = data[12] | (data[13] << 8)
+    height = data[14] | (data[15] << 8)
+    pixel_depth = data[16]
+    image_descriptor = data[17]
+
+    if color_map_type != 0:
+        raise ValueError("TGA color maps are not supported for screenshot verification")
+    if image_type != 2:
+        raise ValueError(f"TGA image type must be uncompressed true-color (2), got {image_type}")
+    if width <= 0 or height <= 0:
+        raise ValueError(f"TGA dimensions must be positive, got {width}x{height}")
+    if pixel_depth not in (24, 32):
+        raise ValueError(f"TGA pixel depth must be 24 or 32, got {pixel_depth}")
+
+    bytes_per_pixel = pixel_depth // 8
+    pixel_count = width * height
+    payload_offset = 18 + id_length
+    payload_bytes = pixel_count * bytes_per_pixel
+    payload_end = payload_offset + payload_bytes
+    if len(data) < payload_end:
+        available = max(0, len(data) - payload_offset)
+        raise ValueError(f"TGA pixel payload is truncated: expected {payload_bytes} bytes, got {available}")
+
+    sample_limit = 262_144
+    sample_step = max(1, (pixel_count + sample_limit - 1) // sample_limit)
+    sampled_pixels = 0
+    black_pixels = 0
+    white_pixels = 0
+    transparent_pixels = 0
+    red_sum = 0
+    green_sum = 0
+    blue_sum = 0
+    luminance_sum = 0
+    luminance_square_sum = 0
+    red_min = green_min = blue_min = 255
+    red_max = green_max = blue_max = 0
+    buckets: dict[tuple[int, int, int], int] = {}
+
+    for pixel_index in range(0, pixel_count, sample_step):
+        offset = payload_offset + pixel_index * bytes_per_pixel
+        blue = data[offset]
+        green = data[offset + 1]
+        red = data[offset + 2]
+        alpha = data[offset + 3] if bytes_per_pixel == 4 else 255
+        luminance = (77 * red + 150 * green + 29 * blue) >> 8
+        bucket = (red >> 3, green >> 3, blue >> 3)
+
+        sampled_pixels += 1
+        black_pixels += int(red <= 8 and green <= 8 and blue <= 8)
+        white_pixels += int(red >= 247 and green >= 247 and blue >= 247)
+        transparent_pixels += int(alpha <= 8)
+        red_sum += red
+        green_sum += green
+        blue_sum += blue
+        luminance_sum += luminance
+        luminance_square_sum += luminance * luminance
+        red_min = min(red_min, red)
+        green_min = min(green_min, green)
+        blue_min = min(blue_min, blue)
+        red_max = max(red_max, red)
+        green_max = max(green_max, green)
+        blue_max = max(blue_max, blue)
+        buckets[bucket] = buckets.get(bucket, 0) + 1
+        if sampled_pixels >= sample_limit:
+            break
+
+    dominant_bucket_count = max(buckets.values(), default=0)
+    divisor = max(1, sampled_pixels)
+    black_ratio = black_pixels / divisor
+    white_ratio = white_pixels / divisor
+    transparent_ratio = transparent_pixels / divisor
+    dominant_bucket_ratio = dominant_bucket_count / divisor
+    mean_luminance = luminance_sum / divisor
+    luminance_variance = max(0.0, luminance_square_sum / divisor - mean_luminance * mean_luminance)
+    luminance_std_dev = luminance_variance**0.5
+    # A legitimate sparse screen (Credits: black background with a few white glyphs) can be >99.5%
+    # one color. Treat only a genuinely single-bucket frame, or near-uniform numerical noise, as blank.
+    blank_like = len(buckets) <= 1 or (dominant_bucket_ratio >= 0.9999 and luminance_std_dev < 1.0)
+
+    return {
+        "format": "tga_uncompressed_true_color",
+        "imageType": image_type,
+        "width": width,
+        "height": height,
+        "pixelDepth": pixel_depth,
+        "originTop": bool(image_descriptor & 0x20),
+        "alphaBits": image_descriptor & 0x0F,
+        "payloadOffset": payload_offset,
+        "payloadBytes": payload_bytes,
+        "trailingBytes": len(data) - payload_end,
+        "sizeBytes": len(data),
+        "sha256": hashlib.sha256(data).hexdigest(),
+        "colorStats": {
+            "sampledPixels": sampled_pixels,
+            "sampleStep": sample_step,
+            "uniqueColorBuckets": len(buckets),
+            "dominantBucketRatio": round(dominant_bucket_ratio, 6),
+            "blackRatio": round(black_ratio, 6),
+            "whiteRatio": round(white_ratio, 6),
+            "transparentRatio": round(transparent_ratio, 6),
+            "meanRgb": {
+                "r": round(red_sum / divisor, 3),
+                "g": round(green_sum / divisor, 3),
+                "b": round(blue_sum / divisor, 3),
+            },
+            "channelRanges": {
+                "r": [red_min, red_max],
+                "g": [green_min, green_max],
+                "b": [blue_min, blue_max],
+            },
+            "meanLuminance": round(mean_luminance, 3),
+            "luminanceStdDev": round(luminance_std_dev, 3),
+        },
+        "blankLike": blank_like,
+    }
+
+
+def screenshot_failure_result(result: dict[str, Any], stage: str, message: str) -> dict[str, Any]:
+    path = Path(str(result["absolutePath"]))
+    try:
+        result["exists"] = path.is_file()
+        result["sizeBytes"] = path.stat().st_size if result["exists"] else 0
+    except OSError:
+        result["exists"] = False
+        result["sizeBytes"] = 0
+    result["verified"] = False
+    result["failure"] = {"stage": stage, "message": message}
+    return {"jsonrpc": "2.0", "id": None, "result": result}
+
+
+def save_verified_engine_screenshot(bridge: Any, arguments: dict[str, Any]) -> dict[str, Any]:
+    workspace_root = workspace_root_for_bridge(bridge).resolve()
+    path = resolve_engine_screenshot_path(workspace_root, arguments.get("path"))
+    selected_bridge = target_bridge(bridge, arguments)
+    settle_ms = int_arg(arguments, "settleMs", 250)
+    if settle_ms < 0 or settle_ms > 10000:
+        raise ValueError("settleMs must be in the 0..10000 range")
+
+    relative_path = path.relative_to(workspace_root).as_posix()
+    result: dict[str, Any] = {
+        "path": str(path),
+        "absolutePath": str(path),
+        "relativePath": relative_path,
+        "exists": False,
+        "sizeBytes": 0,
+        "settleMs": settle_ms,
+        "removedPrevious": False,
+        "verified": False,
+    }
+
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if path.exists():
+            if not path.is_file():
+                return screenshot_failure_result(result, "prepare", "Screenshot target exists and is not a file")
+            path.unlink()
+            result["removedPrevious"] = True
+    except OSError as exc:
+        return screenshot_failure_result(result, "prepare", str(exc))
+
+    if settle_ms > 0:
+        time.sleep(settle_ms / 1000.0)
+
+    wait_arguments = dict(arguments)
+    wait_arguments["waitForCompletion"] = True
+    wait_arguments.setdefault("timeoutMs", 10000)
+    wait_arguments.setdefault("includeEvents", False)
+    try:
+        command_response = act_with_optional_wait(
+            selected_bridge,
+            {"type": "save_screenshot", "stringArg": path.as_posix()},
+            wait_arguments,
+        )
+    except OSError as exc:
+        return screenshot_failure_result(result, "completion", str(exc))
+
+    if "error" in command_response:
+        result["commandError"] = command_response["error"]
+        return screenshot_failure_result(result, "completion", "Bridge rejected the screenshot command")
+
+    command_result = command_response.get("result", {})
+    if not isinstance(command_result, dict):
+        return screenshot_failure_result(result, "completion", "Screenshot command returned no result object")
+    if isinstance(command_result.get("commandSeq"), int):
+        result["commandSeq"] = command_result["commandSeq"]
+    completion = command_result.get("completion")
+    result["completion"] = completion if isinstance(completion, dict) else {}
+    if not isinstance(completion, dict) or not completion.get("completed"):
+        reason = "Screenshot command completion timed out" if isinstance(completion, dict) and completion.get("timedOut") else "Screenshot command completion is missing"
+        return screenshot_failure_result(result, "completion", reason)
+    completion_event = completion.get("event")
+    if not isinstance(completion_event, dict) or completion_event.get("success") is not True:
+        message = completion_event.get("message") if isinstance(completion_event, dict) else "command_completed event is missing"
+        return screenshot_failure_result(result, "completion", f"Screenshot command failed: {message}")
+
+    try:
+        if not path.is_file():
+            return screenshot_failure_result(result, "file", "Screenshot command completed but the target file is missing")
+        inspection = inspect_uncompressed_true_color_tga(path.read_bytes())
+    except (OSError, ValueError) as exc:
+        return screenshot_failure_result(result, "file", str(exc))
+
+    result.update(inspection)
+    result["exists"] = True
+    if bool(inspection.get("blankLike")):
+        return screenshot_failure_result(result, "validation", "Screenshot is valid TGA data but appears blank or single-color")
+
+    result["verified"] = True
     return {"jsonrpc": "2.0", "id": None, "result": result}
 
 
@@ -3659,10 +3998,11 @@ def schema_payload(section: str) -> dict[str, Any]:
             "critters": "Visible critters, capped by AiControl.MaxObservedEntities.",
             "mapItems": "Visible map items, capped by AiControl.MaxObservedEntities.",
             "inventory": "Chosen inventory items, capped by AiControl.MaxObservedEntities.",
+            "barter": "Active barter snapshot with authoritative pricing metadata and player/trader inventory and offer collections; active=false outside Barter.",
             "pda": "Client-visible PDA surfaces currently relevant to AI, including quests.",
             "questLog": "Client-visible quest entries mirrored from the chosen critter's PDA QuestProgress.",
             "activeCollection": "Currently opened loot/container/barter collection state, if a PickUp/Barter modal or transfer context is active.",
-            "uiPrompt": "Active semantic GUI prompt, such as confirm/yes-no/DialogBox/elevator, with answer buttons for tla_ui_answer.",
+            "uiPrompt": "Active semantic DialogBox or elevator prompt with answer buttons for tla_ui_answer.",
             "dialog": "Active dialog state and zero-based answers.",
             "availableActions": "Command types currently worth considering.",
         },
@@ -3718,12 +4058,25 @@ def schema_payload(section: str) -> dict[str, Any]:
             "critterVisualFeedback": ["labels", "suppression", "suppressionMax", "overwatchActive", "overwatchRemainingMs", "heat"],
             "chosenOverwatch": ["opened", "active", "dir", "remainingMs", "canEnter", "blockedReason"],
             "itemVisualFeedback": ["labels", "fuseActive", "fuseRemainingMs", "fuseSeconds", "timerCapable", "blastRadius", "chainBlastRadius"],
-            "item": ["id", "protoId", "name", "count", "ownership", "cost", "weight", "canUse", "canUseOnSmth", "canPickUp", "canDrop", "canLoot", "canBarter", "deteriorable", "isBroken", "visualFeedback", "slot or hex", "static", "isStatic", "opened", "canOpen", "isGag", "noHighlight", "hasStaticScript", "lockerLocked", "lockerNoOpen", "hasMapExit", "hasMapEntry", "mapEntryName"],
+            "item": ["id", "protoId", "name", "count", "stackable", "ownership", "cost", "weight", "canUse", "canUseOnSmth", "canPickUp", "canDrop", "canLoot", "canBarter", "deteriorable", "isBroken", "visualFeedback", "slot or hex", "static", "isStatic", "opened", "canOpen", "isGag", "noHighlight", "hasStaticScript", "lockerLocked", "lockerNoOpen", "hasMapExit", "hasMapEntry", "mapEntryName"],
             "screen": ["active", "activeScreens", "modalActive", "activeModal", "screens", "modalScreens", "top"],
             "screenEntry": ["name", "modal"],
             "activeCollection": ["active", "screen", "kind", "transferType", "containerId", "receivedCount", "items", "inventoryItems", "offerItems", "traderOfferItems"],
-            "uiPrompt": ["active", "screen", "kind", "title", "text", "dialogId", "dialogBoxAnswerIndex", "currentMapProtoId", "buttons"],
-            "uiPromptButton": ["index", "id", "text", "role", "enabled", "dangerous", "mapProtoId"],
+            "barter": [
+                "active",
+                "traderId",
+                "coefficient",
+                "masterTrader",
+                "playerOfferTotal",
+                "traderOfferTotal",
+                "playerInventory",
+                "playerOffer",
+                "traderInventory",
+                "traderOffer",
+            ],
+            "barterItem": ["id", "protoId", "count"],
+            "uiPrompt": ["active", "screen", "kind", "title", "text", "dialogId", "dialogBoxSession", "dialogBoxAnswerIndex", "currentMapProtoId", "buttons"],
+            "uiPromptButton": ["index", "id", "text", "role", "enabled", "dangerous"],
             "pda": ["quests", "factions"],
             "questEntry": ["id", "questId", "title", "description", "objective", "status", "statusCode", "stage", "visible", "progress"],
             "admin": ["available", "connected", "accessLevel", "access", "moderator", "admin", "defaultTargetId", "actions", "preparePresets"],
@@ -4135,6 +4488,7 @@ def act_input_schema(command_types: list[str] | None = None) -> dict[str, Any]:
             "targetId": {"type": ["integer", "string"], "description": "Critter/entity id for target commands."},
             "itemId": {"type": ["integer", "string"], "description": "Item id for item commands."},
             "auxId": {"type": ["integer", "string"], "description": "Auxiliary item/entity id, such as ammo or target item."},
+            "sceneryProtoId": {"type": "string", "minLength": 1, "description": "Static scenery prototype id for use_skill; requires x and y."},
             "x": {"type": "integer", "description": "Map hex X."},
             "y": {"type": "integer", "description": "Map hex Y."},
             "screenX": {"type": "integer", "description": "Screen X for mouse_click."},
@@ -4171,6 +4525,12 @@ def action_sync_properties() -> dict[str, Any]:
 
 def with_action_wait(schema: dict[str, Any]) -> dict[str, Any]:
     schema["properties"] = {**schema.get("properties", {}), **endpoint_target_properties(), **action_wait_properties(), **action_sync_properties()}
+    return schema
+
+
+def with_forced_action_wait(schema: dict[str, Any]) -> dict[str, Any]:
+    schema = with_action_wait(schema)
+    schema["properties"].pop("waitForCompletion", None)
     return schema
 
 
@@ -4379,17 +4739,55 @@ def typed_command_tools() -> list[dict[str, Any]]:
         {
             "name": "tla_use_item",
             "title": "Use Item",
-            "description": "Use an inventory item, optionally on a critter or another item.",
+            "description": "Use an inventory item on self or exactly one critter/item target. Timer mode is self-only and accepts a canonical timer:<seconds> value from 1 through 599.",
             "inputSchema": with_action_wait({
                 "type": "object",
                 "properties": {
                     "itemId": id_schema,
                     "targetId": id_schema,
                     "auxId": id_schema,
-                    "useMode": {"type": "string", "description": "Optional use-mode string."},
+                    "useMode": {
+                        "type": "string",
+                        "pattern": "^timer:(?:[1-9]|[1-9][0-9]|[1-5][0-9]{2})$",
+                        "maxLength": 9,
+                        "description": "Self-only timer:<seconds> mode for an owned timer-capable explosive; seconds must be 1..599 without signs, whitespace, or leading zeroes.",
+                    },
                     "append": append_schema,
                 },
                 "required": ["itemId"],
+                "oneOf": [
+                    {"required": ["useMode"], "not": {"anyOf": [{"required": ["targetId"]}, {"required": ["auxId"]}]}},
+                    {"required": ["targetId"], "not": {"anyOf": [{"required": ["auxId"]}, {"required": ["useMode"]}]}},
+                    {"required": ["auxId"], "not": {"anyOf": [{"required": ["targetId"]}, {"required": ["useMode"]}]}},
+                    {"not": {"anyOf": [{"required": ["targetId"]}, {"required": ["auxId"]}, {"required": ["useMode"]}]}},
+                ],
+            }),
+        },
+        {
+            "name": "tla_use_skill",
+            "title": "Use Skill",
+            "description": "Use a TLA skill on exactly one critter, item, or static scenery target; omit targets to use it on the chosen critter.",
+            "inputSchema": with_action_wait({
+                "type": "object",
+                "properties": {
+                    "skill": {"type": "string", "description": "CritterProperty skill name, such as SkillFirstAid or SkillRepair."},
+                    "targetId": id_schema,
+                    "itemId": id_schema,
+                    "sceneryProtoId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "description": "Optional static scenery proto id; requires its x/y map hex.",
+                    },
+                    "x": {"type": "integer", "description": "Static scenery map hex X; valid only with sceneryProtoId and y."},
+                    "y": {"type": "integer", "description": "Static scenery map hex Y; valid only with sceneryProtoId and x."},
+                },
+                "required": ["skill"],
+                "oneOf": [
+                    {"not": {"anyOf": [{"required": ["targetId"]}, {"required": ["itemId"]}, {"required": ["sceneryProtoId"]}, {"required": ["x"]}, {"required": ["y"]}]}},
+                    {"required": ["targetId"], "not": {"anyOf": [{"required": ["itemId"]}, {"required": ["sceneryProtoId"]}, {"required": ["x"]}, {"required": ["y"]}]}},
+                    {"required": ["itemId"], "not": {"anyOf": [{"required": ["targetId"]}, {"required": ["sceneryProtoId"]}, {"required": ["x"]}, {"required": ["y"]}]}},
+                    {"required": ["sceneryProtoId", "x", "y"], "not": {"anyOf": [{"required": ["targetId"]}, {"required": ["itemId"]}]}},
+                ],
             }),
         },
         {
@@ -4443,6 +4841,46 @@ def typed_command_tools() -> list[dict[str, Any]]:
             }),
         },
         {
+            "name": "tla_craft",
+            "title": "Craft FixBoy Recipe",
+            "description": "Run a FixBoy recipe through the normal server crafting checks.",
+            "inputSchema": with_action_wait({
+                "type": "object",
+                "properties": {"craftId": {"type": "integer", "minimum": 1, "description": "FixBoy craft recipe id."}},
+                "required": ["craftId"],
+            }),
+        },
+        {
+            "name": "tla_barter_transfer",
+            "title": "Transfer Barter Item",
+            "description": "Move an item stack between one side of the active barter screen and its offer.",
+            "inputSchema": with_action_wait({
+                "type": "object",
+                "properties": {
+                    "itemId": id_schema,
+                    "source": {
+                        "type": "string",
+                        "enum": list(BARTER_TRANSFER_SOURCES),
+                        "description": "Collection that currently contains the item.",
+                    },
+                    "count": {"type": "integer", "minimum": 1, "description": "Item count to move."},
+                },
+                "required": ["itemId", "source", "count"],
+            }),
+        },
+        {
+            "name": "tla_barter_offer",
+            "title": "Submit Barter Offer",
+            "description": "Submit the currently assembled active barter offer through the normal client/server path.",
+            "inputSchema": with_action_wait({"type": "object", "properties": {}}),
+        },
+        {
+            "name": "tla_barter_return_dialog",
+            "title": "Return to Barter Dialog",
+            "description": "Return from the active NPC barter screen to its dialog without coordinate input.",
+            "inputSchema": with_action_wait({"type": "object", "properties": {}}),
+        },
+        {
             "name": "tla_toggle_sneak",
             "title": "Toggle Sneak",
             "description": "Toggle sneak mode.",
@@ -4467,15 +4905,34 @@ def typed_command_tools() -> list[dict[str, Any]]:
             "inputSchema": with_action_wait({"type": "object", "properties": {"answerIndex": {"type": "integer", "minimum": 0}}, "required": ["answerIndex"]}),
         },
         {
+            "name": "tla_close_dialog",
+            "title": "Close Dialog",
+            "description": "Close the active dialog through its semantic close link.",
+            "inputSchema": with_action_wait({"type": "object", "properties": {}}),
+        },
+        {
             "name": "tla_ui_answer",
             "title": "Answer UI Prompt",
-            "description": "Answer the active semantic GUI prompt, such as confirm/yes-no/DialogBox/elevator.",
+            "description": "Answer the active semantic DialogBox or elevator prompt by a zero-based button index or its exact answer_N/level_N id. DialogBox answers must carry expectedSession from the same observation.uiPrompt snapshot.",
             "inputSchema": with_action_wait({
                 "type": "object",
                 "properties": {
                     "answerIndex": {"type": "integer", "minimum": 0, "description": "Zero-based index from observation.uiPrompt.buttons."},
-                    "answerId": {"type": "string", "description": "Optional button id such as yes/no/cancel or an elevator map proto id."},
+                    "answerId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 32,
+                        "pattern": "^(?:answer_[0-9]+|level_[0-9]+)$",
+                        "description": "Exact id from observation.uiPrompt.buttons: answer_N for DialogBox or level_N for an elevator.",
+                    },
+                    "expectedSession": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 4294967295,
+                        "description": "Required for DialogBox: copy observation.uiPrompt.dialogBoxSession to reject stale observations. Omit for elevators.",
+                    },
                 },
+                "anyOf": [{"required": ["answerIndex"]}, {"required": ["answerId"]}],
             }),
         },
         {
@@ -4527,6 +4984,12 @@ def typed_command_tools() -> list[dict[str, Any]]:
                 },
                 "required": ["protoId"],
             }),
+        },
+        {
+            "name": "tla_qa_show_dialog_box",
+            "title": "Show QA DialogBox Fixture",
+            "description": "Test-only: open a real server-backed AskFollowGlobalGroupRuler DialogBox with two answers. Requires AiControl.AllowQaCommands; answer_1 is the safe no-op choice.",
+            "inputSchema": with_action_wait({"type": "object", "properties": {}}),
         },
         {
             "name": "tla_admin_prepare",
@@ -4726,14 +5189,20 @@ def typed_command_type_for_tool(name: str) -> str:
         "tla_group_invite": "group_invite",
         "tla_loot_critter": "loot_critter",
         "tla_use_item": "use_item",
+        "tla_use_skill": "use_skill",
         "tla_reload": "reload",
         "tla_unload": "unload",
         "tla_move_item": "move_item",
         "tla_drop_item": "drop_item",
         "tla_operate_container": "operate_container",
+        "tla_craft": "craft",
+        "tla_barter_transfer": "barter_transfer",
+        "tla_barter_offer": "barter_offer",
+        "tla_barter_return_dialog": "barter_return_dialog",
         "tla_toggle_sneak": "toggle_sneak",
         "tla_set_overwatch": "set_overwatch",
         "tla_dialog_answer": "dialog_answer",
+        "tla_close_dialog": "close_dialog",
         "tla_ui_answer": "ui_answer",
         "tla_say": "say",
         "tla_accept_agreement": "accept_agreement",
@@ -4741,6 +5210,7 @@ def typed_command_type_for_tool(name: str) -> str:
         "tla_finish_generation": "finish_generation",
         "tla_change_skill": "change_skill",
         "tla_change_ability": "change_ability",
+        "tla_qa_show_dialog_box": "qa_show_dialog_box",
         "tla_admin_prepare": "admin_prepare",
         "tla_admin_teleport_to_hex": "admin_teleport_to_hex",
         "tla_admin_move_to_map": "admin_move_to_map",
@@ -4777,6 +5247,24 @@ def int_arg(arguments: dict[str, Any], name: str, default: int) -> int:
         return int(value)
     except (TypeError, ValueError):
         raise ValueError(f"{name} must be an integer")
+
+
+def explosive_timer_use_mode(value: Any) -> str:
+    if not isinstance(value, str):
+        raise ValueError("useMode must be a string in timer:<seconds> format")
+    match = re.fullmatch(r"timer:([1-9]|[1-9][0-9]|[1-5][0-9]{2})", value)
+    if match is None:
+        raise ValueError("useMode must be canonical timer:<seconds> with seconds in the 1..599 range")
+    seconds = int(match.group(1))
+    if seconds < MIN_EXPLOSIVE_TIMER_SECONDS or seconds > MAX_EXPLOSIVE_TIMER_SECONDS:
+        raise ValueError("useMode timer seconds must be in the 1..599 range")
+    return value
+
+
+def ui_answer_id(value: Any) -> str:
+    if not isinstance(value, str) or len(value) > 32 or re.fullmatch(r"(?:answer_[0-9]+|level_[0-9]+)", value) is None:
+        raise ValueError("answerId must be an exact answer_N or level_N button id")
+    return value
 
 
 def optional_append(arguments: dict[str, Any], command: dict[str, Any]) -> dict[str, Any]:
@@ -4862,14 +5350,45 @@ def typed_command_payload(name: str, arguments: dict[str, Any]) -> dict[str, Any
         return optional_append(arguments, {"type": "loot_critter", "targetId": arguments["targetId"]})
     if name == "tla_use_item":
         require_arguments(arguments, "itemId")
+        if "useMode" in arguments and ("targetId" in arguments or "auxId" in arguments):
+            raise ValueError("timer useMode is self-only and cannot be combined with targetId or auxId")
+        if "targetId" in arguments and "auxId" in arguments:
+            raise ValueError("use_item accepts at most one of targetId or auxId")
         command = {"type": "use_item", "itemId": arguments["itemId"]}
         if "targetId" in arguments:
             command["targetId"] = arguments["targetId"]
         if "auxId" in arguments:
             command["auxId"] = arguments["auxId"]
         if "useMode" in arguments:
-            command["stringArg"] = arguments["useMode"]
+            command["stringArg"] = explosive_timer_use_mode(arguments["useMode"])
         return optional_append(arguments, command)
+    if name == "tla_use_skill":
+        require_arguments(arguments, "skill")
+        skill_value = arguments["skill"]
+        if not isinstance(skill_value, str) or not skill_value.strip():
+            raise ValueError("skill must be a non-empty string")
+        has_x = "x" in arguments
+        has_y = "y" in arguments
+        if has_x != has_y:
+            raise ValueError("x and y must be provided together")
+        scenery_proto_id = arguments.get("sceneryProtoId")
+        if scenery_proto_id is not None:
+            if not isinstance(scenery_proto_id, str) or not scenery_proto_id.strip():
+                raise ValueError("sceneryProtoId must be a non-empty string")
+            if not has_x:
+                raise ValueError("sceneryProtoId requires x and y")
+        elif has_x:
+            raise ValueError("x and y require sceneryProtoId")
+        target_modes = sum(key in arguments for key in ("targetId", "itemId")) + (1 if scenery_proto_id is not None else 0)
+        if target_modes > 1:
+            raise ValueError("targetId, itemId, and sceneryProtoId are mutually exclusive")
+        command = {"type": "use_skill", "stringArg": skill_value.strip()}
+        for key in ("targetId", "itemId", "x", "y"):
+            if key in arguments:
+                command[key] = arguments[key]
+        if scenery_proto_id is not None:
+            command["sceneryProtoId"] = scenery_proto_id.strip()
+        return command
     if name == "tla_reload":
         require_arguments(arguments, "itemId")
         command = {"type": "reload", "itemId": arguments["itemId"], "intArg": 1 if arguments.get("full") else 0}
@@ -4898,6 +5417,25 @@ def typed_command_payload(name: str, arguments: dict[str, Any]) -> dict[str, Any
         if "itemId" in arguments:
             command["itemId"] = arguments["itemId"]
         return command
+    if name == "tla_craft":
+        require_arguments(arguments, "craftId")
+        craft_id = int_arg(arguments, "craftId", 0)
+        if craft_id < 1:
+            raise ValueError("craftId must be at least 1")
+        return {"type": "craft", "intArg": craft_id}
+    if name == "tla_barter_transfer":
+        require_arguments(arguments, "itemId", "source", "count")
+        source = str(arguments["source"]).strip().lower().replace("-", "_")
+        if source not in BARTER_TRANSFER_SOURCES:
+            raise ValueError("source must be one of: " + ", ".join(BARTER_TRANSFER_SOURCES))
+        count = int_arg(arguments, "count", 0)
+        if count < 1:
+            raise ValueError("count must be at least 1")
+        return {"type": "barter_transfer", "itemId": arguments["itemId"], "stringArg": source, "intArg": count}
+    if name == "tla_barter_offer":
+        return {"type": "barter_offer"}
+    if name == "tla_barter_return_dialog":
+        return {"type": "barter_return_dialog"}
     if name == "tla_toggle_sneak":
         return optional_append(arguments, {"type": "toggle_sneak"})
     if name == "tla_set_overwatch":
@@ -4911,16 +5449,30 @@ def typed_command_payload(name: str, arguments: dict[str, Any]) -> dict[str, Any
     if name == "tla_dialog_answer":
         require_arguments(arguments, "answerIndex")
         return {"type": "dialog_answer", "intArg": arguments["answerIndex"]}
+    if name == "tla_close_dialog":
+        return {"type": "close_dialog"}
     if name == "tla_ui_answer":
         if "answerIndex" not in arguments and "answerId" not in arguments:
             raise ValueError("Missing required argument(s): answerIndex or answerId")
         command: dict[str, Any] = {"type": "ui_answer"}
         if "answerIndex" in arguments:
-            command["intArg"] = arguments["answerIndex"]
+            if isinstance(arguments["answerIndex"], bool) or not isinstance(arguments["answerIndex"], int):
+                raise ValueError("answerIndex must be an integer")
+            answer_index = arguments["answerIndex"]
+            if answer_index < 0:
+                raise ValueError("answerIndex must be zero or greater")
+            command["intArg"] = answer_index
         else:
             command["intArg"] = -1
         if "answerId" in arguments:
-            command["stringArg"] = str(arguments["answerId"])
+            command["stringArg"] = ui_answer_id(arguments["answerId"])
+        if "expectedSession" in arguments:
+            if isinstance(arguments["expectedSession"], bool) or not isinstance(arguments["expectedSession"], int):
+                raise ValueError("expectedSession must be an integer")
+            expected_session = arguments["expectedSession"]
+            if expected_session < 1 or expected_session > 0xFFFFFFFF:
+                raise ValueError("expectedSession must be in the 1..4294967295 range")
+            command["auxId"] = expected_session
         return command
     if name == "tla_say":
         require_arguments(arguments, "text")
@@ -4944,6 +5496,8 @@ def typed_command_payload(name: str, arguments: dict[str, Any]) -> dict[str, Any
         if not proto_id:
             raise ValueError("protoId must not be empty")
         return {"type": "change_ability", "stringArg": proto_id, "intArg": 1 if bool(arguments.get("add", True)) else -1}
+    if name == "tla_qa_show_dialog_box":
+        return {"type": "qa_show_dialog_box"}
     if name == "tla_admin_prepare":
         require_arguments(arguments, "preset")
         require_admin_confirmation(arguments)
@@ -5054,6 +5608,42 @@ def non_empty_string(value: Any, name: str) -> str:
     if not text:
         raise ValueError(f"{name} must not be empty")
     return text
+
+
+def context_screen_command(arguments: dict[str, Any]) -> dict[str, Any]:
+    screen_name = non_empty_string(arguments.get("screen"), "screen")
+    supported_screens = {"Aim", "Use", "Timer", "Split", "SkillBox"}
+    if screen_name not in supported_screens:
+        raise ValueError("screen must be one of: " + ", ".join(sorted(supported_screens)))
+
+    has_target = arguments.get("targetId") not in (None, "", 0, "0")
+    has_item = arguments.get("itemId") not in (None, "", 0, "0")
+    if screen_name == "Aim" and not has_target:
+        raise ValueError("targetId is required for Aim")
+    if screen_name == "Use" and has_target == has_item:
+        raise ValueError("Use requires exactly one of targetId or itemId")
+    if screen_name in {"Timer", "Split"} and not has_item:
+        raise ValueError(f"itemId is required for {screen_name}")
+    if screen_name == "SkillBox" and has_target and has_item:
+        raise ValueError("SkillBox accepts at most one of targetId or itemId")
+
+    command: dict[str, Any] = {"type": "show_context_screen", "stringArg": screen_name}
+    if has_target:
+        command["targetId"] = arguments["targetId"]
+    if has_item:
+        command["itemId"] = arguments["itemId"]
+    if screen_name == "Split":
+        collection = str(arguments.get("itemsCollection", "chosen")).strip().lower()
+        if collection != "chosen":
+            raise ValueError("itemsCollection must be chosen")
+        command["intArg"] = 0
+    elif screen_name == "SkillBox":
+        command["intArg"] = -1
+        if "isInventory" in arguments:
+            if not isinstance(arguments["isInventory"], bool):
+                raise ValueError("isInventory must be a boolean ownership assertion")
+            command["intArg"] = 1 if arguments["isInventory"] else 0
+    return command
 
 
 def available_actions(bridge: Any, arguments: dict[str, Any]) -> dict[str, Any]:
@@ -6104,6 +6694,9 @@ def ui_prompt_answer_candidate(entry: dict[str, Any], ui_prompt: dict[str, Any])
     button_id = str(entry.get("id") or "").strip()
     if button_id:
         arguments["answerId"] = button_id
+    dialog_box_session = ui_prompt.get("dialogBoxSession")
+    if dialog_box_session is not None:
+        arguments["expectedSession"] = dialog_box_session
 
     reason_parts = [f"active {ui_prompt.get('kind', 'ui')} prompt"]
     role = str(entry.get("role") or "").strip()
@@ -6286,6 +6879,7 @@ def action_wait_arguments(arguments: dict[str, Any], command_seq: int) -> dict[s
 
 
 def act_with_optional_wait(bridge: Bridge, command: dict[str, Any], arguments: dict[str, Any]) -> dict[str, Any]:
+    validate_action_command(command)
     response = bridge.request("act", command)
     sync_requested = bool(arguments.get("syncAfterCompletion"))
     should_wait = bool(arguments.get("waitForCompletion") or sync_requested)
@@ -6317,6 +6911,30 @@ def act_with_optional_wait(bridge: Bridge, command: dict[str, Any], arguments: d
         "id": None,
         "result": action_result,
     }
+
+
+def validate_action_command(command: dict[str, Any]) -> None:
+    if command.get("type") != "use_skill":
+        return
+
+    has_x = "x" in command
+    has_y = "y" in command
+    if has_x != has_y:
+        raise ValueError("use_skill x and y must be provided together")
+
+    scenery_proto_id = command.get("sceneryProtoId")
+    has_scenery = scenery_proto_id is not None
+    if has_scenery:
+        if not isinstance(scenery_proto_id, str) or not scenery_proto_id.strip():
+            raise ValueError("use_skill sceneryProtoId must be a non-empty string")
+        if not has_x:
+            raise ValueError("use_skill sceneryProtoId requires x and y")
+    elif has_x:
+        raise ValueError("use_skill x and y require sceneryProtoId")
+
+    target_modes = sum(key in command for key in ("targetId", "itemId")) + (1 if has_scenery else 0)
+    if target_modes > 1:
+        raise ValueError("use_skill targetId, itemId, and sceneryProtoId are mutually exclusive")
 
 
 def dialog_answer_with_memory(bridge: Any, arguments: dict[str, Any]) -> dict[str, Any]:
@@ -6481,6 +7099,34 @@ def environment_query(bridge: Bridge, query_type: str, arguments: dict[str, Any]
         result["accepted"] = accepted
         result["queryId"] = query_id
     return {"jsonrpc": "2.0", "id": None, "result": result}
+
+
+def environment_query_failure_message(response: dict[str, Any]) -> str | None:
+    error = response.get("error")
+    if isinstance(error, str):
+        return error
+    if isinstance(error, dict) and isinstance(error.get("message"), str):
+        return error["message"]
+
+    payload = response.get("result") if isinstance(response.get("result"), dict) else {}
+    for entry in (payload.get("event"), payload.get("accepted"), payload):
+        if isinstance(entry, dict) and entry.get("success") is False and isinstance(entry.get("message"), str):
+            return entry["message"]
+    return None
+
+
+def unsupported_environment_query_message(response: dict[str, Any]) -> str | None:
+    message = environment_query_failure_message(response)
+    if message is None:
+        return None
+    if message.strip().casefold() in {
+        "unknown_environment_query",
+        "unsupported_environment_query",
+        "unknown environment query",
+        "unsupported environment query",
+    }:
+        return message
+    return None
 
 
 def default_environment_query_timeout_ms(query_type: str) -> int:
@@ -9169,10 +9815,13 @@ def local_elevator_trigger_options(observation: dict[str, Any], arguments: dict[
         levels = [str(level) for level in trigger.get("levels", []) if str(level)]
         follow_up: dict[str, Any] = {
             "tool": "tla_ui_answer",
-            "options": [{"answerId": level, "mapProtoId": level, "preferred": bool(target_map_proto_id and level == target_map_proto_id)} for level in levels],
+            "options": [
+                {"answerIndex": index, "mapProtoId": level, "preferred": bool(target_map_proto_id and level == target_map_proto_id)}
+                for index, level in enumerate(levels)
+            ],
         }
         if target_map_proto_id and target_map_proto_id in levels and target_map_proto_id != map_proto_id:
-            follow_up["arguments"] = {"answerId": target_map_proto_id}
+            follow_up["arguments"] = {"answerIndex": levels.index(target_map_proto_id)}
         entry_score = 86 if target_map_proto_id and target_map_proto_id in levels else 78
         if isinstance(distance, int):
             entry_score = max(62, entry_score - min(distance // 8, 20))
@@ -9203,6 +9852,20 @@ def local_elevator_trigger_options(observation: dict[str, Any], arguments: dict[
         )
     )
     return result
+
+
+def authored_elevator_target_answer_index(current_map_proto_id: str, target_map_proto_id: str, button_count: int) -> int | None:
+    if not current_map_proto_id or not target_map_proto_id or target_map_proto_id == current_map_proto_id or button_count < 1:
+        return None
+
+    matching_indices: set[int] = set()
+    for trigger in authored_elevator_triggers_for_map(current_map_proto_id):
+        levels = [str(level) for level in trigger.get("levels", []) if str(level)]
+        if len(levels) != button_count or target_map_proto_id not in levels:
+            continue
+        matching_indices.add(levels.index(target_map_proto_id))
+
+    return next(iter(matching_indices)) if len(matching_indices) == 1 else None
 
 
 def nearest_authored_hex(hexes: list[Any], origin: tuple[int, int] | None) -> dict[str, int] | None:
@@ -9435,13 +10098,18 @@ def ui_prompt_options_payload(observation: dict[str, Any], action_suggestions: d
     if not ui_prompt.get("active"):
         return {"active": False, "options": [], "blocked": [{"reason": "observation.uiPrompt.active=false"}]}
 
+    prompt_buttons = ui_prompt.get("buttons") if isinstance(ui_prompt.get("buttons"), list) else []
+    target_answer_index = authored_elevator_target_answer_index(
+        str(ui_prompt.get("currentMapProtoId") or "").strip(), target_map_proto_id, len(prompt_buttons))
+
     for candidate in action_candidate_entries(ui_action):
         candidate_args = candidate.get("arguments") if isinstance(candidate.get("arguments"), dict) else {}
         role = str(candidate.get("role") or "").strip().lower()
         dangerous = bool(candidate.get("dangerous"))
         enabled = candidate.get("enabled", True) is not False
         score = ui_prompt_role_score(str(ui_prompt.get("kind") or ""), role, dangerous, enabled)
-        if target_map_proto_id and str(candidate_args.get("answerId") or candidate.get("id") or "") == target_map_proto_id:
+        matches_target_map = target_answer_index is not None and candidate_args.get("answerIndex") == target_answer_index
+        if matches_target_map:
             score += 32
         blocked_by = list(ui_action.get("blockedBy", []) if isinstance(ui_action.get("blockedBy"), list) else [])
         if not enabled:
@@ -9457,7 +10125,7 @@ def ui_prompt_options_payload(observation: dict[str, Any], action_suggestions: d
                 "reason": candidate.get("reason") or "visible semantic GUI prompt button",
                 "blockedBy": blocked_by,
                 "dangerous": dangerous,
-                "preferred": bool(target_map_proto_id and str(candidate_args.get("answerId") or candidate.get("id") or "") == target_map_proto_id),
+                "preferred": matches_target_map,
             }
         )
 
@@ -9469,7 +10137,7 @@ def ui_prompt_options_payload(observation: dict[str, Any], action_suggestions: d
         "screen": ui_prompt.get("screen"),
         "prompt": {
             key: ui_prompt.get(key)
-            for key in ("screen", "kind", "title", "text", "dialogId", "dialogBoxAnswerIndex", "currentMapProtoId")
+            for key in ("screen", "kind", "title", "text", "dialogId", "dialogBoxSession", "dialogBoxAnswerIndex", "currentMapProtoId")
             if key in ui_prompt
         },
         "options": options[:limit],
@@ -10695,7 +11363,14 @@ def nav_plan_state(bridge: Any, arguments: dict[str, Any]) -> dict[str, Any]:
     query_type = "path" if bool(arguments.get("simplePath")) else "tactical_path"
     query_args = nav_query_arguments(arguments, target, query_type)
     query_response = environment_query(selected_bridge, query_type, query_args)
-    if "error" in query_response:
+    query_fallback: dict[str, str] | None = None
+    fallback_reason = unsupported_environment_query_message(query_response) if query_type == "tactical_path" else None
+    if fallback_reason is not None:
+        query_fallback = {"from": "tactical_path", "to": "path", "reason": fallback_reason}
+        query_type = "path"
+        query_args = nav_query_arguments(arguments, target, query_type)
+        query_response = environment_query(selected_bridge, query_type, query_args)
+    if "error" in query_response or environment_query_failure_message(query_response) is not None:
         return query_response
 
     query_payload = query_response.get("result", {}) if isinstance(query_response.get("result"), dict) else {}
@@ -10740,6 +11415,7 @@ def nav_plan_state(bridge: Any, arguments: dict[str, Any]) -> dict[str, Any]:
         "target": target,
         "plan": {
             "query": query_type,
+            "queryFallback": query_fallback,
             "reachable": route_reachable(route),
             "score": route_score(route),
             "adjustedScore": adjusted_route_score(route, route_memory),
@@ -10862,12 +11538,19 @@ def find_safe_step_state(bridge: Any, arguments: dict[str, Any]) -> dict[str, An
         candidate_query = nav_query_arguments(arguments, candidate, "tactical_path")
         candidate_query["searchRadius"] = 0
         response = environment_query(selected_bridge, "tactical_path", candidate_query)
-        if "error" in response:
+        fallback_reason = unsupported_environment_query_message(response)
+        if fallback_reason is not None:
+            candidate_query = nav_query_arguments(arguments, candidate, "path")
+            candidate_query["includeDirections"] = False
+            response = environment_query(selected_bridge, "path", candidate_query)
+        if "error" in response or environment_query_failure_message(response) is not None:
             return response
         payload = response.get("result", {}) if isinstance(response.get("result"), dict) else {}
         route = payload.get("result") if isinstance(payload.get("result"), dict) else {}
-        route = route_with_query(route, "tactical_path")
+        route = route_with_query(route, "path" if fallback_reason is not None else "tactical_path")
         assessment = nav_candidate_assessment(candidate, route, payload, observation, profile, memory, arguments)
+        if fallback_reason is not None:
+            assessment["queryFallback"] = {"from": "tactical_path", "to": "path", "reason": fallback_reason}
         if candidate.get("source") == "local_safe_step":
             apply_safe_step_threat_adjustment(assessment, candidate, current_threat_distance, threat_hexes)
         checks.append(assessment)
@@ -10890,7 +11573,7 @@ def find_safe_step_state(bridge: Any, arguments: dict[str, Any]) -> dict[str, An
             "candidates": checks,
             "checked": len(checks),
             "totalCandidates": len(candidates),
-            "guidance": "Safe-step candidates are local reachable hexes by default and are scored with tla_env_tactical_path; pass useVisibleLandmarks for the legacy landmark mode.",
+            "guidance": "Safe-step candidates are local reachable hexes by default and use tla_env_tactical_path when supported; an explicitly unsupported tactical query falls back to tla_env_path. Pass useVisibleLandmarks for the legacy landmark mode.",
         },
     }
 
@@ -11069,7 +11752,7 @@ def observe_with_action_suggestions(bridge: Any, arguments: dict[str, Any]) -> t
     selected_bridge, observe_error, observation_payload, observation = observe_target_payload(bridge, arguments)
     if observe_error is not None:
         return selected_bridge, observe_error, {}, {}, {}
-    observation = unwrap_observation_payload(observation_payload)
+    observation = normalize_observation_hexes(unwrap_observation_payload(observation_payload))
     action_suggestions = available_actions_payload(observation_payload, observation, arguments)
     return selected_bridge, None, observation_payload, observation, action_suggestions
 
@@ -15928,6 +16611,7 @@ def team_tool_properties() -> dict[str, Any]:
 
 
 def tool_list() -> list[dict[str, Any]]:
+    id_schema = {"type": ["integer", "string"]}
     return [
         {
             "name": "tla_launch_options",
@@ -16026,12 +16710,14 @@ def tool_list() -> list[dict[str, Any]]:
         },
         {
             "name": "tla_save_screenshot",
-            "title": "Save Engine Screenshot",
-            "description": "Ask the controlled client to write its composed frame (scene + GUI, exactly what the player sees) to a .tga via the engine's own render-target readback. Unlike tla_window_screenshot this works headless and over Direct3D. Pass waitForCompletion to block until the file is written; the path is relative to the client working directory (repo root).",
-            "inputSchema": with_action_wait({
+            "title": "Save And Verify Engine Screenshot",
+            "description": "Write the controlled client's composed frame (scene + GUI) through the engine render-target readback, always wait for command completion, then validate the uncompressed true-color TGA payload and reject blank-like captures. The target is confined to the configured workspace and any previous file at that target is removed before capture. Unlike tla_window_screenshot this works headless and over Direct3D.",
+            "inputSchema": with_forced_action_wait({
                 "type": "object",
-                "properties": {"path": {"type": "string", "description": "Output .tga path, e.g. Workspace/AiControlScreenshots/frame.tga."}},
-                "required": ["path"],
+                "properties": {
+                    "path": {"type": "string", "description": "Optional .tga path inside the workspace; defaults to Workspace/AiControlScreenshots/<timestamp>.tga."},
+                    "settleMs": {"type": "integer", "minimum": 0, "maximum": 10000, "description": "Delay before capture so a newly opened screen can paint; default 250ms."},
+                },
             }),
         },
         {
@@ -16047,10 +16733,29 @@ def tool_list() -> list[dict[str, Any]]:
         {
             "name": "tla_show_screen",
             "title": "Show GUI Screen",
-            "description": "Open a GUI screen on the controlled client by its GuiScreen enum value name (e.g. \"GameOptions\", \"Pda\", \"Character\", \"MiniMap\"). The reliable way to QA a screen's layout: open it, then tla_save_screenshot, without hunting for the button that opens it. The name is resolved via Game.TryParseEnum; an unknown name returns success=false. Screens that require parameters (Barter, Split, PickUp) are better opened through their real flow.",
+            "description": "Open a GUI screen on the controlled client by its GuiScreen enum value name (e.g. \"Options\", \"PipBoy\", or \"Character\"). Pair it with tla_save_screenshot for layout QA. The name is resolved via Game.TryParseEnum; an unknown name returns success=false. Contextual screens such as Dialog, Barter, Split, PickUp, Aim, Radio, and elevators require parameters or live state and must be opened through their real gameplay flow.",
             "inputSchema": with_action_wait({
                 "type": "object",
-                "properties": {"screen": {"type": "string", "description": "GuiScreen value name, e.g. GameOptions, Pda, Character, MiniMap."}},
+                "properties": {"screen": {"type": "string", "description": "GuiScreen value name, e.g. Options, PipBoy, Character, Inventory, or Menu."}},
+                "required": ["screen"],
+            }),
+        },
+        {
+            "name": "tla_show_context_screen",
+            "title": "Show Contextual GUI Screen",
+            "description": "Open Aim, Use, Timer, Split, or SkillBox with the same OnShow parameter contract used by normal gameplay, after the client validates the real target/item. This is a deterministic QA entry point; buttons inside the window still use ordinary ChosenActions/server mechanics. Timer requires an owned timer-capable item and Split requires an owned stack.",
+            "inputSchema": with_action_wait({
+                "type": "object",
+                "properties": {
+                    "screen": {"type": "string", "enum": ["Aim", "Use", "Timer", "Split", "SkillBox"]},
+                    "targetId": id_schema,
+                    "itemId": id_schema,
+                    "itemsCollection": {"type": "string", "enum": ["chosen"], "description": "Split source collection; only the chosen inventory is safe for direct QA opening."},
+                    "isInventory": {
+                        "type": "boolean",
+                        "description": "Optional SkillBox ownership assertion. The client derives IsInventory from the real item owner and rejects a conflicting assertion.",
+                    },
+                },
                 "required": ["screen"],
             }),
         },
@@ -17505,9 +18210,7 @@ def handle_request(bridge: Bridge, request: dict[str, Any]) -> dict[str, Any] | 
                 return mcp_error(request_id, -32000, str(exc))
         elif name == "tla_save_screenshot":
             try:
-                screenshot_path = non_empty_string(arguments.get("path"), "path")
-                response = act_with_optional_wait(
-                    target_bridge(bridge, arguments), {"type": "save_screenshot", "stringArg": screenshot_path}, arguments)
+                response = save_verified_engine_screenshot(bridge, arguments)
             except ValueError as exc:
                 return mcp_error(request_id, -32602, str(exc))
         elif name == "tla_set_mouse_pos":
@@ -17523,6 +18226,11 @@ def handle_request(bridge: Bridge, request: dict[str, Any]) -> dict[str, Any] | 
                 screen_name = non_empty_string(arguments.get("screen"), "screen")
                 response = act_with_optional_wait(
                     target_bridge(bridge, arguments), {"type": "show_screen", "stringArg": screen_name}, arguments)
+            except ValueError as exc:
+                return mcp_error(request_id, -32602, str(exc))
+        elif name == "tla_show_context_screen":
+            try:
+                response = act_with_optional_wait(target_bridge(bridge, arguments), context_screen_command(arguments), arguments)
             except ValueError as exc:
                 return mcp_error(request_id, -32602, str(exc))
         elif name == "tla_hide_screen":

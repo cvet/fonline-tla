@@ -84,6 +84,13 @@ void ProcessSkillsUp(Player player, any[] params)
 
     for (int i = 0; i < params.length(); i += 2) {
         CritterProperty skill = CritterProperty(int(params[i]));
+        // Идентификатор свойства приходит от клиента: без проверки очки навыков можно было бы
+        // потратить на любое целочисленное свойство критера (SPECIAL, максимум HP, перки)
+        if (CritterPropertyGroup::Skills.find(skill) == -1) {
+            Game.Log("Wrong ProcessSkillsUp skill: " + int(skill));
+            continue;
+        }
+
         int skillPoints = params[i + 1];
         while (skillPoints > 0) {
             int skillValue = cr.GetAsInt(skill);
@@ -168,11 +175,14 @@ void CritterSetExperience(Critter cr, CritterProperty prop, int& newValue)
     }
 }
 
-[[TimeEvent]]
+[[TimeEvent]] [[Async]]
 void UpdateExperienceLevel(any crId)
 {
     Critter? cr = Game.GetCritter(crId);
     if (cr == null) {
+        return;
+    }
+    if (!Sync::Lock(cr)) {
         return;
     }
 
@@ -275,9 +285,11 @@ int NextLevelNeedExp(Critter cr)
 [[PropertySetter]]
 void CritterSetPropertyQuests(Critter cr, CritterProperty prop)
 {
-    int str = ("" + prop).hstr().uhash + cr.GetAsInt(prop);
-    if (Game.IsTextPresent(TextPackKey(TextPackName::Quest, "" + (str)))) {
-        Messaging::Info(Game.GetText(TextPackKey(TextPackName::Quest, "" + (str))));
+    // Пак Quest хранится по паре токенов {CritterProperty::X}{значение}, а не по сумме хешей:
+    // со старым однотокенным ключом сообщение об обновлении квеста не находилось никогда
+    TextPackKey key = TextPackKey(TextPackName::Quest, MsgStr::PropPrefix(prop), "" + cr.GetAsInt(prop));
+    if (Game.IsTextPresent(key)) {
+        Messaging::Info(key);
     }
 }
 
@@ -593,10 +605,11 @@ int CheckPlayerName(string name)
         }
     }
 
-    // Смешение разных языков
+    // Смешение разных языков. Здесь, в отличие от проверки двух пробелов выше, читается только
+    // name[i], поэтому цикл должен доходить до последнего символа
     int letters1 = 0;
     int letters2 = 0;
-    for (int i = 0; i < (name.length() - 1); i++) {
+    for (int i = 0; i < name.length(); i++) {
         if (Settings.Account.ValidNameLettersCulture1.find(name[i]) != -1) {
             letters1++;
         }
@@ -655,6 +668,12 @@ bool VerifyUnarmedItem(Critter cr, hstring pid)
     }
 
     return true;
+}
+
+// Только предметы с явным признаком таймера должны открывать окно выбора задержки.
+bool IsTimedUseItem(AbstractItem item)
+{
+    return item.IsCanUse && item.IsHasTimer;
 }
 
 #if CLIENT
@@ -735,20 +754,27 @@ void UseMainItem()
     int aim = WeaponHelpers::WeaponModeAim(mode);
     Item? realItem = cast<Item?>(item);
     ident itemId = realItem != null ? realItem.Id : ZERO_IDENT;
-    if (mode == WeaponHelpers::USE_RELOAD) {
+    // Ветвимся по разобранному слоту, а не по упакованному режиму: mode содержит ещё и прицел
+    // в старших битах, поэтому при любом прицеливании ни одна ветка не срабатывала
+    if (use == WeaponHelpers::USE_RELOAD) {
         ChosenActions::SetChosenActions({Tla::ChosenUseItem, itemId, 0, ClientDefines::TARGET_SELF_ITEM, 0, WeaponHelpers::USE_RELOAD, 0});
     }
-    else if (mode < WeaponHelpers::MAX_USES && item.Type == ItemType::Weapon) {
+    else if (use < WeaponHelpers::MAX_USES && item.Type == ItemType::Weapon) {
         Gui::Cursor = CursorType::UseWeapon;
     }
-    else if (mode == WeaponHelpers::USE_USE && item.IsCanUseOnSmth) {
+    else if (use == WeaponHelpers::USE_USE && item.IsCanUseOnSmth) {
         // Self->CurUseItem = 0;
         // Self->SetCurMode( CUR_USE_ITEM );
         Gui::Cursor = CursorType::UseItem;
     }
-    else if (mode == WeaponHelpers::USE_USE && item.IsCanUse) {
-        // Отдельная ветка на юз с таймером
-        Gui::ShowScreen(GuiScreen::Timer, dict<string, any> = {{"TargetItemId", itemId}});
+    else if (use == WeaponHelpers::USE_USE && item.IsCanUse) {
+        if (IsTimedUseItem(item)) {
+            Gui::ShowScreen(GuiScreen::Timer, dict<string, any> = {{"TargetItemId", itemId}});
+        }
+        else {
+            ChosenActions::SetChosenActions(
+                {Tla::ChosenUseItem, itemId, 0, ClientDefines::TARGET_SELF, 0, WeaponHelpers::MakeWeaponMode(WeaponHelpers::USE_USE, 0), 0});
+        }
     }
 }
 
@@ -1258,9 +1284,10 @@ int[] CritterGetDamageResistanceImpl(Critter cr)
         result[DamageTypes::Radiation] += 75;
     }
 
-    // Эффекты от препаратов
+    // Эффекты от препаратов. ResistsBase перечислены с нуля (Normal..Radiation), а result
+    // индексируется по DamageTypes, где нулевой слот не используется — отсюда смещение на единицу
     for (int i = 0; i < CritterPropertyGroup::ResistsBase.length(); i++) {
-        result[i] += Drugs::GetDrugEffect(cr, CritterPropertyGroup::ResistsBase[i]);
+        result[i + 1] += Drugs::GetDrugEffect(cr, CritterPropertyGroup::ResistsBase[i]);
     }
 
     // Ограничение диапазона
@@ -1559,21 +1586,42 @@ int GetAimApCost(int hitLocation)
     return 0;
 }
 
-[[PropertyGetter]]
-int CritterGetItemsWeight(Critter cr)
+// Суммирует вес до заданного предела без переполнения. Значение limit + 1 означает,
+// что реальный вес заведомо выше интересующего вызывающего порога.
+int64 CritterGetItemsWeightLimited(Critter cr, int64 limit)
 {
 #if CLIENT
     if (!cr.IsChosen) {
         return 0; // TODO
     }
 #endif
+    if (limit < 0) {
+        return limit + 1;
+    }
+
     Item[] items = cr.GetItems();
-    int result = 0;
+    int64 result = 0;
     for (int i = 0; i < items.length(); i++) {
-        result += items[i].Weight * items[i].Count;
+        int count = items[i].Count;
+        verify(count > 0, "Invalid item count", items[i], count);
+
+        int64 unitWeight = items[i].Weight;
+        if (unitWeight > (limit - result) / count) {
+            return limit + 1;
+        }
+
+        result += unitWeight * count;
     }
 
     return result;
+}
+
+[[PropertyGetter]]
+int CritterGetItemsWeight(Critter cr)
+{
+    const int64 maxPropertyWeight = 2147483647;
+    int64 result = CritterGetItemsWeightLimited(cr, maxPropertyWeight);
+    return result > maxPropertyWeight ? int(maxPropertyWeight) : int(result);
 }
 
 #endif

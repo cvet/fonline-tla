@@ -1,0 +1,314 @@
+// Testing — лёгкий тест-харнесс игровых скриптов (уровень B плана рефакторинга, Docs/Refactoring.md R2-3).
+// SERVER: реестр тестов, последовательный раннер на тайм-ивентах (изоляция исключений через watchdog),
+//  Expect/Fail/Pass, фикстуры (тестовая локация, спавн NPC) с автоочисткой и проверкой утечек.
+// Сьюты (Scripts/Test_*.fos) подписываются на Game.OnTestingInit и регистрируются через RegisterTest.
+// Включается настройкой Testing.Enabled (см. задачу "Launch :: TLA_Tests [windows]"); в обычной игре молчит.
+namespace Testing
+{
+
+///@ Setting Common bool Testing.Enabled
+///@ Setting Common string Testing.Filter
+///@ Setting Common bool Testing.StopOnFirstFailure
+///@ Setting Common bool Testing.ExitOnFinish
+///@ Setting Common int32 Testing.TestTimeout
+
+///@ Event Server Game OnTestingInit()
+
+#if SERVER
+
+// Колбэк одного теста: выполняет проверки через Expect/Fail и по необходимости фикстуры контекста
+funcdef void TestFunc(TestContext ctx);
+
+class TestCase
+{
+    string Suite;
+    string Name;
+    TestFunc? Func;
+}
+
+class TestContext
+{
+    int Index;
+    bool Finished; // Вердикт зафиксирован (Pass/Fail); повторные Fail игнорируются
+    bool Advanced; // Раннер уже перешёл к следующему тесту (гард от гонки executor/watchdog)
+    bool Ok;
+    string FailText;
+    ident[] TrackedLocations = {}; // Созданные фикстурами сущности — уничтожаются в Cleanup с проверкой утечек
+    ident[] TrackedCritters = {};
+}
+
+TestCase[] Tests = {};
+TestContext? CurrentCtx = null;
+int PassedCount = 0;
+int FailedCount = 0;
+int SkippedCount = 0;
+
+[[ModuleInit]]
+void InitTesting()
+{
+    if (!Settings.Testing.Enabled) {
+        return;
+    }
+
+    Game.OnStart.Subscribe(StartTesting);
+}
+
+// Регистрация одного теста; вызывается сьютами из обработчика OnTestingInit
+void RegisterTest(string suite, string name, TestFunc? func)
+{
+    TestCase test = TestCase();
+    test.Suite = suite;
+    test.Name = name;
+    test.Func = func;
+    Tests.insertLast(test);
+}
+
+[[Event]]
+void StartTesting()
+{
+    // Сьюты регистрируются лениво по событию — порядок ModuleInit модулей не важен
+    Game.OnTestingInit.Fire();
+    Game.Log("[Testing] Enabled, registered tests: " + Tests.length() +
+             (Settings.Testing.Filter.isEmpty() ? "" : ", filter '" + Settings.Testing.Filter + "'"));
+    Game.StartTimeEvent(Time::Milliseconds(500), NextTest, -1);
+}
+
+bool MatchesFilter(int index)
+{
+    if (Settings.Testing.Filter.isEmpty()) {
+        return true;
+    }
+
+    string fullName = Tests[index].Suite + "." + Tests[index].Name;
+    return fullName.find(Settings.Testing.Filter) != -1;
+}
+
+[[TimeEvent]] [[Async]]
+void NextTest(any value)
+{
+    int index = int(value) + 1;
+
+    if (FailedCount > 0 && Settings.Testing.StopOnFirstFailure) {
+        FinishRun();
+        return;
+    }
+
+    while (index < Tests.length() && !MatchesFilter(index)) {
+        SkippedCount++;
+        index++;
+    }
+
+    if (index >= Tests.length()) {
+        FinishRun();
+        return;
+    }
+
+    TestContext ctx = TestContext();
+    ctx.Index = index;
+    CurrentCtx = ctx;
+
+    // Watchdog ловит и исключение в колбэке (его тайм-ивент умирает молча), и зависание
+    int timeoutMs = Math::Max(Settings.Testing.TestTimeout, 1000);
+    Game.StartTimeEvent(Time::Milliseconds(timeoutMs), WatchTest, index);
+    Game.StartTimeEvent(Time::Milliseconds(1), ExecuteTest, index);
+}
+
+[[TimeEvent]] [[Async]]
+void ExecuteTest(any value)
+{
+    int index = int(value);
+    TestContext? ctx = CurrentCtx;
+    if (ctx == null || ctx.Index != index || ctx.Advanced) {
+        return;
+    }
+
+    TestFunc? func = Tests[index].Func;
+    if (func != null) {
+        func(ctx);
+    }
+
+    // Колбэк вернулся без исключения: если вердикта нет — тест считается пройденным
+    if (!ctx.Finished) {
+        ctx.Finished = true;
+        ctx.Ok = true;
+    }
+
+    FinishTest(ctx);
+}
+
+[[TimeEvent]] [[Async]]
+void WatchTest(any value)
+{
+    int index = int(value);
+    TestContext? ctx = CurrentCtx;
+    if (ctx == null || ctx.Index != index || ctx.Advanced) {
+        return;
+    }
+
+    ctx.Finished = true;
+    ctx.Ok = false;
+    ctx.FailText = "исключение в колбэке или таймаут (см. лог выше)";
+    FinishTest(ctx);
+}
+
+[[Async]]
+void FinishTest(TestContext ctx)
+{
+    if (ctx.Advanced) {
+        return;
+    }
+
+    ctx.Advanced = true;
+
+    // Очистка фикстур обязана пройти даже для упавшего теста; утечка делает тест проваленным
+    string leakText = CleanupTest(ctx);
+    if (!leakText.isEmpty() && ctx.Ok) {
+        ctx.Ok = false;
+        ctx.FailText = "утечка фикстур: " + leakText;
+    }
+
+    string fullName = Tests[ctx.Index].Suite + "." + Tests[ctx.Index].Name;
+    if (ctx.Ok) {
+        PassedCount++;
+        Game.Log("[Testing] PASS " + fullName);
+    }
+    else {
+        FailedCount++;
+        Game.Log("[Testing] FAIL " + fullName + ": " + ctx.FailText);
+    }
+
+    Game.StartTimeEvent(Time::Milliseconds(1), NextTest, ctx.Index);
+}
+
+void FinishRun()
+{
+    Game.Log("[Testing] COMPLETE: " + PassedCount + " passed, " + FailedCount + " failed, " + SkippedCount + " skipped (of " + Tests.length() + ")");
+
+    if (Settings.Testing.ExitOnFinish) {
+        Game.RequestQuit(FailedCount == 0);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Проверки
+// ---------------------------------------------------------------------------
+
+// Возвращает условие: сьют делает ранний return при false, чтобы не продолжать после провала
+bool Expect(TestContext ctx, bool condition, string message)
+{
+    if (!condition) {
+        Fail(ctx, message);
+        return false;
+    }
+
+    return true;
+}
+
+bool ExpectEq(TestContext ctx, int actual, int expected, string message)
+{
+    return Expect(ctx, actual == expected, message + " (получено " + actual + ", ожидалось " + expected + ")");
+}
+
+bool ExpectStrEq(TestContext ctx, string actual, string expected, string message)
+{
+    return Expect(ctx, actual == expected, message + " (получено '" + actual + "', ожидалось '" + expected + "')");
+}
+
+void Fail(TestContext ctx, string message)
+{
+    if (ctx.Finished) {
+        return;
+    }
+
+    ctx.Finished = true;
+    ctx.Ok = false;
+    ctx.FailText = message;
+}
+
+void Pass(TestContext ctx)
+{
+    if (ctx.Finished) {
+        return;
+    }
+
+    ctx.Finished = true;
+    ctx.Ok = true;
+}
+
+// ---------------------------------------------------------------------------
+// Фикстуры: тестовая локация и спавн NPC; всё созданное уничтожается в CleanupTest
+// ---------------------------------------------------------------------------
+
+[[Async]]
+Location? CreateTestLocation(TestContext ctx, hstring locPid)
+{
+    Location loc = Location::CreateLocation(locPid, ipos(Settings.GlobalMap.GlobalMapZoneLength * 5, Settings.GlobalMap.GlobalMapZoneLength * 5), null);
+    if (!Sync::Lock(loc)) {
+        return null;
+    }
+
+    loc.AutoGarbage = false;
+    loc.Hidden = true;
+    ctx.TrackedLocations.insertLast(loc.Id);
+    return loc;
+}
+
+[[Async]]
+Critter? SpawnTestNpc(TestContext ctx, Map map, hstring protoId, mpos hex)
+{
+    if (!Sync::Lock(map)) {
+        return null;
+    }
+
+    // AddCritter синхронно зовёт обработчики OnMapCritterIn (Main), которые читают локацию карты —
+    // без неё в покрытии цепочка родителей не спасает (лок карты не покрывает её родителя)
+    Location loc = map.GetLocation();
+    if (!Sync::Lock(map, loc)) {
+        return null;
+    }
+
+    Critter cr = map.AddCritter(protoId, hex, HDIR_Random);
+    ctx.TrackedCritters.insertLast(cr.Id);
+    return cr;
+}
+
+// Уничтожает созданные тестом сущности; возвращает описание утечек (пусто = чисто)
+[[Async]]
+string CleanupTest(TestContext ctx)
+{
+    string leaks = "";
+
+    for (int i = 0; i < ctx.TrackedCritters.length(); i++) {
+        Critter? cr = Game.GetCritter(ctx.TrackedCritters[i]);
+        // Уничтожение зовёт OnMapCritterOut (Main), читающий локацию — нужна полная цепочка в покрытии
+        if (cr != null && Sync::LockCritterWithMapAndLocation(cr)) {
+            Game.DestroyCritter(cr);
+        }
+    }
+
+    for (int i = 0; i < ctx.TrackedLocations.length(); i++) {
+        Location? loc = Game.GetLocation(ctx.TrackedLocations[i]);
+        if (loc != null && Sync::Lock(loc)) {
+            Game.DestroyLocation(loc);
+        }
+    }
+
+    // Проверка утечек: всё созданное обязано исчезнуть из реестров
+    for (int i = 0; i < ctx.TrackedCritters.length(); i++) {
+        if (Game.GetCritter(ctx.TrackedCritters[i]) != null) {
+            leaks += (leaks.isEmpty() ? "" : ", ") + "critter " + ctx.TrackedCritters[i];
+        }
+    }
+
+    for (int i = 0; i < ctx.TrackedLocations.length(); i++) {
+        if (Game.GetLocation(ctx.TrackedLocations[i]) != null) {
+            leaks += (leaks.isEmpty() ? "" : ", ") + "location " + ctx.TrackedLocations[i];
+        }
+    }
+
+    return leaks;
+}
+
+#endif
+
+}

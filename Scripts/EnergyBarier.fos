@@ -478,6 +478,14 @@ class CBarier
     }
 };
 
+// Нужно ли сети запланировать единое автовключение после смены режима.
+bool ShouldAutoEnable(int mode, int autoEnable, int autoOnValue, int autoOnHalfValue)
+{
+    bool autoOn = autoOnValue == 0;
+    bool autoOnHalf = autoOnHalfValue == 0;
+    return (((mode == BM_OFF && autoOn) || (mode == BM_HALF_ON && autoOnHalf)) || autoEnable == AE_ON) && autoEnable != AE_OFF;
+}
+
 // Сеть связанных барьеров одной локации: переключаются вместе как единое целое.
 class CBariersNet
 {
@@ -505,23 +513,23 @@ class CBariersNet
     void ChangeNetMode(int mode, int autoEnable)
     {
         CBarier barier;
-        bool autoOn;
-        bool autoOnHalf;
+        bool scheduleAutoEnable = false;
         for (int i = 0; i < Bariers.length(); i++) {
             barier = Bariers[i];
-            autoOn = (barier.Blockers[0].Val4 == 0) ? true : false;
-            autoOnHalf = (barier.Blockers[0].Val5 == 0) ? true : false;
-            if (((((mode == BM_OFF) and (autoOn)) or ((mode == BM_HALF_ON) and (autoOnHalf))) or (autoEnable == AE_ON)) and (autoEnable != AE_OFF)) {
-                any[] values = {};
-                values.insertLast(any(LocId));
-                values.insertLast(any(NetNum));
-                values.insertLast(any(BM_ON));
-                Game.StartTimeEvent(BarrierOpenTime(), TurnOnBariers, values); // SavedDeferredCall
-            }
+            scheduleAutoEnable = scheduleAutoEnable || ShouldAutoEnable(mode, autoEnable, barier.Blockers[0].Val4, barier.Blockers[0].Val5);
 
             barier.ChangeMode(mode);
-            NetState = mode;
         }
+
+        if (scheduleAutoEnable) {
+            any[] values = {};
+            values.insertLast(any(LocId));
+            values.insertLast(any(NetNum));
+            values.insertLast(any(BM_ON));
+            Game.StartTimeEvent(BarrierOpenTime(), TurnOnBariers, values); // SavedDeferredCall
+        }
+
+        NetState = mode;
     }
 };
 
@@ -648,15 +656,42 @@ bool BarierOpen(Critter master)
 }
 
 // Отложенная инициализация барьера (когда на момент создания итем ещё не был привязан к карте).
-[[TimeEvent]]
+[[TimeEvent]] [[Async]]
 void InitBarier(any value)
 {
     Item? barier = Game.GetItem(value);
-    if (barier != null) {
-        InitBariers(barier);
-    }
-    else {
+    if (barier == null) {
         Game.Log("Barier item not valid");
+        return;
+    }
+
+    while (true) {
+        if (!Sync::Lock(barier)) {
+            return;
+        }
+
+        ident mapId = barier.MapId;
+        if (mapId == ZERO_IDENT) {
+            InitBariers(barier);
+            return;
+        }
+
+        Map? map = Game.GetMap(mapId);
+        if (map == null) {
+            Game.Log("Barier map not valid");
+            return;
+        }
+
+        if (!Sync::Lock(barier, map)) {
+            continue;
+        }
+
+        if (barier.MapId != mapId) {
+            continue;
+        }
+
+        InitBariers(barier);
+        return;
     }
 }
 
@@ -1019,6 +1054,36 @@ void EmitterInit(Item emitter, bool firstTime)
 
 // Обработка взаимодействия с терминалом: определяет режим (осмотр/взлом/карта), сохраняет параметры
 // сети на игроке и состояние терминала на карте, затем открывает диалог терминала.
+const int MIN_TERMINAL_BONUS = -100;
+const int MAX_TERMINAL_BONUS = 100;
+
+// Формат SceneryParams терминала: положительный номер сети и два знаковых бонуса.
+// Выходы присваиваются только после полной проверки, чтобы ошибочный контент не оставлял
+// вызывающему коду частично декодированное состояние.
+bool TryDecodeTerminalParams(hstring[] params, int& netNum, int& hackBonus, int& hitBonus)
+{
+    if (params.length() != 3) {
+        return false;
+    }
+
+    int parsedNetNum = 0;
+    int parsedHackBonus = 0;
+    int parsedHitBonus = 0;
+    if (!Tla::TryParseSceneryInt(params[0], parsedNetNum) || !Tla::TryParseSceneryInt(params[1], parsedHackBonus) ||
+        !Tla::TryParseSceneryInt(params[2], parsedHitBonus)) {
+        return false;
+    }
+    if (parsedNetNum <= 0 || parsedHackBonus < MIN_TERMINAL_BONUS || parsedHackBonus > MAX_TERMINAL_BONUS || parsedHitBonus < MIN_TERMINAL_BONUS ||
+        parsedHitBonus > MAX_TERMINAL_BONUS) {
+        return false;
+    }
+
+    netNum = parsedNetNum;
+    hackBonus = parsedHackBonus;
+    hitBonus = parsedHitBonus;
+    return true;
+}
+
 bool TerminalImpl(Critter player, StaticItem terminal, Item? item, any skill)
 {
     Map? map = player.GetMap();
@@ -1026,10 +1091,12 @@ bool TerminalImpl(Critter player, StaticItem terminal, Item? item, any skill)
         return false;
     }
 
-    auto params = terminal.SceneryParams;
-    int netNum = params[0].hash;
-    int hackBonus = params[1].hash;
-    int hitBonus = params[2].hash;
+    int netNum = 0;
+    int hackBonus = 0;
+    int hitBonus = 0;
+    if (!TryDecodeTerminalParams(terminal.SceneryParams, netNum, hackBonus, hitBonus)) {
+        return false;
+    }
 
     ident itemId;
     int mode = 0;
@@ -1082,7 +1149,7 @@ bool TerminalImpl(Critter player, StaticItem terminal, Item? item, any skill)
 
 // Хук статического итема-терминала: проксирует в TerminalImpl.
 [[ItemStatic]]
-bool Terminal(Critter player, StaticItem terminal, Item item, any skill)
+bool Terminal(Critter player, StaticItem terminal, Item? item, any skill)
 {
     return TerminalImpl(player, terminal, item, skill);
 }
@@ -1285,26 +1352,27 @@ int CheckAccessCard(Critter master, Critter slave)
 }
 
 // Отложенное автовключение всей сети (values: locId, netNum, режим). Парный к ChangeNetMode.
-[[TimeEvent]]
+[[TimeEvent]] [[Async]]
 void TurnOnBariers(any[] values)
 {
     CBariersNet? net = GetBariersNet(values[1], values[0]);
-    if (net != null) {
+    if (net != null && EnergyBarierSync::LockBariersNet(net)) {
         net.ChangeNetMode(values[2], AE_DEFAULT);
     }
 }
 
 // Отложенное автовключение одиночного барьера по id его основного итема (values[0]).
-[[TimeEvent]]
+[[TimeEvent]] [[Async]]
 void TurnOnBarier(any[] values)
 {
-    for (int i = 0; i < BariersNets.length(); i++) {
-        for (int k = 0; k < BariersNets[i].Bariers.length(); k++) {
-            CBarier barier = BariersNets[i].Bariers[k];
-            if (barier.Barier.Id == values[0]) {
-                barier.ChangeMode(BM_ON);
-            }
-        }
+    CBarier? barier = GetBarier(values[0]);
+    if (barier == null || !EnergyBarierSync::LockBarierModes({barier})) {
+        return;
+    }
+
+    CBarier? current = GetBarier(values[0]);
+    if (current != null && current is barier) {
+        barier.ChangeMode(BM_ON);
     }
 }
 
@@ -1333,11 +1401,11 @@ void HalfOn(Critter master, Critter npc)
 }
 
 // Отключает силовое поле без охраны (values: netNum, locId); автовозврат запрещён (AE_OFF).
-[[TimeEvent]]
+[[TimeEvent]] [[Async]]
 void DisableForceField(any[] values)
 {
     CBariersNet? net = GetBariersNet(values[0], values[1]);
-    if (net != null) {
+    if (net != null && EnergyBarierSync::LockBariersNet(net)) {
         net.ChangeNetMode(BM_OFF_NO_GUARD, AE_OFF);
     }
 }
@@ -1352,11 +1420,11 @@ void DisableForceFieldWithGuards(any[] values)
 }
 
 // Включает силовое поле; автовозврат запрещён (AE_OFF).
-[[TimeEvent]]
+[[TimeEvent]] [[Async]]
 void EnableForceField(any[] values)
 {
     CBariersNet? net = GetBariersNet(values[0], values[1]);
-    if (net != null) {
+    if (net != null && EnergyBarierSync::LockBariersNet(net)) {
         net.ChangeNetMode(BM_ON, AE_OFF);
     }
 }
@@ -1383,7 +1451,8 @@ CGuards? GetGuards(Critter[] guards, int netNum, int barierId)
         return null;
     }
 
-    if (loc.ProtoId == Content::Item::throwing_knife) {
+    // loc — локация, поэтому и сравнивать нужно с прототипом локации, а не предмета
+    if (loc.ProtoId == Content::Location::geck_city) {
         g = CGuards_GeckCity();
     }
     else {

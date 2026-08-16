@@ -264,58 +264,72 @@ void StopReplicationEvent()
 
 // Отложенная зачистка наземной карты после остановки эвента:
 // эвакуирует игроков на глобал, сносит мешки и удаляет временных нпц (зомби и хабологов)
-[[TimeEvent]]
+[[TimeEvent]] [[Async]]
 void DeleteSandbags(any value)
 {
     Map? map = Game.GetMap(ident(value));
-    if (map != null) {
-        // Перенос игроков на глобал
-        Critter[] critters = map.GetCritters(CritterFindType::NonDeadPlayers);
-        for (int i = 0; i < critters.length(); i++) {
-            Critter cr = critters[i];
-            if (cr.GetMap() != null) {
-                cr.TransferToGlobal();
-            }
+    if (map == null || !Sync::Lock(map)) {
+        return;
+    }
+
+    // Перенос игроков на глобал. Покрытие карты автоматически включает её текущих детей,
+    // поэтому оно одновременно покрывает криттера и его исходную карту для TransferToGlobal.
+    Critter[] critters = map.GetCritters(CritterFindType::NonDeadPlayers);
+    for (int i = 0; i < critters.length(); i++) {
+        Critter cr = critters[i];
+        if (cr.MapId == map.Id) {
+            cr.TransferToGlobal();
         }
+    }
 
-        // Удаление мешков всех уровней «высоты»
-        Item[] items = {};
-        items.insertLast(map.GetItems(Content::Item::sandbag_1));
-        items.insertLast(map.GetItems(Content::Item::sandbag_2));
-        items.insertLast(map.GetItems(Content::Item::sandbag_3));
-        items.insertLast(map.GetItems(Content::Item::sandbag_4));
-        items.insertLast(map.GetItems(Content::Item::sandbag_5));
-        Game.DestroyItems(items);
+    // Удаление мешков всех уровней «высоты»
+    Item[] items = {};
+    items.insertLast(map.GetItems(Content::Item::sandbag_1));
+    items.insertLast(map.GetItems(Content::Item::sandbag_2));
+    items.insertLast(map.GetItems(Content::Item::sandbag_3));
+    items.insertLast(map.GetItems(Content::Item::sandbag_4));
+    items.insertLast(map.GetItems(Content::Item::sandbag_5));
+    Game.DestroyItems(items);
 
-        // Удаление временных нпц: зомби и хабологов
-        critters = map.GetCritters(CritterFindType::Npc);
-        for (int i = 0; i < critters.length(); i++) {
-            Critter npc = critters[i];
-            if (npc.NpcRole == ROLE_ZOMBIE || npc.NpcRole == NPC_ROLE_DEF) {
-                Game.DestroyCritter(npc);
-            }
+    // Удаление временных нпц: зомби и хабологов
+    critters = map.GetCritters(CritterFindType::Npc);
+    for (int i = 0; i < critters.length(); i++) {
+        Critter npc = critters[i];
+        if (npc.NpcRole == ROLE_ZOMBIE || npc.NpcRole == NPC_ROLE_DEF) {
+            Game.DestroyCritter(npc);
         }
     }
 }
 
 // Триггер люка: спускает игрока на подземную карту (индекс 2), пока эвент активен
-[[ItemTrigger]]
+[[Async]] [[ItemTrigger]]
 void ReplDoorTrigger(Critter player, StaticItem trigger, bool entered, mdir dir)
 {
-    if (player.ControlledByPlayer) {
-        if (Game.GEReplStationStatus) {
-            Map? playerMap = player.GetMap();
-            if (playerMap == null) {
-                return;
-            }
-
-            Location loc = playerMap.GetLocation();
-            if (loc.ProtoId == Content::Location::replication_4) {
-                Map map = loc.GetMapByIndex(2);
-                Entrance::CritterTransferToMapEntry(player, map.Id, Tla::EntryHash(ENTRY_0));
-            }
-        }
+    if (!Game.GEReplStationStatus || !Sync::LockCritterWithMapAndLocation(player)) {
+        return;
     }
+
+    Map? playerMap = player.GetMap();
+    if (playerMap == null) {
+        return;
+    }
+
+    Location loc = playerMap.GetLocation();
+    if (!player.ControlledByPlayer || loc.ProtoId != Content::Location::replication_4) {
+        return;
+    }
+
+    Map targetMap = loc.GetMapByIndex(2);
+    Entity[] cover = {player, playerMap, loc, targetMap};
+    if (!Sync::Lock(cover)) {
+        return;
+    }
+
+    if (player.MapId != playerMap.Id || playerMap.GetLocation().Id != loc.Id || loc.GetMapByIndex(2).Id != targetMap.Id) {
+        return;
+    }
+
+    Entrance::CritterTransferToMapEntry(player, targetMap.Id, Tla::EntryHash(ENTRY_0));
 }
 
 // Триггер агро: при входе игрока натравливает на него ближайших зомби (радиус 20)
@@ -520,34 +534,47 @@ EventResult ReplTankUseOnMe(Item item, Critter cr, Item usedItem, int param)
 }
 
 // Отложенный подрыв чана: засчитывает квест, взрывает чан, оставляет «сломанный» чан и пускает газ
-[[TimeEvent]]
+[[TimeEvent]] [[Async]]
 void ExplodeReplTank(any[] values)
 {
+    if (values.length() < 3) {
+        return;
+    }
+
     ident crId = values[0];
     ident itemId = values[1];
     ident mapId = values[2];
 
     Critter? cr = Game.GetCritter(crId);
     Item? item = Game.GetItem(itemId);
-    Map? map;
-    if (mapId != ZERO_IDENT) {
-        map = Game.GetMap(mapId);
+    Map? map = mapId != ZERO_IDENT ? Game.GetMap(mapId) : null;
+    if (cr == null || item == null || map == null || !Sync::LockItemWithParent(item)) {
+        return;
     }
 
-    if (cr != null && item != null) {
-        if (cr.GEReplExplodeTank == STATUS_QVAR_SETUP) {
-            // Засчитываем выполнение квеста и поднимаем навык ловушек
-            cr.GEReplExplodeTank = STATUS_QVAR_EXECUTED;
-            Stdlib::SkillUp(cr, CritterProperty::SkillTraps);
-        }
-
-        if (map != null) {
-            Explode::Explode(map, item.Hex, null, Content::Item::active_plastic_explosive, ZERO_IDENT, 300, Game.Random(1, 5));
-            map.AddItem(item.Hex, Content::Item::replicator_tank_broken, 1);
-            Game.DestroyItem(item);
-            SmokeGrenade::SmokeBlast(map, item.Hex, Content::Item::mustard_gas, crId);
-        }
+    if (item.Ownership != ItemOwnership::MapHex || item.MapId != map.Id) {
+        return;
     }
+
+    Entity[] cover = Sync::Snapshot();
+    Sync::AddUniqueEntity(cover, cr);
+    Sync::AddUniqueEntity(cover, map);
+    if (!Sync::Lock(cover) || item.Ownership != ItemOwnership::MapHex || item.MapId != map.Id) {
+        return;
+    }
+
+    if (cr.GEReplExplodeTank == STATUS_QVAR_SETUP) {
+        // Засчитываем выполнение квеста и поднимаем навык ловушек
+        cr.GEReplExplodeTank = STATUS_QVAR_EXECUTED;
+        Stdlib::SkillUp(cr, CritterProperty::SkillTraps);
+    }
+
+    // Координату нужно сохранить до DestroyItem: уничтоженный хэндл больше нельзя читать.
+    mpos tankHex = item.Hex;
+    Explode::Explode(map, tankHex, null, Content::Item::active_plastic_explosive, ZERO_IDENT, 300, Game.Random(1, 5));
+    map.AddItem(tankHex, Content::Item::replicator_tank_broken, 1);
+    Game.DestroyItem(item);
+    SmokeGrenade::SmokeBlast(map, tankHex, Content::Item::mustard_gas, crId);
 }
 
 // Инициализация зомби, вышедшего на поверхность: подписки на смерть/атаку/сообщения и idle-цикл

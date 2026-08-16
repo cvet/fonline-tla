@@ -175,7 +175,9 @@ int ProcessAi(Critter npc)
         // Идти домой
         if (!npc.IsNoHome && map.Id == npc.HomeMapId && (npc.Hex != npc.HomeHex)) {
             if (!npc.IsNoMove) {
-                AddWalkPlane(npc, 0, 0, 0, npc.HomeHex, mdir(hdir(npc.HomeDir == 0 ? 1 : 0)), false, 0, REASON_GO_HOME);
+                // Домашнее направление, а не переключатель 0/1: соседние ветки и остальные
+                // производители плана «идти домой» используют именно npc.HomeDir
+                AddWalkPlane(npc, 0, 0, 0, npc.HomeHex, mdir(hdir(npc.HomeDir)), false, 0, REASON_GO_HOME);
             }
             else if (map.IsHexesMovable(npc.HomeHex, npc.Multihex)) {
                 npc.TransferToMap(map, npc.HomeHex, hdir(npc.HomeDir));
@@ -480,6 +482,7 @@ int ProcessAi(Critter npc)
                     auto tracer = AttackCritterTracer(targ);
                     LineTracer::LineTracerHex(map, hex, targetHex, maxDist, tracer);
                     if (!tracer.Success) {
+                        bool repositioned = false;
                         float angleDir = (Game.Random(0, 1) == 0 ? 1 : -1);
                         for (int i = 0; i < 17; i++) {
                             float angle = 20.0 * float(i / 2 + 1) * (i % 2 == 0 ? angleDir : -angleDir);
@@ -492,13 +495,18 @@ int ProcessAi(Critter npc)
                                     plane.IsMove = true;
                                     SavePlan(npc, plane);
                                     npc.MoveToHex(thex, 0, plane.Run && !npc.IsNoRun ? npc.WalkSpeed * 2 : npc.WalkSpeed, null);
+                                    repositioned = true;
                                     break;
                                 }
                             }
                         }
 
-                        // Позиция получше не найдена
-                        NextPlane(npc, REASON_POSITION_NOT_FOUND);
+                        // Позиция получше не найдена. Break из цикла выходит только из него,
+                        // поэтому без флага удачный манёвр тут же отменялся вместе с планом
+                        if (!repositioned) {
+                            NextPlane(npc, REASON_POSITION_NOT_FOUND);
+                        }
+
                         break;
                     }
                 }
@@ -889,10 +897,10 @@ bool ErasePlane(Critter? cr, int index)
 void DropPlanes(Critter cr)
 {
     NpcPlane[]? planes = AllNpcPlanes.get(cr.Id, null);
-    if (planes != null && !planes.isEmpty()) {
+    if (planes != null) {
         planes.clear();
-        AllNpcPlanes.set(cr.Id, null);
     }
+    AllNpcPlanes.remove(cr.Id);
 }
 
 bool IsNoPlanes(Critter cr)
@@ -950,14 +958,21 @@ NpcPlane[]? GetPlanes(Critter cr)
     return null;
 }
 
-int GetPlanes(Critter cr, NpcPlane[] planes)
+int GetPlanes(Critter cr, NpcPlane[]? planes)
 {
     NpcPlane[]? crPlanes = GetPlanes(cr);
     if (crPlanes == null) {
         return 0;
     }
 
-    planes = crPlanes;
+    // Заполняем массив вызывающей стороны на месте: присваивание planes = crPlanes
+    // лишь перепривязывало локальный дескриптор, и наружу массив уходил пустым.
+    // planes может быть null: часть вызовов передаёт null, используя только счётчик
+    if (planes != null) {
+        planes.clear();
+        planes.insertLast(crPlanes);
+    }
+
     return crPlanes.length();
 }
 
@@ -981,14 +996,21 @@ NpcPlane[]? GetPlanes(Critter cr, any identifier)
     return null;
 }
 
-int GetPlanes(Critter cr, any identifier, NpcPlane[] planes)
+int GetPlanes(Critter cr, any identifier, NpcPlane[]? planes)
 {
     NpcPlane[]? crPlanes = GetPlanes(cr, identifier);
     if (crPlanes == null) {
         return 0;
     }
 
-    planes = crPlanes;
+    // Заполняем массив вызывающей стороны на месте: присваивание planes = crPlanes
+    // лишь перепривязывало локальный дескриптор, и наружу массив уходил пустым.
+    // planes может быть null: часть вызовов передаёт null, используя только счётчик
+    if (planes != null) {
+        planes.clear();
+        planes.insertLast(crPlanes);
+    }
+
     return crPlanes.length();
 }
 
@@ -1012,14 +1034,21 @@ NpcPlane[]? GetPlanes(Critter cr, any identifier, any identifierExt)
     return null;
 }
 
-int GetPlanes(Critter cr, any identifier, any identifierExt, NpcPlane[] planes)
+int GetPlanes(Critter cr, any identifier, any identifierExt, NpcPlane[]? planes)
 {
     NpcPlane[]? crPlanes = GetPlanes(cr, identifier, identifierExt);
     if (crPlanes == null) {
         return 0;
     }
 
-    planes = crPlanes;
+    // Заполняем массив вызывающей стороны на месте: присваивание planes = crPlanes
+    // лишь перепривязывало локальный дескриптор, и наружу массив уходил пустым.
+    // planes может быть null: часть вызовов передаёт null, используя только счётчик
+    if (planes != null) {
+        planes.clear();
+        planes.insertLast(crPlanes);
+    }
+
     return crPlanes.length();
 }
 
@@ -1032,8 +1061,9 @@ bool AddPlane(Critter? cr, NpcPlane plane, int reason)
 {
     if (cr != null && !cr.ControlledByPlayer) {
         NpcPlane[] planes = {};
-        if (AllNpcPlanes.exists(cr.Id)) {
-            planes = AllNpcPlanes.get(cr.Id, planes);
+        NpcPlane[]? storedPlanes = AllNpcPlanes.get(cr.Id, null);
+        if (storedPlanes != null) {
+            planes = storedPlanes;
         }
 
         // AllNpcPlanes.setIfNotExist( cr.Id, array< NpcPlane >() );
@@ -1075,13 +1105,12 @@ bool AddPlane(Critter? cr, NpcPlane plane, int reason)
 
         Critter? someCr = (plane.Attack_TargId == ZERO_IDENT ? null : Game.GetCritter(plane.Attack_TargId));
         Item? someItem = (plane.Pick_UseItemId == ZERO_IDENT ? null : Game.GetItem(plane.Pick_UseItemId));
-        // Обработчики Begin принимают/разрешают план, возвращая StopChain; план
-        // сохраняется только если и глобальный, и покриттерный обработчик его разрешают.
-        // Удаляем только что вставленный план, если любой из обработчиков накладывает вето
-        // (возвращает ContinueChain). Это повторяет домиграционную семантику вето
-        // `if (!Fire() || !Fire())` и сторону End (продвижение только при ContinueChain).
-        if ((Game.OnNpcPlaneBegin.Fire(cr, plane.PlaneId, reason, someCr, someItem) == EventResult::ContinueChain) ||
-            (cr.OnNpcPlaneBegin.Fire(plane.PlaneId, reason, someCr, someItem) == EventResult::ContinueChain)) {
+        // Вето на план — это StopChain, разрешение — ContinueChain. Полярность обязана совпадать
+        // с нейтральным умолчанием движка: Entity::FireEvent на событии без подписчиков возвращает
+        // ContinueChain, поэтому при обратной трактовке отсутствие покриттерного обработчика
+        // стирало бы любой план у большинства нпц.
+        if ((Game.OnNpcPlaneBegin.Fire(cr, plane.PlaneId, reason, someCr, someItem) == EventResult::StopChain) ||
+            (cr.OnNpcPlaneBegin.Fire(plane.PlaneId, reason, someCr, someItem) == EventResult::StopChain)) {
             ErasePlane(cr, index);
             return false;
         }
@@ -1193,7 +1222,8 @@ bool AddWalkPlane(Critter npc, int priority, mpos hex, mdir dir, bool run, int c
 
 bool AddWalkPlane(Critter npc, int priority, any identifier, any identifierExt, mpos hex, mdir dir, bool run, int cut)
 {
-    return AddWalkPlane(npc, priority, identifier, identifierExt, hex, dir, run, REASON_FROM_SCRIPT);
+    // Пробрасываем все девять аргументов: без cut вызов разрешался в эту же перегрузку (бесконечная рекурсия)
+    return AddWalkPlane(npc, priority, identifier, identifierExt, hex, dir, run, cut, REASON_FROM_SCRIPT);
 }
 
 bool AddWalkPlane(Critter npc, int priority, any identifier, any identifierExt, mpos hex, mdir dir, bool run, int cut, int reason)

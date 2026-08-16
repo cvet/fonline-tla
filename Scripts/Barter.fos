@@ -1,9 +1,71 @@
 // Barter — серверный обмен предметами игрока с НПЦ-торговцем.
 // Ключевые обязанности: старт/refresh/close окна бартера, полная валидация оффера,
 // расчёт sell/buy цены с barter_k, события OnItemCheckMove/OnItemsBarter, перемещение предметов.
-// Сторона: SERVER. Связи: Messaging, MsgStr, Parameters, ItemMovement, TransferTypes, Settings.Dialog.
+// Стороны: COMMON — чистые расчёты цены; SERVER — валидация и проведение сделки.
+// Связи: Messaging, MsgStr, Parameters, ItemMovement, TransferTypes, Settings.Dialog.
 namespace Barter
 {
+
+const int MinBarterCoefficient = 5;
+const int MaxBarterCoefficient = 95;
+const int MaxBarterOfferItems = 512;
+const int64 MaxBarterTotalCost = 1000000000000000;
+const int64 MaxBarterTotalWeight = 1000000000000000;
+
+// Возвращает legacy-коэффициент бартера: разницу навыков НПЦ и игрока в границах [5, 95].
+int GetBarterCoefficient(int npcBarter, int playerBarter)
+{
+    return Math::Clamp(npcBarter - playerBarter, MinBarterCoefficient, MaxBarterCoefficient);
+}
+
+// Цена единицы предмета, который игрок продаёт НПЦ. Нулевая/отрицательная Cost не становится
+// бесплатной валютой, а положительная цена после скидки остаётся минимум единицей.
+int64 GetSaleUnitCost(int cost, int barterCoefficient)
+{
+    if (cost <= 0) {
+        return 0;
+    }
+
+    int k = Math::Clamp(barterCoefficient, MinBarterCoefficient, MaxBarterCoefficient);
+    int64 unitCost = int64(cost) * (100 - k) / 100;
+    return unitCost > 1 ? unitCost : 1;
+}
+
+// Цена единицы предмета, который игрок покупает у НПЦ. Master Trader убирает наценку,
+// но не меняет базовую цену и минимальную стоимость единицы.
+int64 GetBuyUnitCost(int cost, int barterCoefficient, bool hasMasterTrader)
+{
+    int k = Math::Clamp(barterCoefficient, MinBarterCoefficient, MaxBarterCoefficient);
+    int64 unitCost = int64(cost) * (100 + (hasMasterTrader ? 0 : k)) / 100;
+    return unitCost > 1 ? unitCost : 1;
+}
+
+// Считает стоимость стека без переполнения. -1 означает неверное количество или превышение лимита.
+int64 GetStackCost(int64 unitCost, int count, int64 limit)
+{
+    if (unitCost < 1 || count <= 0 || limit < 0 || unitCost > limit / count) {
+        return -1;
+    }
+
+    return unitCost * count;
+}
+
+// Чистая проверка стоимостной части оффера: игрок должен отдать непустую сумму не меньше покупки.
+bool IsOfferCostEnough(int64 saleCost, int64 buyCost)
+{
+    return saleCost > 0 && buyCost >= 0 && saleCost >= buyCost;
+}
+
+// Исходный стек остаётся видимым целиком, а оффер хранит выбранное количество отдельно.
+// Поэтому повторные переносы должны укладываться в реальный Count; нестакаемый предмет выбирается один раз.
+bool CanIncreaseOfferCount(int sourceCount, int offerCount, int addCount, bool stackable)
+{
+    if (sourceCount <= 0 || offerCount < 0 || addCount <= 0 || (!stackable && offerCount != 0)) {
+        return false;
+    }
+
+    return offerCount <= sourceCount - addCount;
+}
 
 #if SERVER
 
@@ -18,8 +80,11 @@ void StartNpcBarter(Critter playerCr, Critter trader)
     }
 
     Item[] items = trader.GetItems(ItemProperty::CritterSlot, CritterItemSlot::Inventory);
+    playerCr.TransferSession = playerCr.TransferSession + 1;
     playerCr.TransferType = TransferTypes::CritBarter;
     playerCr.TransferContainerId = trader.Id;
+    int barterCoefficient = GetBarterCoefficient(Parameters::CritterGetBarterCoefficientImpl(trader), Parameters::CritterGetBarterCoefficientImpl(playerCr));
+    playerCr.PlayerClientCall.SetBarterPricing(playerCr.TransferSession, barterCoefficient, playerCr.PerkMasterTrader > 0);
     playerCr.SendItems(items);
 }
 
@@ -29,6 +94,8 @@ void RefreshBarter(Critter playerCr, Critter trader)
     Item[] items = trader.GetItems(ItemProperty::CritterSlot, CritterItemSlot::Inventory);
     playerCr.TransferType = TransferTypes::CritBarter;
     playerCr.TransferContainerId = trader.Id;
+    int barterCoefficient = GetBarterCoefficient(Parameters::CritterGetBarterCoefficientImpl(trader), Parameters::CritterGetBarterCoefficientImpl(playerCr));
+    playerCr.PlayerClientCall.SetBarterPricing(playerCr.TransferSession, barterCoefficient, playerCr.PerkMasterTrader > 0);
     playerCr.SendItems(items, false, false, 42);
 }
 
@@ -41,14 +108,62 @@ void SendBarterClose(Critter playerCr)
     playerCr.SendItems(items);
 }
 
+// Клиент управляет параллельными массивами оффера. Повтор одного Id позволил бы несколько раз
+// учесть одну и ту же сущность при проверке стоимости и количества.
+bool HasDuplicateItemIds(ident[] itemIds)
+{
+    for (int i = 0; i < itemIds.length(); i++) {
+        for (int j = i + 1; j < itemIds.length(); j++) {
+            if (itemIds[i] == itemIds[j]) {
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
+
+bool AddBarterTotal(int64& total, int64 value, int64 limit)
+{
+    if (value < 0 || value > limit || total > limit - value) {
+        return false;
+    }
+
+    total += value;
+    return true;
+}
+
+bool IsActiveNpcBarter(Critter playerCr, Critter npcCr, uint transferSession)
+{
+    return playerCr.TransferType == TransferTypes::CritBarter && playerCr.TransferContainerId == npcCr.Id && playerCr.TransferSession == transferSession;
+}
+
 // Обрабатывает оффер бартера от игрока к НПЦ: валидирует входные данные и состояние сторон,
 // считает суммарную стоимость продажи/покупки с учётом barter_k и, если сделка выгодна НПЦ,
 // перемещает предметы и обновляет окно. На любой ошибке валидации закрывает бартер.
-void ProcessBarterNpcOffer(Critter playerCr, ident[] saleItemsIds, int[] saleItemsCount, ident[] buyItemsIds, int[] buyItemsCount)
+void ProcessBarterNpcOffer(Critter playerCr, Critter npcCr, ident[] saleItemsIds, int[] saleItemsCount, ident[] buyItemsIds, int[] buyItemsCount,
+                           uint expectedTransferSession)
 {
+    if (!IsActiveNpcBarter(playerCr, npcCr, expectedTransferSession)) {
+        Game.Log("Barter offer outside barter transfer. player " + playerCr.Id);
+        return;
+    }
+
     // Списки id и количеств должны совпадать по длине — иначе оффер сформирован неверно.
     if (saleItemsIds.length() != saleItemsCount.length() || buyItemsIds.length() != buyItemsCount.length()) {
         Game.Log("Wrong barter data. player " + playerCr.Id);
+        SendBarterClose(playerCr);
+        return;
+    }
+
+    if (saleItemsIds.length() > MaxBarterOfferItems || buyItemsIds.length() > MaxBarterOfferItems) {
+        Game.Log("Wrong barter data: too many items. player " + playerCr.Id);
+        SendBarterClose(playerCr);
+        return;
+    }
+
+    if (HasDuplicateItemIds(saleItemsIds) || HasDuplicateItemIds(buyItemsIds)) {
+        Game.Log("Wrong barter data: duplicate item id. player " + playerCr.Id);
         SendBarterClose(playerCr);
         return;
     }
@@ -61,24 +176,14 @@ void ProcessBarterNpcOffer(Critter playerCr, ident[] saleItemsIds, int[] saleIte
         return;
     }
 
-    // Контейнер-трейдер должен быть задан стартом бартера; иначе оффер не привязан к НПЦ.
-    if (playerCr.TransferContainerId == ZERO_IDENT) {
-        Game.Log("Npc trader id invalid. Offer from player " + playerCr.Id);
-        SendBarterClose(playerCr);
-        return;
-    }
-
     if (playerCr.Condition != CritterCondition::Alive) {
         Game.Log("Player isn't alive. Condition: " + playerCr.Condition + ". Player id " + playerCr.Id);
         SendBarterClose(playerCr);
         return;
     }
 
-    // Сужаем nullable-результат: трейдер мог исчезнуть между стартом и оффером.
-    Critter? npcCr = Game.GetCritter(playerCr.TransferContainerId);
-
-    if (npcCr == null) {
-        Game.Log("Npc trader == null. Offer from player " + playerCr.Id + ". TraderId = " + playerCr.TransferContainerId);
+    if (npcCr.ControlledByPlayer || npcCr.IsNoBarter) {
+        Game.Log("Invalid npc trader. PlayerId:" + playerCr.Id + "; traderId = " + npcCr.Id);
         SendBarterClose(playerCr);
         return;
     }
@@ -123,13 +228,15 @@ void ProcessBarterNpcOffer(Critter playerCr, ident[] saleItemsIds, int[] saleIte
     }
 
     // Коэффициент бартера — разница навыков НПЦ и игрока, зажатая в [5, 95] процентов.
-    int barter_k = Parameters::CritterGetBarterCoefficientImpl(npcCr) - Parameters::CritterGetBarterCoefficientImpl(playerCr);
-    barter_k = Math::Clamp(barter_k, 5, 95);
+    int barter_k = GetBarterCoefficient(Parameters::CritterGetBarterCoefficientImpl(npcCr), Parameters::CritterGetBarterCoefficientImpl(playerCr));
+    bool hasMasterTrader = playerCr.PerkMasterTrader > 0;
 
     Item[] itemsSell = {};
     Item[] itemsBuy = {};
-    int sell_cost = 0;
-    int buy_cost = 0;
+    int64 sell_cost = 0;
+    int64 buy_cost = 0;
+    int64 sell_weight = 0;
+    int64 buy_weight = 0;
 
     // Предметы на продажу: валидируем каждый предмет игрока и копим суммарную стоимость продажи.
     for (int i = 0; i < saleItemsIds.length(); i++) {
@@ -142,7 +249,19 @@ void ProcessBarterNpcOffer(Critter playerCr, ident[] saleItemsIds, int[] saleIte
             return;
         }
 
-        if (itemCount == 0 || itemCount > item.Count) {
+        if (item.CritterSlot != CritterItemSlot::Inventory) {
+            Game.Log("Saleitem isn't in inventory. PlayerId:" + playerCr.Id + "; itemId = " + saleItemsIds[i]);
+            SendBarterClose(playerCr);
+            return;
+        }
+
+        if (item.IsBadItem) {
+            Game.Log("Saleitem is bad. PlayerId:" + playerCr.Id + "; itemId = " + saleItemsIds[i]);
+            SendBarterClose(playerCr);
+            return;
+        }
+
+        if (itemCount <= 0 || itemCount > item.Count) {
             Game.Log("Saleitem wrong count. PlayerId:" + playerCr.Id + "; npcid = " + npcCr.Id + "; itemId = " + saleItemsIds[i] + "; Count: " + itemCount);
             SendBarterClose(playerCr);
             return;
@@ -155,15 +274,24 @@ void ProcessBarterNpcOffer(Critter playerCr, ident[] saleItemsIds, int[] saleIte
             return;
         }
 
-        if ((Game.OnItemCheckMove.Fire(item, itemCount, playerCr, npcCr) == EventResult::StopChain)) {
+        EventResult moveResult = Game.OnItemCheckMove.Fire(item, itemCount, playerCr, npcCr);
+        if (!IsActiveNpcBarter(playerCr, npcCr, expectedTransferSession)) {
+            return;
+        }
+        if (moveResult == EventResult::StopChain) {
             Game.Log("Saleitem item check move error. PlayerId:" + playerCr.Id + "; npcid = " + npcCr.Id + "; itemId = " + saleItemsIds[i] +
                      "; Count: " + itemCount);
             SendBarterClose(playerCr);
             return;
         }
 
-        int itemCost = item.Cost * itemCount * (100 - barter_k) / 100;
-        sell_cost += itemCost;
+        int64 itemCost = GetStackCost(GetSaleUnitCost(item.Cost, barter_k), itemCount, MaxBarterTotalCost);
+        int64 itemWeight = int64(item.Weight) * itemCount;
+        if (!AddBarterTotal(sell_cost, itemCost, MaxBarterTotalCost) || !AddBarterTotal(sell_weight, itemWeight, MaxBarterTotalWeight)) {
+            Game.Log("Saleitem cost or weight overflow. PlayerId:" + playerCr.Id + "; itemId = " + saleItemsIds[i]);
+            SendBarterClose(playerCr);
+            return;
+        }
         itemsSell.insertLast(item);
     }
 
@@ -178,7 +306,19 @@ void ProcessBarterNpcOffer(Critter playerCr, ident[] saleItemsIds, int[] saleIte
             return;
         }
 
-        if (itemCount == 0 || itemCount > item.Count) {
+        if (item.CritterSlot != CritterItemSlot::Inventory) {
+            Game.Log("Buyitem isn't in inventory. PlayerId:" + playerCr.Id + "; itemId = " + buyItemsIds[i]);
+            SendBarterClose(playerCr);
+            return;
+        }
+
+        if (item.IsBadItem) {
+            Game.Log("Buyitem is bad. PlayerId:" + playerCr.Id + "; itemId = " + buyItemsIds[i]);
+            SendBarterClose(playerCr);
+            return;
+        }
+
+        if (itemCount <= 0 || itemCount > item.Count) {
             Game.Log("Buyitem wrong count. PlayerId:" + playerCr.Id + "; npcid = " + npcCr.Id + "; itemId = " + buyItemsIds[i] + "; Count: " + itemCount);
             SendBarterClose(playerCr);
             return;
@@ -191,22 +331,30 @@ void ProcessBarterNpcOffer(Critter playerCr, ident[] saleItemsIds, int[] saleIte
             return;
         }
 
-        if ((Game.OnItemCheckMove.Fire(item, itemCount, npcCr, playerCr) == EventResult::StopChain)) {
-            Game.Log("Buy item check move error. PlayerId:" + playerCr.Id + "; npcid = " + npcCr.Id + "; itemId = " + saleItemsIds[i] +
-                     "; Count: " + itemCount);
+        EventResult moveResult = Game.OnItemCheckMove.Fire(item, itemCount, npcCr, playerCr);
+        if (!IsActiveNpcBarter(playerCr, npcCr, expectedTransferSession)) {
+            return;
+        }
+        if (moveResult == EventResult::StopChain) {
+            Game.Log("Buy item check move error. PlayerId:" + playerCr.Id + "; npcid = " + npcCr.Id + "; itemId = " + buyItemsIds[i] + "; Count: " + itemCount);
             SendBarterClose(playerCr);
             return;
         }
 
-        int itemCost = item.Cost * itemCount * (100 - barter_k) / 100;
-        buy_cost += itemCost;
+        int64 itemCost = GetStackCost(GetBuyUnitCost(item.Cost, barter_k, hasMasterTrader), itemCount, MaxBarterTotalCost);
+        int64 itemWeight = int64(item.Weight) * itemCount;
+        if (!AddBarterTotal(buy_cost, itemCost, MaxBarterTotalCost) || !AddBarterTotal(buy_weight, itemWeight, MaxBarterTotalWeight)) {
+            Game.Log("Buyitem cost or weight overflow. PlayerId:" + playerCr.Id + "; itemId = " + buyItemsIds[i]);
+            SendBarterClose(playerCr);
+            return;
+        }
         itemsBuy.insertLast(item);
     }
 
     Game.Log("Total SellCost = " + sell_cost + "; buy_cort" + buy_cost + "; koef = " + barter_k);
 
     // Сделка проходит, только если игрок отдаёт не меньше, чем берёт, и продажа непустая.
-    if (buy_cost > sell_cost || sell_cost == 0) {
+    if (!IsOfferCostEnough(sell_cost, buy_cost)) {
         Game.Log("Barter offer error sell < buy. PlayerId:" + playerCr.Id + "; npcid = " + npcCr.Id);
         Messaging::Info(playerCr, TextPackKey(TextPackName::Game, "" + (MsgStr::StrBarterBadOffer)));
         // TODO: перевести уведомление в реплику НПЦ (breadcrumb миграции SayMsg)
@@ -214,8 +362,21 @@ void ProcessBarterNpcOffer(Critter playerCr, ident[] saleItemsIds, int[] saleIte
         return;
     }
 
+    int64 inventoryWeightLimit = MaxBarterTotalWeight + int64(playerCr.CarryWeight);
+    int64 currentWeight = Parameters::CritterGetItemsWeightLimited(playerCr, inventoryWeightLimit);
+    int64 finalWeight = currentWeight - sell_weight + buy_weight;
+    if (currentWeight > inventoryWeightLimit || finalWeight < 0 || finalWeight > playerCr.CarryWeight) {
+        Game.Log("Barter offer makes player overweight. PlayerId:" + playerCr.Id + "; finalWeight = " + finalWeight);
+        Messaging::Info(playerCr, TextPackKey(TextPackName::Game, "" + (MsgStr::StrBarterBadOffer)));
+        return;
+    }
+
     // Последний гард-событие перед фактическим обменом — скрипты могут отменить сделку.
-    if ((Game.OnItemsBarter.Fire(itemsSell, saleItemsCount, itemsBuy, buyItemsCount, playerCr, npcCr) == EventResult::StopChain)) {
+    EventResult barterResult = Game.OnItemsBarter.Fire(itemsSell, saleItemsCount, itemsBuy, buyItemsCount, playerCr, npcCr);
+    if (!IsActiveNpcBarter(playerCr, npcCr, expectedTransferSession)) {
+        return;
+    }
+    if (barterResult == EventResult::StopChain) {
         Messaging::Info(playerCr, TextPackKey(TextPackName::Game, "" + (MsgStr::StrBarterBadOffer)));
         // TODO: перевести уведомление в реплику НПЦ (breadcrumb миграции SayMsg)
         // Todo: playerCr.SayMsg(SAY_DIALOG, TextPackName::Game, MsgStr::StrBarterBadOffer);

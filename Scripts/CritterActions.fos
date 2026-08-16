@@ -5,6 +5,67 @@
 namespace CritterActions
 {
 
+const int CONTAINER_ACTION_TAKE = 0;
+const int CONTAINER_ACTION_TAKE_ALL = 1;
+const int CONTAINER_ACTION_PUT = 2;
+const int USE_TIMER_MIN_SECONDS = 1;
+const int USE_TIMER_MAX_SECONDS = 599;
+
+// Кодирует actionExt контейнерного действия по контракту GameEnums/ClientMain:
+// десятки — TransferTypes, единицы — направление операции.
+int EncodeContainerActionExt(TransferTypes transferType, bool take, bool all)
+{
+    int direction = !take ? CONTAINER_ACTION_PUT : (all ? CONTAINER_ACTION_TAKE_ALL : CONTAINER_ACTION_TAKE);
+    return int(transferType) * 10 + direction;
+}
+
+// Общий пространственный контракт предметного контейнера на карте.
+bool IsMapContainerAccessValid(ItemOwnership ownership, ident critterMapId, ident containerMapId, int distance, int critterMultihex)
+{
+    return ownership == ItemOwnership::MapHex && critterMapId != ZERO_IDENT && critterMapId == containerMapId && distance >= 0 && critterMultihex >= 0 &&
+           distance <= 1 + critterMultihex;
+}
+
+// Дистанция взаимодействия с контейнером-криттером учитывает multihex обеих сторон.
+bool IsCritterContainerInRange(int distance, int critterMultihex, int containerMultihex)
+{
+    return distance >= 0 && critterMultihex >= 0 && containerMultihex >= 0 && distance <= 1 + critterMultihex + containerMultihex;
+}
+
+// Без переполнения добавляет объём стека к уже занятому объёму контейнера.
+bool TryAddContainerStackVolume(int64 currentVolume, int unitVolume, int count, int64 capacity, int64& nextVolume)
+{
+    nextVolume = currentVolume;
+    if (currentVolume < 0 || unitVolume < 0 || count <= 0 || capacity < 0 || currentVolume > capacity) {
+        return false;
+    }
+
+    int64 remaining = capacity - currentVolume;
+    if (int64(unitVolume) > remaining / count) {
+        return false;
+    }
+
+    nextVolume = currentVolume + int64(unitVolume) * count;
+    return true;
+}
+
+// Таймер разрешён только таймерному предмету при использовании на себя. Обычные применения
+// обязаны передавать ноль, чтобы произвольный RPC-параметр не превращался в скрытый режим предмета.
+bool IsUseItemTimerAllowed(bool timedItem, bool selfTarget, int timer)
+{
+    return timedItem ? selfTarget && timer >= USE_TIMER_MIN_SECONDS && timer <= USE_TIMER_MAX_SECONDS : timer == 0;
+}
+
+bool IsSelfUseTarget(ident critterId, ident targetCritterId)
+{
+    return critterId != ZERO_IDENT && targetCritterId == critterId;
+}
+
+bool IsContainerSelfMove(ident movingItemId, ident containerId)
+{
+    return movingItemId != ZERO_IDENT && movingItemId == containerId;
+}
+
 #if SERVER
 
 // Пытается списать ap очков действия. Если очков не хватает — ставит криттера в ожидание
@@ -150,7 +211,7 @@ void DropInvItem(Critter cr, ident itemId, int count)
         count = item.Count;
     }
 
-    if (count > item.Count) {
+    if (count <= 0 || count > item.Count) {
         throw("Invalid count", cr, item, count);
     }
 
@@ -289,136 +350,298 @@ void MoveInvItem(Critter cr, ident itemId, CritterItemSlot slot)
     cr.ChangeItemSlot(item.Id, slot);
 }
 
-// Универсальная операция перекладки предметов через активный TransferType криттера:
-// лут/кража с криттера, бартер, контейнеры на гексе/в инвентаре/дальние. take — забираем или кладём,
-// all — все предметы или один (itemId/itemCount). Резолвит источник/приёмник, фильтрует NoLoot/NoSteal,
-// проверяет перевес, двигает предметы и обновляет окно контейнера у клиента.
-void OperateContainer(Critter cr, bool take, bool all, ident itemId, int itemCount)
+// Захватывает полный набор сущностей, который затем читает/меняет OperateContainer. Промежуточный
+// lock cr+target нужен до чтения карт; итоговый Game.Sync одним вызовом удерживает обе карты тоже.
+[[Async]]
+bool LockContainerTransfer(Critter cr, TransferTypes expectedTransferType, ident expectedContainerId, uint expectedTransferSession)
 {
-    if (!cr.IsAlive()) {
-        throw("Critter is not alive", cr);
+    while (true) {
+        if (!Sync::Lock(cr)) {
+            return false;
+        }
+
+        if (cr.TransferType != expectedTransferType || cr.TransferContainerId != expectedContainerId || cr.TransferSession != expectedTransferSession ||
+            expectedContainerId == ZERO_IDENT || expectedContainerId == cr.Id) {
+            return false;
+        }
+
+        if (expectedTransferType == TransferTypes::HexContUp || expectedTransferType == TransferTypes::HexContDown ||
+            expectedTransferType == TransferTypes::SelfCont || expectedTransferType == TransferTypes::FarCont) {
+            Item? itemCont = Game.GetItem(expectedContainerId);
+            if (itemCont == null || !Sync::Lock(cr, itemCont)) {
+                return false;
+            }
+
+            if (cr.TransferType != expectedTransferType || cr.TransferContainerId != expectedContainerId || cr.TransferSession != expectedTransferSession) {
+                return false;
+            }
+
+            Map? crMap = cr.GetMap();
+            Map? itemMap = itemCont.GetMap();
+            ident crMapId = cr.MapId;
+            ident itemMapId = itemCont.MapId;
+            Entity[] syncCover = {cr, itemCont};
+            if (crMap != null) {
+                syncCover.insertLast(crMap);
+            }
+            if (itemMap != null && (crMap == null || itemMap.Id != crMap.Id)) {
+                syncCover.insertLast(itemMap);
+            }
+
+            if (!Sync::Lock(syncCover)) {
+                return false;
+            }
+
+            if (cr.TransferType != expectedTransferType || cr.TransferContainerId != expectedContainerId || cr.TransferSession != expectedTransferSession) {
+                return false;
+            }
+            if (cr.MapId != crMapId || itemCont.MapId != itemMapId) {
+                continue;
+            }
+
+            return true;
+        }
+
+        if (expectedTransferType == TransferTypes::CritLoot || expectedTransferType == TransferTypes::CritSteal ||
+            expectedTransferType == TransferTypes::FarCrit) {
+            Critter? crCont = Game.GetCritter(expectedContainerId);
+            if (crCont == null || !Sync::Lock(cr, crCont)) {
+                return false;
+            }
+
+            if (cr.TransferType != expectedTransferType || cr.TransferContainerId != expectedContainerId || cr.TransferSession != expectedTransferSession) {
+                return false;
+            }
+
+            Map? crMap = cr.GetMap();
+            Map? contMap = crCont.GetMap();
+            ident crMapId = cr.MapId;
+            ident contMapId = crCont.MapId;
+            Entity[] syncCover = {cr, crCont};
+            if (crMap != null) {
+                syncCover.insertLast(crMap);
+            }
+            if (contMap != null && (crMap == null || contMap.Id != crMap.Id)) {
+                syncCover.insertLast(contMap);
+            }
+
+            if (!Sync::Lock(syncCover)) {
+                return false;
+            }
+
+            if (cr.TransferType != expectedTransferType || cr.TransferContainerId != expectedContainerId || cr.TransferSession != expectedTransferSession) {
+                return false;
+            }
+            if (cr.MapId != crMapId || crCont.MapId != contMapId) {
+                continue;
+            }
+
+            return true;
+        }
+
+        return false;
     }
 
-    CritterState::Wait(cr, Settings.Movement.Breaktime);
+    return false;
+}
 
+// Только эти типы transfer разрешают общий контейнерный RPC. NPC-бартер обязан идти через
+// Barter::ProcessBarterNpcOffer, иначе клиент мог бы забрать товар без проверки стоимости.
+bool IsContainerTransferType(TransferTypes transferType)
+{
+    return transferType == TransferTypes::HexContUp || transferType == TransferTypes::HexContDown || transferType == TransferTypes::SelfCont ||
+           transferType == TransferTypes::CritLoot || transferType == TransferTypes::CritSteal || transferType == TransferTypes::FarCont ||
+           transferType == TransferTypes::FarCrit;
+}
+
+bool IsActiveContainerTransfer(Critter cr, TransferTypes transferType, ident containerId, uint transferSession)
+{
+    return cr.TransferType == transferType && cr.TransferContainerId == containerId && cr.TransferSession == transferSession;
+}
+
+// Единое правило видимости применяется и к первому снимку, и ко всем refresh после операции.
+bool IsContainerItemVisible(TransferTypes transferType, bool isNoLoot, bool isNoSteal)
+{
+    return !((transferType == TransferTypes::CritLoot && isNoLoot) || (transferType == TransferTypes::CritSteal && isNoSteal));
+}
+
+void FilterContainerItems(Item[] items, TransferTypes transferType)
+{
+    for (int i = 0; i < items.length();) {
+        if (!IsContainerItemVisible(transferType, items[i].IsNoLoot, items[i].IsNoSteal)) {
+            items.removeAt(i);
+        }
+        else {
+            i++;
+        }
+    }
+}
+
+bool IsContainerAccessOpen(bool changeable, bool opened)
+{
+    return !changeable || opened;
+}
+
+void CloseContainerTransfer(Critter cr)
+{
+    Item[]? items = null;
+    cr.TransferType = TransferTypes::Close;
+    cr.TransferContainerId = ZERO_IDENT;
+    cr.SendItems(items);
+}
+
+void SendContainerSnapshot(Critter cr, TransferTypes transferType, Item? itemCont, Critter? crCont)
+{
+    Item[] items;
+    if (itemCont != null && !itemCont.IsDestroyed) {
+        items = itemCont.GetItems(Tla::RootContainerStack());
+    }
+    else if (crCont != null && !crCont.IsDestroyed) {
+        items = crCont.GetItems(ItemProperty::CritterSlot, CritterItemSlot::Inventory);
+    }
+    else {
+        CloseContainerTransfer(cr);
+        return;
+    }
+
+    FilterContainerItems(items, transferType);
+    cr.SendItems(items, false, false, 1);
+}
+
+// Проверяет вместимость предметного контейнера с учётом уже лежащих в корневом стеке
+// предметов и добавляемой операции. Все промежуточные суммы ограничены capacity.
+bool CanPutItemsInContainer(Item container, Item[] movingItems, bool all, int itemCount)
+{
+    int64 capacity = container.Container_Volume;
+    int64 volume = 0;
+    int64 nextVolume = 0;
+    Item[] containedItems = container.GetItems(Tla::RootContainerStack());
+
+    for (int i = 0; i < containedItems.length(); i++) {
+        if (!TryAddContainerStackVolume(volume, containedItems[i].Volume, containedItems[i].Count, capacity, nextVolume)) {
+            return false;
+        }
+        volume = nextVolume;
+    }
+
+    for (int i = 0; i < movingItems.length(); i++) {
+        int moveCount = all ? movingItems[i].Count : itemCount;
+        if (!TryAddContainerStackVolume(volume, movingItems[i].Volume, moveCount, capacity, nextVolume)) {
+            return false;
+        }
+        volume = nextVolume;
+    }
+
+    return true;
+}
+
+// Запрещает сделать контейнер собственным потомком. Повреждённая или уже циклическая
+// цепочка родителей также считается небезопасной и не расширяется новым перемещением.
+bool WouldCreateContainerCycle(Item movingItem, Item targetContainer)
+{
+    if (movingItem.Type != ItemType::Container) {
+        return false;
+    }
+
+    Item current = targetContainer;
+    for (int depth = 0; depth < 256; depth++) {
+        if (IsContainerSelfMove(movingItem.Id, current.Id)) {
+            return true;
+        }
+        if (current.Ownership != ItemOwnership::ItemContainer || current.ContainerId == ZERO_IDENT) {
+            return false;
+        }
+
+        Item? parent = Game.GetItem(current.ContainerId);
+        if (parent == null) {
+            return true;
+        }
+        current = parent;
+    }
+
+    return true;
+}
+
+// Универсальная операция перекладки предметов через активный TransferType криттера:
+// лут/кража с криттера и контейнеры на гексе/в инвентаре/дальние. Все проверки повторяются
+// на сервере под полным sync-cover; клиент получает authoritative snapshot даже при stale-вводе.
+void OperateContainer(Critter cr, bool take, bool all, ident itemId, int itemCount)
+{
     TransferTypes transferType = cr.TransferType;
-    if (transferType == TransferTypes::Close) {
-        throw("Transfer is closed", cr);
+    if (!IsContainerTransferType(transferType)) {
+        return;
+    }
+
+    ident transferContainerId = cr.TransferContainerId;
+    uint transferSession = cr.TransferSession;
+
+    if (!cr.IsAlive()) {
+        CloseContainerTransfer(cr);
+        return;
     }
 
     Map? map = cr.GetMap();
-    if (map == null && (transferType != TransferTypes::CritSteal && transferType != TransferTypes::FarCont && transferType != TransferTypes::FarCrit &&
-                        transferType != TransferTypes::CritBarter && transferType != TransferTypes::SelfCont)) {
-        throw("Invalid transfer type for global map", cr, transferType);
+    if (map == null && transferType != TransferTypes::CritSteal && transferType != TransferTypes::FarCont && transferType != TransferTypes::FarCrit &&
+        transferType != TransferTypes::SelfCont) {
+        CloseContainerTransfer(cr);
+        return;
     }
 
-    if (all && transferType == TransferTypes::CritSteal) {
-        throw("Can't operate with stealing with all items", cr);
-    }
-
-    // Резолвим контейнер (предмет-контейнер или криттер-контейнер)
+    // Резолвим контейнер (предмет-контейнер или криттер-контейнер) и повторно проверяем
+    // capability, которая могла стать недействительной после открытия окна.
     Item? itemCont;
     Critter? crCont;
     if (transferType == TransferTypes::HexContUp || transferType == TransferTypes::HexContDown || transferType == TransferTypes::SelfCont ||
         transferType == TransferTypes::FarCont) {
+        itemCont = transferType == TransferTypes::SelfCont ? cr.GetItem(cr.TransferContainerId) : Game.GetItem(cr.TransferContainerId);
+        if (itemCont == null || itemCont.Type != ItemType::Container || !IsContainerAccessOpen(itemCont.Container_Changeble, itemCont.Opened)) {
+            CloseContainerTransfer(cr);
+            return;
+        }
+
         if (transferType == TransferTypes::HexContUp || transferType == TransferTypes::HexContDown) {
-            itemCont = Game.GetItem(cr.TransferContainerId);
-            if (itemCont == null) {
-                throw("Hex container not found", cr, cr.TransferContainerId);
+            if (map == null || !IsMapContainerAccessValid(itemCont.Ownership, cr.MapId, itemCont.MapId, Game.GetDistance(cr.Hex, itemCont.Hex), cr.Multihex)) {
+                CloseContainerTransfer(cr);
+                return;
             }
-
-            if (itemCont.Type != ItemType::Container) {
-                throw("Hex container is not container type", cr, itemCont);
-            }
-
-            if (itemCont.Ownership != ItemOwnership::MapHex) {
-                throw("Hex container not on map", cr, itemCont);
-            }
-
-            verify(map != null, "Hex container transfer requires critter map", cr);
-            if (itemCont.MapId != map.Id) {
-                throw("Hex container not on cr map", cr, itemCont);
-            }
-
-            if (Game.GetDistance(cr.Hex, itemCont.Hex) > 1 + cr.Multihex) {
-                throw("Hex container too far", cr, itemCont);
-            }
-        }
-        else if (transferType == TransferTypes::FarCont) {
-            itemCont = Game.GetItem(cr.TransferContainerId);
-            if (itemCont == null) {
-                throw("Hex container not found", cr, cr.TransferContainerId);
-            }
-
-            if (itemCont.Type != ItemType::Container) {
-                throw("Hex container is not container type", cr, itemCont);
-            }
-        }
-        else {
-            itemCont = cr.GetItem(cr.TransferContainerId);
-            if (itemCont == null) {
-                throw("Hex container not found", cr, cr.TransferContainerId);
-            }
-
-            if (itemCont.Type != ItemType::Container) {
-                throw("Hex container is not container type", cr, itemCont);
-            }
-        }
-    }
-    else if (transferType == TransferTypes::CritLoot || transferType == TransferTypes::CritSteal || transferType == TransferTypes::CritBarter ||
-             transferType == TransferTypes::FarCrit) {
-        crCont = Game.GetCritter(cr.TransferContainerId);
-        if (crCont == null) {
-            throw("Critter container not found", cr, cr.TransferContainerId);
-        }
-
-        if (transferType != TransferTypes::FarCrit && !cr.IsSee(crCont)) {
-            throw("Critter container is not seen by cr", cr, crCont);
-        }
-
-        if (transferType != TransferTypes::FarCrit && Game.GetDistance(cr.Hex, crCont.Hex) > 1 + cr.Multihex + crCont.Multihex) {
-            throw("Critter container is too far", cr, crCont);
-        }
-
-        if (cr.Id == cr.TransferContainerId) {
-            throw("Critter container id is same as cr id", cr, crCont);
-        }
-
-        if (transferType == TransferTypes::CritSteal && crCont.IsNoSteal) {
-            throw("Critter container marked as NoSteal", cr, crCont);
-        }
-
-        // breadcrumb миграции: запрет кражи у атакующего NPC (ждёт восстановления Ai::IsAttacking)
-        //     if( transferType == TransferTypes::CritSteal && !crCont.ControlledByPlayer && Ai::IsAttacking( crCont ) )
-        //         throw( "Critter container is in battle", cr, crCont );
-        if (transferType == TransferTypes::CritLoot && !crCont.IsDead()) {
-            throw("Critter container loot is not dead", cr, crCont);
         }
     }
     else {
-        verify(false, "Assertion failed");
+        crCont = Game.GetCritter(cr.TransferContainerId);
+        if (crCont == null || crCont.Id == cr.Id) {
+            CloseContainerTransfer(cr);
+            return;
+        }
+
+        if (transferType != TransferTypes::FarCrit &&
+            (cr.MapId != crCont.MapId || !cr.IsSee(crCont) || !IsCritterContainerInRange(Game.GetDistance(cr.Hex, crCont.Hex), cr.Multihex, crCont.Multihex))) {
+            CloseContainerTransfer(cr);
+            return;
+        }
+
+        if ((transferType == TransferTypes::CritSteal && crCont.IsNoSteal) ||
+            (transferType == TransferTypes::CritLoot && (crCont.IsNoLoot || !crCont.IsDead()))) {
+            CloseContainerTransfer(cr);
+            return;
+        }
     }
 
-    // Собираем список предметов для перекладки
+    if ((!all && itemCount <= 0) || (all && transferType == TransferTypes::CritSteal)) {
+        SendContainerSnapshot(cr, transferType, itemCont, crCont);
+        return;
+    }
+
+    // Собираем список предметов для перекладки. Stale id/count является обычным отказом
+    // недоверенного клиента: возвращаем свежий снимок вместо исключения и зависшего UI.
     Item[] items;
     if (take) {
         if (itemCont != null) {
             if (!all) {
                 Item? item = Game.GetItem(itemId);
-                if (item == null) {
-                    throw("Hex container item not found", cr, itemId);
-                }
-
-                if (item.Ownership != ItemOwnership::ItemContainer || item.ContainerId != itemCont.Id) {
-                    throw("Item not in hex container", cr, item, itemCont);
-                }
-
-                if (item.ContainerStack != any()) {
-                    throw("Item hex container stack is not zero", cr, item, itemCont);
-                }
-
-                if (itemCount > item.Count) {
-                    throw("Hex container item invalid count", cr, item, itemCount);
+                if (item == null || item.Ownership != ItemOwnership::ItemContainer || item.ContainerId != itemCont.Id || item.ContainerStack != any() ||
+                    itemCount > item.Count) {
+                    SendContainerSnapshot(cr, transferType, itemCont, crCont);
+                    return;
                 }
 
                 items = {item};
@@ -432,20 +655,10 @@ void OperateContainer(Critter cr, bool take, bool all, ident itemId, int itemCou
             Critter critterContainer = crCont;
             if (!all) {
                 Item? item = critterContainer.GetItem(itemId);
-                if (item == null) {
-                    throw("Critter container item not found", cr, itemId);
-                }
-
-                if (item.Ownership != ItemOwnership::CritterInventory || item.CritterId != critterContainer.Id) {
-                    throw("Item not in critter container", cr, item, critterContainer);
-                }
-
-                if (item.CritterSlot != CritterItemSlot::Inventory) {
-                    throw("Item critter container slot is not innventory", cr, item, critterContainer);
-                }
-
-                if (itemCount > item.Count) {
-                    throw("Critter container item invalid count", cr, item, itemCount);
+                if (item == null || item.Ownership != ItemOwnership::CritterInventory || item.CritterId != critterContainer.Id ||
+                    item.CritterSlot != CritterItemSlot::Inventory || itemCount > item.Count) {
+                    SendContainerSnapshot(cr, transferType, itemCont, crCont);
+                    return;
                 }
 
                 items = {item};
@@ -455,123 +668,140 @@ void OperateContainer(Critter cr, bool take, bool all, ident itemId, int itemCou
             }
         }
     }
+    else if (!all) {
+        Item? item = cr.GetItem(itemId);
+        if (item == null || item.CritterSlot != CritterItemSlot::Inventory || itemCount > item.Count ||
+            (itemCont != null && IsContainerSelfMove(item.Id, itemCont.Id))) {
+            SendContainerSnapshot(cr, transferType, itemCont, crCont);
+            return;
+        }
+
+        items = {item};
+    }
     else {
-        if (!all) {
-            Item? item = cr.GetItem(itemId);
-            if (item == null) {
-                throw("Client item not found", cr, itemId);
-            }
-
-            if (itemCount > item.Count) {
-                throw("Client item invalid count", cr, item, itemCount);
-            }
-
-            items = {item};
-        }
-        else {
-            items = cr.GetItems(ItemProperty::CritterSlot, CritterItemSlot::Inventory);
-        }
-    }
-
-    // Фильтр: при луте/краже выкидываем помеченные NoLoot/NoSteal
-    if (take && (transferType == TransferTypes::CritLoot || transferType == TransferTypes::CritSteal)) {
-        for (int i = 0; i < items.length();) {
-            if ((transferType == TransferTypes::CritLoot && items[i].IsNoLoot) || (transferType == TransferTypes::CritSteal && items[i].IsNoSteal)) {
-                items.removeAt(i);
-            }
-            else {
-                i++;
+        items = cr.GetItems(ItemProperty::CritterSlot, CritterItemSlot::Inventory);
+        if (itemCont != null) {
+            for (int i = 0; i < items.length(); i++) {
+                if (IsContainerSelfMove(items[i].Id, itemCont.Id)) {
+                    items.removeAt(i);
+                    break;
+                }
             }
         }
     }
 
-    if (items.length() == 0) {
+    if (take) {
+        FilterContainerItems(items, transferType);
+    }
+    if (items.isEmpty()) {
+        SendContainerSnapshot(cr, transferType, itemCont, crCont);
         return;
     }
 
-    // Проверка перевеса у приёмника
-    int weight = 0;
-    for (int i = 0; i < items.length(); i++) {
-        weight += items[i].Weight * (all ? items[i].Count : itemCount);
-    }
-
-    if (itemCont == null) {
-        Critter? target = take ? cr : crCont;
-        verify(target != null, "Critter container must be resolved", cr);
-        if (target.CarryWeight < target.ItemsWeight + weight) {
-            throw("Critter is overweight", target);
+    if (!take && itemCont != null) {
+        for (int i = 0; i < items.length(); i++) {
+            if (WouldCreateContainerCycle(items[i], itemCont)) {
+                SendContainerSnapshot(cr, transferType, itemCont, crCont);
+                return;
+            }
         }
-    }
-    else if (take) {
-        // Лут из предметного контейнера — приёмник это игрок, проверяем его перевес
-        if (cr.CarryWeight < cr.ItemsWeight + weight) {
-            throw("Critter is overweight", cr);
-        }
-    }
-
-    // Анимация
-    cr.Action(CritterAction::OperateContainer, transferType, !all ? items[0] : null);
-
-    // Перемещение
-    if (transferType == TransferTypes::CritSteal) {
-        if ((Game.OnCritterStealing.Fire(crCont, cr, items[0], itemCount) == EventResult::ContinueChain)) {
-            ItemMovement::MoveItem(items[0], itemCount, cr);
-        }
-        else {
-            items.clear();
-            cr.TransferType = TransferTypes::Close;
-            cr.TransferContainerId = ZERO_IDENT;
-            cr.SendItems(items);
+        if (!CanPutItemsInContainer(itemCont, items, all, itemCount)) {
+            Messaging::Info(cr, TextPackKey(TextPackName::Game, "" + (MsgStr::StrOvervolume)));
+            SendContainerSnapshot(cr, transferType, itemCont, crCont);
             return;
         }
     }
-    else {
-        if (take) {
-            if (!all) {
-                ItemMovement::MoveItem(items[0], itemCount, cr);
-            }
-            else {
-                ItemMovement::MoveItems(items, cr);
-            }
+
+    // Проверка перевеса у приёмника. Считаем в int64 с насыщением выше любого
+    // возможного CarryWeight, чтобы большой стек не обошёл проверку через int32 wrap.
+    const int64 maxCheckedWeight = 2147483647;
+    int64 weight = 0;
+    for (int i = 0; i < items.length(); i++) {
+        int moveCount = all ? items[i].Count : itemCount;
+        int64 unitWeight = items[i].Weight;
+        if (moveCount <= 0 || unitWeight < 0 || unitWeight > (maxCheckedWeight - weight) / moveCount) {
+            weight = maxCheckedWeight + 1;
+            break;
         }
-        else {
-            if (itemCont != null) {
-                if (!all) {
-                    ItemMovement::MoveItem(items[0], itemCount, itemCont, Tla::RootContainerStack());
-                }
-                else {
-                    ItemMovement::MoveItems(items, itemCont, Tla::RootContainerStack());
-                }
-            }
-            else {
-                if (!all) {
-                    ItemMovement::MoveItem(items[0], itemCount, crCont);
-                }
-                else {
-                    ItemMovement::MoveItems(items, crCont);
-                }
-            }
+        weight += unitWeight * moveCount;
+    }
+
+    Critter? weightTarget;
+    if (itemCont == null) {
+        weightTarget = take ? cr : crCont;
+    }
+    else if (take && transferType != TransferTypes::SelfCont) {
+        // Перекладка из собственного вложенного контейнера не меняет общий вес инвентаря.
+        weightTarget = cr;
+    }
+    if (weightTarget != null) {
+        int64 targetWeight = Parameters::CritterGetItemsWeightLimited(weightTarget, int64(weightTarget.CarryWeight));
+        if (targetWeight > weightTarget.CarryWeight || weight > int64(weightTarget.CarryWeight) - targetWeight) {
+            Messaging::Info(cr, TextPackKey(TextPackName::Game, "" + (take ? MsgStr::StrOverweight : MsgStr::StrOvervolume)));
+            SendContainerSnapshot(cr, transferType, itemCont, crCont);
+            return;
         }
     }
 
-    // События по каждому перемещённому предмету
-    Entity cont = (itemCont != null ? cast<Entity>(itemCont) : cast<Entity>(crCont));
+    // AP списываются authoritative на сервере. Клиент повторяет списание только для плавного UI.
+    if (!ProcessAp(cr, Settings.Movement.RtApCostMoveItemContainer)) {
+        SendContainerSnapshot(cr, transferType, itemCont, crCont);
+        return;
+    }
+
+    cr.Action(CritterAction::OperateContainer, EncodeContainerActionExt(transferType, take, all), !all ? items[0] : null);
+
+    if (transferType == TransferTypes::CritSteal) {
+        verify(crCont != null, "Steal target must be resolved", cr);
+        Critter stealContainer = crCont;
+        EventResult stealResult = Game.OnCritterStealing.Fire(stealContainer, cr, items[0], itemCount);
+        if (!IsActiveContainerTransfer(cr, transferType, transferContainerId, transferSession)) {
+            return;
+        }
+        if (stealResult == EventResult::ContinueChain) {
+            ItemMovement::MoveItem(items[0], itemCount, take ? cr : stealContainer);
+        }
+        else {
+            CloseContainerTransfer(cr);
+            return;
+        }
+    }
+    else if (take) {
+        if (!all) {
+            ItemMovement::MoveItem(items[0], itemCount, cr);
+        }
+        else {
+            ItemMovement::MoveItems(items, cr);
+        }
+    }
+    else if (itemCont != null) {
+        if (!all) {
+            ItemMovement::MoveItem(items[0], itemCount, itemCont, Tla::RootContainerStack());
+        }
+        else {
+            ItemMovement::MoveItems(items, itemCont, Tla::RootContainerStack());
+        }
+    }
+    else {
+        verify(crCont != null, "Critter container must be resolved", cr);
+        if (!all) {
+            ItemMovement::MoveItem(items[0], itemCount, crCont);
+        }
+        else {
+            ItemMovement::MoveItems(items, crCont);
+        }
+    }
+
+    if (!IsActiveContainerTransfer(cr, transferType, transferContainerId, transferSession)) {
+        return;
+    }
+
+    Entity cont = itemCont != null ? cast<Entity>(itemCont) : cast<Entity>(crCont);
     for (int i = 0; i < items.length(); i++) {
         (Game.OnClientOperateContainer.Fire(cr, cont, items[i], take) == EventResult::ContinueChain);
     }
 
-    // Обновляем содержимое контейнера у клиента
-    Item[] curItems;
-    if (itemCont != null) {
-        curItems = itemCont.GetItems(Tla::RootContainerStack());
-    }
-    else {
-        verify(crCont != null, "Critter container must be resolved", cr);
-        Critter critterContainer = crCont;
-        curItems = critterContainer.GetItems(ItemProperty::CritterSlot, CritterItemSlot::Inventory);
-    }
-
-    cr.SendItems(curItems, false, false, 1);
+    SendContainerSnapshot(cr, transferType, itemCont, crCont);
 }
 
 // Перезарядка оружия. Если новый патрон не совпадает с заряженным (или патрон не указан) —
@@ -616,9 +846,10 @@ void ReloadWeapon(Critter cr, ident weaponId, ident ammoId)
         throw("Weapon is full", cr, weapon, ammo);
     }
 
-    // Выгрузка текущего боезапаса
+    // Выгрузка текущего боезапаса. Только при ненулевом остатке: AddItem с нулём бросает
+    // исключение "Count arg must be positive" на уже пустом оружии
     if (ammo == null || (weapon.AmmoCount > 0 && weapon.AmmoPid != ammo.ProtoId)) {
-        if (weapon.AmmoPid != EMPTY_HSTRING) {
+        if (weapon.AmmoPid != EMPTY_HSTRING && weapon.AmmoCount > 0) {
             Item? existAmmo = cr.GetItem(weapon.AmmoPid);
             if (existAmmo == null) {
                 cr.AddItem(weapon.AmmoPid, weapon.AmmoCount);
@@ -657,7 +888,13 @@ void Attack(Critter cr, ident targetId, int mode)
 
     // Распаковываем режим использования и зону прицеливания из mode
     int use = mode & 0xF;
-    int aim = mode >> 4;
+    int aim = (mode >> 4) & 0xF;
+
+    // mode приходит от клиента: без проверки диапазона зона прицела 10..15 давала бесплатный
+    // прицельный выстрел (нулевой AP/штраф) и уводила чтение таблицы критов в чужие строки
+    if (aim < HitLocations::LocationNone || aim > HitLocations::LocationUncalled) {
+        throw("Invalid aim location", cr, mode, aim);
+    }
 
     AbstractItem weapon = CritterItem::GetActive(cr);
     if (weapon.Type != ItemType::Weapon) {
@@ -764,8 +1001,19 @@ void Attack(Critter cr, ident targetId, int mode)
     Combat::CombatAttack(cr, attackTarget, weapon, mode, ammo);
 }
 
-// Применение предмета на цель: криттера, предмет на карте или сценерий. Резолвит используемый
-// предмет и цель, проверяет видимость и дистанцию, затем поднимает событие применения предмета.
+bool HasSingleUseItemTarget(bool hasCritterTarget, bool hasItemTarget, bool hasSceneryTarget)
+{
+    return (hasCritterTarget ? 1 : 0) + (hasItemTarget ? 1 : 0) + (hasSceneryTarget ? 1 : 0) == 1;
+}
+
+bool IsUseItemCapabilityAllowed(bool selfTarget, bool isCanUse, bool isCanUseOnSmth)
+{
+    return selfTarget ? isCanUse : isCanUseOnSmth;
+}
+
+// Применение предмета на цель: криттера, предмет на карте или сценерий. Используемый предмет
+// обязан принадлежать криттеру, target mode должен быть единственным, а capability повторно
+// проверяется на сервере независимо от того, что показал клиентский UI.
 void UseItemOn(Critter cr, ident usedItemId, ident targetCrId, ident targetItemId, hstring sceneryPid, int hx, int hy, int timer)
 {
     if (!cr.IsAlive()) {
@@ -773,12 +1021,28 @@ void UseItemOn(Critter cr, ident usedItemId, ident targetCrId, ident targetItemI
     }
 
     if (usedItemId == ZERO_IDENT) {
-        throw("Critter used zero ident item", cr);
+        return;
     }
 
-    Item? usedItem = Game.GetItem(usedItemId);
+    bool hasCritterTarget = targetCrId != ZERO_IDENT;
+    bool hasItemTarget = targetItemId != ZERO_IDENT;
+    bool hasSceneryTarget = sceneryPid != EMPTY_HSTRING;
+    if (!HasSingleUseItemTarget(hasCritterTarget, hasItemTarget, hasSceneryTarget)) {
+        return;
+    }
+
+    Item? usedItem = cr.GetItem(usedItemId);
     if (usedItem == null) {
-        throw("Critter used item not found", cr, usedItemId);
+        return;
+    }
+
+    bool selfTarget = hasCritterTarget && IsSelfUseTarget(cr.Id, targetCrId);
+    if (!IsUseItemCapabilityAllowed(selfTarget, usedItem.IsCanUse, usedItem.IsCanUseOnSmth)) {
+        return;
+    }
+
+    if (!IsUseItemTimerAllowed(Parameters::IsTimedUseItem(usedItem), selfTarget, timer)) {
+        return;
     }
 
     int ap = Settings.Movement.RtApCostUseItem;
@@ -812,9 +1076,8 @@ void UseItemOn(Critter cr, ident usedItemId, ident targetCrId, ident targetItemI
                 throw("Target critter not found in global group", cr, targetCrId);
             }
         }
-        else {
-            targetCr = cr;
-        }
+        // Self-use в контракте OnCritterUseItemOn представлен пустыми target handles.
+        // selfTarget уже вычислен выше для capability/timer-проверок.
     }
     else if (targetItemId != ZERO_IDENT || sceneryPid != EMPTY_HSTRING) {
         Map? map = cr.GetMap();

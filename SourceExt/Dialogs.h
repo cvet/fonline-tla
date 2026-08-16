@@ -11,6 +11,14 @@ FO_DECLARE_EXCEPTION(DialogManagerException);
 FO_DECLARE_EXCEPTION(DialogParseException);
 FO_DECLARE_EXCEPTION(DialogException);
 
+// Preserve the legacy generic-value spelling used by authored dialog script arguments while storing them
+// as textual any_t values. A leading '@' denotes a hashed string; Content::* tokens denote their final id.
+[[nodiscard]] auto NormalizeDialogScriptValue(string value) -> any_t;
+
+// Property comparisons operate on integer storage. Preserve the legacy ResolveGenericValue spelling for
+// authored boolean literals so any equality compares "0"/"1" rather than "false"/"true" text.
+[[nodiscard]] auto NormalizeDialogPropertyValue(string value) -> any_t;
+
 // Types
 static constexpr uint8_t DR_NONE = 0;
 static constexpr uint8_t DR_PROP_GLOBAL = 1;
@@ -52,8 +60,8 @@ public:
 class DialogAnswer : public RefCounted<DialogAnswer>
 {
 public:
-    auto GetDemand(int32_t index) -> DialogAnswerReq*;
-    auto GetResult(int32_t index) -> DialogAnswerReq*;
+    auto GetDemand(int32_t index) -> ptr<DialogAnswerReq>;
+    auto GetResult(int32_t index) -> ptr<DialogAnswerReq>;
 
     int32_t Link {};
     hstring TextId {};
@@ -67,7 +75,7 @@ public:
 class DialogSpeech : public RefCounted<DialogSpeech>
 {
 public:
-    auto GetAnswer(int32_t index) -> DialogAnswer*;
+    auto GetAnswer(int32_t index) -> ptr<DialogAnswer>;
 
     int32_t Id {};
     hstring TextId {};
@@ -80,7 +88,7 @@ public:
 class DialogPack : public RefCounted<DialogPack>
 {
 public:
-    auto GetSpeech(int32_t index) -> DialogSpeech*;
+    auto GetSpeech(int32_t index) -> ptr<DialogSpeech>;
 
     hstring PackId {};
     int32_t SpeechesCount {};

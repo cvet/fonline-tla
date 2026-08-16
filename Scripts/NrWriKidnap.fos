@@ -390,43 +390,75 @@ EventResult GuardAttacked(Critter cr, Critter attacker)
     return EventResult::StopChain;
 }
 
-[[ItemTrigger]]
+[[Async]] [[ItemTrigger]]
 void Alarm(Critter player, StaticItem trigger, bool entered, mdir dir)
 {
+    if (!entered || !Sync::LockCritterWithMapAndLocation(player)) {
+        return;
+    }
+
     Map? map = player.GetMap();
     if (map == null) {
         return;
     }
 
+    Location loc = map.GetLocation();
     Critter? guard = map.GetCritter(CritterProperty::NpcRole, NPC_ROLE_GUARD, CritterFindType::Npc);
-    if (guard == null || guard.IsDead() || !entered || IsHostile(map)) {
+    if (guard == null) {
         return;
     }
 
-    if (player.ControlledByPlayer) {
-        if (player.NRWriKidnap != 2 && player.NRWriKidnap != 4) {
-            NpcPlanes::AddAttackPlane(guard, 0, player);
-            Messaging::SayShout(guard, TextPackKey(TextPackName::Text, "" + (STR_GUARD_SHOUT)));
-            SetHostile(map.GetLocation(), true);
-            Critter? npc = map.GetCritter(CritterProperty::NpcRole, NPC_ROLE_MARODEUR, CritterFindType::NonDeadNpc);
-            if (npc != null) {
-                NpcPlanes::AddAttackPlane(npc, 0, player);
-            }
-        }
+    Critter? npc = map.GetCritter(CritterProperty::NpcRole, NPC_ROLE_MARODEUR, CritterFindType::NonDeadNpc);
+    Entity[] cover = {player, map, loc, guard};
+    if (npc != null && !(npc is guard)) {
+        cover.insertLast(npc);
+    }
+    if (!Sync::Lock(cover)) {
+        return;
+    }
+
+    if (player.MapId != map.Id || map.GetLocation().Id != loc.Id || guard.MapId != map.Id || guard.IsDead() || !player.ControlledByPlayer || IsHostile(map) ||
+        player.NRWriKidnap == 2 || player.NRWriKidnap == 4) {
+        return;
+    }
+
+    NpcPlanes::AddAttackPlane(guard, 0, player);
+    Messaging::SayShout(guard, TextPackKey(TextPackName::Text, "" + (STR_GUARD_SHOUT)));
+    SetHostile(loc, true);
+    if (npc != null && npc.MapId == map.Id) {
+        NpcPlanes::AddAttackPlane(npc, 0, player);
     }
 }
 
 // Триггер, наступая на который игрок должен быть в снике и подходить ровно со спины
-[[ItemTrigger]]
+[[Async]] [[ItemTrigger]]
 void CheckSneak(Critter player, StaticItem trigger, bool entered, mdir dir)
 {
+    if (!entered || !Sync::LockCritterWithMapAndLocation(player)) {
+        return;
+    }
+
     Map? map = player.GetMap();
     if (map == null) {
         return;
     }
 
+    Location loc = map.GetLocation();
     Critter? guard = map.GetCritter(CritterProperty::NpcRole, NPC_ROLE_GUARD, CritterFindType::Npc);
-    if (!player.ControlledByPlayer || guard == null || guard.IsDead() || !entered || IsHostile(map)) {
+    if (guard == null) {
+        return;
+    }
+
+    Critter? npc = map.GetCritter(CritterProperty::NpcRole, NPC_ROLE_MARODEUR, CritterFindType::NonDeadNpc);
+    Entity[] cover = {player, map, loc, guard};
+    if (npc != null && !(npc is guard)) {
+        cover.insertLast(npc);
+    }
+    if (!Sync::Lock(cover)) {
+        return;
+    }
+
+    if (player.MapId != map.Id || map.GetLocation().Id != loc.Id || guard.MapId != map.Id || guard.IsDead() || !player.ControlledByPlayer || IsHostile(map)) {
         return;
     }
 
@@ -450,9 +482,8 @@ void CheckSneak(Critter player, StaticItem trigger, bool entered, mdir dir)
 
     NpcPlanes::AddAttackPlane(guard, 0, player);
     Messaging::SayShout(guard, TextPackKey(TextPackName::Text, "" + (STR_GUARD_SHOUT)));
-    SetHostile(map.GetLocation(), true);
-    Critter? npc = map.GetCritter(CritterProperty::NpcRole, NPC_ROLE_MARODEUR, CritterFindType::NonDeadNpc);
-    if (npc != null) {
+    SetHostile(loc, true);
+    if (npc != null && npc.MapId == map.Id) {
         NpcPlanes::AddAttackPlane(npc, 0, player);
     }
 }
@@ -604,14 +635,15 @@ void UpdateQuestStatus(Map? map, Critter? cr)
     }
 }
 
-[[TimeEvent]]
+[[TimeEvent]] [[Async]]
 void DeleteQuestLocation(any value)
 {
     Map? map = Game.GetMap(ident(value));
-    if (map != null) {
-        Location loc = map.GetLocation();
-        loc.AutoGarbage = true;
+    if (map == null || !Sync::LockMapWithLocation(map)) {
+        return;
     }
+
+    map.GetLocation().AutoGarbage = true;
 }
 
 [[TimeEvent]] [[Async]]

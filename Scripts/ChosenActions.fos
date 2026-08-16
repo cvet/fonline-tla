@@ -10,7 +10,7 @@ namespace ChosenActions
 ///@ RemoteCall Server MoveInvItem(ident itemId, CritterItemSlot slot)
 ///@ RemoteCall Server DropInvItem(ident itemId, int32 count)
 ///@ RemoteCall Server ReloadWeapon(ident itemId, ident ammoId)
-///@ RemoteCall Server OperateContainer(bool take, bool all, ident itemId, int32 itemCount)
+///@ RemoteCall Server OperateContainer(bool take, bool all, ident itemId, int32 itemCount, int32 expectedTransferType, ident expectedContainerId, uint32 expectedTransferSession)
 ///@ Property Critter Common nanotime ApRegenerationTick Mutable NoSync
 ///@ Property Critter Common int32 ApRegenerationTime Mutable OwnerSync Persistent
 ///@ RemoteCall Server UseSkill(CritterProperty skill, ident targetCrId, ident targetItemId, hstring sceneryPid, mpos hex)
@@ -164,9 +164,13 @@ void ChosenProcess()
         // Перемещение к критеру
         if (actionType == Tla::ChosenMoveToCrit) {
             Critter? cr = Game.GetCritter(ChosenActions[1]);
-            if (cr != null) {
-                hex = cr.Hex;
+            // Цель пропала из видимости — отменяем действие, иначе hex остаётся (0,0)
+            // и персонаж уходит в угол карты
+            if (cr == null) {
+                break;
             }
+
+            hex = cr.Hex;
         }
         else {
             hex = mpos(ChosenActions[1], ChosenActions[2]);
@@ -290,12 +294,12 @@ void ChosenProcess()
         int aim = (rate >> 4);
 
         // Поиск предмета
-        AbstractItem? item = (itemId != ZERO_IDENT ? cast<AbstractItem>(chosen.GetItem(itemId)) : CritterItem::GetSlotItemProto(chosen));
+        AbstractItem? item = (itemId != ZERO_IDENT ? cast<AbstractItem?>(chosen.GetItem(itemId)) : CritterItem::GetSlotItemProto(chosen));
         if (item == null) {
             break;
         }
 
-        Item? realItem = cast<Item>(item);
+        Item? realItem = cast<Item?>(item);
         Item? mainslotItem = chosen.GetItem(ItemProperty::CritterSlot, CritterItemSlot::Main);
         bool isMainItem = (realItem == null || (mainslotItem != null && realItem.Id == mainslotItem.Id));
 
@@ -488,8 +492,8 @@ void ChosenProcess()
                 break;
             }
 
+            // ОД списываются один раз в общем хвосте case-а: ветка перезарядки не делает break
             CurPlayer.ServerCall.ReloadWeapon(realItem.Id, targetId);
-            chosen.CurrentAp -= apCost * Tla::AP_DIVIDER;
         }
         else // Использование
         {
@@ -715,6 +719,9 @@ void ChosenProcess()
         ident itemId = ChosenActions[1];
         int itemCont = ChosenActions[2];
         int count = ChosenActions[3];
+        TransferTypes transferType = TransferTypes(int(ChosenActions[4]));
+        ident transferContainerId = ChosenActions[5];
+        uint transferSession = ChosenActions[6];
 
         verify(itemCont == ClientDefines::ITEMS_PICKUP || itemCont == ClientDefines::ITEMS_PICKUP_FROM, "Assertion failed");
         verify(count > 0, "Assertion failed");
@@ -735,9 +742,11 @@ void ChosenProcess()
             break;
         }
 
+        if (chosen.TransferType != transferType || chosen.TransferContainerId != transferContainerId || chosen.TransferSession != transferSession) {
+            break;
+        }
+
         Entity? contEntity;
-        TransferTypes transferType = chosen.TransferType;
-        ident transferContainerId = chosen.TransferContainerId;
         if (transferContainerId != ZERO_IDENT) {
             if (transferType == TransferTypes::CritLoot || transferType == TransferTypes::CritSteal || transferType == TransferTypes::FarCrit) {
                 contEntity = Game.GetCritter(transferContainerId);
@@ -758,8 +767,8 @@ void ChosenProcess()
 
         auto colType = ClientItems::GetCollectionFromType(itemCont);
         bool take = (colType == ClientItems::Collection::Loot);
-        Entity from = (itemCont == ClientDefines::ITEMS_PICKUP ? cast<Entity>(chosen) : contEntity);
-        Entity to = (itemCont == ClientDefines::ITEMS_PICKUP ? contEntity : cast<Entity>(chosen));
+        Entity from = take ? contEntity : cast<Entity>(chosen);
+        Entity to = take ? cast<Entity>(chosen) : contEntity;
         if ((Game.OnItemCheckMove.Fire(item, count, from, to) == EventResult::StopChain)) {
             break;
         }
@@ -782,29 +791,40 @@ void ChosenProcess()
                 break;
             }
 
-            if (int(toCr.ItemsWeight) + item.Weight * count > toCr.CarryWeight) {
+            if (int64(toCr.ItemsWeight) + int64(item.Weight) * count > toCr.CarryWeight) {
                 Messaging::Info(TextPackKey(TextPackName::Game, "" + ((take ? MsgStr::StrOverweight : MsgStr::StrOvervolume))));
                 break;
             }
         }
 
-        // Game.CustomCall( "MoveItemCont " + apCost + " " + count + " " + itemId + " " + itemCont );
-        ClientItems::RemoveItem(colType, item, count);
+        // Контейнерный UI обновляется только authoritative-снимком сервера. Оптимистичное скрытие
+        // здесь оставляло предмет навсегда скрытым при stale count, исчезнувшей цели или отказе лока.
+        if (!ClientItems::TryBeginContainerOperation(int(transferType), transferContainerId, transferSession)) {
+            break;
+        }
 
-        (Game.OnCritterActionEx.Fire(true, chosen, CritterAction::OperateContainer, transferType, item) == EventResult::ContinueChain);
+        chosen.CurrentAp -= apCost * Tla::AP_DIVIDER;
 
-        CurPlayer.ServerCall.OperateContainer(take, false, item.Id, count);
+        int actionExt = CritterActions::EncodeContainerActionExt(transferType, take, false);
+        (Game.OnCritterActionEx.Fire(true, chosen, CritterAction::OperateContainer, actionExt, item) == EventResult::ContinueChain);
+
+        CurPlayer.ServerCall.OperateContainer(take, false, item.Id, count, int(transferType), transferContainerId, transferSession);
     } break;
     case Tla::ChosenTakeAll:
     case Tla::ChosenPutAll: {
         // «Взять всё» / «Положить всё»: перенос всего контейнера. Кнопка PickUp кладёт действие без аргументов,
         // фактический перенос предметов и проверку веса делает сервер (CritterActions::OperateContainer с all = true).
         bool take = (actionType == Tla::ChosenTakeAll);
+        TransferTypes transferType = TransferTypes(int(ChosenActions[4]));
+        ident transferContainerId = ChosenActions[5];
+        uint transferSession = ChosenActions[6];
+
+        if (chosen.TransferType != transferType || chosen.TransferContainerId != transferContainerId || chosen.TransferSession != transferSession) {
+            break;
+        }
 
         // Определяем контейнер текущего трансфера — та же логика, что в ChosenMoveItemCont
         Entity? contEntity;
-        TransferTypes transferType = chosen.TransferType;
-        ident transferContainerId = chosen.TransferContainerId;
         if (transferContainerId != ZERO_IDENT) {
             if (transferType == TransferTypes::CritLoot || transferType == TransferTypes::CritSteal || transferType == TransferTypes::FarCrit) {
                 contEntity = Game.GetCritter(transferContainerId);
@@ -835,9 +855,16 @@ void ChosenProcess()
             }
         }
 
-        (Game.OnCritterActionEx.Fire(true, chosen, CritterAction::OperateContainer, transferType, null) == EventResult::ContinueChain);
+        if (!ClientItems::TryBeginContainerOperation(int(transferType), transferContainerId, transferSession)) {
+            break;
+        }
 
-        CurPlayer.ServerCall.OperateContainer(take, true, ZERO_IDENT, 0);
+        chosen.CurrentAp -= apCost * Tla::AP_DIVIDER;
+
+        int actionExt = CritterActions::EncodeContainerActionExt(transferType, take, true);
+        (Game.OnCritterActionEx.Fire(true, chosen, CritterAction::OperateContainer, actionExt, null) == EventResult::ContinueChain);
+
+        CurPlayer.ServerCall.OperateContainer(take, true, ZERO_IDENT, 0, int(transferType), transferContainerId, transferSession);
     } break;
     case Tla::ChosenSneak: {
         int apCost = Settings.Movement.RtApCostUseSkill;
@@ -1028,8 +1055,10 @@ void ChosenProcess()
             bool isRun = false; // 814 ( Settings.Movement.AlwaysRun && dist >= Settings.Movement.AlwaysRunUseDist );
             SetAction({Tla::ChosenMove, hx, hy, isRun ? 1 : 0, useDist, 0, 1}, false, false);
 
+            // itemId переносится в отложенное действие: без него подбор после подхода теряет цель
+            // и не поднимает OnCritterActionEx (подбор «срабатывает», но UI цели не открывается).
             if (CurMap.GetPathLength(chosen, mpos(hx, hy), useDist) > 0) {
-                SetAction({Tla::ChosenPickItem, pid, hx, hy, 0, 0, 0}, true, false);
+                SetAction({Tla::ChosenPickItem, pid, hx, hy, itemId, 0, 0}, true, false);
             }
 
             return;
@@ -1217,37 +1246,6 @@ bool LockUseSkillAction(Critter cr, ident targetCrId, ident targetItemId, hstrin
 }
 
 [[Async]]
-bool LockOperateContainerAction(Critter cr)
-{
-    const ident containerId = cr.TransferContainerId;
-    if (containerId == ZERO_IDENT || containerId == cr.Id) {
-        return Sync::Lock(cr);
-    }
-
-    const TransferTypes transferType = cr.TransferType;
-    if (transferType == TransferTypes::HexContUp || transferType == TransferTypes::HexContDown || transferType == TransferTypes::FarCont) {
-        Item? itemCont = Game.GetItem(containerId);
-        if (itemCont == null) {
-            return Sync::Lock(cr);
-        }
-
-        return Sync::Lock(cr, itemCont);
-    }
-
-    if (transferType == TransferTypes::CritLoot || transferType == TransferTypes::CritSteal || transferType == TransferTypes::CritBarter ||
-        transferType == TransferTypes::FarCrit) {
-        Critter? crCont = Game.GetCritter(containerId);
-        if (crCont == null) {
-            return Sync::Lock(cr);
-        }
-
-        return Sync::Lock(cr, crCont);
-    }
-
-    return Sync::Lock(cr);
-}
-
-[[Async]]
 bool LockAttackAction(Critter cr, ident targetId)
 {
     Map? map = cr.GetMap();
@@ -1269,36 +1267,44 @@ bool LockAttackAction(Critter cr, ident targetId)
 }
 
 [[Async]]
-bool LockUseItemOnAction(Critter cr, ident usedItemId, ident targetCrId, ident targetItemId, hstring sceneryPid)
+bool LockUseItemOnAction(Critter cr, ident usedItemId, ident targetCrId, ident targetItemId)
 {
-    Entity[] entities = {cr};
-
-    Item? usedItem = Game.GetItem(usedItemId);
-    if (usedItem != null) {
-        entities.insertLast(usedItem);
-    }
-
-    if (targetCrId != ZERO_IDENT && targetCrId != cr.Id) {
-        Critter? target = Game.GetCritter(targetCrId);
-        if (target != null) {
-            entities.insertLast(target);
+    while (true) {
+        if (!Sync::Lock(cr)) {
+            return false;
         }
-    }
-    else if (targetItemId != ZERO_IDENT || sceneryPid != EMPTY_HSTRING) {
+
         Map? map = cr.GetMap();
+        ident mapId = cr.MapId;
+        Item? usedItem = cr.GetItem(usedItemId);
+        Critter? targetCr = map != null && targetCrId != ZERO_IDENT && targetCrId != cr.Id ? map.GetCritter(targetCrId) : null;
+        Item? targetItem = map != null && targetItemId != ZERO_IDENT ? map.GetItem(targetItemId) : null;
+
+        Entity[] entities = {cr};
         if (map != null) {
             entities.insertLast(map);
         }
-
-        if (targetItemId != ZERO_IDENT) {
-            Item? targetItem = Game.GetItem(targetItemId);
-            if (targetItem != null) {
-                entities.insertLast(targetItem);
-            }
+        if (usedItem != null) {
+            entities.insertLast(usedItem);
         }
+        if (targetCr != null) {
+            entities.insertLast(targetCr);
+        }
+        if (targetItem != null) {
+            entities.insertLast(targetItem);
+        }
+
+        if (!Sync::Lock(entities)) {
+            return false;
+        }
+        if (cr.MapId != mapId) {
+            continue;
+        }
+
+        return true;
     }
 
-    return Sync::Lock(entities);
+    return false;
 }
 
 [[ServerRemoteCall]] [[Async]]
@@ -1374,14 +1380,24 @@ void MoveInvItem(Player player, ident itemId, CritterItemSlot slot)
 }
 
 [[ServerRemoteCall]] [[Async]]
-void OperateContainer(Player player, bool take, bool all, ident itemId, int itemCount)
+void OperateContainer(Player player, bool take, bool all, ident itemId, int itemCount, int expectedTransferType, ident expectedContainerId,
+                      uint expectedTransferSession)
 {
     Critter? cr = player.GetControlledCritter();
     if (cr == null) {
         return;
     }
 
-    if (!LockOperateContainerAction(cr)) {
+    TransferTypes transferType = TransferTypes(expectedTransferType);
+    if (!CritterActions::IsContainerTransferType(transferType)) {
+        return;
+    }
+
+    if (!CritterActions::LockContainerTransfer(cr, transferType, expectedContainerId, expectedTransferSession)) {
+        if (Sync::Lock(cr) && cr.TransferType == transferType && cr.TransferContainerId == expectedContainerId &&
+            cr.TransferSession == expectedTransferSession) {
+            CritterActions::CloseContainerTransfer(cr);
+        }
         return;
     }
 
@@ -1422,7 +1438,7 @@ void UseItemOn(Player player, ident usedItemId, ident targetCrId, ident targetIt
         return;
     }
 
-    if (!LockUseItemOnAction(cr, usedItemId, targetCrId, targetItemId, sceneryPid)) {
+    if (!LockUseItemOnAction(cr, usedItemId, targetCrId, targetItemId)) {
         return;
     }
 

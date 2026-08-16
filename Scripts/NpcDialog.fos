@@ -223,65 +223,105 @@ void NpcMessage(Critter cr, Critter fromCr, int message, any value)
 // waitSeconds - паузы между диалогами
 // radius - радиус поиска вокруг триггера для поиска участников диалога
 const timespan TIME_WAIT = Time::Minutes(5);
+const int MIN_TRIGGER_DELAY_SECONDS = 1;
+const int MAX_TRIGGER_DELAY_SECONDS = 60;
+const int MIN_TRIGGER_RADIUS = 1;
+const int MAX_TRIGGER_RADIUS = 100;
+
+// Декодирует пять обязательных числовых параметров триггера. Все 14 authored-триггеров
+// используют положительные delay/radius, поэтому ноль не является скрытым default-значением.
+bool TryDecodeTriggerParams(hstring[] params, int& npcRole, int& firstStr, int& lastStr, int& waitSeconds, int& radius)
+{
+    if (params.length() != 5) {
+        return false;
+    }
+
+    int parsedNpcRole = 0;
+    int parsedFirstStr = 0;
+    int parsedLastStr = 0;
+    int parsedWaitSeconds = 0;
+    int parsedRadius = 0;
+    if (!Tla::TryParseSceneryInt(params[0], parsedNpcRole) || !Tla::TryParseSceneryInt(params[1], parsedFirstStr) ||
+        !Tla::TryParseSceneryInt(params[2], parsedLastStr) || !Tla::TryParseSceneryInt(params[3], parsedWaitSeconds) ||
+        !Tla::TryParseSceneryInt(params[4], parsedRadius)) {
+        return false;
+    }
+    if (parsedNpcRole <= 0 || parsedFirstStr <= 0 || parsedFirstStr > parsedLastStr || parsedWaitSeconds < MIN_TRIGGER_DELAY_SECONDS ||
+        parsedWaitSeconds > MAX_TRIGGER_DELAY_SECONDS || parsedRadius < MIN_TRIGGER_RADIUS || parsedRadius > MAX_TRIGGER_RADIUS) {
+        return false;
+    }
+
+    npcRole = parsedNpcRole;
+    firstStr = parsedFirstStr;
+    lastStr = parsedLastStr;
+    waitSeconds = parsedWaitSeconds;
+    radius = parsedRadius;
+    return true;
+}
+
 [[ItemTrigger]]
 void NpcDialog(Critter player, StaticItem trigger, bool entered, mdir dir)
 {
-    auto params = trigger.SceneryParams.clone();
-    int npcRole = params[0].uhash;
-    int firstStr = params[1].uhash;
-    int lastStr = params[2].uhash;
-    int waitSeconds = params[3].uhash;
-    int radius = params[4].uhash;
-
-    if (radius == 0) {
-        radius = 20;
+    if (!entered || !player.ControlledByPlayer) {
+        return;
     }
 
     Map? map = player.GetMap();
-    if (map != null && entered && player.ControlledByPlayer) {
-        Critter[] critters = map.GetCrittersInRadius(trigger.Hex, radius, CritterFindType::NonDeadNpc);
-        if (critters.length() > 1) {
-            Critter? npc1;
-            Critter? npc2;
-            for (int i = 0; i < critters.length(); i++) {
-                Critter cr = critters[i];
-                if (cr.NpcRole == npcRole && NpcPlanes::IsNoPlanes(cr)) {
-                    if (npc1 != null) {
-                        npc2 = cr;
-                    }
-                    else {
-                        npc1 = cr;
-                    }
-                }
+    if (map == null) {
+        return;
+    }
 
-                if (npc1 != null && npc2 != null) {
-                    break;
+    int npcRole = 0;
+    int firstStr = 0;
+    int lastStr = 0;
+    int waitSeconds = 0;
+    int radius = 0;
+    if (!TryDecodeTriggerParams(trigger.SceneryParams, npcRole, firstStr, lastStr, waitSeconds, radius)) {
+        return;
+    }
+
+    Critter[] critters = map.GetCrittersInRadius(trigger.Hex, radius, CritterFindType::NonDeadNpc);
+    if (critters.length() > 1) {
+        Critter? npc1;
+        Critter? npc2;
+        for (int i = 0; i < critters.length(); i++) {
+            Critter cr = critters[i];
+            if (cr.NpcRole == npcRole && NpcPlanes::IsNoPlanes(cr)) {
+                if (npc1 != null) {
+                    npc2 = cr;
+                }
+                else {
+                    npc1 = cr;
                 }
             }
 
             if (npc1 != null && npc2 != null) {
-                if (npc1.LastNpcDialog + TIME_WAIT < Game.SynchronizedTime && npc2.LastNpcDialog + TIME_WAIT < Game.SynchronizedTime) {
-                    npc1.LastNpcDialog = Game.SynchronizedTime;
-                    npc2.LastNpcDialog = Game.SynchronizedTime;
-                    // if(Game.Random(1,2)==1)
-                    //	return;
-                    any[] values = {firstStr, lastStr, waitSeconds, npc1.Id, npc2.Id};
-                    Game.StartTimeEvent(Time::Seconds(waitSeconds), NpcTimerDialog, values);
-                }
+                break;
             }
+        }
 
-            if (npc1 != null && npc2 == null) {
-                if (npc1.LastNpcDialog + TIME_WAIT < Game.SynchronizedTime) {
-                    npc1.LastNpcDialog = Game.SynchronizedTime;
-                    any[] values = {firstStr, lastStr, waitSeconds, npc1.Id, 0};
-                    Game.StartTimeEvent(Time::Seconds(waitSeconds), NpcTimerDialog, values);
-                }
+        if (npc1 != null && npc2 != null) {
+            if (npc1.LastNpcDialog + TIME_WAIT < Game.SynchronizedTime && npc2.LastNpcDialog + TIME_WAIT < Game.SynchronizedTime) {
+                npc1.LastNpcDialog = Game.SynchronizedTime;
+                npc2.LastNpcDialog = Game.SynchronizedTime;
+                // if(Game.Random(1,2)==1)
+                //	return;
+                any[] values = {firstStr, lastStr, waitSeconds, npc1.Id, npc2.Id};
+                Game.StartTimeEvent(Time::Seconds(waitSeconds), NpcTimerDialog, values);
+            }
+        }
+
+        if (npc1 != null && npc2 == null) {
+            if (npc1.LastNpcDialog + TIME_WAIT < Game.SynchronizedTime) {
+                npc1.LastNpcDialog = Game.SynchronizedTime;
+                any[] values = {firstStr, lastStr, waitSeconds, npc1.Id, 0};
+                Game.StartTimeEvent(Time::Seconds(waitSeconds), NpcTimerDialog, values);
             }
         }
     }
 }
 
-[[TimeEvent]]
+[[TimeEvent]] [[Async]]
 void NpcTimerDialog(any[] values)
 {
     if (values.length() == 5) {
@@ -289,13 +329,27 @@ void NpcTimerDialog(any[] values)
         int lastStr = values[1];
         int waitSec = values[2];
         Critter? npc1 = Game.GetCritter(values[3]);
+        if (npc1 == null) {
+            return;
+        }
+
         Critter? npc2;
         if (values[4] > 0) {
             npc2 = Game.GetCritter(values[4]);
         }
 
-        if (npc1 != null && npc1.IsAlive() && NpcPlanes::IsNoPlanes(npc1) && !Dialogs::IsTalking(npc1) && npc2 != null && npc2.IsAlive() &&
-            NpcPlanes::IsNoPlanes(npc2) && !Dialogs::IsTalking(npc2)) {
+        // Событие бежит в воркере: покрываем обоих нпц + их карту до любого обращения к состоянию.
+        Entity[] extra = {};
+        if (npc2 != null) {
+            extra.insertLast(npc2);
+        }
+
+        if (!Sync::LockCritterWithMapAndLocation(npc1, extra)) {
+            return;
+        }
+
+        if (npc1.IsAlive() && NpcPlanes::IsNoPlanes(npc1) && !Dialogs::IsTalking(npc1) && npc2 != null && npc2.IsAlive() && NpcPlanes::IsNoPlanes(npc2) &&
+            !Dialogs::IsTalking(npc2)) {
             Messaging::SayOnHead(npc1, TextPackKey(TextPackName::Text, "" + firstStr));
             firstStr++;
             if (firstStr > lastStr) {
@@ -309,7 +363,7 @@ void NpcTimerDialog(any[] values)
             return;
         }
 
-        if (npc1 != null && npc2 == null && NpcPlanes::IsNoPlanes(npc1) && !Dialogs::IsTalking(npc1)) {
+        if (npc2 == null && NpcPlanes::IsNoPlanes(npc1) && !Dialogs::IsTalking(npc1)) {
             Messaging::SayOnHead(npc1, TextPackKey(TextPackName::Text, "" + firstStr));
             firstStr++;
             if (firstStr > lastStr) {

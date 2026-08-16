@@ -1,0 +1,88 @@
+// Test_TestingFixtures — самопроверка фикстурного слоя харнесса: создание тестовой локации,
+// спавн NPC на её карте и автоочистка с контролем утечек (проверяется самим Testing::CleanupTest).
+namespace Test_TestingFixtures
+{
+
+#if SERVER
+
+[[ModuleInit]]
+void InitTestTestingFixtures()
+{
+    Game.OnTestingInit.Subscribe(OnTestingInit);
+}
+
+[[Event]]
+void OnTestingInit()
+{
+    Testing::RegisterTest("fixtures", "location_lifecycle", LocationLifecycle);
+    Testing::RegisterTest("fixtures", "npc_spawn", NpcSpawn);
+}
+
+// Ищет проходимый гекс вблизи центра карты (для спавна на произвольной карте)
+bool FindMovableHex(Map map, mpos& hex)
+{
+    mpos center = mpos(map.Size.width / 2, map.Size.height / 2);
+    for (int radius = 0; radius < 15; radius++) {
+        for (int dx = -radius; dx <= radius; dx++) {
+            for (int dy = -radius; dy <= radius; dy++) {
+                mpos probe = mpos(center.x + dx, center.y + dy);
+                if (probe.x > 0 && probe.y > 0 && int(probe.x) < map.Size.width - 1 && int(probe.y) < map.Size.height - 1 && map.IsHexMovable(probe)) {
+                    hex = probe;
+                    return true;
+                }
+            }
+        }
+    }
+
+    return false;
+}
+
+[[Async]]
+void LocationLifecycle(Testing::TestContext ctx)
+{
+    Location? loc = Testing::CreateTestLocation(ctx, Content::Location::desert_12);
+    if (loc == null) {
+        Testing::Fail(ctx, "Тестовая локация должна создаваться");
+        return;
+    }
+
+    if (!Testing::Expect(ctx, loc.GetMapCount() > 0, "У тестовой локации должна быть хотя бы одна карта")) {
+        return;
+    }
+
+    Map map = loc.GetMapByIndex(0);
+    Testing::Expect(ctx, map.Size.width > 0 && map.Size.height > 0, "Карта тестовой локации должна иметь размер");
+    // Уничтожение и контроль утечки выполняет Testing::CleanupTest после завершения теста
+}
+
+[[Async]]
+void NpcSpawn(Testing::TestContext ctx)
+{
+    Location? loc = Testing::CreateTestLocation(ctx, Content::Location::desert_12);
+    if (loc == null) {
+        Testing::Fail(ctx, "Тестовая локация должна создаваться");
+        return;
+    }
+
+    Map map = loc.GetMapByIndex(0);
+    mpos hex;
+    if (!Testing::Expect(ctx, FindMovableHex(map, hex), "На пустынной карте должен найтись проходимый гекс")) {
+        return;
+    }
+
+    Critter? npc = Testing::SpawnTestNpc(ctx, map, Content::Critter::Brahmin, hex);
+    if (npc == null) {
+        Testing::Fail(ctx, "NPC должен спавниться на проходимом гексе");
+        return;
+    }
+
+    if (!Testing::Expect(ctx, npc.IsAlive(), "Свежесозданный NPC должен быть жив")) {
+        return;
+    }
+
+    Testing::Expect(ctx, map.GetCritters(CritterFindType::NonDeadNpc).length() >= 1, "NPC должен быть виден в списке криттеров карты");
+}
+
+#endif
+
+}

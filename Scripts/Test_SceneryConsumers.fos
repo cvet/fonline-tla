@@ -1,0 +1,125 @@
+// Test_SceneryConsumers — чистые тесты декодирования числовых SceneryParams потребителями.
+namespace Test_SceneryConsumers
+{
+
+#if SERVER
+
+[[ModuleInit]]
+void InitTestSceneryConsumers()
+{
+    Game.OnTestingInit.Subscribe(OnTestingInit);
+}
+
+[[Event]]
+void OnTestingInit()
+{
+    Testing::RegisterTest("scenery_consumers", "energy_barrier_terminal_params", EnergyBarrierTerminalParams);
+    Testing::RegisterTest("scenery_consumers", "se_android_boxes_params", SeAndroidBoxesParams);
+    Testing::RegisterTest("scenery_consumers", "npc_dialog_trigger_params", NpcDialogTriggerParams);
+}
+
+void EnergyBarrierTerminalParams(Testing::TestContext ctx)
+{
+    int netNum = 0;
+    int hackBonus = 0;
+    int hitBonus = 0;
+    hstring[] valid = {"1".hstr(), "-100".hstr(), "100".hstr()};
+    if (!Testing::Expect(ctx,
+                         EnergyBarier::TryDecodeTerminalParams(valid, netNum, hackBonus, hitBonus),
+                         "Терминал принимает три канонических знаковых числа")) {
+        return;
+    }
+    if (!Testing::Expect(ctx, netNum == 1 && hackBonus == -100 && hitBonus == 100, "Терминал сохраняет исходные числовые значения")) {
+        return;
+    }
+
+    netNum = 7;
+    hackBonus = 8;
+    hitBonus = 9;
+    hstring[] malformed = {"1".hstr(), "20x".hstr(), "0".hstr()};
+    if (!Testing::Expect(ctx,
+                         !EnergyBarier::TryDecodeTerminalParams(malformed, netNum, hackBonus, hitBonus) && netNum == 7 && hackBonus == 8 && hitBonus == 9,
+                         "Ошибочный параметр отклоняется без частичного изменения выходов")) {
+        return;
+    }
+
+    hstring[] missing = {"1".hstr(), "0".hstr()};
+    hstring[] invalidNet = {"0".hstr(), "0".hstr(), "0".hstr()};
+    hstring[] invalidBonus = {"1".hstr(), "101".hstr(), "0".hstr()};
+    Testing::Expect(ctx,
+                    !EnergyBarier::TryDecodeTerminalParams(missing, netNum, hackBonus, hitBonus) &&
+                        !EnergyBarier::TryDecodeTerminalParams(invalidNet, netNum, hackBonus, hitBonus) &&
+                        !EnergyBarier::TryDecodeTerminalParams(invalidBonus, netNum, hackBonus, hitBonus),
+                    "Терминал отклоняет неверную арность, сеть и бонусы вне диапазона");
+}
+
+void SeAndroidBoxesParams(Testing::TestContext ctx)
+{
+    int chance = -1;
+    hstring[] zeroChance = {"0".hstr()};
+    if (!Testing::Expect(ctx, SeAndroid::TryDecodeBoxesParams(zeroChance, chance) && chance == 0, "Нулевая граница шанса допустима")) {
+        return;
+    }
+
+    hstring[] fullChance = {"100".hstr()};
+    if (!Testing::Expect(ctx, SeAndroid::TryDecodeBoxesParams(fullChance, chance) && chance == 100, "Стопроцентная граница шанса допустима")) {
+        return;
+    }
+
+    hstring[] negative = {"-1".hstr()};
+    hstring[] overflow = {"101".hstr()};
+    hstring[] malformed = {"80x".hstr()};
+    hstring[] extra = {"80".hstr(), "1".hstr()};
+    Testing::Expect(ctx,
+                    !SeAndroid::TryDecodeBoxesParams(negative, chance) && !SeAndroid::TryDecodeBoxesParams(overflow, chance) &&
+                        !SeAndroid::TryDecodeBoxesParams(malformed, chance) && !SeAndroid::TryDecodeBoxesParams(extra, chance),
+                    "Ящики отклоняют шанс вне 0..100, мусорный суффикс и неверную арность");
+}
+
+void NpcDialogTriggerParams(Testing::TestContext ctx)
+{
+    int npcRole = 0;
+    int firstStr = 0;
+    int lastStr = 0;
+    int waitSeconds = 0;
+    int radius = 0;
+    hstring[] valid = {"333".hstr(), "8040".hstr(), "8042".hstr(), "10".hstr(), "30".hstr()};
+    if (!Testing::Expect(ctx,
+                         NpcDialog::TryDecodeTriggerParams(valid, npcRole, firstStr, lastStr, waitSeconds, radius),
+                         "Штатные параметры authored-триггера декодируются")) {
+        return;
+    }
+    if (!Testing::Expect(ctx,
+                         npcRole == 333 && firstStr == 8040 && lastStr == 8042 && waitSeconds == 10 && radius == 30,
+                         "Все пять полей триггера сохраняют числовые значения")) {
+        return;
+    }
+
+    hstring[] reversedRange = {"333".hstr(), "8042".hstr(), "8040".hstr(), "10".hstr(), "30".hstr()};
+    hstring[] zeroDelay = {"333".hstr(), "8040".hstr(), "8042".hstr(), "0".hstr(), "30".hstr()};
+    hstring[] longDelay = {"333".hstr(), "8040".hstr(), "8042".hstr(), "61".hstr(), "30".hstr()};
+    hstring[] zeroRadius = {"333".hstr(), "8040".hstr(), "8042".hstr(), "10".hstr(), "0".hstr()};
+    hstring[] wideRadius = {"333".hstr(), "8040".hstr(), "8042".hstr(), "10".hstr(), "101".hstr()};
+    if (!Testing::Expect(ctx,
+                         !NpcDialog::TryDecodeTriggerParams(reversedRange, npcRole, firstStr, lastStr, waitSeconds, radius) &&
+                             !NpcDialog::TryDecodeTriggerParams(zeroDelay, npcRole, firstStr, lastStr, waitSeconds, radius) &&
+                             !NpcDialog::TryDecodeTriggerParams(longDelay, npcRole, firstStr, lastStr, waitSeconds, radius) &&
+                             !NpcDialog::TryDecodeTriggerParams(zeroRadius, npcRole, firstStr, lastStr, waitSeconds, radius) &&
+                             !NpcDialog::TryDecodeTriggerParams(wideRadius, npcRole, firstStr, lastStr, waitSeconds, radius),
+                         "Перевёрнутый диапазон, небезопасные задержка и радиус отклоняются")) {
+        return;
+    }
+
+    hstring[] missing = {"333".hstr(), "8040".hstr(), "8042".hstr(), "10".hstr()};
+    hstring[] malformed = {"333".hstr(), "8040x".hstr(), "8042".hstr(), "10".hstr(), "30".hstr()};
+    hstring[] zeroRole = {"0".hstr(), "8040".hstr(), "8042".hstr(), "10".hstr(), "30".hstr()};
+    Testing::Expect(ctx,
+                    !NpcDialog::TryDecodeTriggerParams(missing, npcRole, firstStr, lastStr, waitSeconds, radius) &&
+                        !NpcDialog::TryDecodeTriggerParams(malformed, npcRole, firstStr, lastStr, waitSeconds, radius) &&
+                        !NpcDialog::TryDecodeTriggerParams(zeroRole, npcRole, firstStr, lastStr, waitSeconds, radius),
+                    "Триггер отклоняет неверную арность, мусорные числа и нулевую роль");
+}
+
+#endif
+
+}

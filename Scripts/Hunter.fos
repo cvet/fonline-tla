@@ -195,18 +195,40 @@ EventResult HoughBarter(Critter cr, Critter barterCr, bool attach, int barterCou
 }
 
 // Удаляет у владельца ранее выданные при барте предметы, если он их так и не забрал (values[0] — id криттера).
-[[TimeEvent]]
+[[TimeEvent]] [[Async]]
 void DestroyItemsHough(any[] values)
 {
+    if (values.length() < 2) {
+        return;
+    }
+
     Critter? cr = Game.GetCritter(values[0]);
-    if (cr != null) {
-        for (int i = 1; i < values.length(); i++) {
-            Item? item = Game.GetItem(values[i]);
-            if (item != null && item.CritterId == cr.Id) {
-                Game.DestroyItem(item);
-            }
+    if (cr == null) {
+        return;
+    }
+
+    Item[] items = {};
+    Entity[] cover = {cr};
+    for (int i = 1; i < values.length(); i++) {
+        Item? item = Game.GetItem(values[i]);
+        if (item != null) {
+            items.insertLast(item);
+            Sync::AddUniqueEntity(cover, item);
         }
     }
+
+    if (!Sync::Lock(cover)) {
+        return;
+    }
+
+    Item[] ownedItems = {};
+    for (int i = 0; i < items.length(); i++) {
+        if (items[i].CritterId == cr.Id) {
+            ownedItems.insertLast(items[i]);
+        }
+    }
+
+    Game.DestroyItems(ownedItems);
 }
 
 // Инициализация торговца Лоуренса: только наличные, без кражи/лута/дропа, плюс лимиты на покупку/продажу.
@@ -409,9 +431,12 @@ void Lure(Critter cr, TimeEventContext event)
         if (map != null) {
             Critter[] npc = map.GetCrittersInRadius(cr.Hex, 5, CritterFindType::NonDeadNpc);
             if (!npc.isEmpty()) {
-                Messaging::Say(npc[Game.Random(0, npc.length() - 1)],
-                               TextPackKey(TextPackName::Text, "" + (STR_FOO)),
-                               "|name:" + PlayerRegistration::GetPlayerName(cr.Id));
+                Critter speaker = npc[Game.Random(0, npc.length() - 1)];
+                Entity[] cover = Sync::Snapshot();
+                Sync::AddUniqueEntity(cover, speaker);
+                if (Sync::Lock(cover) && cr.MapId == map.Id && speaker.MapId == map.Id && speaker.IsAlive() && Game.GetDistance(cr, speaker) <= 5) {
+                    Messaging::Say(speaker, TextPackKey(TextPackName::Text, "" + (STR_FOO)), "|name:" + PlayerRegistration::GetPlayerName(cr.Id));
+                }
             }
         }
 
@@ -424,39 +449,127 @@ void Lure(Critter cr, TimeEventContext event)
     return;
 }
 
+// Стабилизирует обе карты квестовой локации, до пяти живых враждебных крыс и всех
+// живых игроков/союзников карты назначения. Registry scan возвращает непокрытые
+// хэндлы, поэтому после ожидания перепроверяем роли, живучесть и текущие карты.
+[[Async]]
+bool LockRatMoveGraph(Location loc, Map? & sourceMap, Map? & destinationMap, Critter[] & rats, Critter[] & allies)
+{
+    sourceMap = null;
+    destinationMap = null;
+    rats.clear();
+    allies.clear();
+
+    for (int attempt = 0; attempt < 16; attempt++) {
+        if (!Sync::Lock(loc)) {
+            return false;
+        }
+
+        Map map = loc.GetMapByIndex(1);
+        Map mapTo = loc.GetMapByIndex(0);
+        ident mapId = map.Id;
+        ident mapToId = mapTo.Id;
+        if (!Sync::Lock(loc, map, mapTo)) {
+            continue;
+        }
+        if (loc.GetMapByIndex(1).Id != mapId || loc.GetMapByIndex(0).Id != mapToId) {
+            continue;
+        }
+
+        Critter[] currentRats = map.GetCritters(CritterProperty::NpcRole, HostileLocationQuest::NPC_ROLE_HOSTILE, CritterFindType::NonDeadNpc);
+        if (currentRats.length() > 5) {
+            currentRats.resize(5);
+        }
+        Critter[] currentAllies = mapTo.GetCritters(CritterFindType::NonDeadPlayers);
+        currentAllies.insertLast(mapTo.GetCritters(CritterProperty::NpcRole, HostileLocationQuest::NPC_ROLE_ALLY, CritterFindType::NonDeadNpc));
+
+        Critter[] participants = currentRats.clone();
+        participants.insertLast(currentAllies);
+        Entity[] fixedCover = {loc, map, mapTo};
+        if (!Sync::LockCrittersWithMaps(participants, fixedCover)) {
+            continue;
+        }
+
+        if (loc.GetMapByIndex(1).Id != mapId || loc.GetMapByIndex(0).Id != mapToId) {
+            continue;
+        }
+
+        bool topologyChanged = false;
+        for (int i = 0; i < currentRats.length(); i++) {
+            if (currentRats[i].MapId != mapId || currentRats[i].IsDead() || currentRats[i].NpcRole != HostileLocationQuest::NPC_ROLE_HOSTILE) {
+                topologyChanged = true;
+                break;
+            }
+        }
+        if (topologyChanged) {
+            continue;
+        }
+        for (int i = 0; i < currentAllies.length(); i++) {
+            if (currentAllies[i].MapId != mapToId || currentAllies[i].IsDead() ||
+                (!currentAllies[i].ControlledByPlayer && currentAllies[i].NpcRole != HostileLocationQuest::NPC_ROLE_ALLY)) {
+                topologyChanged = true;
+                break;
+            }
+        }
+        if (topologyChanged) {
+            continue;
+        }
+
+        sourceMap = map;
+        destinationMap = mapTo;
+        rats = currentRats;
+        allies = currentAllies;
+        return true;
+    }
+
+    return false;
+}
+
 // Переносит до 5 крыс с карты-источника на целевую карту, делает их бездомными и натравливает на игроков/союзников.
-[[TimeEvent]]
+[[TimeEvent]] [[Async]]
 void MoveRat(any value)
 {
     Location? loc = Game.GetLocation(ident(value));
-    if (loc != null) {
-        Map map = loc.GetMapByIndex(1);
-        Map mapTo = loc.GetMapByIndex(0);
-        Critter[] rats = map.GetCritters(CritterFindType::Npc);
-        Critter[] allies = mapTo.GetCritters(CritterFindType::Any);
-        if (!rats.isEmpty()) {
-            for (int i = 0; i < rats.length() && i < 5; i++) {
-                Critter cr = rats[i];
-                mpos hex;
-                Entrance::MapGetEntryCoords(mapTo, ENTRY_SPAWN, 0, hex);
-                if (Entrance::GetFreeHex(mapTo, 3, hex)) {
-                    cr.TransferToMap(mapTo, hex, HDIR_Random);
-                    cr.IsNoHome = true;
-                    cr.StartTimeEvent(Time::Seconds(30), Move);
-                    for (int j = 0; j < allies.length(); j++) {
-                        Critter crit = allies[j];
-                        if (crit.ControlledByPlayer || crit.NpcRole == 401) {
-                            NpcPlanes::AddAttackPlane(cr, 0, crit);
-                            EnemyStack::AddEnemyToStack(cr, crit.Id);
-                        }
-                    }
-                }
-            }
+    if (loc == null) {
+        return;
+    }
 
-            // SavedDeferredCall — отложенный вызов должен переживать рестарт сервера (breadcrumb из исходника).
-            Game.StartTimeEvent(Time::Seconds(Game.Random(1, 3)), MoveRat, value);
+    Map? map;
+    Map? mapTo;
+    Critter[] rats = {};
+    Critter[] allies = {};
+    if (!LockRatMoveGraph(loc, map, mapTo, rats, allies) || map == null || mapTo == null || rats.isEmpty()) {
+        return;
+    }
+
+    Entity[] graphCover = Sync::Snapshot();
+    for (int i = 0; i < rats.length(); i++) {
+        Critter cr = rats[i];
+        mpos hex;
+        Entrance::MapGetEntryCoords(mapTo, ENTRY_SPAWN, 0, hex);
+        if (!Entrance::GetFreeHex(mapTo, 3, hex)) {
+            continue;
+        }
+        if (!Sync::LockForTransferToMap(cr, mapTo, graphCover)) {
+            return;
+        }
+
+        cr.TransferToMap(mapTo, hex, HDIR_Random);
+        if (cr.MapId != mapTo.Id) {
+            return;
+        }
+
+        cr.IsNoHome = true;
+        cr.StartTimeEvent(Time::Seconds(30), Move);
+        for (int j = 0; j < allies.length(); j++) {
+            Critter crit = allies[j];
+            NpcPlanes::AddAttackPlane(cr, 0, crit);
+            EnemyStack::AddEnemyToStack(cr, crit.Id);
         }
     }
+
+    // SavedDeferredCall — отложенный вызов должен переживать рестарт сервера (breadcrumb из исходника).
+    Game.StartTimeEvent(Time::Seconds(Game.Random(1, 3)), MoveRat, value);
 }
 
 // Периодически ведёт перенесённую крысу к точке выхода ENTRY_MOVETO, пока та жива и без активных планов.

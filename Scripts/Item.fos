@@ -30,11 +30,16 @@ EventResult UseAutoCloseDoor(Item door, Critter cr, CritterProperty skill)
     return EventResult::StopChain;
 }
 
-[[TimeEvent]]
+void RetryAutoCloseDoor(any value, timespan delay)
+{
+    Game.StartTimeEvent(delay, AutoCloseDoor, value); //SavedDeferredCall
+}
+
+[[TimeEvent]] [[Async]]
 void AutoCloseDoor(any value)
 {
     Item? door = Game.GetItem(value);
-    if (door == null) {
+    if (door == null || !Sync::Lock(door)) {
         return;
     }
 
@@ -48,21 +53,61 @@ void AutoCloseDoor(any value)
         return;
     }
 
+    if (!Sync::Lock(door, map)) {
+        return;
+    }
+
+    // Пока воркер ожидал карту, дверь могла сменить владельца или позицию.
+    mpos lockedHex;
+    Map? lockedMap = door.GetMapPosition(lockedHex);
+    if (lockedMap !is map || lockedHex != hex) {
+        RetryAutoCloseDoor(value, Time::Seconds(1));
+        return;
+    }
+
     Critter? cr = map.GetCritterOnHex(hex);
     if (cr != null) {
+        // Game.Sync заменяет весь набор: дверь и карта должны остаться в покрытии вместе с криттером.
+        if (!Sync::Lock(door, map, cr)) {
+            RetryAutoCloseDoor(value, Time::Seconds(1));
+            return;
+        }
+
+        lockedMap = door.GetMapPosition(lockedHex);
+        if (lockedMap !is map || lockedHex != hex || map.GetCritterOnHex(hex) !is cr) {
+            RetryAutoCloseDoor(value, Time::Seconds(1));
+            return;
+        }
+
         if (cr.IsAlive()) {
-            Game.StartTimeEvent(Time::Seconds(3), AutoCloseDoor, value); //SavedDeferredCall
+            RetryAutoCloseDoor(value, Time::Seconds(3));
             return;
         }
         else {
             // Попытка сдвинуть труп. Если не получится, дверь поверх трупа закроется
             cr.TransferToMap(map, mpos(hex.x - 1, hex.y), cr.Dir);
+
+            // TransferToMap запускает вложенные события: перед дальнейшей работой восстанавливаем
+            // скриптовое покрытие двери и карты и повторно проверяем их связь.
+            if (!Sync::Lock(door, map)) {
+                return;
+            }
+
+            lockedMap = door.GetMapPosition(lockedHex);
+            if (lockedMap !is map || lockedHex != hex) {
+                RetryAutoCloseDoor(value, Time::Seconds(1));
+                return;
+            }
+
+            Critter? postMoveCr = map.GetCritterOnHex(hex);
+            if (postMoveCr != null && postMoveCr !is cr) {
+                RetryAutoCloseDoor(value, Time::Seconds(3));
+                return;
+            }
         }
     }
 
-    if (!Lockers::SwitchLocker(door, false)) {
-        Game.StartTimeEvent(Time::Seconds(3), AutoCloseDoor, value); //SavedDeferredCall
-    }
+    Lockers::SwitchLocker(door, false);
 }
 
 // Дверь, которая не открывается стандартными способами
@@ -111,13 +156,15 @@ void SetDestroyItem(Item item, int delHours)
     Game.StartTimeEvent(Time::GameHours(delHours), DeferredDestroyItem, item.Id); //SavedDeferredCall
 }
 
-[[TimeEvent]]
+[[TimeEvent]] [[Async]]
 void DeferredDestroyItem(any value)
 {
     Item? item = Game.GetItem(value);
-    if (item != null) {
-        Game.DestroyItem(item);
+    if (item == null || !Sync::LockItemWithParent(item)) {
+        return;
     }
+
+    Game.DestroyItem(item);
 }
 
 // Охраняемая дверь или другой предмет

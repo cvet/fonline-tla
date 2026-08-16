@@ -103,9 +103,8 @@ The active phases above are complete. What is intentionally not changed, and why
 
 - **Idioms — done where it applies.** Magic text ids were named in all active modules (Behemoth and
   the live map/quest modules). The residual sits in **dead code** (events under the disabled
-  `GameEvent::DeclareEvents`), **generated** `GuiScreens.fos` (validator-excluded), one **missing-string
-  ref** (`NrWriKidnap.fos:437` → text id 3354 absent from the pack — a separate content bug), and a
-  handful of **single-use** ids where a named const adds no readability. `flag-soups → enums` is gated
+  `GameEvent::DeclareEvents`), **generated** `GuiScreens.fos` (validator-excluded), and a handful of
+  **single-use** ids where a named const adds no readability. `flag-soups → enums` is gated
   by the plan's "non-serialized only" rule: the discriminator groups (`AI_PLANE_*`→`plane.Type`→
   serialized `Planes[]`, `TYPE_ORDER_*`/`ORDER_TYPE_*`→properties, `HF_*`/`MF_*`/`USE_*`→bitwise) are
   all serialized or bitwise, so none qualify. The two `any`/`double` `Tla::Clamp` sites are correct as
@@ -174,7 +173,8 @@ live in [ScriptStyle.md](ScriptStyle.md); this section is the **plan and running
   translate/add Russian block comments → reorganize structure (radel 4) → format → naming →
   idiom/nullability cleanup → in-pass bug fixes → verify. Batches sized small (4–6 modules)
   to stay under server rate limits and keep review tractable. *(Status: pending.)*
-- **R2-3 — Tests.** Per the testing decision below. *(Status: blocked on owner decision.)*
+- **R2-3 — Tests.** Per the testing decision below. *(Status: initial harness and seven suites operational;
+  expand coverage with each gameplay batch.)*
 
 ## Testing strategy — decided (2026-06-20): B, lightweight harness
 
@@ -182,8 +182,8 @@ Owner chose tier **B**. Port a compact `Testing.fos` from lf-7 down to TLA's sys
 (RegisterTest / Expect / Pass / Fail + fixtures: isolated location, spawn NPC/player/item,
 cleanup with leak check), gated by a `Testing.Enabled` setting, plus a `Launch :: Tests`
 task. Then `Test_*` suites starting with pure helpers (Reputation, Math/Flags, GameTime,
-WeaponHelpers), growing into critical server flows. Done as phase R2-3 after the polish
-batches establish stable module shapes.
+WeaponHelpers), growing into critical server flows. The initial harness is now implemented;
+new suites remain an incremental part of each refactoring batch.
 
 For the record, the tiers considered:
 
@@ -256,10 +256,1096 @@ breadcrumbs untranslated by design. Code-equivalence re-verified (still exactly 
 code; giants comment-only) + Compile + Bake + `--ratchet` green. So **every non-generated `Scripts/*.fos`
 now has a Russian header and Russian comments.**
 
-Those translation agents surfaced **69 more (unverified) flags**. Notable candidates for a future verify+fix
-pass (NOT applied): ChosenActions `cast<AbstractItem>` on possibly-null `GetItem` (nullability); Poker
-`ModChFr / GameNum` possible divide-by-zero (GameNum inits 0); ClientMain `SexTagFemale` double-assign around
-an empty `if (cr.IsChosen) {}`; Worldmap `CheckCompareAnyVar` is a byte-for-byte duplicate of
-`CheckCompareAnyParam` (the "Var" variant likely meant to read a different source); MapperMain `ConvertMaps`
-fail-counter never incremented. Plus content-table smells in Worldmap (weight-0 encounters, duplicate
-location pids, reused special-encounter ids) — designer review. Saved to `Build`/scratch.
+Those translation agents surfaced **69 more (unverified) flags**. The five representative candidates
+originally listed here were verified in the follow-up batch below. The remaining content-table smells in
+Worldmap (weight-0 encounters, duplicate location pids, reused special-encounter ids) still need designer
+review; the full set remains in `Build`/scratch.
+
+**R2-2 follow-up verified batch (2026-07-10).** The five representative flags were independently checked
+against their consumers, engine contracts, and git history before applying anything:
+
+- **Worldmap `CheckChecks` AND-chain restored.** `CHECK_RANDOM`, `CHECK_HOUR`, `CHECK_PARAM_ANY`, and
+  `CHECK_PROPERTY_ANY` returned success from the whole function instead of continuing to later checks. Three
+  authored chains were affected: the android encounter ignored `SpecialAndroid`, the dead SF paladin ignored
+  the armour counter and player level, and the racing encounter ignored Sneak / the one-shot trap property.
+  The cases now return only on failure and otherwise continue. *[encounter/quest availability — playtest]*
+- **ClientMain chosen item views restored.** The obsolete `EngineCallback_ItemChanged(false)` had been removed
+  during the GUI migration but its empty `if (cr.IsChosen)` shell remained. It now refreshes the five chosen-side
+  item-view collections through `Gui::RefreshItemViewsByUserDataExts`; the duplicate `SexTagFemale` assignment
+  was removed.
+- **ChosenActions nullable casts made explicit.** The item lookup and the expected-to-fail `ProtoItem`→`Item`
+  downcast now use `cast<T?>`, matching the strong-nullability contract without changing runtime behavior.
+- **Vault 13 cleanup.** `V13ZGuard::DenyAccess` had an inverted guard: it did nothing for an allowed player and
+  attempted `removeAt(-1)` for a disallowed one. It now resolves the index once and removes only a present entry
+  (currently latent: the helper has no authored callers). Eight behavior-equivalent boolean-return warnings were
+  also removed across `V13ZGuard` and `V13Goris`.
+
+**Refuted/stale flags:** Poker's `ModChFr / GameNum` cannot see zero in a valid game/save flow (`InitGame`
+establishes 1 before the only caller and the 48-field blob preserves it); the duplicate Worldmap Param/Property
+helpers are intentional legacy names over the unified `CritterProperty` storage; MapperMain already increments
+the conversion failure counter.
+
+**Verification:** formatter check + nullable validator + quality `--ratchet` → Compile AngelScript → ForceBake
+(550 maps) → `TLA_Server`, `TLA_Client`, and `TLA_ServerHeadless` builds → headless smoke to
+`"Start server complete!"` with no exceptions. Engine unit tests exited 0. A focused AI-control client smoke
+registered a fresh character, entered `repl1`, and observed the chosen/map/inventory path without client or
+server exceptions. Not committed (owner reviews).
+
+**R2-2 crafting follow-up (2026-07-10).** A focused re-audit of the FixBoy triple protocol
+`(pid, count, orNext)` confirmed that `orNext = 1` joins the current entry to the next one as an alternative.
+The server had three divergent decoders for that protocol, so OR requirements were broken in different ways:
+
+- `NeedTools` checked only the first alternative. This made the later tools unusable in four live recipes:
+  leather armour (id 1), leather armour Mk II (id 2), cured leather armour (id 4), and sharpened pole (id 82).
+- The currently latent resource-OR path required every alternative during validation, used `>` instead of
+  `>=` during consumption, and never considered the terminal alternative. Validation and consumption now use
+  one group interpretation; resources consume the first sufficient alternative and tools remain reusable.
+- The FixBoy GUI dropped the final recipe because its list loop rejected an exact five-field tail record. Its
+  requirement text also read the connector flag from the wrong triple, used hard-coded Russian `и` / `или` on
+  the English client, and relabelled resources as tools after refresh. The `.fogui` source and generated
+  `GuiScreens.fos` now agree, use localized `StrAnd` / `STR_OR`, and preserve the final recipe.
+
+The live craft regression exposed an independent multithreading bug: the deferred
+`Parameters::UpdateExperienceLevel` time event did not inherit the crafting RPC's sync cover and accessed the
+critter from a worker without a lock. It is now `[[Async]]` and locks that critter before calculating level,
+skill points, health, and perk awards. The narrow critter-only lock matches the callback's actual access set.
+
+**Verification:** formatter/quality/nullability checks and Compile AngelScript passed; ForceBake rebuilt 550
+maps; `TLA_Server`, `TLA_Client`, and `TLA_ServerHeadless` built; startup reached `"Start server complete!"`.
+A fresh AI-control character on `repl1`, owning only the last tool alternative (`combat_knife`), crafted recipe
+1: exact resources went to zero, the tool remained, and one leather armour appeared. A threshold run advanced
+experience 900→1050, level 1→2, and max HP 33→38. The final server log contained no exception,
+access-without-sync, error, or assertion entries. Not committed (owner reviews).
+
+## R2-3 harness and barter/GUI regression batch (2026-07-11)
+
+The lightweight `Testing.fos` harness is live behind `Testing.Enabled`, with the
+`Launch :: TLA_Tests [windows]` task, isolated location/NPC fixtures, cleanup, filtering,
+timeouts, and exit status. Seven suites now cover Flags, GameTime, Stdlib serialization,
+fixtures, WeaponHelpers, barter pricing/count bounds, and the NpcPlanes null-entry regression.
+The final server run completed **24 passed, 0 failed, 0 skipped**.
+
+The barter/container batch added authoritative transfer sessions, stale-RPC guards, duplicate/count/slot
+validation, bounded 64-bit cost and weight arithmetic, zero-cost sale rejection, shared client/server pricing,
+and an MCP `Dialog → Barter → Dialog` flow. A live run bought `healing_powder` for 27 caps, refreshed the
+same session, and returned to the same dialog. The GUI generator now enables draw callbacks for every authored
+`OnDraw` and for legacy sibling-cell `ItemView`s; this restored Barter panels, Inventory equipment slots,
+Credits motion, and other dynamic content.
+
+Screenshot verification now combines engine TGA integrity checks with per-screen ROI oracles. The final live
+matrix passed Options, Inventory, Character, PipBoy, FixBoy, Menu, and Credits (7/7); the barter oracle also
+requires four item panels and both totals. The quest runner completed Cassidy's monotonic 0→1→2 cycle through
+the exact `vault_city/vcity_courtyard` map target and reports how many transitions were genuinely exercised.
+Compile AngelScript, ForceBake (550 maps), native server/client builds, Python/unit/static MCP checks, and
+script quality gates were green for the batch. Not committed (owner reviews).
+
+## R2-3 contextual GUI/container mechanics batch (2026-07-12)
+
+The second R2-3 mechanics pass hardened the real server contracts behind contextual windows instead of
+treating screenshot setup as a client-only concern:
+
+- Container transfers now validate the complete session/transfer tuple, current map and range, ownership,
+  `NoLoot`/`NoSteal`, opened state, count, authoritative AP, and destination capacity. Volume/count arithmetic
+  is overflow-safe; moving a container into itself or one of its descendants is rejected. The server takes the
+  full synchronization cover before resolving the operation, closes stale sessions/snapshots, and the client
+  suppresses duplicate clicks until an authoritative refresh clears its pending marker.
+- `UseItemOn` now requires an item owned by the acting critter, accepts at most one real target, checks the
+  correct self/target capability, resolves targets only on the current map under the full lock cover, and keeps
+  the historical null-target contract for self-use. This fixes the Timer path that previously passed the chosen
+  as an explicit target and therefore failed to activate dynamite.
+- Radio editing now writes the parsed channel back on Enter, clamps it to `0..65535`, and keeps fixed-channel
+  radios read-only. Elevator validation rejects invalid types/maps/levels, fixes the level-count boundary and
+  Military 3/4/6 display mapping, and gives its buttons/indicator valid geometry. DialogBox now has a dynamic
+  layout, bounded answer count, expiry/session validation, and a three-argument answer contract; delayed answers
+  cannot act on a newer prompt.
+
+The AI-control surface grew with the same contracts. `tla_use_item` accepts only canonical, self-only
+`timer:<seconds>` values in `1..599`. `tla_ui_answer` accepts an exact `answer_N`/`level_N` or a zero-based
+index; DialogBox answers must include `expectedSession` from the same observation, so stale captures are
+rejected. `tla_qa_show_dialog_box` supplies a gated, server-backed two-answer fixture with a safe no-op choice.
+Map/inventory observation now includes real ownership, stackability, cost/weight, use/pick-up/timer capability,
+and door/container/locker state, allowing automation to reject unsafe candidates from data rather than proto-id
+guesses.
+
+`tla_show_context_screen` builds the genuine parameter contract for `SkillBox`, `Aim`, `Split`, `Timer`, and
+`Use`. `tla_context_gui_playtest.py` combines those with mechanic-owned `PickUp`, `Radio`, `Elevator`, and
+`DialogBox` for a nine-window, ROI-aware screenshot matrix. It requires owned/capable items, a safe visible
+container, an owned radio, an authored elevator trigger, and the gated DialogBox fixture; it does not preserve an
+explicit-id escape hatch around those checks. The `Aim` oracle follows the authored interface and recognizes its
+green labels (rather than the gold text used by several other windows).
+
+Live graphical verification is complete. A standalone DirectX client passed all eight Arroyo contexts available
+there (`SkillBox`, `Aim`, `Split`, `Timer`, `Use`, `PickUp`, `Radio`, and `DialogBox`) and a dedicated Mariposa
+run passed `Elevator`, for **9/9** contextual windows overall. The actual Timer command consumed one dynamite
+stack entry and created one `active_dynamite`; selecting semantic answer `level_2` in the real three-button
+Military elevator transferred the chosen from `mariposa_level1` to `mariposa_level2`. Embedded-headless captures
+were valid TGA files but contained a black framebuffer, so visual regression capture uses the standalone graphical
+client; the headless client remains suitable for non-visual protocol and gameplay checks.
+
+The same follow-up removed a systematic scenery-parameter migration hazard: authored `SceneryParams` are strings,
+so numeric fields are now parsed as signed decimal text (with explicitly allowed legacy `@` prefixes) instead of
+using string hashes, and content ids are normalized without treating a textual `0` sentinel as a proto id. The new
+content validator scanned **275 maps**, **169599 item sections**, and **141 known scenery contracts** with
+**0 errors**. It reports **3 non-failing warnings** for ambiguous legacy `Scenery::TransferToMap` records whose map
+proto is passed to an API that expects a location proto; these require content-owner decisions rather than an
+automatic rewrite.
+
+**Confirmed verification:** MCP Python discovery **89/89**, GUI-generator/formatter units **6/6**, and static
+MCP smoke **PASS**; formatter, quality-ratchet, nullable, and AngelScript compilation gates passed; ForceBake
+rebuilt **550 maps**; `TLA_Server`, `TLA_ServerHeadless`, and `TLA_Client` built; the script harness completed
+**61/61**; native `TLA_UnitTests` exited **0** in **433.7 s**. Not committed (owner reviews).
+
+## R2-3 trigger synchronization and prompt-safety follow-up (2026-07-13)
+
+A live Silo run exposed a strict-sync failure that static compilation could not see: the authored multihex trigger
+did fire, but `Silo::Transit` read `Location.SiloMissileLaunched` without holding the location. The callback is now
+async, locks the player/current map/location/target map as one cover, and revalidates the topology before transfer.
+The corrected mechanic was exercised from `q_silo2` at `39,83` through the trigger to `q_silo3` entry 1 at
+`116,77`.
+
+The same audit fixed eight other location-aware `ItemTrigger` callbacks in `GameEventReplicator`, `KlamTrappers`,
+`ModocVampire`, `NrWriKidnap`, and `SeAndroid`. Their covers now include the source and target maps, locations,
+affected NPCs, doors/containers, and inventory items as required. Script quality gained the zero-tolerance
+`item-trigger-location-sync` check plus four validator unit tests, so a callback that calls `GetLocation()` without
+both `[[Async]]` and an explicit `Sync::` cover is rejected before bake.
+
+Three NPC AI modules (`PatternMedic`, `PatternSlayer`, and `PatternTerm`) also had nullable global pattern handles
+instead of constructed instances; explicit construction removes the null dereferences seen while generating a fresh
+`silo_base`. A clean repeat location creation contained no pattern, null, sync, assertion, or error markers.
+
+DialogBox dispatch was hardened beyond the safe QA answer. NCR brahmin confirmation now locks the player, target
+brahmin, and both current maps with revalidation. Purgatory invite confirmation uses a dedicated
+`PurgatoryInviteSync` snapshot/cover for battle state, target/source maps, request critters, inventories, and the team
+container. The invite callback's `transit` flag is now a genuine `bool&` inout parameter, so `transit=false` actually
+prevents the unintended direct map transfer. Observed DialogBox buttons expose `answer_0` as
+`role=confirm, dangerous=true` and `answer_1` as the safe cancel choice.
+
+The scenery content validator now matches the runtime decoder bounds exactly (positive roles/net ids, NPC dialog
+line/radius lower bounds, wait `1..60`, radius `1..100`). Its **8/8** tests cover both valid boundaries and rejected
+runtime-invalid records; the full scan remains **275 maps / 169599 item sections / 141 contracts / 0 errors**, with
+the same three owner-decision `TransferToMap` warnings.
+
+**Final verification:** AngelScript compilation, formatter check, quality ratchet, nullable validation, ForceBake
+(**550 maps**), and `TLA_Server`/`TLA_ServerHeadless`/`TLA_Client` builds passed. The script harness completed
+**62/62**; MCP discovery completed **90/90** plus static smoke PASS; GUI/formatter/content-quality units completed
+**14/14**, and the new script-quality validator units completed **4/4**. A fresh live DialogBox cancel plus the Silo
+transition completed with no server/client exception, null, sync, assertion, or error markers. Not committed (owner
+reviews).
+
+## Latest Engine compatibility bump (2026-07-13)
+
+The Engine submodule was fast-forwarded by 15 upstream commits from `67ee893ae721d149cd44ff314abd8036adfd3821`
+to the current `origin/master`, `0bdb06bb59fef02b58496ef89105f66d7a243f32`. The range contains the smart-pointer
+and exception-safety refactors, nullable `ItemStatic` marshalling, resource-pack glob filters, finite-float/font
+changes, and the additive `OnCritterPreLoad` lifecycle event.
+
+TLA's native script boundary now follows the new borrow-wrapper ABI. Export receivers and dialog accessors use
+`ptr<T>`/`nptr<T>`; dialog `FindFunc`/`CheckFunc` signatures preserve a non-null actor and nullable talker; and the
+three `SafeAlloc::MakeRaw` ownership hand-offs use `make_unique_del_ptr` (with `reinterpret_as<uint8_t>` for opaque
+engine user data). Internal raw pointers that do not cross the script ABI remain unchanged. The nullable validator
+was extended with focused tests so these forbidden raw script-boundary pointers fail before CMake code generation.
+
+All 25 TLA `[[ItemStatic]]` callbacks now expose the engine's exact
+`bool(Critter, StaticItem, Item?, any)` contract. The mining entrypoint narrows the nullable item before calling its
+non-null tool helper; callbacks that do not consume an item retain their behavior. `CompileAngelScript` alone does
+not validate this attribute signature, so the baker and a dedicated static quality check are part of the gate.
+
+Resource packs were migrated from the removed `RecursiveInput` setting. Directories are recursive in the new
+engine, while `Metadata` and `Scripts` use `IncludePatterns = *` to preserve their former top-level-only behavior
+and avoid mounting `Scripts/Json` twice. `OnCritterPreLoad` needs no TLA subscriber for this bump; existing
+`OnCritterInit` handlers were deliberately left in place because several require an attached map/world.
+
+Persistent-login testing exposed two strict-sync regressions that the compile/bake gates could not see. TLA's
+async registration/login path now owns the caller cover across Engine calls: it holds the request and an existing
+live player before an offline load, then stabilizes the main critter, its map and location, dynamic
+`KnownLocations`, and every member of its global-map group before login. Each topology-dependent set is
+revalidated after replacement `Game.Sync` calls. This fixes login after the previous client has disconnected and
+the main critter must be loaded or rebound.
+
+The simultaneous reconnect path also exposed a failure after `OnPlayerLogin`: native `SendCritterInitialInfo`
+needs more than the two login players when the controlled critter is on a local map or in a global-map group. An
+initial Engine-side cover-rebuild attempt was superseded by the caller-owned contract documented in the 2026-07-15
+follow-up below. `LoginPlayerToExistentRecord` now only validates the cover prepared by AngelScript and fails fast;
+it never narrows or expands that cover. The remaining native change is rollback hardening: destruction of the
+displaced login entity is delayed until the new player job has been scheduled. Focused `PlayerRegistrationCppApi`
+regressions exercise local-map and global-group reconnects with an explicitly prepared caller cover.
+
+**Historical 2026-07-13 verification (before the later synchronization ownership correction):** Compile
+AngelScript and the build-hash-triggered full bake passed (**550 maps**), followed by
+`TLA_Server`, `TLA_ServerHeadless`, `TLA_Client`, and `TLA_UnitTests` builds. The full native suite exited **0**;
+its focused reconnect case passed **144 assertions**, and the full run passed **355538 assertions in 335 test
+cases**. The live script harness completed **62/62**; MCP discovery completed **90/90** and both static and live
+bridge smokes passed. Script-quality and nullable gates passed, and the scenery scan remained at **0 errors**
+with the same three owner-decision warnings. A standalone DirectX client registered `EngBot7`, entered and
+QA-transferred to Arroyo, reached a real dialog, and passed the seven parameterless GUI screenshot oracles plus
+`SkillBox` and safe-cancel `DialogBox` (**9/9** captures). A second persisted session verified disconnected
+relogin for `LiveBot7`, while a fresh `GreenBot7` session verified online-client replacement, observation, and
+movement; the post-relogin GUI matrix passed another **7/7** content oracles without server/client sync or
+exception markers. Reports are under
+`Workspace/AiControlScreenshots/engine-bump-20260713` and
+`Workspace/AiControlScreenshots/engine-bump-context-20260713`, with reconnect reports and captures under
+`Workspace/AiControlScreenshots/engine-bump-relogin-20260713`. Not committed (owner reviews).
+
+## Latest Engine updater cutover follow-up (2026-07-15)
+
+The Engine submodule was fast-forwarded by another 17 upstream commits from
+`0bdb06bb59fef02b58496ef89105f66d7a243f32` to the current `origin/master`,
+`81748b948a36b5737107bea9d87e03982cc4b3cc`. The functional range through `1bcf6e101` completes the
+smart-pointer refactor, hardens AngelScript synchronization and deferred `ScriptFunc` return cleanup,
+synchronizes the player argument for inbound server RPCs, updates movement call sites to the implicit borrow
+form, and replaces the client updater bootstrap with the host/runtime selector. It also raises the forced
+migration version to `0.0.30`; `2f4fc0adf` only strengthens an upstream test. The final `81748b948` commit adds
+the common `Game.GetModelAnimDuration` script API and always emits model-animation metadata in 3D-enabled model
+bakes. TLA has `FO_ENABLE_3D=OFF` and no `ModelInfo` pack, so it needs no authored config/content migration; the
+missing `ModelAnimInfo.foinfo` startup line is informational and duration lookup falls back to zero. The resulting
+TLA compatibility hash is `d4721a8cce1d01c0`.
+
+The final synchronization boundary is script-owned. Neither `LoadCritter` nor
+`LoginPlayerToExistentRecord` calls `SyncEntities`, narrows the held set, or discovers and adds dependent
+entities. TLA AngelScript owns the required cover in the outer async context before every Engine call. The offline
+path holds the request and any existing live player before `LoadCritter`; because the loaded critter does not exist
+in memory before that call, `OnCritterInit` no longer performs topology-changing placement. Immediately after
+`LoadCritter` returns, the caller adds the critter and performs placement under an explicit source/target cover.
+Before login and initial-info delivery it stabilizes the full graph: request player, existing live account player
+when present, main critter, current map and location, dynamic `KnownLocations`, and every member of the
+global-map group. Topology snapshots are checked after each replacement `Game.Sync`, with bounded retries. The
+Engine only validates access through the caller-provided cover and fails fast when the contract is violated. Its
+reconnect-only change is unrelated rollback hardening: the displaced player remains alive until login scheduling
+succeeds, so a thrown callback can still restore the connection. Focused lifecycle tests model the script caller
+by explicitly synchronizing the local-map or global-group cover before entering the Engine API.
+
+Newly registered player critters are now explicitly persistent. Previously their only persistence came from map
+attachment, so offline unload removed that implicit flag and deleted the critter document before a later login.
+Topology-changing placement was also removed from `CritterInit`: the caller performs it only after
+`CreateCritter` or `LoadCritter` returns, while it still owns the surrounding synchronization context. Replication
+and story-intro transfers preserve both the source graph and the target map/location (including dynamically
+created intro locations), then reacquire and validate them after the re-entrant transfer. The registration/login
+and `SwitchCritter` paths likewise retain the player/request entities, critter graph, known locations, and
+global-map group through initial-info delivery.
+
+The updater change is an intentional deployment cutover: `FO_UPDATER_VERSION` is now 2 and the client runtime
+host ABI is now 3. The Windows build therefore includes both `TLA_Client.exe` and the separately built
+`TLA_Client.dll`; the host accepted DLL build hash `62be3ea7d6d7138f0ac198a89c3566ff839b8061` with matching
+compatibility and ABI 3 metadata. Generation-1 clients are rejected before `InitData`, and an ABI-2 host cannot
+load the ABI-3 runtime, so this engine version must be shipped as a complete client package and existing
+installations require a one-time manual replacement rather than an in-place self-update.
+
+**Current script-owned synchronization verification:** Compile AngelScript passed with **0 warnings**; ForceBake
+rebuilt **550 maps**; `TLA_Server`, `TLA_ServerHeadless`, `TLA_Client`, `TLA_ClientLib`, and `TLA_UnitTests`
+built. Focused model-animation, player-registration, and server-script regressions passed **672 assertions in 3
+test cases**. The exact final full native suite passed **355733 assertions in 342 test cases** and exited **0**.
+The live script harness completed **62/62**; script-quality, nullable ABI, formatting, build-warning, and diff
+gates remained green; and MCP tests passed **96/96**. The live compatibility probe also caught and corrected a
+stale unpackaged `TLA_Client.dll`, confirming that `TLA_ClientLib` is a required build/deployment artifact after
+an Engine compatibility change. The TLA CMake finalization hook now makes `TLA_Client` depend on
+`TLA_ClientLib`, and a clean `Build :: TLA_Client` verification rebuilt/copied the runtime before the host.
+
+The MCP navigation adapter now normalizes TLA's flat `hexX` / `hexY` observations and lets both navigation plan
+and safe-step queries fall back from unsupported `tactical_path` to `path` without hiding other query failures.
+A standalone MCP-controlled client registered `SyncLatest`, disconnected, reached server-side offline unload,
+then loaded the same persisted critter (`1233`), passed observation and reachability probes, and moved again
+without sync, exception, assertion, or missing-document markers. MCP discovery and a live command round-trip
+passed on the relogged client. The post-relogin GUI screenshot matrix passed Options, Inventory, Character,
+PipBoy, FixBoy, Menu, and Credits (**7/7**). Reports, captures, and preserved logs are under
+`Workspace/AiControlScreenshots/engine-81748-20260715/script-owned-sync-final`.
+
+The Windows installed-client staged restart and Linux runtime DSO paths remain release/CI checks. At this point
+registration still had a same-name race between parallel requests, and a failed post-creation login could leave
+an orphaned persistent critter; the 2026-07-18 registration transaction follow-up below resolves both. The
+caller-owned script synchronization, native rollback hardening, and game changes are intentionally left
+uncommitted for owner review.
+
+## Latest Engine EntitySync-refactor bump (2026-07-25)
+
+The Engine submodule was fast-forwarded by 1 commit from `fda8ee32a` to `8e9b0e4ae` (`#189` "Generic
+fixes" — a substantial rework of `EntitySync`/`EntityManager`/`Critter`/`TimeEvents`, +4 additive
+`///@ ExportMethod`s, no export removals/hook/setting/shader changes). Native compile, bake, and all six
+targets built clean (SourceExt unaffected). **But `#189` changed a runtime contract that the compile/bake
+gates cannot see.**
+
+**The regression (an engine bug, fixed in the engine — see below).** `#189` removed `EnsureEntitySynced`'s
+contended-lock retry (the old `MAX_CONTENDED_EXPANSION_ATTEMPTS = 16` back-off) and made the acquisition a
+single non-blocking attempt that throws `EntitySyncException: covered entity lock is contended` the moment
+the covered entity's own lock is momentarily touched by another pool thread.
+
+This surfaced in the **parallel test harness**: `Testing.fos::CleanupTest` destroys each fixture location,
+and `MapManager::DestroyLocation` retains each child map via `EnsureEntitySynced`. Concurrent NPC idle events
+under that same location threw the retention off, aborting `FinishTest` so the run hung (500 s timeout)
+instead of the usual `66 passed`. It was **flaky**, ~5 hangs per 9 runs.
+
+**Note the initial misdiagnosis (do not repeat it).** The first reading was "the caller must now cover the
+location's maps too", which produced a `Sync::LockLocationWithMaps` helper wired into `CleanupTest` and
+`LocationGarbager`. **That was wrong and has been fully reverted** — the owner's ruling is that syncing a
+location is sufficient to destroy it, and expanding the script-side cover was masking an engine bug rather
+than fixing it (engine AGENTS.md: *"Fix the source, never mask"*). `Sync::Lock(loc)` before
+`Game.DestroyLocation(loc)` is correct; the quest `DestroyLocation` call sites need no cover changes.
+
+**Root cause, established by instrumenting the throw** (temporary per-lock diagnostic, since removed).
+Failures came in two shapes, both on a map whose location we already held **exclusively**:
+
+- foreign **descendant-mark** still counted — a worker mid-`ReleaseLocks` had dropped its location-mark
+  before its map-mark, because marks release in lock-**address** order, not hierarchy order;
+- foreign **exclusive owner** / busy state mutex — a worker's `AcquireLocks` stage-1 pass had taken the map
+  as part of its ascending-address prefix and was about to fail on our held location and roll back.
+
+Both are microsecond-scale windows of a foreign thread mid-flight through its own non-blocking protocol; a
+covering exclusive ancestor makes a *settled* foreign holder impossible, so neither is a real conflict.
+`#189`'s own comment even acknowledged the "transient try-window race" while deliberately failing it.
+
+**Fixed in the engine** (`Engine/Source/Server/EntitySync.cpp`): the batch acquisition inside
+`EnsureEntitySyncedImpl` — try-lock every op's state mutex, then preflight compatibility with all of them
+held — is retried **as a unit** with bounded back-off until it lands, rolling the partial batch back before
+each back-off and **never releasing the caller's cover**. The former `TryAcquireEnsureOpsAtomically` helper
+was folded into its single caller as an explicitly scoped transaction (so state mutexes drop right after the
+ownership commit) and now throws instead of returning a bool: for a covered entity the acquisition is
+*mandatory* and must land, so `MAX_SYNC_RETRIES` is a livelock valve whose only meaning is a corrupt
+covered-cover invariant. Engine `AGENTS.md` / `Docs/Scripting.md` wording updated to match, and the four
+`Test_ServerEngine.cpp` assertions that pinned the old fail-fast timing were rewritten to pin the new
+contract (sustained synthetic hold → bounded self-terminating throw; **transient hold → absorbed, retention
+lands** — two new cases covering both the target's own lock and an intermediate ancestor mark).
+
+**Verification:** Baker rebuilt → Compile AngelScript 0 warnings → full bake (550 map files) → `TLA_Server`,
+`TLA_ServerHeadless`, `TLA_Client`, `TLA_ClientLib`, `TLA_Mapper`, `TLA_UnitTests` built without warnings →
+`LocalTest` headless reached `Start server complete!`, live script harness **66 passed, 0 failed, 0 skipped**
+with **0 `contended`/sync/exception markers**, repeated **6/6 consecutive clean runs** (the pre-fix binary
+hung ~5 runs in 9, so the repeat count is the actual evidence here — a single green run proves nothing
+against a flaky race). Native `TLA_UnitTests`: **all 419677 assertions in 366 test cases passed**, exit 0.
+Because the engine itself was changed, `Engine/` is dirty too — uncommitted (owner reviews):
+`Engine/Source/Server/EntitySync.{h,cpp}`, `Engine/Source/Tests/Test_ServerEngine.cpp`,
+`Engine/AGENTS.md`, `Engine/Docs/Scripting.md`. No `Scripts/*.fos` changes remain from this bump (the
+`LockLocationWithMaps` attempt was reverted).
+
+## Latest Engine draw-tuning follow-up (2026-07-24)
+
+The Engine submodule was fast-forwarded by 4 `origin/master` commits from `4883d25c4` to `fda8ee32a`
+(`#191` draw tuning, deterministic Effekseer depth sort [gated OFF for TLA], ModelInstance/CritterHexView
+render refactor, ClientConnection message-history deque). All client/rendering internals — no script
+export removed, no engine-hook change, no shader change. **One config fallout:** the new FIXED setting
+`Render.ModelLayerProperties` (vector<string>, empty default — "critter properties feeding model layers"
+for tooling) is Uninitialized-fatal at bake; added empty to `TLA.fomain` next to the other `Render.Model*`
+settings. `Script.DebuggerBindHost` also changed its engine default (0.0.0.0→127.0.0.1) but TLA.fomain
+already supplies its own value (and `Script.DebuggerEnabled = False`), so no action. `Render.DrawWireframe`
+was already present from the sprite bump.
+
+**Verification:** Baker rebuilt → codegen clean → Compile AngelScript 0 warnings → full bake (550 map
+files) → `TLA_Server`, `TLA_ServerHeadless`, `TLA_Client`, `TLA_ClientLib`, `TLA_Mapper`, `TLA_UnitTests`
+built without warnings → `LocalTest` headless reached `Start server complete!`, world generated **1226
+entities**, live script harness **66 passed, 0 failed, 0 skipped**, no exception/sync/assertion marker.
+Script-quality ratchet and nullable ABI green. Native `TLA_UnitTests` passed **419476 assertions in 363
+test cases**, exit 0. Uncommitted (owner reviews): `Engine` gitlink + `TLA.fomain` (one line).
+
+## Latest Engine nested-sections/Effekseer bump (2026-07-24)
+
+The Engine submodule was fast-forwarded by 7 `origin/master` commits from `0109fee5a` to
+`4883d25c4c` (`#185` Effekseer particle integration, `#188` nested config sections, `#190` non-const
+locals, plus baker-order/FlushMap-effect/FileSystem changes). No script export was removed and no
+engine-hook signature changed, but this bump was **not** a small-fallout bump — `#188` changed the
+`.fomap` file format, requiring a migration of all authored maps (owner-approved before executing).
+
+Five migrations:
+
+1. **`.fomap` format — all 275 maps migrated (the big one).** `#188` reworked config parsing so a
+   `.fomap` is a `[ProtoMap]` anchor that **owns nested, `/`-addressed instance sections**; the baker
+   now reads maps with `SkipNestedSections` and rejects flat top-level `[Critter]`/`[Item]` sections
+   (`ProtoTextBakerException: Invalid proto section name`). Validated the exact contract against
+   `Common/MapLoader.cpp` (`MAP_ANCHOR_SECTION = "ProtoMap"`, `CONTEXT_PREFIX = "$Name"` = "the anchor
+   above"; nested types restricted to `Critter`/`Item`). A line-anchored byte-level script rewrote
+   every top-level `[Critter]`→`[$Name/Critter]` and `[Item]`→`[$Name/Item]` across all 275 maps
+   (3522 critter + 169599 item headers) preserving CRLF; pre-checked that the only top-level section
+   names in TLA maps are `ProtoMap`/`Critter`/`Item` and each file has exactly one `[ProtoMap]`. No
+   engine converter exists and the lf repos are all on older engines (no reference), so this was a
+   from-scratch content migration.
+2. **`SourceExt/ContentMigration.cpp` removed.** It implemented the engine hooks
+   `ConfigSectionParseHook`/`ConfigEntryParseHook`, which `#188` **deleted** from the engine (codegen:
+   `Invalid engine hook ConfigSectionParseHook`). Those hooks migrated legacy authored formats at
+   parse time (`[Tile]`→`[Item]`, `HexX/HexY`→`Hex`, `OffsetX/Y`→`Offset`, `Width/Height`→`Size`,
+   `PicMap`→`$Proto` under `Tile`, etc.). A tree-wide scan showed the migration was already dead
+   except one entry — `Items/bike.foitem` still had `OffsetY = 30` — so that was converted permanently
+   to `Offset = 0 30` (exactly what the hook produced) and the file + its `CMakeLists.txt`
+   registration were removed. (`PicMap`, 819 uses, is a current engine Item property — the hook only
+   touched it under `[Tile]`, of which there are none — so those are untouched.)
+3. **`SourceExt/Dialogs.cpp` — `ConfigFile` ctor.** `#188` dropped the `string_view name_hint` first
+   parameter (it only fed the removed hooks); `DialogManager::ParseDialog` now calls
+   `ConfigFile(string(data), ConfigFileOption::CollectContent)`.
+4. **`TLA.fomain` — new settings.** Four `Mapper.ParticlePreview*` VARIABLE settings (Effekseer) are
+   Uninitialized-fatal at bake; added with engine defaults (`ParticlePreviewEffect`=,
+   `ParticlePreviewSeed`=0, `ParticlePreviewScale`=1.0, `ParticlePreviewPrewarm`=False).
+5. **No build change for Effekseer** — `#185` is gated behind `FO_EFFEKSEER_PARTICLES` (default OFF);
+   the engine files self-guard, so TLA's CMake needs nothing. `DialogBaker`'s ctor from the prior bump
+   is stable; `Baker.h` changes were additive.
+
+**Verification:** Baker rebuilt first → codegen clean (hooks gone) → Compile AngelScript 0 warnings →
+full bake **550 map files** (275 maps × 2 langs, MapBaker validated the nested format) → `TLA_Server`,
+`TLA_ServerHeadless`, `TLA_Client`, `TLA_ClientLib`, `TLA_Mapper`, `TLA_UnitTests` built without
+warnings → `LocalTest` headless reached `Start server complete!`, **generated the world with 1233
+entities** (consistent with the prior bump's ~1226 — the migrated maps instantiate critters/items
+correctly, not just parse), live script harness **66 passed, 0 failed, 0 skipped**, no
+exception/sync/assertion/`Invalid map`/`Unknown nested` marker. Native `TLA_UnitTests` passed **419447
+assertions in 361 test cases**, exit 0. Script-quality ratchet and nullable ABI green. **This changeset
+includes all 275 `Maps/*.fomap`.** The owner subsequently committed this bump together with the R3
+bug-fix tree; a re-verification on the committed tree (Compile AngelScript → full bake 550 maps →
+Server/ServerHeadless/Client/ClientLib/Mapper builds → headless `Start server complete!` + harness
+66/66 → ratchet/nullable green) confirmed it clean.
+
+## Latest Engine sprite/3D/baker bump (2026-07-22)
+
+The Engine submodule was fast-forwarded by 23 `origin/master` commits from
+`236165de4c55c041a9cc532ab617756ea3d022f2` to `0109fee5a` (four upstream merges plus the `#186` 3D-subsystem
+and `#187` polygonal-sprites PRs, `small_vector`/perf refactors, sprite/atlas/font rework, MapperEngine
+`std::string` buffers, socket-error message stabilisation, and BakeFiles/BakerDataSource changes). Pre-scan
+confirmed **no script-API export was removed** and **no `EngineHook`/native-bridge signature changed**; the risk
+was concentrated in the baker ABI, the baked sprite format, new settings, and the two changed Core `.fofx`
+shaders.
+
+Three concrete migrations were required:
+
+1. **`SourceExt/DialogBaker.cpp` — baker ctor.** `BaseBaker`'s constructor gained a `string_view baker_name`
+   second parameter (each engine baker passes its `NAME`). Both `DialogBaker` and `DialogTextBaker` (whose
+   headers already declare `static constexpr string_view_nt NAME` and a `GetName()` override) now pass `NAME` to
+   the base ctor.
+2. **`SourceExt/ServerExtension.cpp` — `Server_Game_LoadImage` baked-sprite format.** This was the load-bearing
+   fix: the module-init call `Game.LoadImage(ImageRelief, "relief_tla.png")` (GlobalmapGroup/Worldmap) crashed
+   startup with `ScriptException: File is not image`. The atlas/sprite rework replaced the old hand-parsed header
+   (single `42` magic byte) with a formalised container (`SPRITE_RESOURCE_MAGIC` 43 + `SPRITE_RESOURCE_VERSION`,
+   per-frame mesh payload, footer magic) read by the new `Common/SpriteResource.h` API. TLA's hand-rolled parser
+   was replaced by `ReadSpriteResource(file.GetData())` + `ExtractSpriteResourceFrameImage(<dir 0, frame 0>)`,
+   storing `image.Size`/`image.Pixels` into `ServerImage`. Correctness verified against the baker: cropping only
+   occurs for non-`Quad` frames (ImageBaker `CropSpriteFrameToMeshBounds` is gated on `mesh.Kind != Quad`), and
+   TLA runs `SpriteMesh.Enabled = false`, so every frame is `Quad` and stored at full logical size — so
+   `relief_tla.png` loads at its exact 1400×1500, keeping the absolute-coordinate relief lookup
+   (`GetGlobalMapRelief`, which does no bounds check) correct.
+3. **`TLA.fomain` — new required settings.** The polygonal-sprites PR added `FIXED_SETTING`s that are
+   Uninitialized-fatal at bake; added with engine defaults: `SpriteMesh.Enabled = False`,
+   `SpriteMesh.AlphaThreshold = 0`, `SpriteMesh.MaxTriangles = 4096`, `SpriteMesh.AreaSavingsWeight = 32.0`, and
+   `Render.DrawWireframe = False`. The two changed Core `.fofx` shaders (`2D_Default`, `2D_WithoutEgg`) baked
+   within the minimal profile (no `gl_FragCoord`/X4502).
+
+A new **`Scripts/Test_Worldmap::relief_image_full_size`** regression pins the migration: it samples the loaded
+relief image at `(0,0)` and the far corner `(1399,1499)` — a cropped/shrunk image would throw
+`Invalid coords arg` there — and checks the `GetGlobalMapRelief` low-nibble contract.
+
+**Verification:** Baker rebuilt first (after the DialogBaker fix) → Compile AngelScript 0 warnings → full
+compatibility-triggered bake (all packs + 550 maps) → `TLA_Server`, `TLA_ServerHeadless`, `TLA_Client`,
+`TLA_ClientLib`, `TLA_Mapper`, `TLA_UnitTests` built without warnings (`ServerExtension.cpp` and the sprite/3D
+client rework included). Native `TLA_UnitTests` passed **419310 assertions in 360 test cases** (up from
+355962/346 — the new sprite-resource/mesh suites), exit 0. `LocalTest` headless reached `Start server
+complete!`; the live script harness completed **66 passed, 0 failed, 0 skipped** (added the relief regression),
+with no exception/sync/assertion/fatal marker. Formatter idempotent, quality ratchet and nullable ABI green,
+`git diff --check` clean. Not committed (owner reviews); this bump sits on top of the still-uncommitted R3
+bug-fix working tree.
+
+## Latest Engine handle-only Destroy bump (2026-07-19)
+
+The Engine submodule was fast-forwarded by eight `origin/master` commits from
+`14bb6c85e33cd55fede7e7bac3a5d124d51031f6` to `236165de4c55c041a9cc532ab617756ea3d022f2`. Seven are build/test
+housekeeping (`f667a85d9` third-party update, `3accf133e` rpmalloc C-standard macro, `65dfb851c` MSVC /W4 shadow
+fix, `42b038cf5` effect-baker warning suppression, `998eefcbf` internal `ResolveTargetHex` fallback-hex fix, plus
+two merges) and need no game-layer change. The load-bearing one is **`845bdcce4` "Remove id-based entity Destroy*
+script exports (handle-only)"**: it drops the `ident_t` overloads of
+`Game.Destroy{Entity,Entities,Item,Items,Critter,Critters,Location,Map}`, leaving only the live-handle (and
+handle-array) forms. `Game.DestroyUnloadedCritter(id)` is intentionally kept, since an unloaded critter has no
+live handle.
+
+TLA had exactly **eight** id-based call sites, all `Game.DestroyLocation(<handle>.Id)` where the `Location`
+handle was already resolved and in scope (five plain `loc.Id` in deferred/quest cleanup — `ArroyoMynocDefence`,
+`GameEventStorehouse`, `KlamSmily`, `Purgatory`, `ReddWanamingo`, `VcGuardsman`; plus `SeAndroid`
+`map.GetLocation().Id` and `SfCommon` `locations[i].Id`). Each now passes the handle directly. A tree-wide scan of
+every `Game.Destroy*` call confirmed no other id-based form (no `ident`-typed variable, `.Id`, or `ZERO_IDENT`
+argument) reaches these methods; all remaining calls already pass handles or handle arrays. The removed exports
+change the script-API surface, so the compatibility hash advanced to `221e34cf740c6ba0` and the bake rebuilt the
+full tree (all packs + 550 maps).
+
+**Verification:** Baker rebuilt first, then Compile AngelScript passed with 0 warnings (it pinpointed exactly the
+eight `DestroyLocation(ident)` sites, and reported clean after the fix). Full bake (550 maps, compatibility-hash
+triggered) → `TLA_Server`, `TLA_ServerHeadless`, `TLA_Client`, `TLA_ClientLib`, and `TLA_UnitTests` built without
+warnings (`TLA_Client` correctly rebuilt/copied `TLA_ClientLib` after the compatibility change). A `LocalTest`
+headless run reached `Start server complete!`, the live script harness completed **65 passed, 0 failed, 0
+skipped**, and the log contained no exception, sync, assertion, or fatal marker (only the benign
+`DestroyInnerEntities`/`DestroyAllEntities` shutdown-stage lines). The native `TLA_UnitTests` suite passed
+**355962 assertions in 346 test cases**, exit 0 (the single `Map baking error` line is a negative test that
+feeds the baker an invalid map to confirm it is rejected). Not committed (owner reviews); this bump sits on top
+of the still-uncommitted R3 bug-fix working tree.
+
+## Latest Engine server follow-up (2026-07-18)
+
+The Engine working tree was fast-forwarded in two steps by twelve `origin/master` commits from `5ce19ec24`
+through `260c3d883` to `14bb6c85e33cd55fede7e7bac3a5d124d51031f6`. The first server-facing range adds strict
+init-script resolution failures, `Map.FindPathToAny` with target validation, lifecycle tracking for sent
+messages, and retention of already covered player/critter and singleton-owned entity links within the current
+script chain. The retention changes do not discover topology or call blocking `SyncEntities`; TLA remains
+responsible for preparing the complete cover with `Game.Sync` before entering the Engine API. Generated build
+configuration now uses macros instead of a re-includable typed constants header, and malformed compressed
+transport input now disconnects cleanly through `DecompressException`.
+
+The final server update tracks every accepted interthread, TCP, UDP, and WebSocket connection across concurrent
+accept/shutdown boundaries. `NetworkServer::Shutdown` closes registration, snapshots and disconnects live
+connections, and only then stops the transport implementation. A new `ServerNetwork.LoginTimeout` independently
+limits pre-login connections that make no handshake, authentication, or updater progress, so ping-only peers
+cannot occupy unauthenticated slots forever. TLA enables a five-minute timeout (`300000` ms) for normal/public
+configuration and explicitly disables it in the `Unpackaged` and `LocalTest` profiles for long local debugging
+and MCP sessions. This network/unlogged-player job path is not script-initiated and does not acquire entity
+synchronization locks. The
+upstream `d94f6d9e8` commit also absorbed the temporary local `NetworkClient.h` include-guard fix, leaving the
+Engine working tree clean. The resulting compatibility version is `806044423476dc46`.
+
+**Verification:** `BakeResources` updated the three config outputs; `TLA_Server`, `TLA_ServerHeadless`,
+`TLA_Client`, and `TLA_UnitTests` built without compiler warnings. Focused login-timeout and concurrent-shutdown
+coverage passed **38 assertions in 3 test cases**. The complete native test executable exited **0** in **440.2
+seconds**. A `LocalTest` headless run reached `Start server complete!`, completed the live script harness with
+**62 passed, 0 failed, 0 skipped**, and shut down all three active connection servers cleanly. Main-config
+formatting/check, script-quality ratchet, nullable ABI validation, and the nullable validator's **7/7** self-tests
+passed. Runtime initialization still reports execution-overrun timings for the data-heavy `CritterTypes`,
+`NpcBags`, trader, and world-generation setup; there were no runtime exceptions or failed tests.
+
+## Registration transaction follow-up (2026-07-18)
+
+New-account registration now claims the `PlayerNames` key while the request still holds the shared start-map
+cover and before the next replacement `Game.Sync`. This placement matters: replacing a cover releases the old
+set before acquiring the new one, so merely retaining the same map in successive calls still leaves a scheduling
+window. A parallel request now observes the reservation before it can create a second critter. Reservations carry
+the expected `CritterId`; a mismatched request cannot publish or remove another registration's name.
+
+`PlayerId` publication moved from after `LoginPlayerToNewRecord` into a dedicated `OnPlayerLogin` subscriber.
+That event runs inside the Engine's new-player rollback scope: if publication or any later login subscriber
+fails, the Engine removes the new `Players` record and detaches the player before the outer registration handler
+rolls back the persistent critter. The script removes the name reservation only after critter rollback succeeds;
+if cleanup cannot be proven, the reservation remains claimed instead of allowing a second account to reuse a
+possibly orphaned character. Display/generation properties are prepared before login, leaving no fallible
+persistence step after the Engine transaction returns.
+
+A focused script regression covers reservation visibility, critter ownership checks, `PlayerId` publication,
+and owner-only rollback. A two-client MCP race submitted the same fresh name concurrently: exactly one client
+entered the game, the loser disconnected back to Login, the server created exactly one player critter, and no
+script/sync/assertion error was logged. The winner then disconnected and the losing client successfully logged
+into the same account and controlled the same critter id. MCP discovery/live smoke passed, and the graphical
+client screenshot audit verified Options, Inventory, Character, PipBoy, FixBoy, Menu, and Credits (**7/7**) with
+content-specific oracles. Captures and the manifest are under
+`Workspace/AiControlScreenshots/registration-transaction-20260718`.
+
+**Verification:** AngelScript compilation, incremental baking, and `TLA_Server`, `TLA_ServerHeadless`, and
+`TLA_Client` builds passed without warnings. The focused reservation test passed, then the complete live script
+harness finished with **63 passed, 0 failed, 0 skipped**. Script formatting was idempotent, the quality ratchet
+and nullable ABI validator passed, `git diff --check` was clean, and the final headless log contained no test
+failure, script/sync exception, assertion, or fatal marker.
+
+## R3 adversarial bug hunt over under-audited giants (2026-07-19)
+
+A workflow re-audited the modules whose round-1 coverage was thinnest (the giants: Combat, Worldmap, Caravan,
+Poker, GlobalmapGroup, Parameters, EnergyBarier, Purgatory, NpcPlanes, ChosenActions, FixBoy, Dialog, Main) in
+line-range chunks, and separately re-validated the deferred medium/low backlog in `Build/_audit/`. Every candidate
+went through a three-lens skeptic panel (consumer contract / engine API / git history, refute-by-default);
+**44 of 123 candidates survived unanimously**. The session limit killed part of the verify phase, so the
+split-vote and unverified remainder is still open — see "Remaining" below.
+
+**Applied (each re-read against the code before editing):**
+
+- **NPC AI was globally disabled.** `AddPlane` treated `ContinueChain` as a veto, but the engine's
+  `Entity::FireEvent` returns `ContinueChain` for an event with **no** subscribers. Only a handful of critters
+  subscribe a per-critter `OnNpcPlaneBegin`, so every other NPC had each freshly inserted plane erased on the
+  spot — no attack, walk, pick or misc plane ever survived. The polarity is now engine-idiomatic (`StopChain` =
+  veto) across `NpcPlanes` and all ten handlers (`MainPlanes`, `Eli`, `MapKlamath`, `Mob`, `Patrol`, `Pet`, and
+  the four `Pattern*` wrappers), applied as one atomic change. *[AI-wide — playtest]*
+- **`GetPlanes(..., NpcPlane[] planes)` never filled its out-parameter** (found by the new regression test, not
+  by the hunt): all three overloads did `planes = crPlanes`, rebinding the local handle, so callers in `Combat`,
+  `Item`, `EncounterNpc` and `Patrol` got the right count but an empty array. Now filled in place.
+- `AddWalkPlane` 8-arg overload called itself (infinite recursion, dropped `cut`); attack repositioning cancelled
+  its own successful manoeuvre via an unconditional `NextPlane(REASON_POSITION_NOT_FOUND)`.
+- **Poker was unplayable and leaked caps.** Nested per-NPC state arrays were declared `{{}}`, so the first
+  pokerman indexed a zero-length row and threw; `Replace()` dealt the same card to several players; `BetCall`
+  destroyed the player's caps without adding them to the pot; the all-in `WinKoef` truncated to 0 so a winning
+  all-in paid nothing; the NPC bet-chance ratio collapsed via integer division; `TwoPairReplace` picked a pair
+  card as the kicker and passed 0-based indices to a 1-based `SetBit5` (negative shift). `Roulette` had the same
+  `{{}}` declaration defect. *[economy/minigame — playtest]*
+- **FixBoy workbench charges were never seeded**, so every workbench-gated recipe was permanently uncraftable;
+  "no entry" now means "full workbench" (seeded at the timeout check, which keeps the craft count exact).
+- `GlobalmapGroup`: entrance ordinals were validated against the flat `MapEntrances` length (client-supplied,
+  out-of-bounds reachable) in `GroupToLoc` and `GM_CMD_VIEW_MAP`; `GM_CMD_ENTRANCES` passed the raw index to
+  `CheckEntrance` so town-screen and entry rules disagreed; `GroupToMap` overwrote the passenger hex with the car
+  hex and ignored its `entry` parameter (all entrances arrived at the main gate).
+- `Combat`: burst central line clamped to-hit *before* the knockout/multihex bonuses (95% cap bypassed, a
+  knocked-out bystander soaked the whole volley); `HF_DEATH` raised damage only to exactly `CurrentHp`, which
+  lands in the knockdown branch because `DeadHitPoints` is -20, so instant-death criticals never killed; the
+  flamethrower left line was missing the `- 1` that excludes the victim from the blocker count.
+- `Parameters`: `UseMainItem` branched on the packed weapon mode instead of the decoded use-slot, so every aimed
+  attack was a no-op; drug resistance bonuses were written one `DamageTypes` slot too low (Psycho gave nothing,
+  Rad-X gave poison resistance); `ProcessSkillsUp` wrote a client-supplied property id without checking it is a
+  skill; the name language-mixing scan skipped the last character.
+- `Main` / `Replication`: the corpse drop filter wrote `null` into the array it then passed to `MoveItems`,
+  aborting the whole death handler for any critter carrying a gag/hidden item; steal XP used a stale `StealCount`
+  after a streak reset (up to 12× the intended award).
+- `Purgatory`: nullable `killer` was forwarded into `OnCritterDead`, which dereferenced it (deaths from
+  overdose/poison/radiation on a battle map threw and the winner was never checked); `GetTeamPlayers` indexed
+  `Players[]` with a `Requests[]` index; the invite watchdog re-invited after the player had already accepted,
+  silently dropping him; `TeamCount` emitted four duplicate `team` lexemes instead of `team0..team3`.
+- `Dialog`: `TimeoutCheck` read `player.DialogTimeout` while `TimeoutSet` writes `npc.DialogTimeout`, so all 23
+  `TimeoutCheck` / 18 `NotTimeoutCheck` gates were constants; `GetCurrentDialogNumber` used the throwing
+  single-argument `dict.get`. *[quest cooldowns now actually gate — playtest]*
+- `ChosenActions`: reload deducted AP twice; a vanished move target sent the character to hex (0,0).
+- `Worldmap`: `RotatePosition` permanently rotated the module-global formation table (aliased handle, not a
+  copy); the weighted encounter roll could exceed the candidate pool and select nothing.
+- `Caravan`: `FindCabPlace` took its loop bound from the first entry name only (no wagons placed when entry 243
+  is absent); `IsFullParty` accepted one player past `MaxPlayers`, who was then silently truncated at departure.
+- `FavoriteItem`: an inverted slot check made NPC favorite-item auto-equip a permanent no-op (NPCs undressed and
+  never re-equipped); `EnergyBarier::GetGuards` compared a Location proto against an Item proto.
+
+**New regression test.** `Test_NpcPlanes::add_plane_without_subscriber` covers the exact broken case (an NPC with
+no per-critter subscriber must keep an added plane). It was validated as a negative control: reverting only the
+`AddPlane` polarity makes it fail on its first assertion, and it is what exposed the `GetPlanes` out-parameter bug.
+
+**Deferred (need an owner decision, not a mechanical fix):**
+
+- `Caravan::CaravanLeaderOnGlobal` assigns to by-value event parameters (`toX/toY/speed/waitForAnswer`, plus
+  `x/y/encounterDescriptor` via `Worldmap::FindEncounter`), so caravan global-map movement never reaches the
+  group. Fixing it means marking the args mutable in the `///@ Event` declaration and updating every subscriber.
+- `Purgatory::TeamContainerId` is never assigned, so the invite flow kills the player without stashing his
+  inventory while telling him it was stashed. Both the reporter's and the verifier's placements have problems
+  (a location-owned container is garbage-collected with the arena).
+- `FixBoy::CheckOnCraft` builds the craft list through the interactive `FixboyButton` path, spamming failure
+  messages and mutating persistent map state; a side-effect-free query state is the right fix.
+- `GlobalmapGroup::GetGlobalMapGroup` reads `AllGlobalGroups` unlocked and uses `opIndex`, which inserts a
+  phantom entry on a miss; failing loudly would widen the return type across ~16 call sites.
+- `Combat` `ForceFlags`-only hits send critical-message id 0 (broken combat text); the verifier refuted both
+  proposed fixes and points at a client-side guard instead.
+
+**Verification:** Compile AngelScript (0 warnings) → formatter idempotent (changed 0) → quality ratchet →
+nullable ABI validator → bake → `TLA_Server`, `TLA_ServerHeadless`, `TLA_Client` builds, all without warnings.
+The live script harness finished **64 passed, 0 failed, 0 skipped** (63 + the new regression), the headless run
+reached `Start server complete!`, and the log contained no exception, sync, assertion, or fatal marker.
+`git diff --check` is clean. Not committed (owner reviews).
+
+The gameplay-affecting entries above are flagged for playtest: NPC AI overall, poker/roulette economy, workbench
+crafting, dialog cooldowns, town entrances, and instant-death criticals.
+
+### R3 second pass — the candidates the session limit had dropped (2026-07-19)
+
+The first R3 run lost 164 of 397 verify agents to an account session limit. Reconstructing the finder output from
+the workflow journal showed that **67 candidates had never been adjudicated at all** (the post-processing counted
+them as neither confirmed nor split, because they had zero votes). A follow-up workflow re-ran them against the
+already-patched tree with two independent lenses (consumer contract, engine API + git history), unanimity
+required: **17 confirmed, 11 split, 6 already fixed** by the first pass. All 134 agents completed.
+
+**Applied:**
+
+- **FixBoy expired-timeout branch.** `CheckWorkbenchTimeOut` refilled via `SetWorkbenchCharges`, which is a
+  *decrement-or-refill* helper, and never cleared `FixBoyWorkBenchTimeout`. So after the first expiry the branch
+  ran on every later check and **consumed** a charge instead of refilling — and since `CheckOnCraft` runs once per
+  listed recipe, merely opening the FixBoy screen next to a shared workbench (11 recipes share `SCENERY_AMMO_PRESS`)
+  drained it. Split out a dedicated `RefillWorkbenchCharges` and reset the timeout.
+- `Replication`: the post-`FindEncounter` guard tested the `-1` sentinel, but `FindEncounter` uses `0` for "none"
+  (`-1` is an unrelated global-map convention), so `InviteToEncounter` ran with a blank descriptor.
+- `MapBarterGround`: the same null-into-`Item[]`-then-`MoveItems` pattern fixed earlier in `Main`/`Replication`.
+- `PatternSniper` / `PatternTerm`: `MsgReact` returns true for "should react", but both guards returned early on
+  true — snipers and terminators ignored ally help calls *within* range and answered only out-of-range ones.
+- **Racing quest was uncompletable.** `Coords` has 13 checkpoints so `player.RacingCheckPoints` tops out at 13,
+  while `Win()` requires >= 14. The dialog's final result wrote `RacingCheckpointNumber` — which resolves to the
+  *Location* property, not the Critter counter `Win()` reads. Fixed in `Dialogs/den_racing_mechanic.fodlg`.
+- `Explode`: an unlinked `toggle_switch` passed `ZERO_IDENT` to `Game.GetItem`, which throws rather than
+  returning null (the `!= null` guard could never help).
+- `Combat::CriticalFailure` ignored the `IsNoKnock` immunity (turrets, Horrigan, bodyguards, spore plants were
+  knocked down); the flag is now stripped at entry so clients also stop playing the knockdown reaction.
+- `Poker`: `NpcAction` advanced `MHod` twice when seats had folded, ending the betting round early — it now
+  returns the seat that acts next; `ManyWinsCheck` compared a game-time lockout against real-time `Time::Days`.
+- `Parameters::CritterSetPropertyQuests` built the Quest text-pack id by summing hashes into one numeric key,
+  but the pack is two-token `{CritterProperty::X}{value}` — quest-update messages never fired. Now uses
+  `MsgStr::PropPrefix`, matching the post-migration helpers.
+- `MirelurkCombat`: the move-out emote fired once per search iteration and `GetFreeHex` was called with radius 0.
+- `MapArroyoRaydersCamp`: the XP actually granted was 10 higher than the amount reported to the player, in both
+  quest stages (duplicated round-up expression).
+- `Caravan::IsAppear` used `<` against the inclusive `Game.Random(1, 100)`, so 100%-chance loot appeared 99% of
+  the time and 1%-chance loot never appeared; `NpcPlanes` go-home passed a toggled 0/1 facing instead of `HomeDir`.
+
+**Deferred (owner decision — these are feature/data work, not regressions):**
+
+- `Item::ChangeProto` is an unimplemented `TODO` stub that returns its input unchanged, while `Sandbag` and
+  `EnergyBarier` assign its result expecting a different proto. Implementing it means destroying and recreating a
+  persisted map item, which can break handles held elsewhere (e.g. the barrier's `Blockers` registry) — it needs an
+  ownership/migration decision rather than a blind fix.
+- `Resources::MakeDataKey` silently drops its `pid` argument, so different-proto sceneries on one hex share a
+  single depletion counter (each yields about half its intended resources). Mixing the proto into the key orphans
+  every existing `Map.ResourcesData` entry, and orphans are never erased — so this needs a migration that clears
+  the property, not just a code change.
+
+**Verification:** Compile AngelScript (0 warnings) → formatter idempotent (changed 0) → quality ratchet →
+nullable ABI validator → bake (the `.fodlg` change is baked content) → `TLA_Server`, `TLA_ServerHeadless`,
+`TLA_Client` builds without warnings → live script harness **64 passed, 0 failed, 0 skipped** → headless reached
+`Start server complete!` with no exception, sync, assertion or fatal marker. The native suite passed
+**356029 assertions in 346 test cases**, exit 0. Not committed (owner reviews).
+
+Playtest additions from this pass: workbench charge economy, the Den racing quest end-to-end, sniper/terminator
+assist behaviour, poker betting rounds, and caravan loot rates.
+
+### R3 wave 3 — the previously unhunted modules (2026-07-19)
+
+A third workflow hunted the ~254 modules that had had no R3 deep pass (client bootstrap/HUD, mapper, text,
+critter actions, drugs/perks, economy, items, maps, AI support, mobs, guards, events, replication, quests,
+dialogs, devices). The session limit again killed part of the verify phase (178/398 agents), but **38 candidates
+survived unanimous verification** (36 at full 3-vote, 2 at 2-vote). The unverified remainder is recovered from the
+journal and re-queued for the next pass.
+
+**R3 wave-3 recovery batch (2026-07-24).** The 77 wave-3 candidates the session limit never adjudicated were
+recovered from the workflow journal; the 30 critical/high ones were re-verified against the current (already
+heavily patched) tree with a two-lens panel that explicitly filters already-fixed and dormant-feature findings.
+Result: **11 confirmed-live, 1 already-fixed, 14 dormant, 4 refuted**. The 14 dormant correctly caught the
+disabled-feature backlog (racing/`GameEvent` scheduling, `BulletinBoard`, un-fired item/critter events,
+`Item::ChangeProto` stub) and the already-fixed null-to-`GetPlanes` cases. The 11 live fixes applied:
+
+- **Sync-cover crashes on live paths** (would throw `Entity access without sync` at runtime): `NpcDialog::NpcTimerDialog`
+  (two-NPC timed banter — `[[Async]]` + `LockCritterWithMapAndLocation`), `Dialogs::SpeechAnswer` (took *no* cover
+  when a dialog had no talker — now an unconditional `cr`+map+talker cover, needed by map/location-reading
+  demands/results), `HostileLocationQuest::AllyIdle` (read the quest player's props before locking him — reordered),
+  `SpyMission::BeginReport` (global time event with no cover — `[[Async]]` + `LockCritterWithMap`, re-arm on lock miss).
+- **`ReplicationBank` keeper** — inverted `Opened` check: the keeper "closed" already-closed bank containers and left
+  open ones open (mirror of the correct door block).
+- **`Roulette::LoadSettings`** — `NpcRole == 0` produced a negative `RTables` index → croupier init threw; clamped.
+- **`TownSupply::GuardIdle`** — re-queued a non-deduplicated walk plane every tick until `AddPlane` hit `MAX_PLANES`
+  and the bounty hunter self-destructed ~9 s after spawn; now guarded on an existing exit plane.
+- **`Merc::MercIdleImpl`** — called `GetGlobalGroup(merc)` on a merc still on a local map (throws every tick); guarded
+  on the merc being off-map.
+- **`Dialogs::UseAnswerResults`** — `AddItem(pid, 0)` when target count already equalled current (engine throws
+  "Count arg must be positive"); skip the no-op.
+- **`Sandbag::AddSandBag`** — destroyed the pre-existing barricade *before* the door/container and critter-on-hex
+  validations, so a rejected placement lost both the old stack and the new bag; restructured to validate-then-mutate.
+- **`Monologue::RunMonologue`** — blind-cast the authored say-type; `den_joshua.fodlg` passed out-of-range `6` so
+  Joshua's ballad rendered as nothing. Added a range clamp and corrected the authored value to `3` (Emote).
+
+**Verification:** Compile AngelScript 0 warnings → formatter idempotent → quality ratchet + nullable ABI green →
+bake (the `.fodlg` change) → headless `Start server complete!` + harness **66 passed, 0 failed, 0 skipped**, no
+exception/sync/assertion marker. Native `TLA_UnitTests` had already passed **419476 assertions / 363 cases** on
+this tree. Not committed (owner reviews).
+
+**A self-inflicted regression fixed first.** The earlier `GetPlanes(...)` out-parameter fix (`planes.clear();
+planes.insertLast(...)`) broke the ~8 call sites that pass `null` as the out-array to use only the count
+(`GetPlanes(guard, null)` in GuardLib, GameEventReplicator, NcrInvasion, EncounterNpc, SlaversHunt,
+PatternMedic). All three overloads now take `NpcPlane[]? planes` and guard the fill. Covered by a new
+`Test_NpcPlanes::get_planes_null_out` regression (negative-control verified). **Also**: the first-session
+`OnNpcPlaneBegin` polarity flip had missed **WarehouseTurret** and **V13ZSoldier** (the grep was truncated at 20
+lines) — under the new AddPlane contract both were inverted, so active warehouse turrets and V13 guardians could
+never attack. Both flipped to match.
+
+**Applied (contained, high-confidence):**
+
+- **ClientMain freeze/grief.** `CritterAction` sent `Rpc_Wait(1200)` for *every visible critter's* action, so any
+  nearby NPC firing/reloading/looting stamped the local player's own `WaitEndTick` 1.2 s ahead and starved the
+  action pump — a player in a firefight or crowd was continuously frozen, and any client could grief a bystander.
+  Gated on `cr.IsChosen`. *critical*
+- **Drugs null-array crash.** `DropDrugEffects` stored `null` into `AllActiveDrugEffects`, so the next drug use
+  after any respawn/antidote dereferenced null. Now removes the key. *critical*
+- **Repair re-break loop.** `DeteriorateItem` never set `IsBroken`, so a worn-out item re-ran the break block on
+  every subsequent hit — cost repeatedly divided by 3, BrokenCount inflated to unrepairable. Now latches the flag. *critical*
+- **GlobalMapFog 32-bit shift.** `SetFog` packed with a 32-bit shift while the property is `int64` and the map is
+  28 wide (offset reaches 54), so the right ~43% of the world map was permanently black; also added the missing
+  negative-coord guard both callers rely on. *critical*
+- `MainPlanes`: `CTraceFirstCritter.Cr` was sticky (a rejected corpse/too-close critter was still returned as a
+  burst blocker); `ValidateBurst` was called with the single-shot mode while deciding to switch to burst;
+  `ChooseAim`'s "1/3 pick second-best zone" always converged on the max (dead diversification).
+- `CritterActions`: `Attack` accepted an unvalidated client aim value (free aimed shots + out-of-range crit-table
+  reads) — now range-checked and masked; `ReloadWeapon` unload called `AddItem` with count 0 on an empty weapon
+  (server exception).
+- `ClientItems::BarterTransfer` double-subtracted the offer, blocking a second transfer from the same stack.
+- `ClientMain` text/casing: age-bracket scan ran downward (wrong bracket, unrelated text for ages 14–15); the
+  look description replaced `Max` but the pack uses `MAX` (max HP/ammo never shown); the inventory SPECIAL block
+  used a summed-hash key (seven blank lines) — switched to the existing two-token helper.
+- `Drugs`: stat-change messages built a summed-hash `@text` tag (blank stat name) — now the 3-token form; drug
+  stage durations are game-minute table values but were scheduled with `Time::Seconds` (~3× too fast) — now
+  `Time::GameMinutes`. *[drug pacing — playtest]*
+- `Repair`: a successful repair left the `BrokenLow/Norm/High` severity flags set (item read as broken forever,
+  next break re-applied the old severity) — factored a `ClearBrokenLevel` helper used by both repair and
+  `SetDeterioration`.
+- `MapTime`: the game-time offset truncated to int32, wrapping the in-game calendar backwards ~49.7 days every
+  ~30 h of uptime — now built as a 64-bit `timespan`.
+- `GameEventRacing::RacingWhen` always overwrote the "Никогда" fallback with a zero timestamp.
+
+**Deferred — flagged for the owner (feature-work, cross-file migration, or serialized-contract change):**
+
+- **`Item::OnCritterUseSkill` and `Resources::OnCritterUseOn` are never fired** (Item.fos:23, Resources.fos:380).
+  These are whole dormant subsystems — wiring the events would activate ~18 sealed quest doors, the entire
+  resource-gathering module, Navarro scanner/collar handlers, etc. The verifiers themselves note subscribers
+  return `StopChain` unconditionally and need coordinated changes; this is feature activation, not a contained fix.
+- **`ItemMovement` free-ammo exploit** (empty weapon refilled on every inventory entry): the correct fix moves the
+  initial load to `OnItemInit(firstTime)`, a new event subscription — deferred to keep it deliberate.
+- **MsgStr legacy hash keys** (MsgStr.fos:164/513/1155 — radio messages, the whole PipBoy quest tab, NPC look
+  names/descriptions render blank): the known cross-file text-pack migration that also touches generated
+  `GuiScreens.fos` + the owning `.fogui`, previously flagged as owner follow-up.
+- **Radiation stage bookkeeping** (AffectRadiation/DropRadiation, Radiation.fos:106/126): permanent stat loss or a
+  free permanent buff. The fix needs a redesign of how the applied stage is tracked (no `GetTimeEventData` API
+  exists), so it is not a one-liner.
+- **Repair `SetItemCost`** compounds a persistent per-instance cost discount that is never restored — the correct
+  fix makes it a pure read-path accessor and must preserve `ReplicationTrader`'s authored per-instance prices.
+- **Repairer stack loss** (whole hand stack destroyed, one item returned): needs a new `RepairItemCount` serialized
+  property.
+- **GMTown RPCs** (`Rpc_TransferToMap`/`Rpc_ShowTownView`/`Rpc_ShowGMTown`): an arbitrary-teleport map-unlock
+  exploit on dead inbound RPCs with no client caller — the clean fix deletes the `ServerRemoteCall` surface, a
+  network-contract change for the owner.
+- **CritterIcons follow-icon** (CritterProps.fos:107 `FollowLeaderId` is `OwnerSync`, so the group-member icon is
+  never drawn): the fix flips it to `PublicSync`, a serialized/network-sync contract change.
+- **Hunter/Lourence barter** dead-locked by `IsBarterOnlyCash` + a buy whitelist omitting caps — a content/design
+  decision on whether Lourence trades for caps or pelts.
+- **Resources respawn** rebuilds the scenery proto id from a numeric uhash (over-caps regrowth), and `ToolAxe`
+  grants count 0 on the last chop — both live only if the Resources module is wired (see the deferred event above),
+  and the respawn fix additionally needs a persisted-time-event migration.
+
+**Verification:** Compile AngelScript (0 warnings) → formatter idempotent → quality ratchet → nullable ABI →
+bake → `TLA_Server`/`TLA_ServerHeadless`/`TLA_Client` builds without warnings → live script harness **65 passed,
+0 failed, 0 skipped** (added `get_planes_null_out`) → headless reached `Start server complete!` with no exception,
+sync, assertion or fatal marker. `git diff --check` clean. Not committed (owner reviews).
+
+Playtest additions from this wave: general responsiveness in crowds/combat (the ClientMain freeze), drug
+durations, NPC aimed-shot behaviour and burst decisions, warehouse-turret / V13-guardian aggression, weapon repair
+display and severity, and world-map fog coverage.
+
+### R3 Poker draw-order follow-up (2026-08-08)
+
+The NPC draw strategy still detected near-straights by comparing adjacent slots in the unsorted deal. The same
+five cards therefore produced different replacement decisions after a permutation, and most valid open-ended or
+inside draws were missed. `Poker::FindNearStraightReplaceCard` now evaluates each possible discard against every
+normal five-rank straight window, counts distinct completion ranks, and uses the lower discarded rank as the
+stable tie-break so the higher card is preserved. `HighCardReplace` and `FlushReplace` share that pure decision
+helper; the latter now also honours its documented 5% risk instead of always breaking a made flush whenever a
+near-straight happened to be detected. Repeated hand indexing in the touched replacement paths is centralized in
+`GetHandRank`.
+
+`Test_Poker::near_straight_replace` covers arbitrary deal order, a permutation of the same hand, inside and
+open-ended draws, the ace-high boundary, scattered ranks, duplicates, and an invalid hand size.
+
+**Verification:** Compile AngelScript succeeded with no warnings; full resource bake completed; project formatter
+is clean; script-quality ratchet and nullable ABI validator are green; focused server harness **1 passed, 0 failed,
+66 skipped**; full server harness **67 passed, 0 failed, 0 skipped**; `TLA_ServerHeadless` reached
+`Start server complete!` and shut down cleanly. No client/GUI surface changed, so this server-only batch did not
+require a screenshot comparison. Not committed (owner reviews).
+
+### R3 AI-control dialog tracing follow-up (2026-08-08)
+
+The Stage-0 quest workflow now has a bounded `tla_quest_runner.py --trace-dialog` discovery mode. It identifies
+the real giver by visible `protoId` + `dialogId`, replays localized answer paths with explicit depth/path/candidate
+bounds, ranks stage-increasing answers, records stable Russian keyword sets and full node paths, supports setup
+prerequisites, and restores the traced flag in `finally`. Replay handles first-meeting roots and randomized
+greeting/exit variants; it deliberately warns that items, dialog cooldowns, and unrelated properties require a
+disposable QA character.
+
+Live testing exposed two asynchronous races rather than engine-lock gaps. A `qa_get_prop` response can be
+missing or delayed under full-world async load, and an old reply could be mistaken for a newer read. The runner now
+retries within a bounded timeout, while the existing script RemoteCall echoes a correlation `requestId` in
+`qa_prop_value`; only the matching reply is accepted. Same-hex QA transfers are likewise retried until the
+client observes the requested hex. No implicit Engine synchronization was added: the explicit script
+`Game.Sync` covers remain the only potentially waiting synchronization on these paths.
+
+The fresh-client Cassidy seed produced the correct rank-1 answer `Да, конечно.` with the complete three-step
+path, `ArroyoCassidyLetter` 0 → 1, 5 explored paths, 1 root rebase, no branch errors, and a confirmed restore to
+0. This is one of the seven Stage-0 trace exit-criterion quests, not completion of the criterion.
+
+The second seed exposed three automation races under the full-world idle-job load. `qa_set_prop` now carries a
+request id and publishes `qa_prop_set` only after its `[[Async]]` script callback explicitly establishes the
+`Game.Sync` critter cover and performs `SetAsInt`; the runner retries unacknowledged writes without adding any
+implicit synchronization to the called engine function.
+Confirmed adjacent positions retain bounded `talk_to` retries, first-time Debug map loads have a configurable
+`--map-timeout` (90 seconds by default), and trace replay has an internal wall-clock budget so its `finally`
+restore is not left to an
+external shell watchdog. Quest-guided ordering also prioritizes the authored armour/rust/grease lead over
+Mynoc's large lore subtree.
+
+The resulting live Mynoc trace matched `protoId=EnclaveGuard` + `dialogId=arroyo_mynoc`, found the two-step path
+`Я заметил... Твоя броня...` → `Я принесу тебе смазку...`, observed `ArroyoMynocOil` 0 → 1 in 2 explored paths
+and 13.7 seconds, reported no branch errors, and confirmed restore to 0.
+
+The next live seed covered the complete Den Smitty robot chain. The real `HomesteaderMale` / `den_smitty` and
+`MrHandy` / `den_mr_handy` dialogs produced ranked, branch-error-free transitions `DenSmittyFixit`
+0 → 1 → 2 → 3 → 4, including the Repair-85 diagnosis and the three-item repair gate; each independently injected
+stage restored the original value 0. Cold Den loads exposed the old fixed transfer timeout at the exact map-load
+boundary, so both trace and authored quest runs now pass the validated `--map-timeout` through to strict
+`map.protoId` observation instead of weakening the oracle. Live reports are
+`Build/_artifacts/trace-dialog/smitty-{accept,examine,repair,report}-live.json`. Stage-0 trace coverage is now
+3/7.
+
+The fourth seed matched Klamath's real `MasterTrader` / `klam_hish` at hex 82,132. With `IntellectBase=6`, the
+ranked replay walked five visible answers from the work topic through the name joke and vaccination offer,
+observed `KlamVaccination` 0 → 1 in 5 explored paths and 20.97 seconds, reported no branch errors, and restored
+the original 0. Its report is `Build/_artifacts/trace-dialog/klam-hish-accept-live.json`; the full Klamath session
+logged zero script, sync, bag, fatal, or assertion markers. All 4 seed quests are now traced, so Stage-0 coverage
+is 4/7 with only the 3 fresh Arroyo quests remaining.
+
+The first fresh Arroyo probe revisited Todd instead of carrying forward the old generic "guard does not talk"
+label. Visible-critter observations now include `isNoTalk` and the effective `talkDistance`; the normal
+`DropMenuHandler::StartDialog` path publishes a QA-only server diagnostic before and after the same
+`Dialogs::RunDialog(cr, npc, false)` call. The real `HeroMaleDontUse` / `arroyo_todd` was alive, talk-enabled,
+adjacent, mutually visible, and reported `no_visible_start_speech`. That isolated a project dialog-parser
+migration bug: textual script arguments retained the `@` sigil (`@!` hashed as `@!` rather than `!`) and kept
+qualified content names (`Content::Location::modoc`) instead of the terminal id. `NormalizeDialogScriptValue`
+restores the legacy value contract, with native tests for sigils, content ids, numeric and boolean values. The
+same ordinary talk path then traced `ArroyoProofOfDeath` 0 → 1 in 11 paths with no branch errors and restored 0;
+the report is `Build/_artifacts/trace-dialog/arroyo-todd-proof-live.json`.
+
+The remaining fresh Arroyo traces are also live-green. Todd's second offer advanced
+`ArroyoLetterToLinnett` 0 → 1 in 3 explored paths after the authored proof prerequisite was injected. Mynoc's
+defence replay first exposed changing `@@` answer text; selectors now fall back to the same answer slot only when
+the answer count is unchanged, while still preferring unique exact text. It then exposed a gameplay bug: the
+dialog deliberately offered stage 1 to a solo level-5 player, but the shared quest helper silently applied the
+stage-2 minimum-group guard. That guard is now restricted to stage 2. A fresh live run explored 25 paths, followed
+the complete 13-answer conversation, advanced `ArroyoMynocDefence` 0 → 1, restored 0, and logged no branch,
+script, sync, fatal, or assertion error. Reports are
+`Build/_artifacts/trace-dialog/arroyo-letter-linnett-live.json` and
+`Build/_artifacts/trace-dialog/arroyo-mynoc-defence-live.json`. The Stage-0 trace criterion is now **7/7**.
+
+Loading Den also exposed two real time-event sync faults. `DenCooldude::Sing`, `DenKliff::Say`, both
+`DenBarBekkyBoy` announcements, and `DenVirgin::Check` now enter as `[[Async]]`, establish the full critter+map
+cover in script, and retry after one second if the entity moved or became unavailable before touching properties,
+movement, or messaging. No Engine synchronization was added. A fresh full Den session covering all four quest
+stages logged zero `Entity access without sync`, `EntitySyncException`, fatal, or assertion markers.
+
+The same session exposed `NpcBags::GetBag(6)` from the first `repl_bank_den` guard. Bag 6 does not exist in
+`BagsConfig.json`; the other ten guards on that map use configured bank-guard bag 42. The outlier now uses 42,
+and a ContentQuality contract scans every authored map bag reference against the server config. The four older
+orphans were then mapped by authored role: `intro_init` BOS privates 176 → BOS infantry 263,
+`redding_miners` supervisor Andrew 160 → Redding civilian 85, inner gate guard 230 → strong regulator 81, and
+the lone `sf_hubb` guard outlier 203 → the same Hubologist guard bag 117 as its peers. The contract now has no
+exceptions. Incremental bake rebuilt all three affected maps; a fresh headless world reached
+`Start server complete!` and remained free of `Bag … not found`, script, sync, fatal, and assertion markers.
+
+A follow-up Den Mom trace disproved the old `DenVirginIsAway` scope-mismatch hypothesis: the dialog parser already
+infers the property's Game owner and runtime reads it through `Game.GetAsInt`. The actual migration defect was the
+textual boolean RHS. Integer property 0 became any value `"0"`, authored `false` remained `"false"`, and
+`any.opEquals` compared those spellings directly. `NormalizeDialogPropertyValue` now restores the legacy
+`ResolveGenericValue` representation (`false` → `0`, `true` → `1`) for all 51 authored boolean property
+demand/results without changing script-argument conversions. Native dialog tests cover both value-normalization
+contracts. Fresh live traces then completed `DenMomSlut` 0 → 1 at Mom (27 paths), 1 → 2 at Virginia (2 paths,
+including `DenVirgin::GoAway`), and 2 → 3 at Mom (1 path); every run restored the original 0 and the server/client
+logs contained no script, sync, fatal, or assertion marker. Reports are
+`Build/_artifacts/trace-dialog/den-{mom-slut-accept,virginia-away,mom-slut-report}-live.json`.
+
+The `NrWriKidnap` arrival guard used general `Text` id 3354, but the English pack lacked the whole related
+3350–3354 block. All five English rows are now authored. A ContentQuality parity ratchet records the remaining
+103 legacy russ→engl gaps and rejects new omissions or English-only ids. AI Control gained the QA-gated
+`qa_get_text_pack` command and now advertises every implemented command; an isolated client forced to
+`Language=engl` resolved 3350 and 3354 from the baked runtime pack, while a negative id was rejected. No Engine
+or synchronization path was added, and the server/client logs contained no script, sync, fatal, or assertion
+marker (the headless client only reported the expected missing audio device).
+
+The same ratchet exposed a shifted Den Bekky id: English authored `Hmm...` as a second 1101 instead of the
+`STR_STEAL_FAIL` id 1100. The id is corrected without banning intentional duplicate-id random variants. The
+complete deathclaw-egg block 3490–3495 is now also authored in English; the MCP runtime lookup resolved 1100,
+1101 and every egg string from the freshly baked pack, preserving the late `@arg Hp@` substitution contract.
+The active Vault City Lynnet witness block 5920–5924, Hubologist laboratory alarm/opening lines 8030–8031,
+and split three-message race-start announcement 3857–3858 are also authored and covered. MCP resolved every new
+row from the baked English pack; the race strings retain the deliberate `prefix → player count → suffix` flow.
+
+The remaining-plan note about empty start-map `repl_*` dialog text was stale after the earlier dialog-key repair.
+A fresh character on `repl1` opened `repl_hubb_oper` through ordinary `talk_to` with readable speech and answer;
+the real 1024×768 engine framebuffer shows the dialog window composed correctly. A new ContentQuality contract
+checks every reachable speech and answer across all 17 `repl_*.fodlg` files in `russ` and `engl`, excluding only
+the intentionally invisible pre-dialog routing node. No missing or empty player-visible replication text remains.
+
+The next async batch fixed `Item::DeferredDestroyItem`, `Item::AutoCloseDoor`, and `ReddGates::CloseGates` without
+adding synchronization to Engine calls. The time-event callbacks are now `[[Async]]` and acquire their complete
+item/map/critter covers through script-side `Sync::Lock`; after reentrant `TransferToMap` calls they reacquire and
+validate the surviving topology before touching the door again. `AutoCloseDoor` also no longer treats the
+documented `SwitchLocker(..., false)` return value as a close failure and therefore does not enqueue a redundant
+post-close callback.
+
+The first Map batch migrated coastal weather, map radiation, the Modoc giant-wasp quest timeout, and the simple
+Primal Tribe nature/delete callbacks. Radiation snapshots recipients under the map lock, then reacquires
+`map + current critter` for every dose so a reentrant radiation death cannot invalidate the next iteration.
+The plan's `MapSfTanker::TankerIdle` candidate was stale: its async map/player cover was already present.
+
+The complex Primal Tribe raid graph is now migrated as well. Raid start, spawning, target selection, retargeting,
+and deferred quest-result delivery run only in `[[Async]]` jobs and acquire complete script-owned covers before
+entity access. Covers are reacquired after reentrant critter creation, destruction, movement-plane, and attack-plane
+operations; topology and role flags are revalidated before continuing. The synchronous map-enter event only
+schedules the raid job, and quest results are deduplicated and applied under one player lock at a time. A pure
+five-branch quest-stage resolver has a server script test. No direct `Game.Sync` or Engine-side synchronization was
+added. That script-harness run passed **68/68**, including the new Primal Tribe failure-stage contract.
+
+The NCR/Gecko energy-barrier time-event surface is now covered too. Deferred barrier initialization first locks
+the item, then atomically expands to its stable parent map; network and single-barrier mode changes acquire all
+base items, blockers, and parent maps in `EnergyBarierSync.fos`, then revalidate both `MapId` topology and the
+network snapshot before changing properties. No barrier callback calls `Game.Sync` directly. `ChangeNetMode` also
+coalesces its former one-identical-timer-per-barrier behavior into one network auto-enable timer. The pure auto-
+enable policy has a seven-branch server test, and every `EnergyBarier` time event is now `[[Async]]`. The full
+headless script harness passes **69/69** with no entity-sync exception.
+
+The Behemoth time-event surface is complete as well. `BehemothIdle` now uses the topology-aware
+`LockCritterWithMapAndLocation` helper, expands the same cover with the route target, and re-reads the current
+order, target, map, and location after waiting. `ShowCamera` is now `[[Async]]` and locks the player, viewed map,
+and map location before entering the Engine view call, with topology revalidation immediately beforehand. This
+module also contains no direct `Game.Sync`; three static contracts pin these rules.
+
+The scheduled Caravan preparation/departure/cleanup surface now follows the latest server transfer contracts too.
+`Sync.fos` provides `LockForTransferToMap` (critter + source map + destination map/location) and
+`LockForTransferToGlobalWithGroup` (leader + every member + every current source map); both acquire only through
+script-side `Game.Sync` and revalidate topology after waiting. All entity-touching Caravan time events and their
+helpers are `[[Async]]`; synchronous dialog results only enqueue the covered jobs. Departure now rejects a player
+from another map even when hex coordinates coincide and restores the legacy whole-group transfer through
+`TransferToGlobalWithGroup` instead of moving only the leader. Stale delete/return timers validate the current
+leader id before resetting or moving anything. The disabled `CaravansInit` subsystem remains disabled: startup and
+the pure four-branch member-policy test are green, but live route/escort E2E remains gated on the owner-coordinated
+fresh-database fix and re-enable. The full script harness passes **71/71** with no entity-sync exception.
+
+The next entity-id/time-event wave follows the newer destructive and registry-lookup contracts. `Sync.fos` now
+has `LockItemWithParent` (map, inventory, nested-container, and unowned cases), `LockMapWithLocation`, and
+`LockCrittersWithMaps`; every helper acquires through script-side `Game.Sync` and revalidates the ownership or
+topology after waiting. Deferred cleanup in `Base`, `GameEventCaches`, `GameEventStorehouse`, `Location`,
+`Navarro`, `SeAndroid`, and `SfInvasion` now supplies the entity plus the current parent required by
+`Game.DestroyItem`/`DestroyCritter`/`DestroyMap`/`DestroyLocation`. Simple location, map, and critter property
+timers in `SignalRocket`, `VcGuardsman`, `NrWriKidnap`, `Elevator`, `Jukebox`, `KlamJura`, `NcrKess`,
+`NcrCommon`, `NcrSmit`, `Resources`, `TownSupply`, and `V13Goris` are async and lock before their first read.
+
+Replication/explosion mechanics received the same treatment. Replicator surface cleanup holds its map cover
+while transferring players and destroying child items/NPCs; the delayed tank explosion stabilizes the quest
+critter, tank, tank parent, and map. It also fixes a real use-after-destroy bug by snapshotting `tankHex` before
+`Game.DestroyItem(item)`, and rejects a tank moved away from its authored map. `Explode` and `SmokeGrenade`
+timers validate serialized payload sizes, lock their charge/map/optional owner covers, and destroy smoke items
+with their current parents. Android radio/awakening and Replication Bank warning/attack timers now stabilize all
+participants and current maps; the bank attack still clears its pending-warning flag when the player vanished.
+
+A project contract now scans the current Engine scripting layer and fails if a script-exported method calls the
+blocking `SyncEntity`/`SyncEntities` primitives anywhere except the explicit `Server_Game_Sync` overloads.
+Server networking, movement, login, and other autonomous jobs retain their own job-entry synchronization, while
+AngelScript gameplay modules call `Game.Sync` only through `Sync.fos`. Non-blocking `EnsureEntitySynced`
+retention inside destructive Engine internals is intentionally outside this rule.
+
+The named conditional-callback tranche is now covered as well. `Purgatory::DeletePurgatory` holds the location
+cover while collecting child-map players and destroying the location. All six `MainIntro` scene callbacks validate
+their serialized payloads and lock the expected map/player before effects, death, replication, or notification.
+The shared `Replication::ReplicateCritter` path now stabilizes the global group, existing encounter location, source
+and destination topology before every transfer, reacquires the actual destination after nested transfer events, and
+locks all registry-resolved enemies before `EnemyStack` type filtering. This also makes a local-map car owner fail
+closed instead of throwing from a global-group lookup.
+
+`KlamCowboy` now runs its seven entity/map timers, spawn helpers, cow-death completion, and quest-owner update path
+as async script-owned operations. Vault City drill timers lock the commander, the complete saved squad, and all
+current maps before MarchQueue/SquadCommander registry lookups; the start check additionally rejects a player who
+moved to a different map even when the authored hex coordinates happen to match. Lynnet's delayed prisoner and
+witness dialogue similarly covers every speaker and map. Focused contracts pin all of these rules, and the current
+headless harness remains **71/71** with no sync exception. The four `NpcRevenge` map-loop/delayed callbacks are now
+async too and acquire their map before saved revenge state, child NPC queries, speeches, planes, or mode changes.
+
+`MobWave` now treats the authored source map as the script-owned serialization anchor for every deferred wave
+step. Each callback locks the map, reloads `Game.MobWaveData`, expands the cover to all saved mobs, targets,
+assigned attackers, newly found target candidates, their current maps, and the transit destination/location, then
+reloads and revalidates the graph after each wait. Transit preserves that complete cover while using
+`Sync::LockForTransferToMap`; dead-mob cleanup covers the critter and its current map. This closes both the stale
+wave-save race and the uncovered `TransferToMap` path without adding Engine-side synchronization.
+
+`Hunter` now covers the owner and all still-owned barter items before batch destruction, and retains the selected
+registry speaker through the delayed lure message. Rat relocation locks both authored maps, the location, only the
+role-400 hostile rats, role-401 allies, players, and every participant's current map; each transfer preserves that
+whole graph and revalidates the destination before assigning combat state. `Sync::LockCrittersWithMaps` therefore
+accepts fixed serialization entities just like the transfer helper.
+
+The Merc idle graph is script-owned as well. Both the repeating timer and global-map idle event enter an async
+implementation that first stabilizes merc, master, and their current maps. Cross-map following uses the full
+transfer cover, while joining a global group snapshots and locks its complete membership before reading the
+leader's charisma and calling `TransferToGlobalGroup`. `ReleaseMerc` now locks before any saved-property read,
+revalidates its home tuple after the transfer wait, and ignores a stale release timer when that NPC has already
+been hired again. A pure server regression pins this last policy. The remaining plain `[[TimeEvent]]` inventory is
+now **61** callbacks (not all access entities). The current headless script harness passes **72/72**, including
+`merc.stale_release_guard`, with no entity-sync, script-exception, assertion, or fatal marker in the server log.
+
+**Verification:** focused Python/contract tests and the full MCP suite are green (**119 passed**), alongside
+**128** ScriptQuality contract tests and **19** ContentQuality tests; project formatter checked all 345 inputs
+without changes; script-quality ratchet, nullable ABI validation, and `git diff --check` are clean. AngelScript
+compilation succeeded without warnings; forced resource bake rebuilt scripts, server data and all 550 maps.
+`TLA_Server`, `TLA_ServerHeadless`, the Baker, and `TLA_UnitTests` built successfully; the full native suite passed
+with exit 0 in 253.7 seconds, including the new dialog-value tests. The RelWithDebInfo client library compiled and
+linked, but its final deploy copy was blocked by an already-running owner client holding `TLA_Client.dll`; live
+testing therefore used an isolated client directory without stopping the owner process. The final Mynoc session
+reached `Start server complete!` and logged no script, sync, fatal, or assertion marker. No GUI surface changed,
+so no screenshot baseline changed in this server/dialog batch. Not committed (owner reviews).

@@ -2,6 +2,7 @@
 
 #include "Dialogs.h"
 #include "Server.h"
+#include "SpriteResource.h"
 
 FO_USING_NAMESPACE();
 
@@ -69,7 +70,7 @@ void FO_NAMESPACE ServerInitHook(ptr<ServerEngine> server)
 {
     FO_STACK_TRACE_ENTRY();
 
-    server->UserData = unique_del_ptr<uint8_t>(reinterpret_cast<uint8_t*>(SafeAlloc::MakeRaw<ServerExtData>()), [](const uint8_t* ptr) FO_DEFERRED {
+    server->UserData = make_unique_del_ptr(SafeAlloc::MakeRaw<ServerExtData>().reinterpret_as<uint8_t>(), [](const uint8_t* ptr) FO_DEFERRED {
         const auto* ext_data_ptr = reinterpret_cast<const ServerExtData*>(ptr);
         delete ext_data_ptr;
     });
@@ -83,13 +84,13 @@ void FO_NAMESPACE ServerInitHook(ptr<ServerEngine> server)
     ext_data.LookMinimum = strvex(server->Settings->GetCustomSetting("Look.LookMinimum")).to_int32();
     FO_VERIFY_AND_THROW(ext_data.LookMinimum != 0, "Look.LookMinimum setting must be set");
 
-    const auto* cr_props = server->GetPropertyRegistrator(Critter::ENTITY_TYPE_NAME).get();
+    const auto* cr_props = server->GetPropertyRegistrar(Critter::ENTITY_TYPE_NAME).get();
     ext_data.InSneakMode = cr_props->FindProperty("InSneakMode");
     FO_VERIFY_AND_THROW(ext_data.InSneakMode, "Critter property InSneakMode not found");
     ext_data.SneakCoefficient = cr_props->FindProperty("SneakCoefficient");
     FO_VERIFY_AND_THROW(ext_data.SneakCoefficient, "Critter property SneakCoefficient not found");
 
-    const auto* item_props = server->GetPropertyRegistrator(Item::ENTITY_TYPE_NAME).get();
+    const auto* item_props = server->GetPropertyRegistrar(Item::ENTITY_TYPE_NAME).get();
     ext_data.IsAlwaysView = item_props->FindProperty("IsAlwaysView");
     FO_VERIFY_AND_THROW(ext_data.IsAlwaysView, "Item property IsAlwaysView not found");
     ext_data.IsTrap = item_props->FindProperty("IsTrap");
@@ -187,54 +188,25 @@ isize32 FO_NAMESPACE Server_Game_LoadImage(ptr<ServerEngine> server, uint32_t im
         throw ScriptException("File not found", imageName);
     }
 
-    auto reader = file.GetReader();
+    // Читаем спрайт через движковый парсер: движок сменил бинарный формат
+    // (SPRITE_RESOURCE_MAGIC/VERSION, помимо старого одиночного байта 42), поэтому ручной разбор
+    // больше не подходит. Берём первый кадр первого направления и разворачиваем его в логическое изображение.
+    const auto file_data = file.GetData();
+    auto resource = ReadSpriteResource(file_data);
 
-    const auto check_number = reader.GetUInt8();
+    FO_VERIFY_AND_THROW(!resource.Directions.empty(), "Image contains no directions", imageName);
+    FO_VERIFY_AND_THROW(!resource.Directions.front().Frames.empty(), "Image contains no frames", imageName);
 
-    if (check_number != 42) {
-        throw ScriptException("File is not image", imageName);
-    }
-
-    const auto frames_count = reader.GetLEUInt16();
-
-    if (frames_count != 1) {
-        throw ScriptException("File must contain only one frame", imageName);
-    }
-
-    [[maybe_unused]] const auto ticks = reader.GetLEUInt16();
-
-    const auto dirs = reader.GetUInt8();
-
-    if (dirs != 1) {
-        throw ScriptException("File must contain only one dir", imageName);
-    }
-
-    [[maybe_unused]] const auto ox = reader.GetLEInt16();
-    [[maybe_unused]] const auto oy = reader.GetLEInt16();
-
-    const auto is_spr_ref = reader.GetUInt8();
-    FO_VERIFY_AND_THROW(is_spr_ref == 0, "Sprite reference images are not supported");
-
-    const auto width = reader.GetLEUInt16();
-    const auto height = reader.GetLEUInt16();
-    [[maybe_unused]] const auto nx = reader.GetLEInt16();
-    [[maybe_unused]] const auto ny = reader.GetLEInt16();
-    const auto* data = reader.GetCurBuf().get();
-
-    reader.GoForward(numeric_cast<size_t>(width) * height * 4);
-
-    const auto check_number2 = reader.GetUInt8();
-    FO_VERIFY_AND_THROW(check_number2 == 42, "Image trailing check number mismatch");
+    auto image = ExtractSpriteResourceFrameImage(std::move(resource.Directions.front().Frames.front()));
 
     auto simg = SafeAlloc::MakeUnique<ServerImage>();
-    simg->Width = width;
-    simg->Height = height;
-    simg->Data.resize(numeric_cast<size_t>(width) * height);
-    MemCopy(simg->Data.data(), data, simg->Data.size() * sizeof(ucolor));
+    simg->Width = image.Size.width;
+    simg->Height = image.Size.height;
+    simg->Data = std::move(image.Pixels);
 
     ext_data.ServerImages[imageSlot] = std::move(simg);
 
-    return {width, height};
+    return image.Size;
 }
 
 ucolor FO_NAMESPACE Server_Game_GetImageColor(ptr<ServerEngine> server, uint32_t imageSlot, ipos32 pos)
@@ -281,10 +253,10 @@ string FO_NAMESPACE Server_Game_RunSpeechScript(ptr<ServerEngine> server, ptr<Di
     if (speech->DlgScriptFuncName) {
         bool failed = false;
 
-        if (auto func = server->FindFunc<void, Critter*, Critter*, string&>(speech->DlgScriptFuncName); func && !func.Call(cr.get(), talker.get(), textArgs)) {
+        if (auto func = server->FindFunc<void, ptr<Critter>, nptr<Critter>, string&>(speech->DlgScriptFuncName); func && !func.Call(cr, talker, textArgs)) {
             failed = true;
         }
-        if (auto func = server->FindFunc<uint32_t, Critter*, Critter*, string&>(speech->DlgScriptFuncName); func && !func.Call(cr.get(), talker.get(), textArgs)) {
+        if (auto func = server->FindFunc<uint32_t, ptr<Critter>, nptr<Critter>, string&>(speech->DlgScriptFuncName); func && !func.Call(cr, talker, textArgs)) {
             failed = true;
         }
 
@@ -302,12 +274,12 @@ bool FO_NAMESPACE Server_Game_DialogScriptDemand(ptr<ServerEngine> server, ptr<D
 
     ServerEngine* server_ptr = server.get();
     DialogAnswerReq* demand_ptr = demand.get();
-    Critter* master_ptr = master.get();
-    Critter* slave_ptr = slave.get();
+    const auto master_arg = master;
+    const auto slave_arg = slave;
 
-    const auto call_demand = [server_ptr, demand_ptr, master_ptr, slave_ptr]<typename... TArgs>(const TArgs&... args) -> bool {
-        auto func = server_ptr->FindFunc<bool, Critter*, Critter*, TArgs...>(demand_ptr->AnswerScriptFuncName);
-        return func && func.HasAttribute("DialogDemand") && func.Call(master_ptr, slave_ptr, args...) && func.GetResult();
+    const auto call_demand = [server_ptr, demand_ptr, master_arg, slave_arg]<typename... TArgs>(const TArgs&... args) -> bool {
+        auto func = server_ptr->FindFunc<bool, ptr<Critter>, nptr<Critter>, TArgs...>(demand_ptr->AnswerScriptFuncName);
+        return func && func.HasAttribute("DialogDemand") && func.Call(master_arg, slave_arg, args...) && func.GetResult();
     };
 
     switch (demand->ValuesCount) {
@@ -334,22 +306,22 @@ int32_t FO_NAMESPACE Server_Game_DialogScriptResult(ptr<ServerEngine> server, pt
 
     ServerEngine* server_ptr = server.get();
     DialogAnswerReq* result_ptr = result.get();
-    Critter* master_ptr = master.get();
-    Critter* slave_ptr = slave.get();
+    const auto master_arg = master;
+    const auto slave_arg = slave;
 
-    const auto call_result_int = [server_ptr, result_ptr, master_ptr, slave_ptr]<typename... TArgs>(const TArgs&... args) -> optional<int32_t> {
-        auto func = server_ptr->FindFunc<int32_t, Critter*, Critter*, TArgs...>(result_ptr->AnswerScriptFuncName);
+    const auto call_result_int = [server_ptr, result_ptr, master_arg, slave_arg]<typename... TArgs>(const TArgs&... args) -> optional<int32_t> {
+        auto func = server_ptr->FindFunc<int32_t, ptr<Critter>, nptr<Critter>, TArgs...>(result_ptr->AnswerScriptFuncName);
 
-        if (func && func.HasAttribute("DialogResult") && func.Call(master_ptr, slave_ptr, args...)) {
+        if (func && func.HasAttribute("DialogResult") && func.Call(master_arg, slave_arg, args...)) {
             return func.GetResult();
         }
 
         return std::nullopt;
     };
 
-    const auto call_result_void = [server_ptr, result_ptr, master_ptr, slave_ptr]<typename... TArgs>(const TArgs&... args) -> bool {
-        auto func = server_ptr->FindFunc<void, Critter*, Critter*, TArgs...>(result_ptr->AnswerScriptFuncName);
-        return func && func.HasAttribute("DialogResult") && func.Call(master_ptr, slave_ptr, args...);
+    const auto call_result_void = [server_ptr, result_ptr, master_arg, slave_arg]<typename... TArgs>(const TArgs&... args) -> bool {
+        auto func = server_ptr->FindFunc<void, ptr<Critter>, nptr<Critter>, TArgs...>(result_ptr->AnswerScriptFuncName);
+        return func && func.HasAttribute("DialogResult") && func.Call(master_arg, slave_arg, args...);
     };
 
     switch (result->ValuesCount) {

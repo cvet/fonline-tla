@@ -2,7 +2,7 @@
 // Содержит игровые константы и enum-метаданные (возраст, перки предметов, флаги машин, типы тел,
 //  локомоция, лифты, типы криттеров CRTYPE_*, слоты и точки входа, события глобальной карты,
 //  действия Chosen) плюс хелперы: математика (Min/Max/Clamp/Abs/Pow2), ident-стеки контейнеров,
-//  доступ к предметам в слотах, работа с планами ИИ NPC.
+//  строгий разбор параметров сценери, доступ к предметам в слотах, работа с планами ИИ NPC.
 // Модуль без подписок и ModuleInit — фундамент, используемый всем проектом. SERVER-гарды: удаление
 //  AI-планов NPC (NpcPlanes), Animate/Reset; CLIENT-гард: константы действий Chosen.
 namespace Tla
@@ -17,6 +17,64 @@ namespace Tla
 hstring EntryHash(int entryNumber)
 {
     return ("" + entryNumber).hstr();
+}
+
+// Разбирает только каноническое знаковое десятичное число. Историческая форма @N
+// принимается лишь явно: она встречается в старых параметрах дверей и переходов.
+bool TryParseSceneryInt(hstring param, int& result, bool allowLegacyAt = false)
+{
+    string text = param.str;
+    if (text.isEmpty()) {
+        return false;
+    }
+
+    if (text.substr(0, 1) == "@") {
+        if (!allowLegacyAt || text.length() == 1) {
+            return false;
+        }
+        text = text.substr(1);
+    }
+
+    bool negative = text.substr(0, 1) == "-";
+    string digits = negative ? text.substr(1) : text;
+    if (digits.isEmpty() || digits.length() > 10) {
+        return false;
+    }
+    for (int i = 0; i < digits.length(); i++) {
+        string digit = digits[i];
+        if (digit < "0" || digit > "9") {
+            return false;
+        }
+    }
+
+    const string limit = negative ? "2147483648" : "2147483647";
+    if (digits.length() == limit.length() && digits > limit) {
+        return false;
+    }
+
+    int parsed = 0;
+    if (!text.tryToInt(parsed) || text != "" + parsed) {
+        return false;
+    }
+
+    result = parsed;
+    return true;
+}
+
+// Снимает авторский квалификатор Content::<Type>:: с runtime-id. Нулевой sentinel
+// и квалификатор без id считаются пустым значением; уже нормализованный id сохраняется.
+hstring NormalizeSceneryContentId(hstring param, string prefix)
+{
+    string text = param.str;
+    if (text == "0") {
+        return EMPTY_HSTRING;
+    }
+
+    if (!prefix.isEmpty() && text.length() >= prefix.length() && text.substr(0, prefix.length()) == prefix) {
+        return text.length() == prefix.length() ? EMPTY_HSTRING : text.substr(prefix.length()).hstr();
+    }
+
+    return param;
 }
 
 // Макросы анимации

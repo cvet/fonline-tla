@@ -29,7 +29,7 @@ void FO_NAMESPACE ClientInitHook(ptr<ClientEngine> client)
     FO_STACK_TRACE_ENTRY();
 
     if (!client->UserData) {
-        client->UserData = unique_del_ptr<uint8_t>(reinterpret_cast<uint8_t*>(SafeAlloc::MakeRaw<ClientExtData>()), [](const uint8_t* ptr) FO_DEFERRED {
+        client->UserData = make_unique_del_ptr(SafeAlloc::MakeRaw<ClientExtData>().reinterpret_as<uint8_t>(), [](const uint8_t* ptr) FO_DEFERRED {
             const auto* ext_data_ptr = reinterpret_cast<const ClientExtData*>(ptr);
             delete ext_data_ptr;
         });
@@ -53,7 +53,7 @@ static auto HasFemaleSexTag(nptr<const CritterView> cr) -> bool
         return false;
     }
 
-    const auto* sex_tag_female = cr->GetProperties()->GetRegistrator()->FindProperty("SexTagFemale").get();
+    const auto* sex_tag_female = cr->GetProperties()->GetRegistrar()->FindProperty("SexTagFemale").get();
     return sex_tag_female != nullptr && cr->GetProperties()->GetValue<bool>(sex_tag_female);
 }
 

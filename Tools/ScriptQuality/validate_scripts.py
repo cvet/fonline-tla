@@ -4,15 +4,17 @@
 This is a *validator*, not an auto-formatter: by default it only reports.
 Autofixes for the unambiguous, safe checks are applied only on explicit
 `--fix`. It complements `Tools/NullableEstimate/validate_nullable.py`
-(which owns `?`/FO_NULLABLE placement and Event/RemoteCall signature
-parity); this tool owns the broader hygiene rules surfaced by the script
-refactoring audit.
+(which owns script `?`, native `ptr<T>`/`nptr<T>` ABI checks, and
+Event/RemoteCall signature parity); this tool owns the broader hygiene rules
+surfaced by the script refactoring audit.
 
 Checks (severity):
   ERROR   trailing-blank-line        exactly one terminator at EOF, no extra blank
   ERROR   namespace-matches-filename first top-level namespace == file basename
   ERROR   preprocessor-guard-balance #if/#ifdef/#ifndef balance with #endif
   ERROR   component-null-probe       `.Comp == null` instead of `!HasComp`
+  ERROR   item-static-signature      ItemStatic must match its engine callback ABI
+  ERROR   item-trigger-location-sync ItemTrigger location access without Async + Sync
   WARNING banner-tags               `// Author:` / `// ver x.y` header banners
   WARNING textpack-magic-id         `"" + (1234)` magic text-pack ids
   WARNING hand-rolled-utils         calls to helpers that duplicate engine APIs
@@ -215,6 +217,30 @@ HAND_ROLLED = [
      "use native string.split / a short join loop"),
 ]
 
+ITEM_TRIGGER_FUNCTION_RE = re.compile(
+    r"(?P<attrs>(?:[ \t]*\[\[[^\]\n]+\]\][ \t\r\n]*)+)"
+    r"(?:[A-Za-z_]\w*(?:<[^>{}]+>)?[ \t]+)+"
+    r"[A-Za-z_]\w*[ \t]*\([^{};]*\)[ \t\r\n]*\{",
+    re.MULTILINE,
+)
+ANNOTATED_DECL_RE = re.compile(
+    r"(?P<attrs>(?:[ \t]*\[\[[^\]\n]+\]\][ \t\r\n]*)+)"
+    r"(?P<header>[^{};]+?)[ \t\r\n]*(?:\{|;)",
+    re.MULTILINE,
+)
+ITEM_STATIC_ATTRIBUTE_RE = re.compile(r"\[\[[^\]\n]*\bItemStatic\b[^\]\n]*\]\]")
+FUNCTION_HEADER_RE = re.compile(
+    r"^[ \t\r\n]*(?P<return_type>.+?)[ \t\r\n]+(?P<name>[A-Za-z_]\w*)"
+    r"[ \t\r\n]*\((?P<params>.*)\)[ \t\r\n]*$",
+    re.DOTALL,
+)
+ITEM_STATIC_PARAM_RES = (
+    re.compile(r"^[ \t\r\n]*Critter[ \t\r\n]+[A-Za-z_]\w*[ \t\r\n]*$"),
+    re.compile(r"^[ \t\r\n]*StaticItem[ \t\r\n]+[A-Za-z_]\w*[ \t\r\n]*$"),
+    re.compile(r"^[ \t\r\n]*Item[ \t\r\n]*\?[ \t\r\n]+[A-Za-z_]\w*[ \t\r\n]*$"),
+    re.compile(r"^[ \t\r\n]*any[ \t\r\n]+[A-Za-z_]\w*[ \t\r\n]*$"),
+)
+
 
 def check_trailing_blank_line(rel: str, raw: bytes) -> list[Violation]:
     if not raw:
@@ -278,6 +304,85 @@ def check_component_null_probe(rel: str, code: str, text: str, components: set[s
     return out
 
 
+def check_item_static_signature(rel: str, code: str, text: str) -> list[Violation]:
+    """Require the exact native callback contract for every ItemStatic function."""
+    out: list[Violation] = []
+    for match in ANNOTATED_DECL_RE.finditer(code):
+        attrs = match.group("attrs")
+        if not ITEM_STATIC_ATTRIBUTE_RE.search(attrs):
+            continue
+
+        header = match.group("header")
+        signature = FUNCTION_HEADER_RE.fullmatch(header)
+        valid = signature is not None
+        if signature is not None:
+            return_type = re.sub(r"[ \t\r\n]+", " ", signature.group("return_type").strip())
+            params_text = signature.group("params").strip()
+            params = [] if not params_text else params_text.split(",")
+            valid = (
+                return_type == "bool"
+                and len(params) == len(ITEM_STATIC_PARAM_RES)
+                and all(pattern.fullmatch(param) for pattern, param in zip(ITEM_STATIC_PARAM_RES, params))
+            )
+
+        if valid:
+            continue
+
+        actual = re.sub(r"[ \t\r\n]+", " ", header.strip())
+        out.append(Violation(
+            "item-static-signature",
+            rel,
+            line_of(text, match.start("attrs")),
+            "ItemStatic callback must have signature "
+            f"`bool NAME(Critter, StaticItem, Item?, any)`; got `{actual}`",
+            SEVERITY_ERROR,
+        ))
+    return out
+
+
+def check_item_trigger_location_sync(rel: str, code: str, text: str) -> list[Violation]:
+    """Require worker-safe synchronization before ItemTrigger callbacks access a Location.
+
+    Static-item trigger dispatch covers the critter and current map, but not their Location.
+    Calling GetLocation without switching the callback to async execution and acquiring an
+    explicit Sync cover raises `Entity access without sync` at runtime.
+    """
+    out: list[Violation] = []
+    for match in ITEM_TRIGGER_FUNCTION_RE.finditer(code):
+        attrs = match.group("attrs")
+        if "[[ItemTrigger]]" not in attrs:
+            continue
+
+        opening_brace = match.end() - 1
+        depth = 1
+        cursor = opening_brace + 1
+        while cursor < len(code) and depth:
+            if code[cursor] == "{":
+                depth += 1
+            elif code[cursor] == "}":
+                depth -= 1
+            cursor += 1
+        body = code[opening_brace + 1:cursor - 1] if depth == 0 else code[opening_brace + 1:]
+        if not re.search(r"(?:\.|\b)GetLocation[ \t]*\(", body):
+            continue
+        if "[[Async]]" in attrs and "Sync::" in body:
+            continue
+
+        missing = []
+        if "[[Async]]" not in attrs:
+            missing.append("[[Async]]")
+        if "Sync::" not in body:
+            missing.append("an explicit Sync cover")
+        out.append(Violation(
+            "item-trigger-location-sync",
+            rel,
+            line_of(text, match.start()),
+            "ItemTrigger accesses a Location without " + " and ".join(missing),
+            SEVERITY_ERROR,
+        ))
+    return out
+
+
 def check_banner_tags(rel: str, text: str, kinds: str) -> list[Violation]:
     out: list[Violation] = []
     comment = mask_to(text, kinds, "LB")
@@ -301,6 +406,11 @@ def check_textpack_magic(rel: str, text: str, kinds: str) -> list[Violation]:
 
 
 def check_hand_rolled(rel: str, code: str, text: str) -> list[Violation]:
+    # Test suites (Scripts/Test_*.fos) legitimately call the helpers under test;
+    # the rule exists to steer gameplay code to native APIs, not to block coverage.
+    if rel.replace("\\", "/").rsplit("/", 1)[-1].startswith("Test_"):
+        return []
+
     out: list[Violation] = []
     for rx, hint in HAND_ROLLED:
         for m in rx.finditer(code):
@@ -372,6 +482,8 @@ def analyze() -> list[Violation]:
         violations += check_namespace(rel, f.name, text)
         violations += check_guard_balance(rel, code)
         violations += check_component_null_probe(rel, code, text, components)
+        violations += check_item_static_signature(rel, code, text)
+        violations += check_item_trigger_location_sync(rel, code, text)
         violations += check_banner_tags(rel, text, kinds)
         violations += check_textpack_magic(rel, text, kinds)
         violations += check_hand_rolled(rel, code, text)

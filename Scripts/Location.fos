@@ -53,11 +53,17 @@ Location CreateLocation(hstring protoId, ipos wpos, Critter[]? critters = null, 
 }
 
 // Периодический сборщик мусора: удаляет пустую локацию или перезапускает проверку.
-[[TimeEvent]]
+[[TimeEvent]] [[Async]]
 void LocationGarbager(any locId)
 {
     Location? loc = Game.GetLocation(ident(locId));
     if (loc == null) {
+        return;
+    }
+
+    // Тайм-ивент выполняется в воркере: без лока чтение свойств локации (и её карт/криттеров по
+    // цепочке покрытия) кидает «Entity access without sync». Провал лока = локация уничтожается.
+    if (!Sync::Lock(loc)) {
         return;
     }
 
@@ -197,13 +203,15 @@ void SetLocationDeleteTime(Location loc, timespan time)
 }
 
 // Отложенный колбэк: помечает локацию под автоудаление (если она ещё существует).
-[[TimeEvent]]
+[[TimeEvent]] [[Async]]
 void DeferredDestroyLocation(any value)
 {
     Location? loc = Game.GetLocation(ident(value));
-    if (loc != null) {
-        loc.AutoGarbage = true;
+    if (loc == null || !Sync::Lock(loc)) {
+        return;
     }
+
+    loc.AutoGarbage = true;
 }
 
 // Создаёт видимую для игрока локацию и (если номер переменной > 0) запоминает её Id в свойстве криттера.

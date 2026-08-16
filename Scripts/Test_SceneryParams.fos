@@ -1,0 +1,102 @@
+// Test_SceneryParams — чистые регрессии строгого разбора и нормализации параметров сценери.
+namespace Test_SceneryParams
+{
+
+#if SERVER
+
+[[ModuleInit]]
+void InitTestSceneryParams()
+{
+    Game.OnTestingInit.Subscribe(OnTestingInit);
+}
+
+[[Event]]
+void OnTestingInit()
+{
+    Testing::RegisterTest("scenery_params", "signed_canonical_decimal", SignedCanonicalDecimal);
+    Testing::RegisterTest("scenery_params", "invalid_decimal", InvalidDecimal);
+    Testing::RegisterTest("scenery_params", "legacy_at_decimal", LegacyAtDecimal);
+    Testing::RegisterTest("scenery_params", "content_id_normalization", ContentIdNormalization);
+}
+
+void SignedCanonicalDecimal(Testing::TestContext ctx)
+{
+    int value = 0;
+    if (!Testing::Expect(ctx, Tla::TryParseSceneryInt("0".hstr(), value) && value == 0, "Канонический ноль допустим")) {
+        return;
+    }
+    if (!Testing::Expect(ctx, Tla::TryParseSceneryInt("47".hstr(), value) && value == 47, "Положительное число разбирается")) {
+        return;
+    }
+    if (!Testing::Expect(ctx, Tla::TryParseSceneryInt("2147483647".hstr(), value) && value == 2147483647, "Верхняя граница int32 допустима")) {
+        return;
+    }
+    if (!Testing::Expect(ctx, Tla::TryParseSceneryInt("-2147483648".hstr(), value) && "" + value == "-2147483648", "Нижняя граница int32 допустима")) {
+        return;
+    }
+
+    Testing::Expect(ctx, Tla::TryParseSceneryInt("-47".hstr(), value) && value == -47, "Отрицательное число разбирается со знаком");
+}
+
+void InvalidDecimal(Testing::TestContext ctx)
+{
+    int value = 91;
+    if (!Testing::Expect(ctx,
+                         !Tla::TryParseSceneryInt(EMPTY_HSTRING, value) && !Tla::TryParseSceneryInt("+4".hstr(), value) &&
+                             !Tla::TryParseSceneryInt("04".hstr(), value),
+                         "Пустое значение, плюс и ведущий ноль отклоняются")) {
+        return;
+    }
+    if (!Testing::Expect(ctx,
+                         !Tla::TryParseSceneryInt("-0".hstr(), value) && !Tla::TryParseSceneryInt("4x".hstr(), value) &&
+                             !Tla::TryParseSceneryInt("2147483648".hstr(), value) && !Tla::TryParseSceneryInt("-2147483649".hstr(), value),
+                         "Неканоническая запись, хвост и переполнение отклоняются")) {
+        return;
+    }
+
+    Testing::ExpectEq(ctx, value, 91, "Неудачный разбор не меняет выходное значение");
+}
+
+void LegacyAtDecimal(Testing::TestContext ctx)
+{
+    int value = 0;
+    if (!Testing::Expect(ctx, !Tla::TryParseSceneryInt("@12".hstr(), value), "Legacy-форма запрещена по умолчанию")) {
+        return;
+    }
+    if (!Testing::Expect(ctx, Tla::TryParseSceneryInt("@12".hstr(), value, true) && value == 12, "Legacy-форма разрешается явным флагом")) {
+        return;
+    }
+    if (!Testing::Expect(ctx, Tla::TryParseSceneryInt("@-12".hstr(), value, true) && value == -12, "Legacy-префикс сохраняет знаковый контракт")) {
+        return;
+    }
+
+    Testing::Expect(ctx,
+                    !Tla::TryParseSceneryInt("@".hstr(), value, true) && !Tla::TryParseSceneryInt("@04".hstr(), value, true),
+                    "Пустая и неканоническая legacy-формы отклоняются");
+}
+
+void ContentIdNormalization(Testing::TestContext ctx)
+{
+    const string prefix = "Content::Dialog::";
+    if (!Testing::Expect(ctx,
+                         Tla::NormalizeSceneryContentId("Content::Dialog::vault_terminal".hstr(), prefix) == "vault_terminal".hstr(),
+                         "Авторский квалификатор снимается с content-id")) {
+        return;
+    }
+    if (!Testing::Expect(ctx,
+                         Tla::NormalizeSceneryContentId("vault_terminal".hstr(), prefix) == "vault_terminal".hstr(),
+                         "Уже нормализованный content-id сохраняется")) {
+        return;
+    }
+    if (!Testing::Expect(ctx, Tla::NormalizeSceneryContentId("0".hstr(), prefix) == EMPTY_HSTRING, "Нулевой sentinel становится пустым id")) {
+        return;
+    }
+
+    Testing::Expect(ctx,
+                    Tla::NormalizeSceneryContentId("Content::Dialog::".hstr(), prefix) == EMPTY_HSTRING,
+                    "Квалификатор без суффикса не образует content-id");
+}
+
+#endif
+
+}

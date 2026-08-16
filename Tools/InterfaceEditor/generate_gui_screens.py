@@ -5,7 +5,6 @@ from __future__ import annotations
 import argparse
 import json
 import re
-import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -92,16 +91,12 @@ def write_text_utf8(path: Path, content: str) -> None:
 
 
 def discover_clang_format(project_root: Path) -> str:
-    bundled = project_root / 'Tools' / 'Formatter' / 'clang-format-20.exe'
-    if sys.platform == 'win32' and bundled.is_file():
-        return str(bundled)
+    formatter_dir = project_root / 'Tools' / 'Formatter'
+    if str(formatter_dir) not in sys.path:
+        sys.path.insert(0, str(formatter_dir))
+    from format_project import discover_clang_format as discover_project_clang_format
 
-    for executable in ('clang-format-20', 'clang-format'):
-        path = shutil.which(executable)
-        if path:
-            return path
-
-    raise SystemExit('clang-format not found')
+    return discover_project_clang_format(project_root)
 
 
 def parse_cfg(path: Path) -> dict[str, str]:
@@ -287,6 +282,18 @@ def append_image_call(lines: list[str], indent: str, method: str, image: str | N
 def emit_on_construct(lines: list[str], obj: dict, is_root: bool) -> None:
     indent = '        '
     obj_type = obj['$type']
+    cell_prototype = obj.get('CellPrototype')
+    sibling_item_prototype = (
+        obj_type == 'ItemView'
+        and is_non_empty(cell_prototype)
+        and str(cell_prototype).strip().strip('"').startswith('.')
+    )
+
+    # OnDraw callbacks are opt-in in the engine. A legacy ItemView whose cell prototype is a
+    # sibling also needs to stay drawable while empty, otherwise later Resort() cells remain
+    # hidden because the parent's draw-needed flag was never raised.
+    if is_non_empty(obj.get('OnDraw')) or sibling_item_prototype:
+        lines.append(f'{indent}SetHasOnDraw(true);')
 
     if is_root and obj_type == 'Screen':
         if obj.get('IsModal'):

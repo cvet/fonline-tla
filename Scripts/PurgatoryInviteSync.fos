@@ -1,0 +1,149 @@
+// PurgatoryInviteSync — async-покрытие сущностей для каскадной обработки инвайтов Purgatory.
+// Снимает bInfo-состояние, блокирует локацию, карты, криттеров, их инвентари контейнер команды,
+// затем отклоняет устаревший снимок до входа в WIP-логику BattleInfo.
+namespace PurgatoryInviteSync
+{
+
+#if SERVER
+
+void AppendUniqueEntity(Entity[] & entities, Entity entity)
+{
+    for (int i = 0; i < entities.length(); i++) {
+        if (entities[i] is entity) {
+            return;
+        }
+    }
+
+    entities.insertLast(entity);
+}
+
+void AppendUniqueCritter(Critter[] & critters, Critter cr)
+{
+    for (int i = 0; i < critters.length(); i++) {
+        if (critters[i] is cr) {
+            return;
+        }
+    }
+
+    critters.insertLast(cr);
+}
+
+void AppendCritterById(Critter[] & critters, ident crId)
+{
+    if (crId == ZERO_IDENT) {
+        return;
+    }
+
+    Critter? cr = Game.GetCritter(crId);
+    if (cr != null) {
+        AppendUniqueCritter(critters, cr);
+    }
+}
+
+// bInfo не Entity, поэтому его нельзя передать Game.Sync: сохраняем и повторно проверяем его invite-часть.
+string StateSignature()
+{
+    string signature = "" + Purgatory::bInfo.LocId + ":" + Purgatory::bInfo.Stage + ":" + Purgatory::TeamContainerId + ":" + Purgatory::bInfo.Teams.length();
+    for (int i = 0; i < Purgatory::bInfo.Teams.length(); i++) {
+        Purgatory::BattleTeam team = Purgatory::bInfo.Teams[i];
+        signature += "|" + team.StartMap + ":" + team.LastPeekedRequestId + ":" + (team.LastRequestAccepted ? 1 : 0) + ":" + team.Requests.length() + ":" +
+                     team.Players.length();
+        for (int j = 0; j < team.Requests.length(); j++) {
+            signature += ",r" + team.Requests[j];
+        }
+        for (int j = 0; j < team.Players.length(); j++) {
+            signature += ",p" + team.Players[j];
+        }
+    }
+
+    return signature;
+}
+
+// Ответ на один инвайт может каскадно закрыть текущий набор команд и разослать следующий.
+// Поэтому cover включает всех LastPeeked/Requests криттеров, их исходные и целевые карты и инвентари.
+[[Async]]
+bool LockBattleInviteCover(Critter? initiator)
+{
+    string stateSignature = StateSignature();
+    Entity[] cover = {};
+    Critter[] critters = {};
+
+    if (initiator != null) {
+        AppendUniqueCritter(critters, initiator);
+    }
+
+    Location? battleLocation = Game.GetLocation(Purgatory::bInfo.LocId);
+    if (battleLocation != null) {
+        AppendUniqueEntity(cover, battleLocation);
+    }
+
+    Item? teamContainer = Purgatory::TeamContainerId != ZERO_IDENT ? Game.GetItem(Purgatory::TeamContainerId) : null;
+    if (teamContainer != null) {
+        AppendUniqueEntity(cover, teamContainer);
+    }
+
+    for (int i = 0; i < Purgatory::bInfo.Teams.length(); i++) {
+        Map? targetMap = Game.GetMap(Purgatory::bInfo.Teams[i].StartMap);
+        if (targetMap != null) {
+            AppendUniqueEntity(cover, targetMap);
+        }
+
+        AppendCritterById(critters, Purgatory::bInfo.Teams[i].LastPeekedRequestId);
+        for (int j = 0; j < Purgatory::bInfo.Teams[i].Requests.length(); j++) {
+            AppendCritterById(critters, Purgatory::bInfo.Teams[i].Requests[j]);
+        }
+    }
+
+    for (int i = 0; i < critters.length(); i++) {
+        AppendUniqueEntity(cover, critters[i]);
+    }
+    if (!Sync::Lock(cover)) {
+        return false;
+    }
+
+    ident[] critterMapIds = {};
+    Item[] inventoryItems = {};
+    ident[] inventoryOwnerIds = {};
+    for (int i = 0; i < critters.length(); i++) {
+        critterMapIds.insertLast(critters[i].MapId);
+        Map? sourceMap = critters[i].GetMap();
+        if (sourceMap != null) {
+            AppendUniqueEntity(cover, sourceMap);
+        }
+
+        Item[] items = critters[i].GetItems();
+        for (int j = 0; j < items.length(); j++) {
+            inventoryItems.insertLast(items[j]);
+            inventoryOwnerIds.insertLast(critters[i].Id);
+            AppendUniqueEntity(cover, items[j]);
+        }
+    }
+
+    if (teamContainer != null && teamContainer.Ownership == ItemOwnership::MapHex) {
+        Map? containerMap = Game.GetMap(teamContainer.MapId);
+        if (containerMap != null) {
+            AppendUniqueEntity(cover, containerMap);
+        }
+    }
+
+    if (!Sync::Lock(cover) || StateSignature() != stateSignature) {
+        return false;
+    }
+
+    for (int i = 0; i < critters.length(); i++) {
+        if (critters[i].MapId != critterMapIds[i]) {
+            return false;
+        }
+    }
+    for (int i = 0; i < inventoryItems.length(); i++) {
+        if (inventoryItems[i].Ownership != ItemOwnership::CritterInventory || inventoryItems[i].CritterId != inventoryOwnerIds[i]) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+#endif
+
+}

@@ -784,7 +784,8 @@ void CombatAttack(Critter cr, Critter target, AbstractItem weapon, int weaponMod
             for (int i = leftStart, j = leftLen; i < j; i++) {
                 // корректируем tohit
                 dist = Game.GetDistance(critterHex, lineLeft[i].Hex);
-                bl = map.GetCrittersInPath(critterHex, lineLeft[i].Hex, 0.0f, dist, CritterFindType::NonDead).length();
+                // -1 исключает саму цель из числа перекрывающих, как в правой линии и в очередях
+                bl = map.GetCrittersInPath(critterHex, lineLeft[i].Hex, 0.0f, dist, CritterFindType::NonDead).length() - 1;
                 toHit = baseToHit - 10 * bl;
                 acc = dist;
                 if (dist < distmod2) {
@@ -1046,7 +1047,6 @@ void CombatAttack(Critter cr, Critter target, AbstractItem weapon, int weaponMod
                 toHit -= acmod;
             }
 
-            toHit = Math::Clamp(toHit, 5, 95);
             if (lineCentral[i].IsKnockout()) {
                 toHit += 40;
             }
@@ -1058,6 +1058,9 @@ void CombatAttack(Critter cr, Critter target, AbstractItem weapon, int weaponMod
                 toHit += 15;
             }
 
+            // Ограничение применяем последним, как и в остальных блоках расчёта попадания:
+            // иначе бонусы за нокаут/мультигекс поднимают шанс выше предела в 95%
+            toHit = Math::Clamp(toHit, 5, 95);
             for (curRounds = 0; curRounds < volleyRounds;) {
                 if (Game.Random(1, 100) <= toHit) {
                     curRounds++;
@@ -1546,7 +1549,7 @@ void CombatAttack(Critter cr, Critter target, AbstractItem weapon, int weaponMod
                 }
             }
             else {
-                ItemMovement::MoveItem(realWeapon, 0, map, targetHex);
+                ItemMovement::MoveItem(realWeapon, realWeapon.Count, map, targetHex);
             }
         }
     }
@@ -1850,7 +1853,7 @@ void ApplyDamage(AttackStruct attack, Critter target, int rounds, bool isCritica
                 }
             }
             else {
-                ItemMovement::MoveItem(realWeaponTarget, 0, map, target.Hex);
+                ItemMovement::MoveItem(realWeaponTarget, realWeaponTarget.Count, map, target.Hex);
                 if (!target.ControlledByPlayer) {
                     NpcPlanes::NpcPlane plane = NpcPlanes::CreatePlane();
 
@@ -1934,10 +1937,11 @@ void ApplyDamage(AttackStruct attack, Critter target, int rounds, bool isCritica
         loseTurn = false; // переопределяем: нокаут не тратит ход
     }
 
-    // Мгновенная смерть
+    // Мгновенная смерть: добиваем ниже порога смерти, а не до нуля —
+    // ровно нулевое HP попадает в ветку нокдауна, потому что Combat.DeadHitPoints отрицателен
     if (Flags::HasFlag(eff, Flags::HF_DEATH)) {
-        if (target.CurrentHp > totalDmg) {
-            totalDmg = target.CurrentHp;
+        if (target.CurrentHp - Settings.Combat.DeadHitPoints > totalDmg) {
+            totalDmg = target.CurrentHp - Settings.Combat.DeadHitPoints;
         }
     }
 
@@ -2390,6 +2394,12 @@ void CriticalFailure(Critter cr, AbstractItem weap, int weaponUse, ProtoItem? am
         Flags::UnsetFlag(eff, Flags::MF_WEAPON_DROPPED);
     }
 
+    // Снимаем флаг сразу, а не только на месте применения: иначе клиенту уходит
+    // реакция сбивания с ног у критера, который на самом деле не падал
+    if (cr.IsNoKnock) {
+        Flags::UnsetFlag(eff, Flags::MF_KNOCKED_DOWN);
+    }
+
     if (Flags::HasFlag(eff, Flags::MF_HIT_SELF) ||
         Flags::HasFlag(eff, Flags::MF_WEAPON_EXPLODED)) // только одна пуля, так как у оружия с очередью нет такой возможности
     {
@@ -2476,7 +2486,7 @@ void CriticalFailure(Critter cr, AbstractItem weap, int weaponUse, ProtoItem? am
             }
         }
         else {
-            ItemMovement::MoveItem(realWeapon, 0, map, cr.Hex);
+            ItemMovement::MoveItem(realWeapon, realWeapon.Count, map, cr.Hex);
             if (!cr.ControlledByPlayer) {
                 NpcPlanes::NpcPlane plane = NpcPlanes::CreatePlane();
 
@@ -2595,7 +2605,7 @@ void CriticalFailure(Critter cr, AbstractItem weap, int weaponUse, ProtoItem? am
         }
     }
 
-    Critter[] crits = crits = cr.GetCritters(CritterSeeType::WhoSeeMe, CritterFindType::Players);
+    Critter[] crits = cr.GetCritters(CritterSeeType::WhoSeeMe, CritterFindType::Players);
     for (int i = 0; i < crits.length(); i++) {
         AddEff(crits[i], allEff, results);
     }

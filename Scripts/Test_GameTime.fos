@@ -1,0 +1,93 @@
+// Test_GameTime — тесты чистых календарных хелперов GameTime: части суток, дни в месяце, GameSeconds.
+namespace Test_GameTime
+{
+
+#if SERVER
+
+[[ModuleInit]]
+void InitTestGameTime()
+{
+    Game.OnTestingInit.Subscribe(OnTestingInit);
+}
+
+[[Event]]
+void OnTestingInit()
+{
+    Testing::RegisterTest("game_time", "day_parts_boundaries", DayPartsBoundaries);
+    Testing::RegisterTest("game_time", "days_in_month", DaysInMonth);
+    Testing::RegisterTest("game_time", "game_seconds_ordering", GameSecondsOrdering);
+}
+
+// Границы контракта: утро 7-11, день 12-21, ночь 22-6 (через полночь)
+void DayPartsBoundaries(Testing::TestContext ctx)
+{
+    if (!Testing::Expect(ctx,
+                         !GameTime::IsMorning(6) && GameTime::IsMorning(7) && GameTime::IsMorning(11) && !GameTime::IsMorning(12),
+                         "Утро — ровно часы 7..11")) {
+        return;
+    }
+
+    if (!Testing::Expect(ctx,
+                         !GameTime::IsAfternoon(11) && GameTime::IsAfternoon(12) && GameTime::IsAfternoon(21) && !GameTime::IsAfternoon(22),
+                         "День — ровно часы 12..21")) {
+        return;
+    }
+
+    if (!Testing::Expect(ctx,
+                         GameTime::IsNight(22) && GameTime::IsNight(23) && GameTime::IsNight(0) && GameTime::IsNight(6) && !GameTime::IsNight(7) &&
+                             !GameTime::IsNight(21),
+                         "Ночь — часы 22..6 с переходом через полночь")) {
+        return;
+    }
+
+    // Каждый час суток попадает ровно в одну категорию
+    for (int hour = 0; hour < 24; hour++) {
+        int parts = (GameTime::IsMorning(hour) ? 1 : 0) + (GameTime::IsAfternoon(hour) ? 1 : 0) + (GameTime::IsNight(hour) ? 1 : 0);
+        if (!Testing::ExpectEq(ctx, parts, 1, "Час " + hour + " должен попадать ровно в одну часть суток")) {
+            return;
+        }
+    }
+}
+
+void DaysInMonth(Testing::TestContext ctx)
+{
+    if (!Testing::ExpectEq(ctx, GameTime::GetDaysInMonth(2246, 1), 31, "Январь — 31 день")) {
+        return;
+    }
+
+    if (!Testing::ExpectEq(ctx, GameTime::GetDaysInMonth(2246, 4), 30, "Апрель — 30 дней")) {
+        return;
+    }
+
+    // Високосность: кратный 4 (не кратный 100) — 29; кратный 400 — 29; кратный 100 (не 400) — 28
+    if (!Testing::ExpectEq(ctx, GameTime::GetDaysInMonth(2246, 2), 28, "2246 — невисокосный февраль")) {
+        return;
+    }
+
+    if (!Testing::ExpectEq(ctx, GameTime::GetDaysInMonth(2244, 2), 29, "2244 — високосный февраль (кратен 4)")) {
+        return;
+    }
+
+    if (!Testing::ExpectEq(ctx, GameTime::GetDaysInMonth(2000, 2), 29, "2000 — високосный февраль (кратен 400)")) {
+        return;
+    }
+
+    Testing::ExpectEq(ctx, GameTime::GetDaysInMonth(1900, 2), 28, "1900 — невисокосный февраль (кратен 100, не 400)");
+}
+
+void GameSecondsOrdering(Testing::TestContext ctx)
+{
+    if (!Testing::Expect(ctx, GameTime::GameSeconds(0) == timespan(), "GameSeconds(0) — нулевой интервал")) {
+        return;
+    }
+
+    if (!Testing::Expect(ctx, GameTime::GameSeconds(120) > GameTime::GameSeconds(60), "Больший игровой интервал должен быть длиннее")) {
+        return;
+    }
+
+    Testing::Expect(ctx, GameTime::GameSeconds(60) + GameTime::GameSeconds(60) == GameTime::GameSeconds(120), "Игровые интервалы должны складываться линейно");
+}
+
+#endif
+
+}

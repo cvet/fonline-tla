@@ -5,7 +5,30 @@
 namespace ClientItems
 {
 
-///@ RemoteCall Server ProcessBarterNpcOffer(ident[] saleItemsIds, int32[] saleItemsCount, ident[] buyItemsIds, int32[] buyItemsCount)
+///@ RemoteCall Server ProcessBarterNpcOffer(ident[] saleItemsIds, int32[] saleItemsCount, ident[] buyItemsIds, int32[] buyItemsCount, uint32 expectedTransferSession)
+///@ RemoteCall Server CloseTransfer(int32 expectedTransferType, ident expectedContainerId, uint32 expectedTransferSession)
+///@ RemoteCall Server ResumeDialogFromBarter(ident traderId, uint32 expectedTransferSession)
+///@ RemoteCall Client BarterOfferProcessed(uint32 expectedTransferSession)
+///@ RemoteCall Client SetBarterPricing(uint32 expectedTransferSession, int32 barterCoefficient, bool hasMasterTrader)
+
+// Нормализует ввод пятизначного окна Split и не пропускает нулевой/лишний count в действие.
+int NormalizeSplitCount(int count, int itemCount)
+{
+    int maxCount = Math::Clamp(itemCount, 1, 99999);
+    return Math::Clamp(count, 1, maxCount);
+}
+
+// Коллекция ITEMS_USE предназначена только для предметов, применяемых к другой цели.
+bool IsUsableOnTarget(AbstractItem item)
+{
+    return item.IsCanUseOnSmth;
+}
+
+bool IsSameContainerTransfer(int transferType, ident containerId, uint transferSession, int expectedTransferType, ident expectedContainerId,
+                             uint expectedTransferSession)
+{
+    return transferType == expectedTransferType && containerId == expectedContainerId && transferSession == expectedTransferSession;
+}
 
 #if CLIENT
 
@@ -26,6 +49,15 @@ Item[] ReceivedItems = {};
 Item[] BarterOfferItems = {};
 Item[] BarterTraderOfferItems = {};
 Item[] RemovedItems = {};
+bool BarterOfferPending = false;
+uint PendingBarterSession = 0;
+int BarterCoefficient = Barter::MinBarterCoefficient;
+bool BarterHasMasterTrader = false;
+uint ActiveBarterSession = 0;
+bool ContainerOperationPending = false;
+int PendingContainerTransferType = int(TransferTypes::Close);
+ident PendingContainerId = ZERO_IDENT;
+uint PendingContainerSession = 0;
 
 [[ModuleInit]]
 void InitClientItems()
@@ -33,19 +65,101 @@ void InitClientItems()
     Game.OnReceiveItems.Subscribe(OnReceiveItems);
 }
 
+// Перерисовывает все ItemView, которые используют клиентские теневые коллекции. Внутренний
+// Collection не совпадает по номерам с UserDataExt, поэтому перечисляем UI-контракты явно.
+void RefreshItemViews()
+{
+    Gui::RefreshItemViewsByUserDataExts({ClientDefines::ITEMS_CHOSEN_ALL,
+                                         ClientDefines::ITEMS_INVENTORY,
+                                         ClientDefines::ITEMS_USE,
+                                         ClientDefines::ITEMS_BARTER,
+                                         ClientDefines::ITEMS_BARTER_OFFER,
+                                         ClientDefines::ITEMS_BARTER_OPPONENT,
+                                         ClientDefines::ITEMS_BARTER_OPPONENT_OFFER,
+                                         ClientDefines::ITEMS_PICKUP,
+                                         ClientDefines::ITEMS_PICKUP_FROM});
+}
+
+void ClearContainerOperation()
+{
+    ContainerOperationPending = false;
+    PendingContainerTransferType = int(TransferTypes::Close);
+    PendingContainerId = ZERO_IDENT;
+    PendingContainerSession = 0;
+}
+
+// В одной transfer-сессии держим не больше одной неподтверждённой контейнерной операции.
+// Смена tuple отзывает старый pending, а authoritative SendItems очищает новый.
+bool TryBeginContainerOperation(int expectedTransferType, ident expectedContainerId, uint expectedTransferSession)
+{
+    if (!HasChosen || !IsSameContainerTransfer(int(Chosen.TransferType),
+                                               Chosen.TransferContainerId,
+                                               Chosen.TransferSession,
+                                               expectedTransferType,
+                                               expectedContainerId,
+                                               expectedTransferSession)) {
+        return false;
+    }
+
+    if (ContainerOperationPending) {
+        if (IsSameContainerTransfer(PendingContainerTransferType,
+                                    PendingContainerId,
+                                    PendingContainerSession,
+                                    expectedTransferType,
+                                    expectedContainerId,
+                                    expectedTransferSession)) {
+            return false;
+        }
+        ClearContainerOperation();
+    }
+
+    ContainerOperationPending = true;
+    PendingContainerTransferType = expectedTransferType;
+    PendingContainerId = expectedContainerId;
+    PendingContainerSession = expectedTransferSession;
+    return true;
+}
+
 // Получили предметы от сервера: сбрасываем теневые коллекции и по типу передачи открываем
 // нужный экран (бартер или подбор/контейнер).
 [[Event]]
 void OnReceiveItems(Item[] items, any contextParam)
 {
+    int context = int(contextParam);
+    if (context == 0) {
+        ClearContainerOperation();
+    }
+    else if (context == 1 && ContainerOperationPending && HasChosen &&
+             IsSameContainerTransfer(int(Chosen.TransferType),
+                                     Chosen.TransferContainerId,
+                                     Chosen.TransferSession,
+                                     PendingContainerTransferType,
+                                     PendingContainerId,
+                                     PendingContainerSession)) {
+        ClearContainerOperation();
+    }
+    if (!HasChosen) {
+        ClearContainerOperation();
+    }
+
     ReceivedItems.clear();
     BarterOfferItems.clear();
     BarterTraderOfferItems.clear();
     RemovedItems.clear();
 
-    ReceivedItems = items;
+    ReceivedItems = items.clone();
+    RefreshItemViews();
 
-    if (int(contextParam) != 0) {
+    if (context != 0) {
+        return;
+    }
+
+    if (!HasChosen) {
+        BarterOfferPending = false;
+        PendingBarterSession = 0;
+        ActiveBarterSession = 0;
+        Gui::HideScreen(GuiScreen::Barter);
+        Gui::HideScreen(GuiScreen::PickUp);
         return;
     }
 
@@ -55,9 +169,19 @@ void OnReceiveItems(Item[] items, any contextParam)
 
     if (transfer != TransferTypes::Close) {
         if (transfer == TransferTypes::CritBarter) {
-            Gui::ShowScreen(GuiScreen::Barter, dict<string, any> = {{"CritterId", chosen.TransferContainerId}});
+            if (ActiveBarterSession != chosen.TransferSession) {
+                BarterOfferPending = false;
+                PendingBarterSession = 0;
+            }
+            ActiveBarterSession = chosen.TransferSession;
+            Gui::HideScreen(GuiScreen::PickUp);
+            Gui::ShowScreen(GuiScreen::Barter, dict<string, any> = {{"CritterId", chosen.TransferContainerId}, {"TransferSession", chosen.TransferSession}});
         }
         else {
+            BarterOfferPending = false;
+            PendingBarterSession = 0;
+            ActiveBarterSession = 0;
+            Gui::HideScreen(GuiScreen::Barter);
             ident crId;
             ident itemId;
 
@@ -69,8 +193,20 @@ void OnReceiveItems(Item[] items, any contextParam)
                 itemId = chosen.TransferContainerId;
             }
 
-            Gui::ShowScreen(GuiScreen::PickUp, dict<string, any> = {{"TargetCritterId", crId}, {"TargetItemId", itemId}});
+            Gui::ShowScreen(GuiScreen::PickUp,
+                            dict<string, any> = {{"TargetCritterId", crId},
+                                                 {"TargetItemId", itemId},
+                                                 {"TransferType", int(transfer)},
+                                                 {"TransferContainerId", chosen.TransferContainerId},
+                                                 {"TransferSession", chosen.TransferSession}});
         }
+    }
+    else {
+        BarterOfferPending = false;
+        PendingBarterSession = 0;
+        ActiveBarterSession = 0;
+        Gui::HideScreen(GuiScreen::Barter);
+        Gui::HideScreen(GuiScreen::PickUp);
     }
 }
 
@@ -92,7 +228,7 @@ Item[] GetCollection(Collection collection)
         }
     }
     else if (collection == Collection::Loot) {
-        items = ReceivedItems;
+        items = ReceivedItems.clone();
         // breadcrumb миграции: альтернативный источник лута из инвентаря криттера-цели; не удалять.
         /*if (chosen != null && chosen.TransferContainerId != ZERO_IDENT) {
             Critter? targetCr = Game.GetCritter(chosen.TransferContainerId);
@@ -111,7 +247,7 @@ Item[] GetCollection(Collection collection)
         items = BarterTraderOfferItems;
     }
     else if (collection == Collection::RecievedItems) {
-        items = ReceivedItems;
+        items = ReceivedItems.clone();
     }
 
     if (collection != Collection::BarterOffer && collection != Collection::BarterTraderOffer) {
@@ -125,12 +261,13 @@ Item[] GetCollection(Collection collection)
 
 // Помечает count единиц предмета как временно убранные (теневая коллекция RemovedItems),
 // чтобы UI скрыл их до подтверждения сервером.
-void RemoveItem(Collection collection, Item& item, int count)
+void RemoveItem(Collection collection, Item item, int count)
 {
     verify(count > 0, "Assertion failed");
     verify(count <= item.Count, "Assertion failed");
 
     RemovedItems.insertLast(item.Clone(count));
+    RefreshItemViews();
 }
 
 // Заготовка переноса предмета в/из бартер-оффера (тело не реализовано).
@@ -142,7 +279,7 @@ void BarterItem(bool offer, Item& item, int count)
 
 // Вычитает excludeItems из items по Id: полностью убирает предмет или уменьшает его количество
 // клонированием, чтобы исходные предметы не мутировались.
-void ExcludeItems(Item[] & items, Item[] & excludeItems)
+void ExcludeItems(Item[] items, Item[] excludeItems)
 {
     for (int i = 0; i < excludeItems.length(); i++) {
         Item excludeItem = excludeItems[i];
@@ -202,7 +339,7 @@ Item[] RefreshItemsCollection(int collectionType)
     return GetCollection(collection);
 }
 
-// Удаляет предмет по Id из свежесобранной коллекции (работает над локальной копией коллекции).
+// Удаляет предмет по Id из теневой коллекции оффера.
 void RemoveItemFromCollection(ident itemId, Collection collection)
 {
     Item[] items = GetCollection(collection);
@@ -229,8 +366,9 @@ void ChangeCollectionItemCount(ident itemId, Collection collection, int count)
     }
 }
 
-// Ищет предмет в коллекции по Id; если в коллекции нет — берёт его напрямую из игры.
-Item? GetCollectionItem(ident itemId, Collection collection)
+// Ищет предмет строго в актуальной коллекции. Используется операциями, которым нельзя повторно
+// взять уже исключённый из источника предмет.
+Item? FindCollectionItem(ident itemId, Collection collection)
 {
     Item[] items = GetCollection(collection);
     for (int i = 0; i < items.length(); i++) {
@@ -239,13 +377,26 @@ Item? GetCollectionItem(ident itemId, Collection collection)
         }
     }
 
-    return Game.GetItem(itemId);
+    return null;
+}
+
+// Ищет предмет для UI-превью. TargetItemId контейнера/карты может законно не входить в показанную
+// коллекцию, поэтому сохраняем резервный поиск сущности в игре.
+Item? GetCollectionItem(ident itemId, Collection collection)
+{
+    Item? item = FindCollectionItem(itemId, collection);
+    return item != null ? item : Game.GetItem(itemId);
 }
 
 // Формирует из обеих сторон бартер-оффера параллельные массивы Id/количество и отправляет
 // оффер на сервер удалённым вызовом.
-void BarterOffer()
+bool BarterOffer(uint expectedTransferSession)
 {
+    if (BarterOfferPending || !HasChosen || Chosen.TransferType != TransferTypes::CritBarter || Chosen.TransferSession != expectedTransferSession ||
+        ActiveBarterSession != expectedTransferSession) {
+        return false;
+    }
+
     ident[] saleItemsIds = {};
     int[] saleItemsCount = {};
     ident[] buyItemsIds = {};
@@ -264,13 +415,72 @@ void BarterOffer()
         buyItemsCount.insertLast(itemsBuy[i].Count);
     }
 
-    CurPlayer.ServerCall.ProcessBarterNpcOffer(saleItemsIds, saleItemsCount, buyItemsIds, buyItemsCount);
+    if (saleItemsIds.length() == 0) {
+        return false;
+    }
+
+    BarterOfferPending = true;
+    PendingBarterSession = expectedTransferSession;
+    CurPlayer.ServerCall.ProcessBarterNpcOffer(saleItemsIds, saleItemsCount, buyItemsIds, buyItemsCount, expectedTransferSession);
+    return true;
+}
+
+bool BarterOffer()
+{
+    return BarterOffer(ActiveBarterSession);
+}
+
+// Сервер закончил обработку оффера (успех или отказ) — разрешаем повторную отправку.
+[[ClientRemoteCall]]
+void BarterOfferProcessed(uint expectedTransferSession)
+{
+    if (BarterOfferPending && PendingBarterSession == expectedTransferSession) {
+        BarterOfferPending = false;
+        PendingBarterSession = 0;
+    }
+}
+
+// Сервер передаёт тот же коэффициент и состояние Master Trader, которые использует при
+// авторитетной проверке сделки. Поэтому суммы в окне совпадают с серверными до единицы.
+[[ClientRemoteCall]]
+void SetBarterPricing(uint expectedTransferSession, int barterCoefficient, bool hasMasterTrader)
+{
+    if (!HasChosen || Chosen.TransferType != TransferTypes::CritBarter || Chosen.TransferSession != expectedTransferSession) {
+        return;
+    }
+
+    BarterCoefficient = Math::Clamp(barterCoefficient, Barter::MinBarterCoefficient, Barter::MaxBarterCoefficient);
+    BarterHasMasterTrader = hasMasterTrader;
+}
+
+int64 GetBarterCollectionCost(int collectionType)
+{
+    bool playerSale = collectionType == ClientDefines::ITEMS_BARTER_OFFER;
+    bool playerBuy = collectionType == ClientDefines::ITEMS_BARTER_OPPONENT_OFFER;
+    Item[] items = RefreshItemsCollection(collectionType);
+    int64 total = 0;
+
+    for (int i = 0; i < items.length(); i++) {
+        int64 unitCost = playerSale ? Barter::GetSaleUnitCost(items[i].Cost, BarterCoefficient) :
+                                      (playerBuy ? Barter::GetBuyUnitCost(items[i].Cost, BarterCoefficient, BarterHasMasterTrader) : int64(items[i].Cost));
+        int64 stackCost = Barter::GetStackCost(unitCost, items[i].Count, Barter::MaxBarterTotalCost);
+        if (stackCost < 0 || total > Barter::MaxBarterTotalCost - stackCost) {
+            return Barter::MaxBarterTotalCost + 1;
+        }
+        total += stackCost;
+    }
+
+    return total;
 }
 
 // Переносит предмет между инвентарём/лутом и соответствующим бартер-оффером: для переноса
 // «в оффер» наращивает стек или добавляет клон, для «из оффера» уменьшает или убирает предмет.
-void BarterTransfer(ident item_id, int collectionTypeFrom, int item_count)
+bool BarterTransfer(ident item_id, int collectionTypeFrom, int item_count)
 {
+    if (item_count <= 0) {
+        return false;
+    }
+
     Collection collectionFrom;
     Collection collectionTo;
     switch (collectionTypeFrom) {
@@ -291,34 +501,46 @@ void BarterTransfer(ident item_id, int collectionTypeFrom, int item_count)
         collectionFrom = Collection::BarterTraderOffer;
         break;
     default:
-        return;
+        return false;
     }
 
-    Item? item = GetCollectionItem(item_id, collectionFrom);
+    Item? item = FindCollectionItem(item_id, collectionFrom);
 
     if (item == null) {
-        return;
+        return false;
     }
 
     if (item_count > item.Count) {
-        return;
+        return false;
+    }
+
+    // Предметы без контрактной стоимости нельзя превращать в бартерную валюту. Сервер повторяет
+    // эту проверку через GetSaleUnitCost/GetStackCost для недоверенного оффера.
+    if (collectionTypeFrom == ClientDefines::ITEMS_BARTER && Barter::GetSaleUnitCost(item.Cost, BarterCoefficient) == 0) {
+        return false;
     }
 
     Item? itemTo = null;
     Item[] itemsTo = GetCollection(collectionTo);
 
-    if (item.Stackable) {
-        for (int i = 0; i < itemsTo.length(); i++) {
-            if (itemsTo[i].ProtoId == item.ProtoId) {
-                itemTo = itemsTo[i];
-                break;
-            }
+    for (int i = 0; i < itemsTo.length(); i++) {
+        // Оффер передаёт серверу entity Id, поэтому разные стеки одного прототипа нельзя
+        // склеивать: у них могут отличаться свойства, а суммарный count не принадлежит одному Id.
+        if (itemsTo[i].Id == item.Id) {
+            itemTo = itemsTo[i];
+            break;
         }
     }
 
     if (collectionTypeFrom == ClientDefines::ITEMS_BARTER || collectionTypeFrom == ClientDefines::ITEMS_BARTER_OPPONENT) {
+        int offerCount = itemTo != null ? itemTo.Count : 0;
+        // Восстанавливаем исходный размер стопки: GetCollection уже вычел уложенное в оффер,
+        // и передача item.Count вычитала бы оффер повторно, блокируя второй перенос из той же стопки
+        if (!Barter::CanIncreaseOfferCount(item.Count + offerCount, offerCount, item_count, item.Stackable)) {
+            return false;
+        }
         if (itemTo != null) {
-            ChangeCollectionItemCount(item_id, collectionTo, itemTo.Count + item_count);
+            ChangeCollectionItemCount(itemTo.Id, collectionTo, itemTo.Count + item_count);
         }
         else {
             itemsTo.insertLast(item.Clone(item_count));
@@ -332,47 +554,149 @@ void BarterTransfer(ident item_id, int collectionTypeFrom, int item_count)
             ChangeCollectionItemCount(item_id, collectionFrom, item.Count - item_count);
         }
     }
+
+    RefreshItemViews();
+    return true;
 }
 
 #endif
 
 #if SERVER
 
+// Закрывает transfer-контекст только если клиент закрывает именно то окно, которое ещё активно
+// на сервере. Проверка типа и контейнера не даёт запоздалому OnHide закрыть уже новое окно.
+[[ServerRemoteCall]] [[Async]]
+void CloseTransfer(Player player, int expectedTransferType, ident expectedContainerId, uint expectedTransferSession)
+{
+    Critter? cr = player.GetControlledCritter();
+    if (cr == null || !Sync::Lock(cr)) {
+        return;
+    }
+
+    if (int(cr.TransferType) != expectedTransferType || cr.TransferContainerId != expectedContainerId || cr.TransferSession != expectedTransferSession) {
+        return;
+    }
+
+    Item[]? items = null;
+    cr.TransferType = TransferTypes::Close;
+    cr.TransferContainerId = ZERO_IDENT;
+    cr.SendItems(items);
+}
+
+// Кнопка «Диалог» атомарно завершает текущий бартер с ожидаемым НПЦ и снова начинает
+// разговор. Отдельный CloseTransfer здесь не нужен: иначе два async-RPC могли бы обогнать
+// друг друга и закрыть уже восстановленный диалог/следующее окно.
+[[ServerRemoteCall]] [[Async]]
+void ResumeDialogFromBarter(Player player, ident traderId, uint expectedTransferSession)
+{
+    Critter? cr = player.GetControlledCritter();
+    if (cr == null || !Sync::Lock(cr)) {
+        return;
+    }
+
+    if (cr.TransferType != TransferTypes::CritBarter || cr.TransferContainerId != traderId || cr.TransferSession != expectedTransferSession) {
+        return;
+    }
+
+    Critter? trader = Game.GetCritter(traderId);
+    if (trader == null || !Sync::Lock(cr, trader)) {
+        if (Sync::Lock(cr) && cr.TransferType == TransferTypes::CritBarter && cr.TransferContainerId == traderId &&
+            cr.TransferSession == expectedTransferSession) {
+            Barter::SendBarterClose(cr);
+        }
+        return;
+    }
+
+    if (cr.TransferType != TransferTypes::CritBarter || cr.TransferContainerId != traderId || cr.TransferSession != expectedTransferSession) {
+        return;
+    }
+
+    Barter::SendBarterClose(cr);
+    if (cr.IsAlive() && trader.IsAlive() && !trader.ControlledByPlayer && !trader.IsNoTalk) {
+        Dialogs::RunDialog(cr, trader, false);
+    }
+}
+
 // Серверный приём бартер-оффера: берёт локи на криттера, торговца и их карты, затем передаёт
 // обработку в Barter. Без полного набора локов выходит, не трогая состояние.
 [[ServerRemoteCall]] [[Async]]
-void ProcessBarterNpcOffer(Player player, ident[] saleItemsIds, int[] saleItemsCount, ident[] buyItemsIds, int[] buyItemsCount)
+void ProcessBarterNpcOffer(Player player, ident[] saleItemsIds, int[] saleItemsCount, ident[] buyItemsIds, int[] buyItemsCount, uint expectedTransferSession)
 {
     Critter? cr = player.GetControlledCritter();
     if (cr == null) {
+        player.ClientCall.BarterOfferProcessed(expectedTransferSession);
         return;
     }
 
-    Critter? trader = Game.GetCritter(cr.TransferContainerId);
-    if (trader != null && !Sync::Lock(cr, trader)) {
+    if (!Sync::Lock(cr)) {
+        player.ClientCall.BarterOfferProcessed(expectedTransferSession);
         return;
     }
 
-    Map? crMap = cr.GetMap();
-    Map? traderMap = trader != null ? trader.GetMap() : null;
-    Entity[] entities = {cr};
-    if (trader != null) {
-        entities.insertLast(trader);
-    }
-
-    if (crMap != null) {
-        entities.insertLast(crMap);
-    }
-
-    if (traderMap != null) {
-        entities.insertLast(traderMap);
-    }
-
-    if (!Sync::Lock(entities)) {
+    if (cr.TransferType != TransferTypes::CritBarter || cr.TransferContainerId == ZERO_IDENT || cr.TransferSession != expectedTransferSession) {
+        player.ClientCall.BarterOfferProcessed(expectedTransferSession);
         return;
     }
 
-    Barter::ProcessBarterNpcOffer(cr, saleItemsIds, saleItemsCount, buyItemsIds, buyItemsCount);
+    ident traderId = cr.TransferContainerId;
+    Critter? trader = Game.GetCritter(traderId);
+    if (trader == null) {
+        Barter::SendBarterClose(cr);
+        player.ClientCall.BarterOfferProcessed(expectedTransferSession);
+        return;
+    }
+
+    while (true) {
+        if (!Sync::Lock(cr, trader)) {
+            if (Sync::Lock(cr) && cr.TransferType == TransferTypes::CritBarter && cr.TransferContainerId == traderId &&
+                cr.TransferSession == expectedTransferSession) {
+                Barter::SendBarterClose(cr);
+            }
+            player.ClientCall.BarterOfferProcessed(expectedTransferSession);
+            return;
+        }
+
+        if (cr.TransferType != TransferTypes::CritBarter || cr.TransferContainerId != traderId || cr.TransferSession != expectedTransferSession) {
+            player.ClientCall.BarterOfferProcessed(expectedTransferSession);
+            return;
+        }
+
+        Map? crMap = cr.GetMap();
+        Map? traderMap = trader.GetMap();
+        ident crMapId = cr.MapId;
+        ident traderMapId = trader.MapId;
+        Entity[] entities = {cr, trader};
+
+        if (crMap != null) {
+            entities.insertLast(crMap);
+        }
+
+        if (traderMap != null && (crMap == null || traderMap.Id != crMap.Id)) {
+            entities.insertLast(traderMap);
+        }
+
+        if (!Sync::Lock(entities)) {
+            if (Sync::Lock(cr) && cr.TransferType == TransferTypes::CritBarter && cr.TransferContainerId == traderId &&
+                cr.TransferSession == expectedTransferSession) {
+                Barter::SendBarterClose(cr);
+            }
+            player.ClientCall.BarterOfferProcessed(expectedTransferSession);
+            return;
+        }
+
+        if (cr.TransferType != TransferTypes::CritBarter || cr.TransferContainerId != traderId || cr.TransferSession != expectedTransferSession) {
+            player.ClientCall.BarterOfferProcessed(expectedTransferSession);
+            return;
+        }
+
+        if (cr.MapId != crMapId || trader.MapId != traderMapId) {
+            continue;
+        }
+
+        Barter::ProcessBarterNpcOffer(cr, trader, saleItemsIds, saleItemsCount, buyItemsIds, buyItemsCount, expectedTransferSession);
+        player.ClientCall.BarterOfferProcessed(expectedTransferSession);
+        return;
+    }
 }
 
 #endif

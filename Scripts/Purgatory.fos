@@ -46,7 +46,7 @@ hstring[] LocPids = {Content::Location::den,           Content::Location::klamat
 
 interface IBattleTeamInviteCallback
 {
-    void OnInvite(Critter cr, bool transit, BattleTeam team);
+    void OnInvite(Critter cr, bool& transit, BattleTeam team);
     void OnTransit(Critter cr);
 };
 interface IBattleInfoStageChangedHandler
@@ -55,7 +55,8 @@ interface IBattleInfoStageChangedHandler
 };
 interface IBattleInfoCallBack
 {
-    void OnCritterDead(Critter dead, Critter killer);
+    // killer может быть null: смерть от передозировки, яда, радиации и прочих безличных причин
+    void OnCritterDead(Critter dead, Critter? killer);
 };
 
 class BattleTeam
@@ -180,6 +181,7 @@ class BattleTeam
 
                 IBattleTeamInviteCallback? inviteCallback = CallBackInvite;
                 if (inviteCallback != null) {
+                    // Callback может отменить прямой перенос, например когда игрока нужно сначала убить и реплицировать.
                     inviteCallback.OnInvite(cr, transit, this);
                 }
 
@@ -453,8 +455,13 @@ class BattleInfo
 
 // Оповещения
 // Приглашение на участие
+[[Async]]
 void BattleInvite(Critter player, int answerI)
 {
+    if (!PurgatoryInviteSync::LockBattleInviteCover(player)) {
+        return;
+    }
+
     DebugLog("Answer called. Answ " + answerI);
     BattleTeam? bt = bInfo.GetCritterTeam(player.Id);
     if (bt != null && bt.LastPeekedRequestId == player.Id) {
@@ -470,12 +477,19 @@ void BattleInvite(Critter player, int answerI)
 }
 
 // Если по каким то причинам последняя заявка не получила ответа, или игрок слишком долго думает
-[[TimeEvent]]
+[[TimeEvent]] [[Async]]
 void CheckInvite(any[] values)
 {
-    BattleTeam bt = bInfo.Teams[values[0]];
     ident crId = values[1];
-    if (crId == bt.LastPeekedRequestId) {
+    Critter? cr = Game.GetCritter(crId);
+    if (!PurgatoryInviteSync::LockBattleInviteCover(cr)) {
+        return;
+    }
+
+    BattleTeam bt = bInfo.Teams[values[0]];
+    // Сторожевой таймер не должен срабатывать, если приглашение уже принято: иначе SendTeamInvite
+    // перезапишет LastPeekedRequestId и согласившийся игрок выпадет и из Requests, и из Players
+    if (crId == bt.LastPeekedRequestId && !bt.LastRequestAccepted) {
         bt.SendTeamInvite();
     }
 }
@@ -536,7 +550,7 @@ void SaveRequest(Critter player, Critter npc, any team)
 }
 
 // генерация лексем: Количество поданных заявок, за команду и всего
-// число заявок в команде пишется в виде lex team1
+// число заявок в команде пишется в виде lex team0..team3 (нумерация с нуля, как в purg_gate_keeper.fodlg)
 // общее число заявок lex total
 void TeamCount(Critter player, Critter npc, string& textArgs)
 {
@@ -547,7 +561,8 @@ void TeamCount(Critter player, Critter npc, string& textArgs)
     textArgs = "";
     int total = 0;
     for (int i = 0; i < bInfo.Teams.length(); i++) {
-        textArgs = textArgs + "|team:" + i + bInfo.Teams[i].Requests.length();
+        // Номер команды входит в имя ключа, а не в значение: иначе получались четыре одинаковых ключа "team"
+        textArgs = textArgs + "|team" + i + ":" + bInfo.Teams[i].Requests.length();
         total += bInfo.Teams[i].Requests.length();
     }
 
@@ -748,7 +763,10 @@ string GetTeamPlayers(BattleTeam? team)
         }
         else {
             for (int i = 0; i < l; i++) {
-                cr = Game.GetCritter(bInfo.Stage >= STAGE_BEGIN ? team.Players[i] : team.Requests[i]);
+                // Индекс принадлежит тому же списку, что и длина цикла: до начала боя Players пуст,
+                // поэтому обращение к team.Players[i] в оффлайн-ветке выходило за границы массива
+                ident memberId = bInfo.Stage >= STAGE_BEGIN ? team.Players[i] : team.Requests[i];
+                cr = Game.GetCritter(memberId);
                 if (cr != null) {
                     teamText += GetPlayerName(cr) + " (" + cr.Level + ")";
                     if (cr.IsDead()) {
@@ -758,7 +776,7 @@ string GetTeamPlayers(BattleTeam? team)
                     teamText += "\n";
                 }
                 else {
-                    teamText += PlayerRegistration::GetPlayerName(team.Players[i]) + "[Offline]\n";
+                    teamText += PlayerRegistration::GetPlayerName(memberId) + "[Offline]\n";
                     // оффлайн персонаж
                 }
             }
@@ -1001,8 +1019,12 @@ class PurgatoryStageChangedHandler : IBattleInfoStageChangedHandler, IBattleInfo
         }
     }
 
-    void OnCritterDead(Critter dead, Critter killer)
+    void OnCritterDead(Critter dead, Critter? killer)
     {
+        if (killer == null) {
+            return;
+        }
+
         BattleTeam? btDead = bInfo.GetCritterTeam(dead.Id);
         BattleTeam? btKiller = bInfo.GetCritterTeam(killer.Id);
         if (btKiller != null && btDead != null && killer.ControlledByPlayer) {
@@ -1041,7 +1063,7 @@ NeedReplicateCritterToBattle(Critter cr)
 
 class PurgatoryInviteCallback : IBattleTeamInviteCallback
 {
-    void OnInvite(Critter? cr, bool transit, BattleTeam? team)
+    void OnInvite(Critter? cr, bool& transit, BattleTeam? team)
     {
         if (cr != null && !cr.ControlledByPlayer) {
             return;
@@ -1445,23 +1467,27 @@ void PurgatoryLoop(Map map)
 }
 
 // Удаление локации после того, как время истекло
-[[TimeEvent]]
+[[TimeEvent]] [[Async]]
 void DeletePurgatory(any value)
 {
     Location? loc = Game.GetLocation(ident(value));
-    if (loc != null) {
-        Critter[] critters = {};
-        for (int i = 0; i < 3; i++) {
-            Map map = loc.GetMapByIndex(i);
-            critters.insertLast(map.GetCritters(CritterFindType::Players));
-        }
-
-        for (int i = 0; i < critters.length(); i++) {
-            Messaging::Info(critters[i], TextPackKey(TextPackName::Text, "" + (7128)));
-        }
-
-        Game.DestroyLocation(loc.Id);
+    if (loc == null || !Sync::Lock(loc)) {
+        return;
     }
+
+    // Покрытие локации включает её карты и текущих дочерних криттеров, поэтому оно остаётся
+    // полным и для уведомлений игроков, и для последующего каскадного DestroyLocation.
+    Critter[] critters = {};
+    for (int i = 0; i < 3; i++) {
+        Map map = loc.GetMapByIndex(i);
+        critters.insertLast(map.GetCritters(CritterFindType::Players));
+    }
+
+    for (int i = 0; i < critters.length(); i++) {
+        Messaging::Info(critters[i], TextPackKey(TextPackName::Text, "" + (7128)));
+    }
+
+    Game.DestroyLocation(loc);
 }
 
 #endif

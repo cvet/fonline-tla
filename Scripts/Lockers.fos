@@ -54,7 +54,8 @@ bool UseItemOnLocker(Critter cr, Item locker, Item item)
 bool UseSkillOnLocker(Critter cr, Item locker, CritterProperty skill)
 {
     Map? map = cr.GetMap();
-    if (map == null) {
+    if (map == null ||
+        !CritterActions::IsMapContainerAccessValid(locker.Ownership, cr.MapId, locker.MapId, Game.GetDistance(cr.Hex, locker.Hex), cr.Multihex)) {
         Messaging::Info(cr, TextPackKey(TextPackName::Game, "" + (MsgStr::StrUseNothing)));
         return true;
     }
@@ -258,13 +259,18 @@ void ShowContainer(Critter cr, Critter? crFrom, Item? container, TransferTypes t
     // Лут/кража у криттера: доступно только в пределах дальности использования на той же карте
     Item[] items = {};
     if (crFrom != null && (typeShow == TransferTypes::CritLoot || typeShow == TransferTypes::CritSteal)) {
+        if ((typeShow == TransferTypes::CritLoot && (crFrom.IsNoLoot || !crFrom.IsDead())) || (typeShow == TransferTypes::CritSteal && crFrom.IsNoSteal)) {
+            return;
+        }
+
         Map? mapCrFrom = crFrom.GetMap();
         Map? mapCr = cr.GetMap();
         if (mapCr != null && mapCrFrom != null && mapCr.Id == mapCrFrom.Id) {
             int dist = Game.GetDistance(cr.Hex, crFrom.Hex);
-            int useDist = 1 + cr.Multihex;
-            if (dist <= useDist) {
+            if (CritterActions::IsCritterContainerInRange(dist, cr.Multihex, crFrom.Multihex)) {
                 items = crFrom.GetItems(ItemProperty::CritterSlot, CritterItemSlot::Inventory);
+                CritterActions::FilterContainerItems(items, typeShow);
+                cr.TransferSession = cr.TransferSession + 1;
                 cr.TransferType = typeShow;
                 cr.TransferContainerId = crFrom.Id;
                 cr.SendItems(items);
@@ -274,8 +280,19 @@ void ShowContainer(Critter cr, Critter? crFrom, Item? container, TransferTypes t
 
     // Просмотр обычного контейнера: игроку показываем содержимое, NPC забирает предметы себе
     if (container != null) {
+        if (!CritterActions::IsContainerAccessOpen(container.Container_Changeble, container.Opened) ||
+            ((typeShow == TransferTypes::HexContUp || typeShow == TransferTypes::HexContDown) &&
+             !CritterActions::IsMapContainerAccessValid(container.Ownership,
+                                                        cr.MapId,
+                                                        container.MapId,
+                                                        Game.GetDistance(cr.Hex, container.Hex),
+                                                        cr.Multihex))) {
+            return;
+        }
+
         items = container.GetItems(Tla::RootContainerStack());
         if (cr.ControlledByPlayer) {
+            cr.TransferSession = cr.TransferSession + 1;
             cr.TransferType = (container.GroundLevel ? TransferTypes::HexContDown : TransferTypes::HexContUp);
             cr.TransferContainerId = container.Id;
             cr.SendItems(items);

@@ -193,13 +193,19 @@ void Arest(Critter cr, StaticItem trigger, bool entered, mdir dir)
     }
 }
 
-[[TimeEvent]]
+[[TimeEvent]] [[Async]]
 void PrisonerTalk(any[] values)
 {
-    Critter? cr = Game.GetCritter(values[0]);
-    if (cr != null) {
-        Messaging::Say(cr, MsgStr::DialogTextKey(Content::Dialog::vc_telman, STR_PRISONER_SHOUT));
+    if (values.length() < 1) {
+        return;
     }
+
+    Critter? cr = Game.GetCritter(values[0]);
+    if (cr == null || !Sync::LockCritterWithMap(cr)) {
+        return;
+    }
+
+    Messaging::Say(cr, MsgStr::DialogTextKey(Content::Dialog::vc_telman, STR_PRISONER_SHOUT));
 }
 
 // Подлог
@@ -292,23 +298,51 @@ EventResult LynDocsPutCont(Item item, Critter cr, CritterProperty skill)
     return EventResult::StopChain;
 }
 
-[[TimeEvent]]
+void AddUniqueAnswerCritter(Critter[] & critters, Critter? candidate)
+{
+    if (candidate == null) {
+        return;
+    }
+
+    for (int i = 0; i < critters.length(); i++) {
+        if (critters[i] is candidate) {
+            return;
+        }
+    }
+
+    critters.insertLast(candidate);
+}
+
+[[TimeEvent]] [[Async]]
 void Answer(any[] values)
 {
     if (values.length() > 2) {
         Critter? mcClure = Game.GetCritter(values[0]);
+        Critter? player = Game.GetCritter(values[1]);
+        Critter[] guards = {};
+        Critter[] participants = {};
+        AddUniqueAnswerCritter(participants, mcClure);
+        AddUniqueAnswerCritter(participants, player);
         for (int i = 2; i < values.length(); i++) {
             Critter? guard = Game.GetCritter(values[i]);
             if (guard != null) {
-                Messaging::Say(guard, TextPackKey(TextPackName::Text, "" + (STR_GUARDS)));
+                guards.insertLast(guard);
+                AddUniqueAnswerCritter(participants, guard);
             }
+        }
+
+        if (!Sync::LockCrittersWithMaps(participants)) {
+            return;
+        }
+
+        for (int i = 0; i < guards.length(); i++) {
+            Messaging::Say(guards[i], TextPackKey(TextPackName::Text, "" + (STR_GUARDS)));
         }
 
         if (mcClure != null) {
             Messaging::Say(mcClure, TextPackKey(TextPackName::Text, "" + (STR_MCCLURE)));
         }
 
-        Critter? player = Game.GetCritter(values[1]);
         if (player != null && player.VCLynettForgery == 4) {
             player.VCLynettForgery = 5;
             player.Experience += 2500;

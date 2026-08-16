@@ -50,7 +50,7 @@ void DeadlyRadiation(Map map, bool firstTime)
 }
 
 // Тик цикла облучения: дозу выбираем случайно из диапазона карты (передаём 0).
-[[TimeEvent]]
+[[TimeEvent]] [[Async]]
 void MapLoop(Map map)
 {
     AffectRadiationToAllCritters(map, 0);
@@ -58,15 +58,31 @@ void MapLoop(Map map)
 
 // Раздаёт дозу радиации всем живым криттерам на карте.
 // При value == 0 доза выбирается случайно из диапазона [MapRadiationMinDose, MapRadiationMaxDose].
+[[Async]]
 void AffectRadiationToAllCritters(Map map, int value)
 {
+    if (!Sync::Lock(map)) {
+        return;
+    }
+
     if (value == 0) {
         value = Game.Random(map.MapRadiationMinDose, map.MapRadiationMaxDose);
     }
 
     Critter[] critters = map.GetCritters(CritterFindType::NonDead);
     for (int i = 0; i < critters.length(); i++) {
-        Radiation::AffectRadiation(critters[i], value);
+        Critter cr = critters[i];
+        // Смерть от дозы запускает вложенные события и может заменить покрытие. Перед каждым
+        // следующим криттером заново удерживаем карту и именно этого получателя дозы.
+        if (!Sync::Lock(map, cr)) {
+            continue;
+        }
+
+        if (cr.MapId != map.Id || !cr.IsAlive()) {
+            continue;
+        }
+
+        Radiation::AffectRadiation(cr, value);
     }
 }
 

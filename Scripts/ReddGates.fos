@@ -548,28 +548,79 @@ void OpenGates(Critter player, Critter npc, any gateNumber, any time) // Отк�
     }
 }
 
-[[TimeEvent]]
+void RetryCloseGates(Item gates, timespan delay)
+{
+    gates.Val5 = Game.StartTimeEvent(delay, CloseGates, gates.Id); //SavedDeferredCall
+}
+
+[[TimeEvent]] [[Async]]
 void CloseGates(any value)
 {
     // Если в проеме стоит игрок, он будет смещен на энтайр хекс выхода
     Item? gates = Game.GetItem(value);
-    if (gates != null) {
+    if (gates == null || !Sync::Lock(gates)) {
+        return;
+    }
+
+    mpos gatesHex;
+    Map? map = gates.GetMapPosition(gatesHex);
+    if (map == null) {
         gates.Val5 = 0;
-        Map? map = Game.GetMap(gates.MapId);
-        if (map == null) {
+        return;
+    }
+
+    if (!Sync::Lock(gates, map)) {
+        return;
+    }
+
+    mpos lockedHex;
+    Map? lockedMap = gates.GetMapPosition(lockedHex);
+    if (lockedMap !is map || lockedHex != gatesHex) {
+        RetryCloseGates(gates, Time::Seconds(1));
+        return;
+    }
+
+    gates.Val5 = 0;
+    Critter? cr = map.GetCritterOnHex(gatesHex);
+    if (cr != null) {
+        // Game.Sync заменяет покрытие целиком, поэтому ворота и карта остаются в одном наборе с криттером.
+        if (!Sync::Lock(gates, map, cr)) {
+            if (Sync::Lock(gates, map)) {
+                RetryCloseGates(gates, Time::Seconds(1));
+            }
             return;
         }
 
-        mpos hex = gates.Hex;
-        Critter? cr = map.GetCritterOnHex(hex);
-        if (cr != null) {
-            if (Entrance::GetNearEntry(map, ENTRY_GATES_OUT, hex)) {
-                cr.TransferToMap(map, hex, Game.GetDirection(hex, gates.Hex));
-            }
+        lockedMap = gates.GetMapPosition(lockedHex);
+        if (lockedMap !is map || lockedHex != gatesHex || map.GetCritterOnHex(gatesHex) !is cr) {
+            RetryCloseGates(gates, Time::Seconds(1));
+            return;
         }
 
-        Lockers::SwitchLocker(gates, false);
+        mpos exitHex = gatesHex;
+        if (Entrance::GetNearEntry(map, ENTRY_GATES_OUT, exitHex)) {
+            cr.TransferToMap(map, exitHex, Game.GetDirection(exitHex, gatesHex));
+
+            // TransferToMap реэнтрантен: его вложенные события могли заменить script-side cover.
+            if (!Sync::Lock(gates, map)) {
+                return;
+            }
+
+            lockedMap = gates.GetMapPosition(lockedHex);
+            if (lockedMap !is map || lockedHex != gatesHex) {
+                RetryCloseGates(gates, Time::Seconds(1));
+                return;
+            }
+
+            Critter? postMoveCr = map.GetCritterOnHex(gatesHex);
+            if (postMoveCr != null && postMoveCr !is cr) {
+                RetryCloseGates(gates, Time::Seconds(3));
+                return;
+            }
+        }
     }
+
+    Lockers::SwitchLocker(gates, false);
 }
 
 #endif

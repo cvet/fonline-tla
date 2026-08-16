@@ -40,6 +40,13 @@ bool ShouldMercAlwaysRun(Critter cr)
     return cr.MercAlwaysRun;
 }
 
+// Отложенное увольнение относится только к уже свободному НПЦ. Если за время ожидания
+// его снова наняли, старый таймер не должен сбрасывать новый контракт и уводить мерка домой.
+bool CanReleaseMerc(bool hasMaster)
+{
+    return !hasMaster;
+}
+
 mdir GetDir(Critter cr0, Critter cr1)
 {
     return Game.GetDirection(cr0.Hex, cr1.Hex);
@@ -145,7 +152,7 @@ void MercInit(Critter merc, bool firstTime)
 
 // * ****************************** Обработка событий мерка ***************************** *//
 
-[[Event]]
+[[Event]] [[Async]]
 EventResult MercGlobalProcess(Critter cr, int type, Item, float, float, float, float, float, int, bool)
 {
     if (type == Tla::GlobalProcessNpcIdle) {
@@ -221,9 +228,15 @@ void MercSmthDead(Critter merc, Critter fromCr, Critter killer)
     MercSmthDeadImpl(merc, fromCr, killer);
 }
 
+[[Async]]
 void MercIdleImpl(Critter merc)
 {
-    if (merc.MercMasterId == ZERO_IDENT) {
+    if (!Sync::LockCritterWithMap(merc)) {
+        return;
+    }
+
+    ident masterId = merc.MercMasterId;
+    if (masterId == ZERO_IDENT) {
         return;
     }
 
@@ -232,8 +245,17 @@ void MercIdleImpl(Critter merc)
         return;
     }
 
-    Critter? master = Game.GetCritter(merc.MercMasterId);
+    Critter? master = Game.GetCritter(masterId);
     if (master == null) {
+        return;
+    }
+
+    Critter[] pair = {merc, master};
+    if (!Sync::LockCrittersWithMaps(pair)) {
+        return;
+    }
+
+    if (merc.MercMasterId != master.Id) {
         return;
     }
 
@@ -242,13 +264,14 @@ void MercIdleImpl(Critter merc)
         return; // погиб хозяин
     }
 
-    Map? map_master = master.GetMap();
-    Map? map_merc = merc.GetMap();
-    if (map_master != null) {
+    Map? masterMap = master.GetMap();
+    Map? mercMap = merc.GetMap();
+    if (masterMap != null) {
+        ident masterMapId = masterMap.Id;
         mpos hex = master.Hex;
-        Entrance::GetFreeHex(map_master, 1, hex);
-        if (map_merc != null) {
-            if (map_master.Id == map_merc.Id) {
+        Entrance::GetFreeHex(masterMap, 1, hex);
+        if (mercMap != null) {
+            if (masterMapId == mercMap.Id) {
                 int dist = Game.GetDistance(merc, master);
                 if (CanLoseMerc(merc)) {
                     if (dist > merc.MercLoseDist) {
@@ -266,12 +289,23 @@ void MercIdleImpl(Critter merc)
             }
             else {
                 if (!merc.MercWaitForMaster) {
-                    merc.TransferToMap(map_master, hex, HDIR_Random);
+                    Entity[] pairCover = Sync::Snapshot();
+                    if (!Sync::LockForTransferToMap(merc, masterMap, pairCover) || merc.MercMasterId != master.Id || master.IsDead() ||
+                        master.MapId != masterMapId) {
+                        return;
+                    }
+
+                    merc.TransferToMap(masterMap, hex, HDIR_Random);
                 }
             }
         }
         else {
-            merc.TransferToMap(map_master, hex, HDIR_Random);
+            Entity[] pairCover = Sync::Snapshot();
+            if (!Sync::LockForTransferToMap(merc, masterMap, pairCover) || merc.MercMasterId != master.Id || master.IsDead() || master.MapId != masterMapId) {
+                return;
+            }
+
+            merc.TransferToMap(masterMap, hex, HDIR_Random);
         }
     }
     else {
@@ -286,25 +320,41 @@ void MercIdleImpl(Critter merc)
             return;
         }
 
-        Critter[] globalGroup = GlobalmapGroupExtended::GetGlobalGroup(master);
-        if (!GlobalmapGroupExtended::GetGlobalGroup(merc).isEmpty() || globalGroup.isEmpty()) {
+        // Мерк ещё на локации, хозяин на глобале — тянем мерка на глобал, если харизма лидера позволяет.
+        // GetGlobalGroup(merc) для мерка на локации бросает исключение, поэтому зовём его только когда мерк уже на глобале.
+        if (mercMap != null) {
+            int masterTripId = int(master.GlobalMapTripId);
+            if (masterTripId == 0) {
+                return;
+            }
+
+            Critter[] globalGroup = {};
+            Entity[] pairCover = Sync::Snapshot();
+            if (!GlobalmapGroup::LockGroupForMutation(master, masterTripId, pairCover, globalGroup) || merc.MercMasterId != master.Id || master.IsDead() ||
+                master.MapId != ZERO_IDENT || merc.GetMap() == null) {
+                return;
+            }
+
+            if (globalGroup.isEmpty()) {
+                return;
+            }
+
+            Critter leader = globalGroup[0];
+            if (leader.Charisma > int(globalGroup.length())) {
+                merc.TransferToGlobalGroup(master);
+            }
+
             return;
         }
 
-        Critter leader = globalGroup[0];
-        if (leader.Charisma > int(globalGroup.length())) {
-            merc.TransferToGlobalGroup(master);
-        }
+        // Мерк уже на глобале; присоединение или исправление состава здесь не требуется.
+        return;
     }
 }
 
 [[TimeEvent]] [[Async]]
 void MercIdle(Critter merc)
 {
-    if (!Sync::LockCritterWithMap(merc)) {
-        return;
-    }
-
     MercIdleImpl(merc);
 }
 
@@ -409,28 +459,42 @@ void CancelMerc(Critter merc)
     Game.StartTimeEvent(ReleaseTime(), ReleaseMerc, merc.Id); //SavedDeferredCall
 }
 
-[[TimeEvent]]
+[[TimeEvent]] [[Async]]
 void ReleaseMerc(any value)
 {
     Critter? merc = Game.GetCritter(value);
-    if (merc != null) {
-        merc.IsGeck = false;
-        merc.IsNoHome = false;
-        // Если домашняя позиция нпц найдена, перемещаем его домой.
-        auto map = Game.GetMap(merc.HomeMapId);
-        if (merc.HomeMapId != ZERO_IDENT && map != null) {
-            merc.ReplicationTime = 0;
-            if (merc.IsDead()) {
-                CritterState::ToAlive(merc);
-            }
+    if (merc == null || !Sync::LockCritterWithMap(merc) || !CanReleaseMerc(merc.MercMasterId != ZERO_IDENT)) {
+        return;
+    }
 
-            merc.TransferToMap(map, merc.HomeHex, hdir(merc.HomeDir));
-        }
-        else {
-            // Домашняя позиция не найдена, криттера нужно удалять
-            Game.DestroyCritter(merc);
+    ident homeMapId = merc.HomeMapId;
+    mpos homeHex = merc.HomeHex;
+    uint8 homeDir = merc.HomeDir;
+    merc.IsGeck = false;
+    merc.IsNoHome = false;
+
+    // Если домашняя позиция нпц не найдена, криттера нужно удалять.
+    Map? homeMap = homeMapId != ZERO_IDENT ? Game.GetMap(homeMapId) : null;
+    if (homeMap == null) {
+        Game.DestroyCritter(merc);
+        return;
+    }
+
+    merc.ReplicationTime = 0;
+    if (merc.IsDead()) {
+        CritterState::ToAlive(merc);
+        if (!CanReleaseMerc(merc.MercMasterId != ZERO_IDENT)) {
+            return;
         }
     }
+
+    Entity[] releaseCover = Sync::Snapshot();
+    if (!Sync::LockForTransferToMap(merc, homeMap, releaseCover) || !CanReleaseMerc(merc.MercMasterId != ZERO_IDENT) || merc.HomeMapId != homeMapId ||
+        merc.HomeHex != homeHex || merc.HomeDir != homeDir) {
+        return;
+    }
+
+    merc.TransferToMap(homeMap, homeHex, hdir(homeDir));
 }
 
 // * *********************** Получение мерков игрока ******************** *//

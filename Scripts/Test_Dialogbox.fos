@@ -1,0 +1,109 @@
+// Test_Dialogbox — чистые тесты одноразового серверного контракта DialogBox.
+namespace Test_Dialogbox
+{
+
+#if SERVER
+
+[[ModuleInit]]
+void InitTestDialogbox()
+{
+    Game.OnTestingInit.Subscribe(OnTestingInit);
+}
+
+[[Event]]
+void OnTestingInit()
+{
+    Testing::RegisterTest("dialogbox", "answer_count_bounds", AnswerCountBounds);
+    Testing::RegisterTest("dialogbox", "answer_index_bounds", AnswerIndexBounds);
+    Testing::RegisterTest("dialogbox", "session_progression", SessionProgression);
+    Testing::RegisterTest("dialogbox", "answer_contract", AnswerContract);
+    Testing::RegisterTest("dialogbox", "answer_metadata", AnswerMetadata);
+}
+
+void AnswerCountBounds(Testing::TestContext ctx)
+{
+    if (!Testing::Expect(ctx, Dialogbox::IsDialogBoxAnswerCountValid(1), "Один вариант ответа допустим")) {
+        return;
+    }
+    if (!Testing::Expect(ctx, Dialogbox::IsDialogBoxAnswerCountValid(16), "Верхняя граница числа ответов допустима")) {
+        return;
+    }
+    if (!Testing::Expect(ctx, !Dialogbox::IsDialogBoxAnswerCountValid(0), "Пустая модалка отклоняется")) {
+        return;
+    }
+
+    Testing::Expect(ctx, !Dialogbox::IsDialogBoxAnswerCountValid(17), "Число ответов выше лимита отклоняется");
+}
+
+void AnswerIndexBounds(Testing::TestContext ctx)
+{
+    if (!Testing::Expect(ctx, Dialogbox::IsDialogBoxAnswerIndexValid(2, 0), "Первый ответ допустим")) {
+        return;
+    }
+    if (!Testing::Expect(ctx, Dialogbox::IsDialogBoxAnswerIndexValid(2, 1), "Последний ответ допустим")) {
+        return;
+    }
+    if (!Testing::Expect(ctx, !Dialogbox::IsDialogBoxAnswerIndexValid(2, -1), "Отрицательный индекс отклоняется")) {
+        return;
+    }
+
+    Testing::Expect(ctx, !Dialogbox::IsDialogBoxAnswerIndexValid(2, 2), "Индекс за правой границей отклоняется");
+}
+
+void SessionProgression(Testing::TestContext ctx)
+{
+    if (!Testing::Expect(ctx, Dialogbox::NextDialogBoxSession(0) == 1, "Первая сессия ненулевая")) {
+        return;
+    }
+
+    Testing::Expect(ctx, Dialogbox::NextDialogBoxSession(41) == 42, "Сессия монотонно увеличивается");
+}
+
+void AnswerContract(Testing::TestContext ctx)
+{
+    int type = int(DialogBoxType::NcrIllBrahmin);
+    if (!Testing::Expect(ctx, Dialogbox::IsDialogBoxAnswerContractValid(true, 7, 7, type, type, 2, 1, false), "Точный непросроченный контракт принимается")) {
+        return;
+    }
+    if (!Testing::Expect(ctx, !Dialogbox::IsDialogBoxAnswerContractValid(false, 7, 7, type, type, 2, 1, false), "Ответ без pending-контракта отклоняется")) {
+        return;
+    }
+    if (!Testing::Expect(ctx, !Dialogbox::IsDialogBoxAnswerContractValid(true, 7, 6, type, type, 2, 1, false), "Ответ старой сессии отклоняется")) {
+        return;
+    }
+    if (!Testing::Expect(ctx,
+                         !Dialogbox::IsDialogBoxAnswerContractValid(true, 7, 7, type, int(DialogBoxType::PurgatoryInvite), 2, 1, false),
+                         "Подмена типа модалки отклоняется")) {
+        return;
+    }
+    if (!Testing::Expect(ctx, !Dialogbox::IsDialogBoxAnswerContractValid(true, 7, 7, type, type, 2, 2, false), "Ответ вне диапазона отклоняется")) {
+        return;
+    }
+
+    Testing::Expect(ctx, !Dialogbox::IsDialogBoxAnswerContractValid(true, 7, 7, type, type, 2, 1, true), "Просроченный контракт отклоняется");
+}
+
+void AnswerMetadata(Testing::TestContext ctx)
+{
+    DialogBoxType[] types = {DialogBoxType::AskFollowGlobalGroupRuler, DialogBoxType::NcrIllBrahmin, DialogBoxType::PurgatoryInvite};
+    for (int i = 0; i < types.length(); i++) {
+        if (!Testing::Expect(ctx, Dialogbox::IsDialogBoxAnswerDangerous(types[i], 0), "Подтверждение помечено опасным")) {
+            return;
+        }
+        if (!Testing::Expect(ctx, Dialogbox::GetDialogBoxAnswerRole(types[i], 0) == "confirm", "Первый ответ имеет роль confirm")) {
+            return;
+        }
+        if (!Testing::Expect(ctx, !Dialogbox::IsDialogBoxAnswerDangerous(types[i], 1), "Отказ остаётся безопасным")) {
+            return;
+        }
+        if (!Testing::Expect(ctx, Dialogbox::GetDialogBoxAnswerRole(types[i], 1) == "cancel", "Второй ответ имеет роль cancel")) {
+            return;
+        }
+    }
+
+    Testing::Expect(ctx, Dialogbox::GetDialogBoxAnswerRole(DialogBoxType::NcrIllBrahmin, 2) == "choice", "Дополнительный ответ остаётся обычным выбором");
+}
+
+#endif
+
+}

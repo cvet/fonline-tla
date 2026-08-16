@@ -9,12 +9,12 @@ FO_USING_NAMESPACE();
 
 FO_BEGIN_NAMESPACE
 ///@ ExportMethod
-FO_SCRIPT_API string Common_Game_Sha1(BaseEngine* engine, string_view text);
+FO_SCRIPT_API string Common_Game_Sha1(ptr<BaseEngine> engine, string_view text);
 ///@ ExportMethod
-FO_SCRIPT_API string Common_Game_Sha2(BaseEngine* engine, string_view text);
+FO_SCRIPT_API string Common_Game_Sha2(ptr<BaseEngine> engine, string_view text);
 FO_END_NAMESPACE
 
-string FO_NAMESPACE Common_Game_Sha1(BaseEngine* engine, string_view text)
+string FO_NAMESPACE Common_Game_Sha1(ptr<BaseEngine> engine, string_view text)
 {
     ignore_unused(engine);
 
@@ -33,7 +33,7 @@ string FO_NAMESPACE Common_Game_Sha1(BaseEngine* engine, string_view text)
     return {hex_digest, sizeof(hex_digest)};
 }
 
-string FO_NAMESPACE Common_Game_Sha2(BaseEngine* engine, string_view text)
+string FO_NAMESPACE Common_Game_Sha2(ptr<BaseEngine> engine, string_view text)
 {
     ignore_unused(engine);
 

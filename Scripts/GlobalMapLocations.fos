@@ -3,7 +3,7 @@
 //   через RemoteCall при входе на глобалку, начальной инфо и изменении KnownLocations.
 // CLIENT: хранит полученные локации, ищет локацию под курсором и инициирует вход в неё.
 // Связи: Location (валидация известных локаций), GlobalmapGroup (группа на глобальной карте),
-//   Serializator (упаковка/распаковка передаваемых данных), Flags (битовые флаги набора данных).
+//   Serializer (упаковка/распаковка передаваемых данных), Flags (битовые флаги набора данных).
 namespace GlobalMapLocations
 {
 
@@ -42,7 +42,7 @@ class LocationData
     int Radius;
     ucolor Color;
 
-    void Save(Serializator::Serializator save)
+    void Save(Serializer::Serializer save)
     {
         save.Set(LocId);
         save.Set(LocPid);
@@ -52,7 +52,7 @@ class LocationData
         save.Set(Color);
     }
 
-    void Load(Serializator::Serializator load)
+    void Load(Serializer::Serializer load)
     {
         load.Get(LocId);
         load.Get(LocPid);
@@ -80,35 +80,116 @@ void InitGlobalMapLocations()
     Game.AddPropertySetter(CritterProperty::KnownLocations, OnPlayerSetKnownLocations);
 }
 
+void AddSyncEntity(Entity[] & entities, Entity entity)
+{
+    for (int i = 0; i < entities.length(); i++) {
+        if (entities[i] is entity) {
+            return;
+        }
+    }
+
+    entities.insertLast(entity);
+}
+
+bool SameLocationIds(ident[] left, ident[] right)
+{
+    if (left.length() != right.length()) {
+        return false;
+    }
+
+    for (int i = 0; i < left.length(); i++) {
+        if (left[i] != right[i]) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+// Данные глобальной карты читают свойства всех известных локаций. Сохраняем покрытие вызывающего
+// и расширяем его полным, стабилизированным списком локаций.
+[[Async]]
+bool LockKnownLocations(Critter cr, Entity[] baseCover)
+{
+    while (true) {
+        if (!Sync::Lock(baseCover)) {
+            return false;
+        }
+
+        ident[] locationIds = cr.KnownLocations.clone();
+        Entity[] locationCover = baseCover.clone();
+        for (int i = 0; i < locationIds.length(); i++) {
+            Location? loc = Game.GetLocation(locationIds[i]);
+            if (loc != null) {
+                AddSyncEntity(locationCover, loc);
+            }
+        }
+
+        if (!Sync::Lock(locationCover)) {
+            if (cr.IsDestroyed) {
+                return false;
+            }
+
+            continue;
+        }
+
+        if (!SameLocationIds(locationIds, cr.KnownLocations)) {
+            continue;
+        }
+
+        return true;
+    }
+
+    return false;
+}
+
 // При смене списка известных локаций обновляем их у криттера, только если он на глобалке (без карты).
-[[PropertySetter]]
+[[PropertySetter]] [[Async]]
 void OnPlayerSetKnownLocations(Critter cr)
 {
     if (cr.GetMap() == null) {
-        SetGlobalMapData(GM_INFO_LOCATIONS, cr);
+        SetGlobalMapDataSynced(GM_INFO_LOCATIONS, cr);
     }
 }
 
 // При начальной отправке инфо криттеру, находящемуся на глобалке, шлём весь набор данных карты.
-[[Event]]
+[[Event]] [[Async]]
 void OnCritterSendInitialInfo(Critter cr)
 {
     if (cr.GetMap() == null) {
-        SetGlobalMapData(GM_INFO_ALL, cr);
+        SetGlobalMapDataSynced(GM_INFO_ALL, cr);
     }
 }
 
 // При входе криттера на глобальную карту обновляем у клиента список локаций.
-[[Event]]
+[[Event]] [[Async]]
 void OnGlobalMapCritterIn(Critter cr)
 {
-    SetGlobalMapData(GM_INFO_LOCATIONS, cr);
+    SetGlobalMapDataSynced(GM_INFO_LOCATIONS, cr);
+}
+
+// Async-обёртка для точек, где вызывающий не может заранее перечислить динамический KnownLocations.
+[[Async]]
+void SetGlobalMapDataSynced(int flags, Critter cr)
+{
+    Entity[] baseCover = Sync::Snapshot();
+    AddSyncEntity(baseCover, cr);
+    if (Flags::HasFlag(flags, GM_INFO_LOCATIONS)) {
+        if (!LockKnownLocations(cr, baseCover)) {
+            return;
+        }
+    }
+    else if (!Sync::Lock(baseCover)) {
+        return;
+    }
+
+    SetGlobalMapData(flags, cr);
 }
 
 // Пакует запрошенные флагами порции данных глобальной карты и отправляет их клиенту криттера.
 void SetGlobalMapData(int flags, Critter cr)
 {
-    auto save = Serializator::Serializator();
+    auto save = Serializer::Serializer();
 
     if (Flags::HasFlag(flags, GM_INFO_LOCATIONS)) {
         Location::ValidateKnownLocations(cr);
@@ -171,7 +252,7 @@ LocationData ? GetHoveredLocationData(int x, int y) //TODO: проверить, 
 [[ClientRemoteCall]]
 void GetGlobalMapData(int flags, uint8[] data)
 {
-    auto load = Serializator::Serializator();
+    auto load = Serializer::Serializer();
     if (load.SetData(data) == 0) {
         return;
     }

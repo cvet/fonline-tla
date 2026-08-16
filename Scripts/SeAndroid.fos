@@ -88,30 +88,34 @@ EventResult RadioSkill(Item item, Critter cr, CritterProperty skill)
     return EventResult::StopChain;
 }
 
-[[TimeEvent]]
+[[TimeEvent]] [[Async]]
 void AndroidRadio(any[] values)
 {
+    if (values.length() < 4) {
+        return;
+    }
+
     DebugLog("AndroidRadio. ItemId:" + values[0] + "; MsgCount:" + values[1] + "; " + "radioChannel: " + values[2]);
     Item? item = Game.GetItem(values[0]);
-    if (item != null) {
-        if (item.SeAndroidRadioListened) {
-            Radio::SendChannelRadioMessage(values[3], TextPackKey(TextPackName::Text, "" + (STR_RADIO_MESSAGE)));
-            values[1] = values[1] + 1;
-            DebugLog("count radio messages:" + values[1]);
-            Critter? cr = Game.GetCritter(item.CritterId);
-            if (cr == null) {
-                return;
-            }
+    if (item == null || !Sync::LockItemWithParent(item) || !item.SeAndroidRadioListened || !item.HasRadio) {
+        return;
+    }
 
-            if (cr.SpecialAndroid < 2 && item.Radio.Channel == values[3]) { // Про локацию пока не известно, радио на нужной волне
-                cr.SpecialAndroid = 2;
-            }
+    Radio::SendChannelRadioMessage(values[3], TextPackKey(TextPackName::Text, "" + (STR_RADIO_MESSAGE)));
+    values[1] = values[1] + 1;
+    DebugLog("count radio messages:" + values[1]);
+    Critter? cr = item.GetCritter();
+    if (cr == null) {
+        return;
+    }
 
-            DebugLog("seAndroidValue: " + cr.SpecialAndroid);
-            if (values[1] < 5) { // Максимум 5 повторов раз в 20 секунд на нужной радиоволне
-                Game.StartTimeEvent(GameTime::GameSeconds(20), AndroidRadio, values);
-            }
-        }
+    if (cr.SpecialAndroid < 2 && item.Radio.Channel == values[3]) { // Про локацию пока не известно, радио на нужной волне
+        cr.SpecialAndroid = 2;
+    }
+
+    DebugLog("seAndroidValue: " + cr.SpecialAndroid);
+    if (values[1] < 5) { // Максимум 5 повторов раз в 20 секунд на нужной радиоволне
+        Game.StartTimeEvent(GameTime::GameSeconds(20), AndroidRadio, values);
     }
 }
 
@@ -147,9 +151,13 @@ EventResult UseGroundDoor(Item door, Critter cr, CritterProperty skill)
     return (loc.SeAndroidPlayerIn) ? EventResult::StopChain : EventResult::ContinueChain;
 }
 
-[[ItemTrigger]]
+[[Async]] [[ItemTrigger]]
 void TransitPlayer(Critter player, StaticItem trigger, bool entered, mdir dir)
 {
+    if (!Sync::LockCritterWithMapAndLocation(player)) {
+        return;
+    }
+
     Map? map = player.GetMap();
     if (map == null) {
         return;
@@ -159,7 +167,73 @@ void TransitPlayer(Critter player, StaticItem trigger, bool entered, mdir dir)
     if (not loc.SeAndroidPlayerIn) {
         // Переносим игрока в подвал, кладем в нокаут
         Map basement = loc.GetMapByIndex(1);
+
+        Entity[] mapCover = {player, map, loc, basement};
+        if (!Sync::Lock(mapCover)) {
+            return;
+        }
+
+        if (player.MapId != map.Id || map.GetLocation().Id != loc.Id || loc.GetMapByIndex(1).Id != basement.Id) {
+            return;
+        }
+
         mpos hex;
+        bool hasContainerEntry = Entrance::MapGetEntryCoords(basement, ENTRY_CONTAINER, 0, hex);
+        Item? cont = hasContainerEntry ? basement.GetItemOnHex(hex, Content::Item::locker_rusty_right) : null;
+        Critter? doctor = basement.GetCritter(CritterProperty::NpcRole, ROLE_DOCTOR, CritterFindType::NonDeadNpc);
+        bool hasDoorEntry = Entrance::MapGetEntryCoords(map, ENTRY_DOOR_GROUND, 0, hex);
+        Item? door = hasDoorEntry ? map.GetItemOnHex(hex, Content::Item::door_2421) : null;
+        Item[] items = player.GetItems();
+
+        Entity[] cover = {player, map, loc, basement};
+        for (int i = 0; i < items.length(); i++) {
+            cover.insertLast(items[i]);
+        }
+        if (cont != null) {
+            cover.insertLast(cont);
+        }
+        if (doctor != null) {
+            cover.insertLast(doctor);
+        }
+        if (door != null) {
+            cover.insertLast(door);
+        }
+
+        if (!Sync::Lock(cover)) {
+            return;
+        }
+
+        Item[] containerItems = {};
+        if (!items.isEmpty() && cont != null) {
+            containerItems = cont.GetItems(Tla::RootContainerStack());
+            for (int i = 0; i < containerItems.length(); i++) {
+                cover.insertLast(containerItems[i]);
+            }
+            if (!Sync::Lock(cover)) {
+                return;
+            }
+        }
+
+        if (player.MapId != map.Id || map.GetLocation().Id != loc.Id || loc.GetMapByIndex(1).Id != basement.Id) {
+            return;
+        }
+        for (int i = 0; i < items.length(); i++) {
+            if (items[i].Ownership != ItemOwnership::CritterInventory || items[i].CritterId != player.Id) {
+                return;
+            }
+        }
+        if ((cont != null && (cont.Ownership != ItemOwnership::MapHex || cont.MapId != basement.Id)) || (doctor != null && doctor.MapId != basement.Id) ||
+            (door != null && (door.Ownership != ItemOwnership::MapHex || door.MapId != map.Id))) {
+            return;
+        }
+        if (cont != null) {
+            for (int i = 0; i < containerItems.length(); i++) {
+                if (containerItems[i].Ownership != ItemOwnership::ItemContainer || containerItems[i].ContainerId != cont.Id) {
+                    return;
+                }
+            }
+        }
+
         Entrance::MapGetEntryCoords(basement, ENTRY_KNOCKOUT, 0, hex);
         Effects::FadeScreen(player, Color::Black, Color::Black, Time::Milliseconds(5000));
         player.TransferToMap(basement, hex, 3);
@@ -173,23 +247,19 @@ void TransitPlayer(Critter player, StaticItem trigger, bool entered, mdir dir)
                                  100000,
                                  player.Hex);
         // Все вещи игрока перекладываем в разные ящики
-        Item[] items = player.GetItems();
         if (!items.isEmpty()) {
-            if (Entrance::MapGetEntryCoords(basement, ENTRY_CONTAINER, 0, hex)) {
-                Item? cont = basement.GetItemOnHex(hex, Content::Item::locker_rusty_right);
-                if (cont != null) {
-                    ItemMovement::MoveItems(items, cont, Tla::RootContainerStack());
-                    items = cont.GetItems(Tla::RootContainerStack());
-                    for (int i = 0; i < items.length(); i++) {
-                        auto pid = items[i].ProtoId;
-                        if (Pids.exists(pid) || pid == Content::Item::pot) {
-                            Game.DestroyItem(items[i]);
-                        }
+            if (cont != null) {
+                ItemMovement::MoveItems(items, cont, Tla::RootContainerStack());
+                items = cont.GetItems(Tla::RootContainerStack());
+                for (int i = 0; i < items.length(); i++) {
+                    auto pid = items[i].ProtoId;
+                    if (Pids.exists(pid) || pid == Content::Item::pot) {
+                        Game.DestroyItem(items[i]);
                     }
-
-                    Item item = cont.AddItem(Content::Item::pot, 1, Tla::RootContainerStack());
-                    item.TextArgs = TextFormatting::TextArg("text", PlayerRegistration::GetPlayerName(player.Id));
                 }
+
+                Item item = cont.AddItem(Content::Item::pot, 1, Tla::RootContainerStack());
+                item.TextArgs = TextFormatting::TextArg("text", PlayerRegistration::GetPlayerName(player.Id));
             }
         }
 
@@ -197,8 +267,6 @@ void TransitPlayer(Critter player, StaticItem trigger, bool entered, mdir dir)
         // Игрок внутри, больше никто туда не попадет
         loc.SeAndroidPlayerIn = true;
         // Закрываем дверь
-        Entrance::MapGetEntryCoords(map, ENTRY_DOOR_GROUND, 0, hex);
-        Item? door = map.GetItemOnHex(hex, Content::Item::door_2421);
         if (door != null && door.Opened) {
             Lockers::SwitchLocker(door, false);
         }
@@ -342,19 +410,37 @@ void TransformPlayer(Map map, Critter player, Critter doctor)
     Game.StartTimeEvent(GameTime::GameSeconds(60), AwakePlayer, values); //SavedDeferredCall
 }
 
-[[TimeEvent]]
+[[TimeEvent]] [[Async]]
 void AwakePlayer(any[] values)
 {
+    if (values.length() < 3) {
+        return;
+    }
+
     Critter? player = Game.GetCritter(values[0]);
     Critter? doctor = Game.GetCritter(values[1]);
-    if (player != null && doctor != null) {
-        player.Experience += 4000;
-        Messaging::Info(player, TextPackKey(TextPackName::Text, "" + (STR_AWAKE)));
-        CritterState::ToDead(player, CritterActionAnim::DeadBack, null); // TODO: убрать
-        player.CurrentAp = 0;
-        CritterState::ToAlive(player);
-        Dialogs::RunDialog(player, doctor, true);
+    Map? map = Game.GetMap(ident(values[2]));
+    if (player == null || doctor == null || map == null) {
+        return;
     }
+
+    Critter[] critters = {player, doctor};
+    if (!Sync::LockCrittersWithMaps(critters)) {
+        return;
+    }
+
+    Entity[] cover = Sync::Snapshot();
+    Sync::AddUniqueEntity(cover, map);
+    if (!Sync::Lock(cover) || player.MapId != map.Id || doctor.MapId != map.Id) {
+        return;
+    }
+
+    player.Experience += 4000;
+    Messaging::Info(player, TextPackKey(TextPackName::Text, "" + (STR_AWAKE)));
+    CritterState::ToDead(player, CritterActionAnim::DeadBack, null); // TODO: убрать
+    player.CurrentAp = 0;
+    CritterState::ToAlive(player);
+    Dialogs::RunDialog(player, doctor, true);
 }
 
 [[DialogResult]]
@@ -378,9 +464,13 @@ void SendDoctorHome(Critter player, Critter? npc)
 const int ENTRY_EXPLODE = 30; // Номера гексов, на которых будут взрывы
 const int STR_OUT = 70095;    // Вам чудом удалось пройти мимо ловушек безумца. Но сейчас нужно делать ноги.
 
-[[ItemTrigger]]
+[[Async]] [[ItemTrigger]]
 void Warn(Critter player, StaticItem trigger, bool entered, mdir dir)
 {
+    if (!Sync::LockCritterWithMapAndLocation(player)) {
+        return;
+    }
+
     Map? map = player.GetMap();
     if (map == null) {
         return;
@@ -396,11 +486,11 @@ void Warn(Critter player, StaticItem trigger, bool entered, mdir dir)
     }
 }
 
-[[TimeEvent]]
+[[TimeEvent]] [[Async]]
 void DeferredExplode(any value)
 {
     Map? map = Game.GetMap(ident(value));
-    if (map == null) {
+    if (map == null || !Sync::Lock(map)) {
         return;
     }
 
@@ -416,13 +506,15 @@ void DeferredExplode(any value)
     Game.StartTimeEvent(GameTime::GameSeconds(1), DeferredExplode, value); //SavedDeferredCall
 }
 
-[[TimeEvent]]
+[[TimeEvent]] [[Async]]
 void DeferredDestroyMap(any value)
 {
     Map? map = Game.GetMap(ident(value));
-    if (map != null) {
-        Game.DestroyLocation(map.GetLocation().Id);
+    if (map == null || !Sync::LockMapWithLocation(map)) {
+        return;
     }
+
+    Game.DestroyLocation(map.GetLocation());
 }
 
 // Части тела в банках с биогелем
@@ -464,13 +556,15 @@ void PotInit(Item item, bool firstTime)
     item.OnCritterUse.Subscribe(PotUse);
 }
 
-[[TimeEvent]]
+[[TimeEvent]] [[Async]]
 void DefferedDestroyItem(any value)
 {
     Item? item = Game.GetItem(value);
-    if (item != null) {
-        Game.DestroyItem(item);
+    if (item == null || !Sync::LockItemWithParent(item)) {
+        return;
     }
+
+    Game.DestroyItem(item);
 }
 
 [[Event]]
@@ -483,14 +577,34 @@ EventResult PotUse(Item item, Critter cr, int param)
     return EventResult::StopChain;
 }
 
+// Единственный параметр ящика — процент базового шанса. Неверная арность или значение
+// вне процентного диапазона означают ошибочный authored-контент, а не нулевой шанс.
+bool TryDecodeBoxesParams(hstring[] params, int& chance)
+{
+    if (params.length() != 1) {
+        return false;
+    }
+
+    int parsedChance = 0;
+    if (!Tla::TryParseSceneryInt(params[0], parsedChance) || parsedChance < 0 || parsedChance > 100) {
+        return false;
+    }
+
+    chance = parsedChance;
+    return true;
+}
+
 [[ItemStatic]]
-bool Boxes(Critter player, StaticItem scenery, Item itemUse, any skill)
+bool Boxes(Critter player, StaticItem scenery, Item? itemUse, any skill)
 {
     if (skill != CritterProperty::SpecialSkillPickOnGround) {
         return false;
     }
 
-    int chance = scenery.SceneryParams[0].hash;
+    int chance = 0;
+    if (!TryDecodeBoxesParams(scenery.SceneryParams, chance)) {
+        return false;
+    }
     Map? map = player.GetMap();
     if (map == null) {
         return false;

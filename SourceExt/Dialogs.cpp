@@ -9,6 +9,36 @@ static constexpr int32_t DIALOG_LINK_EXIT = 0;
 static constexpr int32_t DIALOG_LINK_BACK = -1;
 static constexpr string_view DIALOG_ANSWER_LINK_ENUM = "DialogAnswerLink";
 
+auto NormalizeDialogScriptValue(string value) -> any_t
+{
+    FO_STACK_TRACE_ENTRY();
+
+    if (!value.empty() && value.front() == '@') {
+        value.erase(0, 1);
+    }
+    else if (value.starts_with("Content::")) {
+        const size_t separator = value.rfind(':');
+        FO_VERIFY_AND_THROW(separator != string::npos && separator + 1 < value.size(), "Invalid dialog Content token", value);
+        value.erase(0, separator + 1);
+    }
+
+    return any_t {std::move(value)};
+}
+
+auto NormalizeDialogPropertyValue(string value) -> any_t
+{
+    FO_STACK_TRACE_ENTRY();
+
+    if (strvex(value).compare_ignore_case("true")) {
+        value = "1";
+    }
+    else if (strvex(value).compare_ignore_case("false")) {
+        value = "0";
+    }
+
+    return any_t {std::move(value)};
+}
+
 static auto IsDialogCommentOrEmpty(string_view line) -> bool
 {
     FO_STACK_TRACE_ENTRY();
@@ -346,11 +376,11 @@ static auto GetPropEnumIndex(ptr<const EngineMetadata> meta, string_view str, bo
 {
     FO_STACK_TRACE_ENTRY();
 
-    const auto* prop_global = meta->GetPropertyRegistrator(GameProperties::ENTITY_TYPE_NAME)->FindProperty(str).get();
-    const auto* prop_critter = meta->GetPropertyRegistrator(CritterProperties::ENTITY_TYPE_NAME)->FindProperty(str).get();
-    const auto* prop_item = meta->GetPropertyRegistrator(ItemProperties::ENTITY_TYPE_NAME)->FindProperty(str).get();
-    const auto* prop_location = meta->GetPropertyRegistrator(LocationProperties::ENTITY_TYPE_NAME)->FindProperty(str).get();
-    const auto* prop_map = meta->GetPropertyRegistrator(MapProperties::ENTITY_TYPE_NAME)->FindProperty(str).get();
+    const auto* prop_global = meta->GetPropertyRegistrar(GameProperties::ENTITY_TYPE_NAME)->FindProperty(str).get();
+    const auto* prop_critter = meta->GetPropertyRegistrar(CritterProperties::ENTITY_TYPE_NAME)->FindProperty(str).get();
+    const auto* prop_item = meta->GetPropertyRegistrar(ItemProperties::ENTITY_TYPE_NAME)->FindProperty(str).get();
+    const auto* prop_location = meta->GetPropertyRegistrar(LocationProperties::ENTITY_TYPE_NAME)->FindProperty(str).get();
+    const auto* prop_map = meta->GetPropertyRegistrar(MapProperties::ENTITY_TYPE_NAME)->FindProperty(str).get();
 
     int32_t count = 0;
     count += prop_global != nullptr ? 1 : 0;
@@ -402,7 +432,7 @@ static auto GetPropEnumIndex(ptr<const EngineMetadata> meta, string_view str, bo
     return prop->GetRegIndex();
 }
 
-auto DialogAnswer::GetDemand(int32_t index) -> DialogAnswerReq*
+auto DialogAnswer::GetDemand(int32_t index) -> ptr<DialogAnswerReq>
 {
     FO_STACK_TRACE_ENTRY();
 
@@ -410,10 +440,10 @@ auto DialogAnswer::GetDemand(int32_t index) -> DialogAnswerReq*
         throw DialogException("Dialog demand index out of range", index);
     }
 
-    return Demands.at(index).get();
+    return Demands.at(index);
 }
 
-auto DialogAnswer::GetResult(int32_t index) -> DialogAnswerReq*
+auto DialogAnswer::GetResult(int32_t index) -> ptr<DialogAnswerReq>
 {
     FO_STACK_TRACE_ENTRY();
 
@@ -421,10 +451,10 @@ auto DialogAnswer::GetResult(int32_t index) -> DialogAnswerReq*
         throw DialogException("Dialog result index out of range", index);
     }
 
-    return Results.at(index).get();
+    return Results.at(index);
 }
 
-auto DialogSpeech::GetAnswer(int32_t index) -> DialogAnswer*
+auto DialogSpeech::GetAnswer(int32_t index) -> ptr<DialogAnswer>
 {
     FO_STACK_TRACE_ENTRY();
 
@@ -432,10 +462,10 @@ auto DialogSpeech::GetAnswer(int32_t index) -> DialogAnswer*
         throw DialogException("Dialog answer index out of range", index);
     }
 
-    return Answers.at(index).get();
+    return Answers.at(index);
 }
 
-auto DialogPack::GetSpeech(int32_t index) -> DialogSpeech*
+auto DialogPack::GetSpeech(int32_t index) -> ptr<DialogSpeech>
 {
     FO_STACK_TRACE_ENTRY();
 
@@ -443,7 +473,7 @@ auto DialogPack::GetSpeech(int32_t index) -> DialogSpeech*
         throw DialogException("Dialog speech index out of range", index);
     }
 
-    return Speeches.at(index).get();
+    return Speeches.at(index);
 }
 
 DialogManager::DialogManager(EngineMetadata& meta) :
@@ -513,7 +543,7 @@ auto DialogManager::ParseDialog(string_view pack_name, string_view data) const -
     FO_STACK_TRACE_ENTRY();
 
     auto pack = SafeAlloc::MakeRefCounted<DialogPack>();
-    auto fodlg = ConfigFile(strex("{}.fodlg", pack_name), string(data), ConfigFileOption::CollectContent);
+    auto fodlg = ConfigFile(string(data), ConfigFileOption::CollectContent);
 
     pack->PackId = _meta->Hashes.ToHashedString(pack_name);
 
@@ -820,7 +850,7 @@ auto DialogManager::LoadDemandResult(istringstream& input, bool is_demand) const
 
         // Value
         input >> svalue;
-        value = any_t {std::move(svalue)};
+        value = NormalizeDialogPropertyValue(std::move(svalue));
     } break;
     case DR_ITEM: {
         // Who
@@ -865,7 +895,7 @@ auto DialogManager::LoadDemandResult(istringstream& input, bool is_demand) const
                 throw DialogParseException("Invalid values count", values_count + 1);
             }
 
-            script_val[values_count] = any_t {std::move(value_str)};
+            script_val[values_count] = NormalizeDialogScriptValue(std::move(value_str));
             values_count++;
         }
 

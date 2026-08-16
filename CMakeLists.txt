@@ -75,7 +75,6 @@ AddIncludeDirectories("Engine/ThirdParty/Asio/include")
 
 AddEngineSources(
     COMMON SourceExt/CommonExtension.cpp
-    COMMON SourceExt/ContentMigration.cpp
     COMMON SourceExt/Dialogs.h
     COMMON SourceExt/Dialogs.cpp
     SERVER SourceExt/ServerExtension.cpp
@@ -83,7 +82,8 @@ AddEngineSources(
     CLIENT SourceExt/ClientAiBridge.cpp
     BAKER SourceExt/BakerExtension.cpp
     BAKER SourceExt/DialogBaker.h
-    BAKER SourceExt/DialogBaker.cpp)
+    BAKER SourceExt/DialogBaker.cpp
+    TESTS SourceExt/TestDialogs.cpp)
 
 RegisterEngineSources()
 
@@ -96,7 +96,6 @@ DefinePackage(Dev
     BINARY Server Windows win64 NoRes+Root+SingleZip
     BINARY Client Windows win64 NoRes+Root+SingleZip
     BINARY Mapper Windows win64 NoRes+Root+SingleZip
-    BINARY Editor Windows win64 NoRes+Root+SingleZip
     BINARY Baker Windows win64 Lib+NoRes+Root+SingleZip)
 
 DefinePackage(Test
@@ -108,7 +107,6 @@ DefinePackage(LinuxTest
     CONFIG LocalTest
     BINARY Client Linux x64 Raw
     BINARY Server Linux x64 Raw
-    BINARY Editor Linux x64 Raw
     BINARY Mapper Linux x64 Raw)
 
 # ---------------------------------------------------------------------------
@@ -120,12 +118,17 @@ DefinePackage(LinuxTest
 # ---------------------------------------------------------------------------
 
 function(_tla_post_target_setup)
+    # The desktop host prefers the external runtime module when it is present. Build it before the
+    # executable so source/config changes cannot leave Build :: TLA_Client with a stale compatibility hash.
+    if(TARGET ${FO_DEV_NAME}_Client AND TARGET ${FO_DEV_NAME}_ClientLib)
+        add_dependencies(${FO_DEV_NAME}_Client ${FO_DEV_NAME}_ClientLib)
+    endif()
+
     CopyTargetRuntimeToTarget(${FO_DEV_NAME}_Client ${FO_DEV_NAME}_BakerLib)
     CopyTargetRuntimeToTarget(${FO_DEV_NAME}_Server ${FO_DEV_NAME}_BakerLib)
     CopyTargetRuntimeToTarget(${FO_DEV_NAME}_ServerHeadless ${FO_DEV_NAME}_BakerLib)
     CopyTargetRuntimeToTarget(${FO_DEV_NAME}_ServerService ${FO_DEV_NAME}_BakerLib)
     CopyTargetRuntimeToTarget(${FO_DEV_NAME}_Mapper ${FO_DEV_NAME}_BakerLib)
-    CopyTargetRuntimeToTarget(${FO_DEV_NAME}_Editor ${FO_DEV_NAME}_BakerLib)
     CopyTargetRuntimeToTarget(${FO_DEV_NAME}_ASCompiler ${FO_DEV_NAME}_BakerLib)
 endfunction()
 

@@ -2,12 +2,25 @@
 // Весь модуль — только SERVER (#if SERVER). Хелперы Sync::Lock(...) добавляют поверх Game.Sync политику
 // живучести: проверяют IsDestroyed до и после захвата и возвращают false для раннего выхода без обращения
 // к мёртвым хэндлам. Snapshot/Restore сохраняют покрытие блокировок вокруг ре-энтрантной работы, а
-// LockCritterWithMap[AndLocation] расширяют набор до карты/локации с повторами при миграции криттера.
+// LockCritterWithMap[AndLocation] и LockMapWithLocation расширяют набор до карты/локации с повторами
+// при изменении связей, а перегрузка с fixedEntities сохраняет в том же покрытии дополнительные
+// ведущие сущности.
 
 namespace Sync
 {
 
 #if SERVER
+
+void AddUniqueEntity(Entity[] & entities, Entity entity)
+{
+    for (int i = 0; i < entities.length(); i++) {
+        if (entities[i] is entity) {
+            return;
+        }
+    }
+
+    entities.insertLast(entity);
+}
 
 // Game.Sync(...) — нативный примитив блокировки: он только захватывает локи, полностью заменяя набор
 // блокировок SyncContext ровно перечисленными сущностями. Возврата у него нет: если ожидание лока
@@ -93,6 +106,25 @@ bool Lock(Entity[] entities)
 Entity[] Snapshot()
 {
     return Game.GetHeldSyncEntities();
+}
+
+Entity[] SurvivingEntities(Entity[] entities)
+{
+    Entity[] survivors = {};
+    for (int i = 0; i < entities.length(); i++) {
+        if (!entities[i].IsDestroyed) {
+            survivors.insertLast(entities[i]);
+        }
+    }
+
+    return survivors;
+}
+
+// Для rollback после исключения часть удерживаемых хэндлов уже может быть уничтожена. Такой снимок
+// сохраняет живое покрытие, но не передаёт destroyed-сущности в следующий Game.Sync.
+Entity[] SurvivingSnapshot()
+{
+    return SurvivingEntities(Snapshot());
 }
 
 [[Async]]
@@ -372,6 +404,338 @@ bool LockCritterWithMapAndLocation(Critter cr)
         }
 
         return true;
+    }
+
+    return false;
+}
+
+[[Async]]
+bool LockCritterWithMapAndLocation(Critter cr, Entity[] fixedEntities)
+{
+    while (true) {
+        if (cr.IsDestroyed) {
+            return false;
+        }
+
+        Entity[] critterCover = fixedEntities.clone();
+        AddUniqueEntity(critterCover, cr);
+        if (!Lock(critterCover)) {
+            return false;
+        }
+
+        Map? map = cr.GetMap();
+
+        if (map == null) {
+            return true;
+        }
+
+        if (map.IsDestroyed) {
+            return false;
+        }
+
+        ident mapId = map.Id;
+
+        // Ведущие сущности должны оставаться в каждом наборе: Game.Sync полностью заменяет покрытие.
+        Entity[] mapCover = critterCover.clone();
+        AddUniqueEntity(mapCover, map);
+        if (!Lock(mapCover)) {
+            continue;
+        }
+
+        if (cr.MapId != mapId) {
+            continue;
+        }
+
+        Location loc = map.GetLocation();
+        if (loc.IsDestroyed) {
+            return false;
+        }
+
+        ident locId = loc.Id;
+
+        Entity[] locationCover = mapCover.clone();
+        AddUniqueEntity(locationCover, loc);
+        if (!Lock(locationCover)) {
+            continue;
+        }
+
+        // Карта или локация могли смениться, пока воркер ждал полный набор локов.
+        if (cr.MapId != mapId || map.GetLocation().Id != locId) {
+            continue;
+        }
+
+        return true;
+    }
+
+    return false;
+}
+
+// Полное покрытие для Critter.TransferToMap: сам криттер, его текущая карта (если есть),
+// целевая карта и локация целевой карты. Server_Critter_TransferToMap не расширяет покрытие
+// сам и валидирует именно этот набор, поэтому после каждого ожидания перепроверяем обе связи.
+// fixedEntities позволяют вызывающему удержать сериализующего владельца операции и остальной
+// граф сущностей: Game.Sync полностью заменяет ранее удерживаемый набор.
+[[Async]]
+bool LockForTransferToMap(Critter cr, Map destinationMap, Entity[] fixedEntities)
+{
+    while (true) {
+        if (cr.IsDestroyed || destinationMap.IsDestroyed) {
+            return false;
+        }
+
+        Entity[] initialCover = fixedEntities.clone();
+        AddUniqueEntity(initialCover, cr);
+        AddUniqueEntity(initialCover, destinationMap);
+        if (!Lock(initialCover)) {
+            return false;
+        }
+
+        ident sourceMapId = cr.MapId;
+        Map? sourceMap = cr.GetMap();
+        Location destinationLocation = destinationMap.GetLocation();
+        ident destinationLocationId = destinationLocation.Id;
+
+        Entity[] transferCover = initialCover.clone();
+        if (sourceMap != null) {
+            AddUniqueEntity(transferCover, sourceMap);
+        }
+        AddUniqueEntity(transferCover, destinationLocation);
+
+        if (!Lock(transferCover)) {
+            continue;
+        }
+
+        if (cr.MapId != sourceMapId || destinationMap.GetLocation().Id != destinationLocationId) {
+            continue;
+        }
+
+        Map? currentSourceMap = cr.GetMap();
+        if ((sourceMap == null) != (currentSourceMap == null)) {
+            continue;
+        }
+        if (sourceMap != null && currentSourceMap != null && sourceMap.Id != currentSourceMap.Id) {
+            continue;
+        }
+
+        return true;
+    }
+
+    return false;
+}
+
+[[Async]]
+bool LockForTransferToMap(Critter cr, Map destinationMap)
+{
+    Entity[] fixedEntities = {};
+    return LockForTransferToMap(cr, destinationMap, fixedEntities);
+}
+
+// Полное покрытие для Critter.TransferToGlobalWithGroup: ведущий, каждый участник и все
+// их текущие исходные карты. Массив group не должен содержать ведущего, но здесь всё равно
+// устраняем дубликаты, чтобы вспомогательный захват оставался безопасным для общего применения.
+[[Async]]
+bool LockForTransferToGlobalWithGroup(Critter leader, Critter[] group)
+{
+    Critter[] participants = {leader};
+    for (int i = 0; i < group.length(); i++) {
+        bool found = false;
+        for (int j = 0; j < participants.length(); j++) {
+            if (participants[j] is group[i]) {
+                found = true;
+                break;
+            }
+        }
+
+        if (!found) {
+            participants.insertLast(group[i]);
+        }
+    }
+
+    while (true) {
+        Entity[] participantsCover = {};
+        for (int i = 0; i < participants.length(); i++) {
+            AddUniqueEntity(participantsCover, participants[i]);
+        }
+        if (!Lock(participantsCover)) {
+            return false;
+        }
+
+        ident[] sourceMapIds = array<ident>(participants.length());
+        Entity[] transferCover = participantsCover.clone();
+        for (int i = 0; i < participants.length(); i++) {
+            sourceMapIds[i] = participants[i].MapId;
+            Map? sourceMap = participants[i].GetMap();
+            if (sourceMap != null) {
+                AddUniqueEntity(transferCover, sourceMap);
+            }
+        }
+
+        if (!Lock(transferCover)) {
+            continue;
+        }
+
+        bool topologyChanged = false;
+        for (int i = 0; i < participants.length(); i++) {
+            if (participants[i].MapId != sourceMapIds[i]) {
+                topologyChanged = true;
+                break;
+            }
+        }
+        if (topologyChanged) {
+            continue;
+        }
+
+        return true;
+    }
+
+    return false;
+}
+
+// Покрывает несколько криттеров и все их текущие карты одним набором. Хелпер подходит
+// для отложенных взаимодействий между двумя и более криттерами, когда registry lookup
+// возвращает только непокрытые хэндлы. После ожидания проверяем MapId каждого участника.
+[[Async]]
+bool LockCrittersWithMaps(Critter[] critters, Entity[] fixedEntities)
+{
+    while (true) {
+        Entity[] critterCover = fixedEntities.clone();
+        for (int i = 0; i < critters.length(); i++) {
+            AddUniqueEntity(critterCover, critters[i]);
+        }
+        if (!Lock(critterCover)) {
+            return false;
+        }
+
+        ident[] mapIds = array<ident>(critters.length());
+        Entity[] fullCover = critterCover.clone();
+        for (int i = 0; i < critters.length(); i++) {
+            mapIds[i] = critters[i].MapId;
+            Map? map = critters[i].GetMap();
+            if (map != null) {
+                AddUniqueEntity(fullCover, map);
+            }
+        }
+
+        if (!Lock(fullCover)) {
+            continue;
+        }
+
+        bool topologyChanged = false;
+        for (int i = 0; i < critters.length(); i++) {
+            if (critters[i].MapId != mapIds[i]) {
+                topologyChanged = true;
+                break;
+            }
+        }
+        if (topologyChanged) {
+            continue;
+        }
+
+        return true;
+    }
+
+    return false;
+}
+
+[[Async]]
+bool LockCrittersWithMaps(Critter[] critters)
+{
+    Entity[] fixedEntities = {};
+    return LockCrittersWithMaps(critters, fixedEntities);
+}
+
+// Покрывает карту вместе с её текущей родительской локацией. Это полный контракт
+// Game.DestroyMap и операций, которые читают или меняют обе стороны связи карта-локация.
+// После ожидания перепроверяем родителя, потому что Game.Sync полностью заменяет покрытие.
+[[Async]]
+bool LockMapWithLocation(Map map)
+{
+    while (true) {
+        if (map.IsDestroyed || !Lock(map)) {
+            return false;
+        }
+
+        Location loc = map.GetLocation();
+        ident locationId = loc.Id;
+        if (!Lock(map, loc)) {
+            continue;
+        }
+        if (map.GetLocation().Id != locationId) {
+            continue;
+        }
+
+        return true;
+    }
+
+    return false;
+}
+
+// Покрывает предмет вместе с его непосредственным текущим владельцем. Это полный контракт
+// Game.DestroyItem/DestroyEntity и операций перепривязки: предмет может лежать на карте,
+// в инвентаре криттера или во вложенном контейнере. После ожидания сверяем тип и id владельца.
+[[Async]]
+bool LockItemWithParent(Item item)
+{
+    while (true) {
+        if (item.IsDestroyed || !Lock(item)) {
+            return false;
+        }
+
+        ItemOwnership ownership = item.Ownership;
+        if (ownership == ItemOwnership::MapHex) {
+            ident mapId = item.MapId;
+            Map? map = Game.GetMap(mapId);
+            if (map == null) {
+                return false;
+            }
+
+            if (!Lock(item, map)) {
+                continue;
+            }
+            if (item.Ownership != ownership || item.MapId != mapId) {
+                continue;
+            }
+
+            return true;
+        }
+
+        if (ownership == ItemOwnership::CritterInventory) {
+            ident critterId = item.CritterId;
+            Critter? cr = item.GetCritter();
+            if (cr == null) {
+                return false;
+            }
+
+            if (!Lock(item, cr)) {
+                continue;
+            }
+            if (item.Ownership != ownership || item.CritterId != critterId || cr.Id != critterId) {
+                continue;
+            }
+
+            return true;
+        }
+
+        if (ownership == ItemOwnership::ItemContainer) {
+            ident containerId = item.ContainerId;
+            Item? container = Game.GetItem(containerId);
+            if (container == null) {
+                return false;
+            }
+
+            if (!Lock(item, container)) {
+                continue;
+            }
+            if (item.Ownership != ownership || item.ContainerId != containerId || container.Id != containerId) {
+                continue;
+            }
+
+            return true;
+        }
+
+        // У предмета без владельца нет второго участника контракта DestroyItem: его самого
+        // уже покрывает первый Lock, а Ownership не может измениться, пока этот лок удержан.
+        return ownership == ItemOwnership::Nowhere;
     }
 
     return false;

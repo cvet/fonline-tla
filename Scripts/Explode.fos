@@ -20,9 +20,14 @@ int TrapHideValue(int traps)
 }
 const int EXPLODE_CLEARANCE_EXPERIENCE = 50;
 
-// Границы таймера обратного отсчёта, в игровых минутах.
+// Границы таймера обратного отсчёта из окна Timer, в реальных секундах.
 const int TIMER_MIN_VALUE = 1;
 const int TIMER_MAX_VALUE = 599;
+
+int NormalizeTimerSeconds(int timer)
+{
+    return Math::Clamp(timer, TIMER_MIN_VALUE, TIMER_MAX_VALUE);
+}
 
 // Глобальная точка входа на использование взрывчатки игроком.
 bool OnUseExplode(Critter cr, Item explode, Critter? targetCr, Item? targetItem, StaticItem? targetScen, int timer)
@@ -44,15 +49,7 @@ bool OnUseExplode(Critter cr, Item explode, Critter? targetCr, Item? targetItem,
         trapsSkill = 0;
     }
 
-    if (timer < TIMER_MIN_VALUE) {
-        timer = TIMER_MIN_VALUE;
-    }
-
-    if (timer > TIMER_MAX_VALUE) {
-        timer = TIMER_MAX_VALUE;
-    }
-
-    timer *= 60; // перевод минут в игровые секунды
+    timer = NormalizeTimerSeconds(timer);
 
     // Активация динамита: запускаем отложенный взрыв по таймеру.
     if (pid == Content::Item::dynamite) {
@@ -62,7 +59,7 @@ bool OnUseExplode(Critter cr, Item explode, Critter? targetCr, Item? targetItem,
             timer = timer * Game.Random(80, 120) / 100;
         }
 
-        activateExpl.ExplodeInvokeId = Game.StartTimeEvent(GameTime::GameSeconds(timer), DeferredExplode, activateExpl.Id); //SavedDeferredCall
+        activateExpl.ExplodeInvokeId = Game.StartTimeEvent(Time::Seconds(timer), DeferredExplode, activateExpl.Id); //SavedDeferredCall
         activateExpl.IsTrap = true;
         activateExpl.ExplodeOwnerId = cr.Id;
         activateExpl.TrapValue = TrapHideValue(cr.SkillTraps);
@@ -94,7 +91,14 @@ bool OnUseExplode(Critter cr, Item explode, Critter? targetCr, Item? targetItem,
 
     // Подрыв пластида с пульта: находим связанный заряд и взрываем его.
     else if (pid == Content::Item::toggle_switch) {
-        Item? expl = Game.GetItem(explode.ExplodeSwitcherExplodeId);
+        // Game.GetItem бросает исключение на нулевом id, поэтому пульт без привязки к заряду
+        // (например, найденный в контенте или в луте) отсеиваем заранее и не тратим впустую
+        ident explId = explode.ExplodeSwitcherExplodeId;
+        if (explId == ZERO_IDENT) {
+            return false;
+        }
+
+        Item? expl = Game.GetItem(explId);
         if (expl != null) {
             mpos hex;
             Map? map = expl.GetMapPosition(hex);
@@ -170,11 +174,11 @@ void MineWalk(Item mine, Critter cr, bool entered, mdir dir)
 }
 
 // Отложенный взрыв по таймеру: подрывает заряд на карте либо на глобалке (в инвентаре криттера).
-[[TimeEvent]]
+[[TimeEvent]] [[Async]]
 void DeferredExplode(any value)
 {
     Item? item = Game.GetItem(value);
-    if (item == null) {
+    if (item == null || !Sync::LockItemWithParent(item)) {
         return;
     }
 
@@ -322,19 +326,25 @@ void TimerMineWalk(Item mine, Critter cr, bool entered, mdir dir)
 }
 
 // Возрождение маппер-мины в исходных координатах с восстановлением её параметров из сохранённого массива.
-[[TimeEvent]]
+[[TimeEvent]] [[Async]]
 void RespawnTimerMine(any[] values)
 {
-    Map? map = Game.GetMap(ident(values[0]));
-    if (map != null) {
-        Item mine = map.AddItem(mpos(values[1], values[2]), hstring(values[3]), 1);
-        mine.ExplodeTimeRespawnMine = values[4];
-        mine.ExplodeOwnerId = values[5];
-        mine.TrapValue = (values[6] == 0 ? Game.Random(30, 50) : values[6]);
-        mine.ExplodeBonusDamage = values[7];
-        mine.ExplodeBonusRadius = Math::Clamp(int(values[8]), 1, 5);
-        mine.SetupScript(TimerMineInit);
+    if (values.length() < 9) {
+        return;
     }
+
+    Map? map = Game.GetMap(ident(values[0]));
+    if (map == null || !Sync::Lock(map)) {
+        return;
+    }
+
+    Item mine = map.AddItem(mpos(values[1], values[2]), hstring(values[3]), 1);
+    mine.ExplodeTimeRespawnMine = values[4];
+    mine.ExplodeOwnerId = values[5];
+    mine.TrapValue = (values[6] == 0 ? Game.Random(30, 50) : values[6]);
+    mine.ExplodeBonusDamage = values[7];
+    mine.ExplodeBonusRadius = Math::Clamp(int(values[8]), 1, 5);
+    mine.SetupScript(TimerMineInit);
 }
 
 // Попытка обезвредить маппер-мину навыком: успех даёт опыт, провал подрывает; при заданном таймере мина всё равно возрождается.

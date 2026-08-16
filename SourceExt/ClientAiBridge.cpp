@@ -19,7 +19,7 @@ FO_SCRIPT_API void Client_Game_AiControlStop(ptr<ClientEngine> client);
 ///@ ExportMethod
 FO_SCRIPT_API bool Client_Game_AiControlIsRunning(ptr<ClientEngine> client);
 ///@ ExportMethod
-FO_SCRIPT_API bool Client_Game_AiControlPullCommand(ptr<ClientEngine> client, uint32_t& commandSeq, string& type, ident_t& targetId, ident_t& itemId, ident_t& auxId, int32_t& hexX, int32_t& hexY, int32_t& screenX, int32_t& screenY, int32_t& intArg, string& stringArg, bool& append);
+FO_SCRIPT_API bool Client_Game_AiControlPullCommand(ptr<ClientEngine> client, uint32_t& commandSeq, string& type, ident_t& targetId, ident_t& itemId, ident_t& auxId, int32_t& hexX, int32_t& hexY, int32_t& screenX, int32_t& screenY, int32_t& intArg, string& stringArg, string& sceneryProtoId, bool& append);
 ///@ ExportMethod
 FO_SCRIPT_API void Client_Game_AiControlSetObservation(ptr<ClientEngine> client, string_view observationJson);
 ///@ ExportMethod
@@ -47,6 +47,7 @@ struct AiControlCommand
     int32_t ScreenY {};
     int32_t IntArg {};
     string StringArg {};
+    string SceneryProtoId {};
     bool Append {};
 };
 
@@ -155,7 +156,7 @@ bool FO_NAMESPACE Client_Game_AiControlIsRunning(ptr<ClientEngine> client)
     return data.Running.load(std::memory_order_acquire) && !data.StopRequested.load(std::memory_order_acquire);
 }
 
-bool FO_NAMESPACE Client_Game_AiControlPullCommand(ptr<ClientEngine> client, uint32_t& commandSeq, string& type, ident_t& targetId, ident_t& itemId, ident_t& auxId, int32_t& hexX, int32_t& hexY, int32_t& screenX, int32_t& screenY, int32_t& intArg, string& stringArg, bool& append)
+bool FO_NAMESPACE Client_Game_AiControlPullCommand(ptr<ClientEngine> client, uint32_t& commandSeq, string& type, ident_t& targetId, ident_t& itemId, ident_t& auxId, int32_t& hexX, int32_t& hexY, int32_t& screenX, int32_t& screenY, int32_t& intArg, string& stringArg, string& sceneryProtoId, bool& append)
 {
     FO_STACK_TRACE_ENTRY();
 
@@ -180,6 +181,7 @@ bool FO_NAMESPACE Client_Game_AiControlPullCommand(ptr<ClientEngine> client, uin
     screenY = command.ScreenY;
     intArg = command.IntArg;
     stringArg = command.StringArg;
+    sceneryProtoId = command.SceneryProtoId;
     append = command.Append;
 
     return true;
@@ -243,7 +245,7 @@ static auto EnsureAiControlData(ptr<ClientEngine> client) -> AiControlClientData
     ClientExtData& ext = GetClientExtData(client);
 
     if (!ext.AiControl) {
-        ext.AiControl = unique_del_ptr<AiControlClientData>(SafeAlloc::MakeRaw<AiControlClientData>(), [](AiControlClientData* ptr) FO_DEFERRED {
+        ext.AiControl = make_unique_del_ptr(SafeAlloc::MakeRaw<AiControlClientData>(), [](AiControlClientData* ptr) FO_DEFERRED {
             FO_STACK_TRACE_ENTRY();
 
             if (ptr != nullptr) {
@@ -459,6 +461,7 @@ static auto EnqueueAiControlCommand(AiControlClientData& data, const nlohmann::j
     command.ScreenY = GetJsonInt32(params, "screenY");
     command.IntArg = GetJsonInt32(params, "intArg");
     command.StringArg = GetJsonString(params, "stringArg");
+    command.SceneryProtoId = GetJsonString(params, "sceneryProtoId");
     command.Append = GetJsonBool(params, "append");
 
     {
@@ -905,7 +908,7 @@ bool FO_NAMESPACE Client_Game_AiControlIsRunning(ptr<ClientEngine> client)
     return false;
 }
 
-bool FO_NAMESPACE Client_Game_AiControlPullCommand(ptr<ClientEngine> client, uint32_t& commandSeq, string& type, ident_t& targetId, ident_t& itemId, ident_t& auxId, int32_t& hexX, int32_t& hexY, int32_t& screenX, int32_t& screenY, int32_t& intArg, string& stringArg, bool& append)
+bool FO_NAMESPACE Client_Game_AiControlPullCommand(ptr<ClientEngine> client, uint32_t& commandSeq, string& type, ident_t& targetId, ident_t& itemId, ident_t& auxId, int32_t& hexX, int32_t& hexY, int32_t& screenX, int32_t& screenY, int32_t& intArg, string& stringArg, string& sceneryProtoId, bool& append)
 {
     FO_STACK_TRACE_ENTRY();
 
@@ -921,6 +924,7 @@ bool FO_NAMESPACE Client_Game_AiControlPullCommand(ptr<ClientEngine> client, uin
     screenY = 0;
     intArg = 0;
     stringArg = "";
+    sceneryProtoId = "";
     append = false;
     return false;
 }

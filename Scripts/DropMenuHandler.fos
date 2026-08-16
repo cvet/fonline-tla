@@ -1,11 +1,10 @@
 // DropMenuHandler — контекстное drop-меню действий над целью.
-// Ключевые обязанности: CLIENT — кнопки меню и Can*/Do* предикаты/действия; SERVER — ServerRemoteCall StartDialog/UseSkillOnItem.
+// Ключевые обязанности: CLIENT — кнопки меню и Can*/Do* предикаты/действия; SERVER — ServerRemoteCall StartDialog.
 // Сторона: MIXED. Связи: TlaFixedDropMenu, ChosenActions, Gui, Tla, Lockers, Dialogs, Sync.
 namespace DropMenuHandler
 {
 
 ///@ RemoteCall Server StartDialog(ident npcId)
-///@ RemoteCall Server UseSkillOnItem(ident itemId, CritterProperty skill)
 
 #if CLIENT
 
@@ -87,7 +86,6 @@ void DoUseItemFromInventory(Critter? cr, Item? item)
     else {
         if (cr != null) {
             critterId = cr.Id;
-            Game.Log("Target name " + cr.DisplayName);
         }
     }
 
@@ -170,8 +168,6 @@ void Use(Critter? cr, Item? item)
     // if(item.Ownership != ItemOwnership::MapHex )
     //    return;
     if (item != null && item.Ownership == ItemOwnership::MapHex) {
-        // оставлено для истории миграции: прежний прямой серверный вызов навыка по предмету
-        // CurPlayer.ServerCall.UseSkillOnItem( item.Id, CritterProperty::SpecialSkillPickOnGround );
         ChosenActions::SetChosenActions({Tla::ChosenPickItem, item.ProtoId, item.Hex.x, item.Hex.y, item.Id, 0, 0});
     }
 
@@ -180,9 +176,13 @@ void Use(Critter? cr, Item? item)
     }
 
     if (item != null && IsChosenAlive() && IsChosenItem(item) && (item.IsCanUse || item.IsCanUseOnSmth)) {
-        Game.Log("use on self");
-        ChosenActions::SetChosenActions(
-            {Tla::ChosenUseItem, item.Id, 0, ClientDefines::TARGET_SELF, 0, WeaponHelpers::MakeWeaponMode(WeaponHelpers::USE_USE, 0), 0});
+        if (Parameters::IsTimedUseItem(item)) {
+            Gui::ShowScreen(GuiScreen::Timer, dict<string, any> = {{"TargetItemId", item.Id}});
+        }
+        else {
+            ChosenActions::SetChosenActions(
+                {Tla::ChosenUseItem, item.Id, 0, ClientDefines::TARGET_SELF, 0, WeaponHelpers::MakeWeaponMode(WeaponHelpers::USE_USE, 0), 0});
+        }
     }
 }
 
@@ -205,7 +205,12 @@ void Drop(Critter? cr, Item? item)
         return;
     }
     if (item.Stackable && item.Count > 1) {
-        Gui::ShowScreen(GuiScreen::Split, dict<string, any> = {{"TargetItemId", item.Id}, {"ItemsCollection", ClientDefines::ITEMS_CHOSEN_ALL}});
+        Gui::ShowScreen(GuiScreen::Split,
+                        dict<string, any> = {{"TargetItemId", item.Id},
+                                             {"ItemsCollection", ClientDefines::ITEMS_CHOSEN_ALL},
+                                             {"TransferType", 0},
+                                             {"TransferContainerId", ZERO_IDENT},
+                                             {"TransferSession", uint(0)}});
     }
     else {
         ChosenActions::SetChosenActions({Tla::ChosenMoveItem, item.Id, item.Count, CritterItemSlot::Outside, 0, 0, 0});
@@ -241,27 +246,92 @@ void DoUnload(Critter? cr, Item? item)
 
 #if SERVER
 
-// Серверный запуск диалога: под локом проверяем, что оба криттера живы и NPC разрешает разговор.
+// Серверный запуск диалога: под явным скриптовым покрытием проверяем обычные игровые предусловия.
+// В QA-режиме тот же путь дополнительно сообщает мосту точную причину отказа, не обходя механику.
 [[ServerRemoteCall]] [[Async]]
 void StartDialog(Player player, ident npcId)
 {
     Critter? cr = player.GetControlledCritter();
     Critter? npc = Game.GetCritter(npcId);
-    if (cr != null && npc != null && Sync::Lock(cr, npc) && cr.IsAlive() && npc.IsAlive() && !npc.ControlledByPlayer && !npc.IsNoTalk) {
-        Dialogs::RunDialog(cr, npc, false);
+    if (cr == null || npc == null || !Sync::Lock(cr, npc)) {
+        return;
     }
-}
 
-// Серверное применение навыка к предмету: для контейнеров/дверей передаём в Lockers.
-[[ServerRemoteCall]] [[Async]]
-void UseSkillOnItem(Player player, ident itemId, CritterProperty skill)
-{
-    Critter? cr = player.GetControlledCritter();
-    Item? item = Game.GetItem(itemId);
-    if (cr != null && item != null && Sync::Lock(cr, item)) {
-        if (item.Type == ItemType::Container || item.Type == ItemType::Door) {
-            Lockers::UseSkillOnLocker(cr, item, CritterProperty::SpecialSkillPickOnGround);
-        }
+    bool playerAlive = cr.IsAlive();
+    bool npcAlive = npc.IsAlive();
+    bool npcControlled = npc.ControlledByPlayer;
+    bool npcNoTalk = npc.IsNoTalk;
+    bool sameMap = cr.MapId == npc.MapId;
+    int distance = sameMap ? Game.GetDistance(cr, npc) : -1;
+    int talkDistance = cr.TalkDistance != 0 ? cr.TalkDistance : Settings.Dialog.TalkDistance;
+    bool playerSeesNpc = sameMap && cr.IsSee(npc);
+    bool npcSeesPlayer = sameMap && npc.IsSee(cr);
+    int diagnosticStatus = AiControl::TalkDiagnosticEligible;
+
+    if (!playerAlive) {
+        diagnosticStatus = AiControl::TalkDiagnosticPlayerDead;
+    }
+    else if (!npcAlive) {
+        diagnosticStatus = AiControl::TalkDiagnosticNpcDead;
+    }
+    else if (npcControlled) {
+        diagnosticStatus = AiControl::TalkDiagnosticNpcControlled;
+    }
+    else if (npcNoTalk) {
+        diagnosticStatus = AiControl::TalkDiagnosticNpcNoTalk;
+    }
+    else if (npc.DialogId == EMPTY_HSTRING) {
+        diagnosticStatus = AiControl::TalkDiagnosticMissingDialog;
+    }
+    else if (!sameMap) {
+        diagnosticStatus = AiControl::TalkDiagnosticDifferentMap;
+    }
+    else if (distance > talkDistance) {
+        diagnosticStatus = AiControl::TalkDiagnosticOutOfRange;
+    }
+    else if (!playerSeesNpc) {
+        diagnosticStatus = AiControl::TalkDiagnosticPlayerCannotSeeNpc;
+    }
+    else if (!npcSeesPlayer) {
+        diagnosticStatus = AiControl::TalkDiagnosticNpcCannotSeePlayer;
+    }
+
+    if (Settings.AiControl.AllowQaCommands) {
+        cr.PlayerClientCall.AiControlReceiveTalkDiagnostic(npcId,
+                                                           diagnosticStatus,
+                                                           playerAlive,
+                                                           npcAlive,
+                                                           npcControlled,
+                                                           npcNoTalk,
+                                                           sameMap,
+                                                           distance,
+                                                           talkDistance,
+                                                           playerSeesNpc,
+                                                           npcSeesPlayer);
+    }
+
+    // Это исходные ранние проверки StartDialog. Остальные проверки остаются внутри RunDialog и потому
+    // сохраняют его нормальное поведение (включая исключение при невозможном разговоре).
+    if (!playerAlive || !npcAlive || npcControlled || npcNoTalk) {
+        return;
+    }
+
+    Entity[] heldEntities = Sync::SurvivingSnapshot();
+    Dialogs::RunDialog(cr, npc, false);
+
+    if (Settings.AiControl.AllowQaCommands && Sync::Restore(heldEntities) && !cr.IsDestroyed) {
+        int finalStatus = cr.HasDialogContext && cr.DialogContext.Talking ? AiControl::TalkDiagnosticStarted : AiControl::TalkDiagnosticNoVisibleStartSpeech;
+        cr.PlayerClientCall.AiControlReceiveTalkDiagnostic(npcId,
+                                                           finalStatus,
+                                                           playerAlive,
+                                                           npcAlive,
+                                                           npcControlled,
+                                                           npcNoTalk,
+                                                           sameMap,
+                                                           distance,
+                                                           talkDistance,
+                                                           playerSeesNpc,
+                                                           npcSeesPlayer);
     }
 }
 

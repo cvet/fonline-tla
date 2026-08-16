@@ -406,51 +406,57 @@ EventResult BehemothOnGlobal(Critter cr, int type, Item car, float x, float y, f
 [[TimeEvent]] [[Async]]
 void BehemothIdle(Critter cr)
 {
-    if (!Sync::LockCritterWithMap(cr)) {
-        return;
-    }
-
-    int orderCurrent = cr.BehemothOrderType;
-    Map? map = cr.GetMap();
+    Map? map;
     Location? loc = null;
     Location? locTo;
 
-    switch (orderCurrent) {
-    case TYPE_ORDER_ROUTE:
+    while (true) {
+        if (!Sync::LockCritterWithMapAndLocation(cr)) {
+            return;
+        }
+
+        if (cr.BehemothOrderType != TYPE_ORDER_ROUTE) {
+            return;
+        }
+
+        map = cr.GetMap();
         if (map != null) {
             loc = map.GetLocation();
-            if (!Sync::Lock(cr, map, loc)) {
-                return;
-            }
+        }
+        else {
+            loc = null;
         }
 
         locTo = GetLocationTo(cr);
-        if (locTo != null) {
-            Entity[] entities = {cr, locTo};
-            if (map != null) {
-                entities.insertLast(map);
-            }
-
-            if (loc != null) {
-                entities.insertLast(loc);
-            }
-
-            if (!Sync::Lock(entities)) {
-                return;
-            }
+        if (locTo == null) {
+            break;
         }
 
-        if (locTo != null && loc != null && locTo.Id != loc.Id) {
-            Radio::SendChannelRadioMessage(cr.BehemothRadio, TextPackKey(TextPackName::Text, "" + (STR_CONTINUING_ROUTE)));
-            RunOrderRoute(cr);
-        }
-        else {
-            CancelOrder(cr.Id, false);
+        Entity[] fixedEntities = {locTo};
+        if (!Sync::LockCritterWithMapAndLocation(cr, fixedEntities)) {
+            return;
         }
 
+        if (cr.BehemothOrderType != TYPE_ORDER_ROUTE) {
+            return;
+        }
+
+        Location? currentLocTo = GetLocationTo(cr);
+        if (currentLocTo == null || currentLocTo !is locTo) {
+            continue;
+        }
+
+        map = cr.GetMap();
+        loc = map != null ? map.GetLocation() : null;
         break;
-    default:
-        break;
+    }
+
+    if (locTo != null && loc != null && locTo.Id != loc.Id) {
+        Radio::SendChannelRadioMessage(cr.BehemothRadio, TextPackKey(TextPackName::Text, "" + (STR_CONTINUING_ROUTE)));
+        RunOrderRoute(cr);
+    }
+    else {
+        CancelOrder(cr.Id, false);
     }
 }
 
@@ -591,16 +597,30 @@ void RunOrderCamera(Critter cr)
 }
 
 // Отложенный показ обзора карты владельцу: values = {ownerId, mapId, hexX, hexY, dir}.
-[[TimeEvent]]
+[[TimeEvent]] [[Async]]
 void ShowCamera(any[] values)
 {
     Critter? player = Game.GetCritter(values[0]);
-    if (player != null && player.ControlledByPlayer) {
-        Map? map = Game.GetMap(ident(values[1]));
-        if (map != null) {
-            player.ViewMap(map, 50, mpos(values[2], values[3]), values[4]);
-        }
+    if (player == null || !Sync::Lock(player) || !player.ControlledByPlayer) {
+        return;
     }
+
+    ident mapId = values[1];
+    Map? map = Game.GetMap(mapId);
+    if (map == null || !Sync::Lock(player, map)) {
+        return;
+    }
+
+    Location loc = map.GetLocation();
+    if (!Sync::Lock(player, map, loc)) {
+        return;
+    }
+
+    if (!player.ControlledByPlayer || map.Id != mapId || map.GetLocation().Id != loc.Id) {
+        return;
+    }
+
+    player.ViewMap(map, 50, mpos(values[2], values[3]), values[4]);
 }
 
 // Приказ "сообщение": бегемот произносит переданную реплику игрока.

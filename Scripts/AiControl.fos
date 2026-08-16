@@ -33,12 +33,28 @@ namespace AiControl
 // контент/глобалку или подвинуть на недостижимый гекс. Это не нормальная игровая способность.
 ///@ RemoteCall Server AiControlQaTeleportGlobal()
 ///@ RemoteCall Server AiControlQaTeleportHex(mpos hex)
-///@ RemoteCall Server AiControlQaTeleportMap(hstring mapPid, mpos hex)
-///@ RemoteCall Server AiControlQaSetProp(CritterProperty prop, int32 value)
+///@ RemoteCall Server AiControlQaTeleportMap(hstring locPid, hstring mapPid, mpos hex)
+///@ RemoteCall Server AiControlQaSetProp(CritterProperty prop, int32 value, int32 requestId)
 ///@ RemoteCall Server AiControlQaSetGameProp(GameProperty prop, int32 value)
 ///@ RemoteCall Server AiControlQaGiveItem(hstring pid, int32 count)
-///@ RemoteCall Server AiControlQaGetProp(CritterProperty prop)
-///@ RemoteCall Client AiControlReceiveQaProp(CritterProperty prop, int32 value)
+///@ RemoteCall Server AiControlQaGetProp(CritterProperty prop, int32 requestId)
+///@ RemoteCall Server AiControlQaShowDialogBox()
+///@ RemoteCall Client AiControlReceiveQaProp(CritterProperty prop, int32 value, int32 requestId)
+///@ RemoteCall Client AiControlReceiveQaPropSet(CritterProperty prop, int32 value, int32 requestId)
+///@ RemoteCall Client AiControlReceiveTalkDiagnostic(ident npcId, int32 status, bool playerAlive, bool npcAlive, bool npcControlled, bool npcNoTalk, bool sameMap, int32 distance, int32 talkDistance, bool playerSeesNpc, bool npcSeesPlayer)
+
+const int TalkDiagnosticEligible = 0;
+const int TalkDiagnosticStarted = 1;
+const int TalkDiagnosticNoVisibleStartSpeech = 2;
+const int TalkDiagnosticPlayerDead = 3;
+const int TalkDiagnosticNpcDead = 4;
+const int TalkDiagnosticNpcControlled = 5;
+const int TalkDiagnosticNpcNoTalk = 6;
+const int TalkDiagnosticDifferentMap = 7;
+const int TalkDiagnosticOutOfRange = 8;
+const int TalkDiagnosticPlayerCannotSeeNpc = 9;
+const int TalkDiagnosticNpcCannotSeePlayer = 10;
+const int TalkDiagnosticMissingDialog = 11;
 
 #if CLIENT
 
@@ -48,8 +64,8 @@ const int DefaultMaxEvents = 512;
 const int DefaultObservationInterval = 250;
 const int DefaultMaxObservedEntities = 80;
 
-// Спецзначение ответа диалога «продолжить/закрыть» (см. GuiScreens.fos SpeechAnswer(0xF2)).
-const int DialogAnswerContinue = 0xF2;
+// Спецзначение закрытия диалога (0xF2 означает переход в бартер).
+const int DialogAnswerClose = 0xF1;
 
 bool BridgeStarted = false;
 nanotime NextObservationTick = ZERO_NANOTIME;
@@ -255,7 +271,10 @@ void OnReceiveItems(Item[] items, any contextParam)
     for (int i = 0; i < items.length(); i++) {
         entries.insertLast(InventoryItemJson(items[i]));
     }
-    PushEvent(Object({StringMember("type", "receive_items"), IntMember("count", int(items.length())), RawMember("items", Array(entries))}));
+    PushEvent(Object({StringMember("type", "receive_items"),
+                      IntMember("count", int(items.length())),
+                      IntMember("context", int(contextParam)),
+                      RawMember("items", Array(entries))}));
 }
 
 [[Event]]
@@ -266,7 +285,17 @@ void OnScreenChange(bool show, GuiScreen screenNum, dict<string, any> params)
         ClearDialogState();
     }
 
-    PushEvent(Object({StringMember("type", "screen_change"), BoolMember("show", show), StringMember("screen", Game.EnumToString(screenNum, true))}));
+    string uiPrompt = UiPromptJson(Gui::GetActiveScreen());
+    PushEvent(Object({StringMember("type", "screen_change"),
+                      BoolMember("show", show),
+                      StringMember("screen", Game.EnumToString(screenNum, true)),
+                      RawMember("uiPrompt", uiPrompt)}));
+
+    if (screenNum == GuiScreen::DialogBox || screenNum == GuiScreen::Elevator) {
+        PushEvent(Object({StringMember("type", show ? "ui_prompt_opened" : "ui_prompt_closed"),
+                          StringMember("screen", Game.EnumToString(screenNum, true)),
+                          RawMember("uiPrompt", show ? uiPrompt : Object({BoolMember("active", false)}))}));
+    }
 }
 
 // Вызывается из Dialogs.fos::ReceiveDialogContext при открытии/обновлении диалога.
@@ -302,9 +331,84 @@ void ClearDialogState()
 // Ответ сервера на qa_get_prop: публикуем значение свойства как событие qa_prop_value (имя свойства +
 // числовое значение). Так раннер может верифицировать Server-scope квестовые флаги, невидимые в наблюдении.
 [[ClientRemoteCall]] [[Async]]
-void AiControlReceiveQaProp(CritterProperty prop, int value)
+void AiControlReceiveQaProp(CritterProperty prop, int value, int requestId)
 {
-    PushEvent(Object({StringMember("type", "qa_prop_value"), StringMember("prop", Game.EnumToString(prop, true)), IntMember("value", value)}));
+    PushEvent(Object({StringMember("type", "qa_prop_value"),
+                      StringMember("prop", Game.EnumToString(prop, true)),
+                      IntMember("value", value),
+                      IntMember("requestId", requestId)}));
+}
+
+// Подтверждение qa_set_prop приходит только после явного скриптового critter-cover и успешной записи.
+// Корреляция отделяет поздний ответ предыдущей попытки от текущей настройки предусловия.
+[[ClientRemoteCall]] [[Async]]
+void AiControlReceiveQaPropSet(CritterProperty prop, int value, int requestId)
+{
+    PushEvent(Object({StringMember("type", "qa_prop_set"),
+                      StringMember("prop", Game.EnumToString(prop, true)),
+                      IntMember("value", value),
+                      IntMember("requestId", requestId)}));
+}
+
+// Диагностика приходит из обычного StartDialog и только наблюдает его серверные проверки. Она не
+// открывает диалог в обход механик и не меняет состояние игрового мира.
+[[ClientRemoteCall]] [[Async]]
+void AiControlReceiveTalkDiagnostic(ident npcId, int status, bool playerAlive, bool npcAlive, bool npcControlled, bool npcNoTalk, bool sameMap, int distance,
+                                    int talkDistance, bool playerSeesNpc, bool npcSeesPlayer)
+{
+    PushEvent(Object({StringMember("type", "talk_diagnostic"),
+                      IdentMember("npcId", npcId),
+                      StringMember("status", TalkDiagnosticStatus(status)),
+                      BoolMember("playerAlive", playerAlive),
+                      BoolMember("npcAlive", npcAlive),
+                      BoolMember("npcControlled", npcControlled),
+                      BoolMember("npcNoTalk", npcNoTalk),
+                      BoolMember("sameMap", sameMap),
+                      IntMember("distance", distance),
+                      IntMember("talkDistance", talkDistance),
+                      BoolMember("playerSeesNpc", playerSeesNpc),
+                      BoolMember("npcSeesPlayer", npcSeesPlayer)}));
+}
+
+string TalkDiagnosticStatus(int status)
+{
+    if (status == TalkDiagnosticEligible) {
+        return "eligible";
+    }
+    if (status == TalkDiagnosticStarted) {
+        return "started";
+    }
+    if (status == TalkDiagnosticNoVisibleStartSpeech) {
+        return "no_visible_start_speech";
+    }
+    if (status == TalkDiagnosticPlayerDead) {
+        return "player_dead";
+    }
+    if (status == TalkDiagnosticNpcDead) {
+        return "npc_dead";
+    }
+    if (status == TalkDiagnosticNpcControlled) {
+        return "npc_controlled";
+    }
+    if (status == TalkDiagnosticNpcNoTalk) {
+        return "npc_no_talk";
+    }
+    if (status == TalkDiagnosticDifferentMap) {
+        return "different_map";
+    }
+    if (status == TalkDiagnosticOutOfRange) {
+        return "out_of_range";
+    }
+    if (status == TalkDiagnosticPlayerCannotSeeNpc) {
+        return "player_cannot_see_npc";
+    }
+    if (status == TalkDiagnosticNpcCannotSeePlayer) {
+        return "npc_cannot_see_player";
+    }
+    if (status == TalkDiagnosticMissingDialog) {
+        return "missing_dialog";
+    }
+    return "unknown";
 }
 
 [[Event]]
@@ -347,20 +451,291 @@ void ProcessCommands()
         int screenY = 0;
         int intArg = 0;
         string stringArg;
+        string sceneryProtoId;
         bool append = false;
 
-        if (!Game.AiControlPullCommand(commandSeq, type, targetId, itemId, auxId, hexX, hexY, screenX, screenY, intArg, stringArg, append)) {
+        if (!Game.AiControlPullCommand(commandSeq, type, targetId, itemId, auxId, hexX, hexY, screenX, screenY, intArg, stringArg, sceneryProtoId, append)) {
             return;
         }
 
         string message;
-        bool success = ExecuteCommand(type, targetId, itemId, auxId, hexX, hexY, screenX, screenY, intArg, stringArg, append, message);
+        bool success = ExecuteCommand(type, targetId, itemId, auxId, hexX, hexY, screenX, screenY, intArg, stringArg, sceneryProtoId, append, message);
         Game.AiControlCompleteCommand(commandSeq, success, message);
     }
 }
 
+// Открывает параметризованные окна на реальных клиентских сущностях. Это QA-вход в тот же
+// контракт OnShow, который используют игровые обработчики; действия из окна остаются штатными.
+bool ShowContextScreen(string screenName, ident targetId, ident itemId, int intArg, string& message)
+{
+    if (!HasChosen) {
+        message = "no_chosen";
+        return false;
+    }
+
+    GuiScreen screenNum = GuiScreen::None;
+    if (!Game.TryParseEnum(screenName, screenNum)) {
+        message = "unknown_screen:" + screenName;
+        return false;
+    }
+
+    dict<string, any> params = {};
+    if (screenNum == GuiScreen::Aim) {
+        if (!HasCurMap) {
+            message = "no_map";
+            return false;
+        }
+        Critter? target = targetId != ZERO_IDENT ? Game.GetCritter(targetId) : null;
+        if (target == null) {
+            message = targetId == ZERO_IDENT ? "missing_target" : "target_missing";
+            return false;
+        }
+        if (!target.IsAlive()) {
+            message = "target_not_alive";
+            return false;
+        }
+
+        params["TargetCritterId"] = target.Id;
+    }
+    else if (screenNum == GuiScreen::Use) {
+        bool hasCritterTarget = targetId != ZERO_IDENT;
+        bool hasItemTarget = itemId != ZERO_IDENT;
+        if (hasCritterTarget == hasItemTarget) {
+            message = "invalid_context_target";
+            return false;
+        }
+
+        Critter? targetCr = hasCritterTarget ? Game.GetCritter(targetId) : null;
+        Item? targetItem = hasItemTarget ? Game.GetItem(itemId) : null;
+        if (hasCritterTarget && targetCr == null) {
+            message = "target_missing";
+            return false;
+        }
+        if (hasItemTarget && targetItem == null) {
+            message = "item_missing";
+            return false;
+        }
+
+        params["TargetCritterId"] = targetId;
+        params["TargetItemId"] = itemId;
+    }
+    else if (screenNum == GuiScreen::Timer || screenNum == GuiScreen::Split) {
+        Item? item = itemId != ZERO_IDENT ? Game.GetItem(itemId) : null;
+        if (item == null) {
+            message = "item_missing";
+            return false;
+        }
+        if (item.Ownership != ItemOwnership::CritterInventory || item.CritterId != Chosen.Id) {
+            message = "item_not_owned";
+            return false;
+        }
+
+        if (screenNum == GuiScreen::Timer) {
+            if (!Parameters::IsTimedUseItem(item)) {
+                message = "item_not_timed";
+                return false;
+            }
+            params["TargetItemId"] = item.Id;
+        }
+        else {
+            if (intArg != ClientDefines::ITEMS_CHOSEN_ALL) {
+                message = "unsupported_split_collection";
+                return false;
+            }
+            if (!item.Stackable || item.Count <= 1) {
+                message = "item_not_stackable";
+                return false;
+            }
+
+            params["TargetItemId"] = item.Id;
+            params["ItemsCollection"] = ClientDefines::ITEMS_CHOSEN_ALL;
+            params["TransferType"] = 0;
+            params["TransferContainerId"] = ZERO_IDENT;
+            params["TransferSession"] = uint(0);
+        }
+    }
+    else if (screenNum == GuiScreen::SkillBox) {
+        bool hasCritterTarget = targetId != ZERO_IDENT;
+        bool hasItemTarget = itemId != ZERO_IDENT;
+        if (hasCritterTarget && hasItemTarget) {
+            message = "invalid_context_target";
+            return false;
+        }
+        Critter? targetCr = hasCritterTarget ? Game.GetCritter(targetId) : null;
+        Item? targetItem = hasItemTarget ? Game.GetItem(itemId) : null;
+        if (hasCritterTarget && targetCr == null) {
+            message = "target_missing";
+            return false;
+        }
+        if (hasItemTarget && targetItem == null) {
+            message = "item_missing";
+            return false;
+        }
+
+        int isInventory = 0;
+        if (targetItem != null && targetItem.Ownership == ItemOwnership::CritterInventory && targetItem.CritterId == Chosen.Id) {
+            isInventory = 1;
+        }
+        if (intArg >= 0 && intArg != isInventory) {
+            message = "item_ownership_mismatch";
+            return false;
+        }
+
+        params["TargetCritterId"] = targetId;
+        params["TargetItemId"] = itemId;
+        params["IsInventory"] = isInventory;
+    }
+    else {
+        message = "unsupported_context_screen:" + screenName;
+        return false;
+    }
+
+    Gui::ShowScreen(screenNum, params);
+    message = "shown";
+    return true;
+}
+
+int ResolveUiPromptAnswerIndex(int requestedIndex, string answerId, string idPrefix, int firstValue, int count)
+{
+    if (answerId.isEmpty()) {
+        return requestedIndex;
+    }
+
+    for (int i = 0; i < count; i++) {
+        string value = "" + (firstValue + i);
+        if (answerId == idPrefix + value || answerId == value) {
+            return requestedIndex >= 0 && requestedIndex != i ? -1 : i;
+        }
+    }
+
+    return -1;
+}
+
+int ResolveElevatorUiPromptAnswerIndex(int requestedIndex, string answerId, int elevatorType, int count)
+{
+    if (answerId.isEmpty()) {
+        return requestedIndex;
+    }
+
+    for (int i = 0; i < count; i++) {
+        int displayLevel = Elevator::GetElevatorDisplayLevel(elevatorType, i);
+        string value = "" + displayLevel;
+        if (displayLevel >= 0 && (answerId == "level_" + value || answerId == value)) {
+            return requestedIndex >= 0 && requestedIndex != i ? -1 : i;
+        }
+    }
+
+    return -1;
+}
+
+bool ExecuteUiPromptAnswer(int requestedIndex, string answerId, ident expectedSession, string& message)
+{
+    Gui::Screen? activeScreen = Gui::GetActiveScreen();
+    if (activeScreen == null) {
+        message = "ui_prompt_missing";
+        return false;
+    }
+
+    if (activeScreen.Num == GuiScreen::DialogBox) {
+        auto dialogBox = cast<GuiScreens::DialogBox::DialogBox>(activeScreen);
+        if (dialogBox.Answers < 1 || dialogBox.Answers > Dialogbox::MAX_DIALOG_BOX_ANSWERS || dialogBox.Session == 0) {
+            message = "ui_prompt_stale";
+            return false;
+        }
+        if (expectedSession == ZERO_IDENT) {
+            message = "ui_prompt_session_required";
+            return false;
+        }
+        if (expectedSession.value != int64(dialogBox.Session)) {
+            message = "ui_prompt_stale";
+            return false;
+        }
+
+        int answer = ResolveUiPromptAnswerIndex(requestedIndex, answerId, "answer_", 0, dialogBox.Answers);
+        if (answer < 0 || answer >= dialogBox.Answers) {
+            message = "ui_answer_out_of_range";
+            return false;
+        }
+
+        Dialogbox::AnswerDialog(dialogBox.Session, dialogBox.DialogType, answer);
+        Gui::HideScreen(GuiScreen::DialogBox);
+        message = "ui_answered";
+        return true;
+    }
+
+    if (activeScreen.Num == GuiScreen::Elevator) {
+        // Сессия относится только к DialogBox: запоздавший ответ от него не должен выбрать
+        // этаж внезапно открывшегося лифта с тем же индексом кнопки.
+        if (expectedSession != ZERO_IDENT) {
+            message = "ui_prompt_stale";
+            return false;
+        }
+        if (!HasCurPlayer) {
+            message = "not_connected";
+            return false;
+        }
+
+        auto elevator = cast<GuiScreens::Elevator::Elevator>(activeScreen);
+        if (!elevator.Valid || int(elevator.Data.length()) < 14) {
+            message = "ui_prompt_stale";
+            return false;
+        }
+
+        int firstLevel = int(elevator.Data[1]);
+        int answerCount = int(elevator.Data[13]);
+        int elevatorType = elevator.Type & 0xFFFF;
+        if (answerCount < 1 || answerCount > 16 || int(elevator.Data.length()) < 14 + answerCount * 4 ||
+            answerCount != Elevator::GetElevatorExpectedLevelCount(elevatorType)) {
+            message = "ui_prompt_stale";
+            return false;
+        }
+
+        int answer = ResolveElevatorUiPromptAnswerIndex(requestedIndex, answerId, elevatorType, answerCount);
+        if (answer < 0 || answer >= answerCount) {
+            message = "ui_answer_out_of_range";
+            return false;
+        }
+
+        CurPlayer.ServerCall.Rpc_SelectLevel(firstLevel + answer, 0, 0);
+        Gui::HideScreen(GuiScreen::Elevator);
+        message = "ui_answered";
+        return true;
+    }
+
+    message = "ui_prompt_missing";
+    return false;
+}
+
+bool TryParseTimerUseMode(string value, int& seconds)
+{
+    const string prefix = "timer:";
+    if (value.length() <= prefix.length() || value.substr(0, prefix.length()) != prefix) {
+        return false;
+    }
+
+    string secondsText = value.substr(prefix.length());
+    if (secondsText.isEmpty() || secondsText.length() > 3) {
+        return false;
+    }
+    for (int i = 0; i < secondsText.length(); i++) {
+        string digit = secondsText[i];
+        if (digit < "0" || digit > "9") {
+            return false;
+        }
+    }
+    int parsedSeconds = 0;
+    // Ограничение длины выше не даёт tryToInt переполниться, а каноническая обратная запись
+    // запрещает пробелы, знак, ведущие нули и хвост после числа.
+    if (!secondsText.tryToInt(parsedSeconds) || parsedSeconds < 1 || parsedSeconds > 599 || secondsText != "" + parsedSeconds) {
+        return false;
+    }
+
+    seconds = parsedSeconds;
+    return true;
+}
+
 bool ExecuteCommand(string type, ident targetId, ident itemId, ident auxId, int hexX, int hexY, int screenX, int screenY, int intArg, string stringArg,
-                    bool append, string& message)
+                    string sceneryProtoId, bool append, string& message)
 {
     // Команды, не требующие управляемого персонажа / карты.
     if (type == "clear_actions") {
@@ -386,6 +761,24 @@ bool ExecuteCommand(string type, ident targetId, ident itemId, ident auxId, int 
         message = "answered";
         return true;
     }
+    if (type == "close_dialog") {
+        if (!HasCurPlayer || !DialogActive) {
+            message = "dialog_not_active";
+            return false;
+        }
+        CurPlayer.ServerCall.SpeechAnswer(DialogAnswerClose);
+        message = "dialog_closed";
+        return true;
+    }
+    if (type == "barter_return_dialog") {
+        if (!HasCurPlayer || !HasChosen || Chosen.TransferType != TransferTypes::CritBarter || !Gui::IsScreenActive(GuiScreen::Barter)) {
+            message = "barter_not_active";
+            return false;
+        }
+        CurPlayer.ServerCall.ResumeDialogFromBarter(Chosen.TransferContainerId, Chosen.TransferSession);
+        message = "barter_returned_to_dialog";
+        return true;
+    }
     if (type == "close_screen") {
         Gui::HideScreen();
         message = "closed";
@@ -400,6 +793,12 @@ bool ExecuteCommand(string type, ident targetId, ident itemId, ident auxId, int 
         Gui::ShowScreen(screenNum);
         message = "shown";
         return true;
+    }
+    if (type == "ui_answer") {
+        return ExecuteUiPromptAnswer(intArg, stringArg, auxId, message);
+    }
+    if (type == "show_context_screen") {
+        return ShowContextScreen(stringArg, targetId, itemId, intArg, message);
     }
     if (type == "hide_screen") {
         GuiScreen screenNum = GuiScreen::None;
@@ -445,6 +844,23 @@ bool ExecuteCommand(string type, ident targetId, ident itemId, ident auxId, int 
         // intArg=queryId, screenX/screenY=fromHex (или -1 => chosen), x/y=toHex, stringArg=опции.
         return ExecuteEnvironmentQuery(intArg, screenX, screenY, hexX, hexY, stringArg, message);
     }
+    if (type == "qa_show_dialog_box") {
+        if (!Settings.AiControl.AllowQaCommands) {
+            message = "qa_commands_disabled";
+            return false;
+        }
+        if (!HasCurPlayer || !HasChosen) {
+            message = "no_chosen";
+            return false;
+        }
+        if (Gui::IsScreenActive(GuiScreen::DialogBox)) {
+            message = "dialog_box_already_active";
+            return false;
+        }
+        CurPlayer.ServerCall.AiControlQaShowDialogBox();
+        message = "qa_dialog_box_requested";
+        return true;
+    }
     if (type == "qa_teleport_global" || type == "qa_teleport_hex" || type == "qa_teleport_map") {
         if (!Settings.AiControl.AllowQaCommands) {
             message = "qa_commands_disabled";
@@ -461,7 +877,23 @@ bool ExecuteCommand(string type, ident targetId, ident itemId, ident auxId, int 
             CurPlayer.ServerCall.AiControlQaTeleportHex(mpos(hexX, hexY));
         }
         else {
-            CurPlayer.ServerCall.AiControlQaTeleportMap(stringArg.hstr(), mpos(hexX, hexY));
+            // Составной pid нельзя передавать одним hstring: сервер отклонит неизвестный хеш строки
+            // "location/map" до вызова скрипта. Передаём два известных content-id отдельно.
+            string[] pidParts = stringArg.split("/");
+            if (pidParts.length() > 2 || pidParts[0].isEmpty() || (pidParts.length() > 1 && pidParts[1].isEmpty())) {
+                message = "invalid_map_target";
+                return false;
+            }
+            hstring locPid = pidParts[0].hstr();
+            hstring mapPid = pidParts.length() > 1 ? pidParts[1].hstr() : locPid;
+            bool hasLocationProto = Game.CheckProtoLocation(locPid);
+            bool hasMapProto = Game.CheckProtoMap(mapPid);
+            bool directMapTarget = locPid == mapPid && hasMapProto;
+            if ((!hasLocationProto && !directMapTarget) || (locPid != mapPid && !hasMapProto)) {
+                message = "unknown_map_target";
+                return false;
+            }
+            CurPlayer.ServerCall.AiControlQaTeleportMap(locPid, mapPid, mpos(hexX, hexY));
         }
         message = "qa_sent";
         return true;
@@ -482,7 +914,8 @@ bool ExecuteCommand(string type, ident targetId, ident itemId, ident auxId, int 
             message = "unknown_property:" + stringArg;
             return false;
         }
-        CurPlayer.ServerCall.AiControlQaSetProp(prop, intArg);
+        // Для этой команды x используется как correlation id подтверждения записи.
+        CurPlayer.ServerCall.AiControlQaSetProp(prop, intArg, hexX);
         message = "qa_prop_set";
         return true;
     }
@@ -524,14 +957,14 @@ bool ExecuteCommand(string type, ident targetId, ident itemId, ident auxId, int 
             message = "unknown_property:" + stringArg;
             return false;
         }
-        CurPlayer.ServerCall.AiControlQaGetProp(prop);
+        CurPlayer.ServerCall.AiControlQaGetProp(prop, intArg);
         message = "qa_prop_requested";
         return true;
     }
     if (type == "qa_get_text") {
-        // Debug: resolve a dialog NUMBERED floating-text (the NPC Say/SayOnHead/Info lines) by dialog id +
-        // string number, through the same MsgStr::DialogTextKey the game now uses. Returns the text in the
-        // message — empty means the string isn't authored for that dialog.
+        // QA-чтение нумерованной реплики диалога (NPC Say/SayOnHead/Info) по id диалога и номеру строки
+        // через тот же MsgStr::DialogTextKey, который использует игра. Пустая строка означает, что текст
+        // для этого диалога не задан.
         if (!Settings.AiControl.AllowQaCommands) {
             message = "qa_commands_disabled";
             return false;
@@ -540,10 +973,24 @@ bool ExecuteCommand(string type, ident targetId, ident itemId, ident auxId, int 
         message = "text=<" + text + ">";
         return true;
     }
+    if (type == "qa_get_text_pack") {
+        // QA-чтение числовой строки общего пака Text через тот же TextPackKey, который используют игровые
+        // скрипты. Команда проверяет фактически запечённую локализацию активного языка клиента.
+        if (!Settings.AiControl.AllowQaCommands) {
+            message = "qa_commands_disabled";
+            return false;
+        }
+        if (intArg < 0) {
+            message = "invalid_text_id";
+            return false;
+        }
+        string text = Game.GetText(TextPackKey(TextPackName::Text, "" + intArg));
+        message = "text=<" + text + ">";
+        return true;
+    }
     if (type == "qa_format_tags") {
-        // Debug: run a raw string through Game.FormatTags (resolves @text/@arg/@sex/… on the client) and
-        // return the result. Used to verify the three-token `@text Dialogs <dialogName> <key>@` path
-        // end-to-end (the NPC floating/banker/poker text and NPC names).
+        // QA-прогон сырой строки через Game.FormatTags (клиентское разрешение @text/@arg/@sex/…) с
+        // возвратом результата. Нужен для сквозной проверки формы `@text Dialogs <dialogName> <key>@`.
         if (!Settings.AiControl.AllowQaCommands) {
             message = "qa_commands_disabled";
             return false;
@@ -553,9 +1000,9 @@ bool ExecuteCommand(string type, ident targetId, ident itemId, ident auxId, int 
     }
     if (type == "use_skill") {
         // Механика навыков: применить навык (stringArg = имя CritterProperty, напр. SkillFirstAid/
-        // SkillLockpick/SkillSteal/SkillRepair/SkillScience/SkillDoctor) к цели: криттеру (targetId),
-        // предмету (itemId), сценерию (stringArg2 не задаём) или гексу (hexX/hexY). Если цель не задана —
-        // применяем к себе (на собственного криттера).
+        // SkillLockpick/SkillSteal/SkillRepair/SkillScience/SkillDoctor) ровно к одной цели:
+        // криттеру (targetId), предмету (itemId), сценерию (sceneryProtoId + hexX/hexY) либо,
+        // если цель не задана, к собственному криттеру.
         if (!HasCurPlayer) {
             message = "not_connected";
             return false;
@@ -566,11 +1013,20 @@ bool ExecuteCommand(string type, ident targetId, ident itemId, ident auxId, int 
             message = "unknown_skill:" + stringArg;
             return false;
         }
+        bool hasCritterTarget = targetId != ZERO_IDENT;
+        bool hasItemTarget = itemId != ZERO_IDENT;
+        bool hasSceneryTarget = !sceneryProtoId.isEmpty();
+        int targetModes = (hasCritterTarget ? 1 : 0) + (hasItemTarget ? 1 : 0) + (hasSceneryTarget ? 1 : 0);
+        if (targetModes > 1 || (!hasSceneryTarget && (hexX != 0 || hexY != 0))) {
+            message = "invalid_skill_target";
+            return false;
+        }
+        hstring sceneryPid = sceneryProtoId.isEmpty() ? EMPTY_HSTRING : sceneryProtoId.hstr();
         ident skillTargetCr = targetId;
-        if (skillTargetCr == ZERO_IDENT && itemId == ZERO_IDENT && hexX == 0 && hexY == 0 && HasChosen) {
+        if (targetModes == 0 && HasChosen) {
             skillTargetCr = Chosen.Id; // по умолчанию навык на себя (напр. первая помощь)
         }
-        CurPlayer.ServerCall.UseSkill(skill, skillTargetCr, itemId, EMPTY_HSTRING, mpos(hexX, hexY));
+        CurPlayer.ServerCall.UseSkill(skill, skillTargetCr, itemId, sceneryPid, mpos(hexX, hexY));
         message = "skill_used";
         return true;
     }
@@ -625,6 +1081,51 @@ bool ExecuteCommand(string type, ident targetId, ident itemId, ident auxId, int 
         message = "queued";
         return true;
     }
+    if (type == "barter_transfer") {
+        if (Chosen.TransferType != TransferTypes::CritBarter || !Gui::IsScreenActive(GuiScreen::Barter)) {
+            message = "barter_not_active";
+            return false;
+        }
+
+        int collectionType = -1;
+        if (stringArg == "player_inventory") {
+            collectionType = ClientDefines::ITEMS_BARTER;
+        }
+        else if (stringArg == "player_offer") {
+            collectionType = ClientDefines::ITEMS_BARTER_OFFER;
+        }
+        else if (stringArg == "trader_inventory") {
+            collectionType = ClientDefines::ITEMS_BARTER_OPPONENT;
+        }
+        else if (stringArg == "trader_offer") {
+            collectionType = ClientDefines::ITEMS_BARTER_OPPONENT_OFFER;
+        }
+        else {
+            message = "unknown_barter_source:" + stringArg;
+            return false;
+        }
+
+        if (!ClientItems::BarterTransfer(itemId, collectionType, intArg)) {
+            message = "barter_transfer_rejected";
+            return false;
+        }
+
+        message = "barter_transferred";
+        return true;
+    }
+    if (type == "barter_offer") {
+        if (Chosen.TransferType != TransferTypes::CritBarter || !Gui::IsScreenActive(GuiScreen::Barter)) {
+            message = "barter_not_active";
+            return false;
+        }
+
+        if (!ClientItems::BarterOffer()) {
+            message = "barter_offer_pending_or_empty";
+            return false;
+        }
+        message = "barter_offered";
+        return true;
+    }
     if (type == "talk_to") {
         ChosenActions::SetAction({Tla::ChosenTalkNpc, targetId, 0, 0, 0, 0, 0}, append, false);
         message = "queued";
@@ -665,12 +1166,52 @@ bool ExecuteCommand(string type, ident targetId, ident itemId, ident auxId, int 
         return true;
     }
     if (type == "use_item") {
+        Item? usedItem = Chosen.GetItem(itemId);
+        if (usedItem == null) {
+            message = "item_missing";
+            return false;
+        }
+
+        if (targetId != ZERO_IDENT && auxId != ZERO_IDENT) {
+            message = "invalid_item_target";
+            return false;
+        }
+
+        int useParam = intArg;
+        if (!stringArg.isEmpty()) {
+            if (!TryParseTimerUseMode(stringArg, useParam)) {
+                message = "invalid_use_mode:" + stringArg;
+                return false;
+            }
+            if (targetId != ZERO_IDENT || auxId != ZERO_IDENT) {
+                message = "invalid_timer_target";
+                return false;
+            }
+            if (!Parameters::IsTimedUseItem(usedItem)) {
+                message = "item_not_timed";
+                return false;
+            }
+        }
+
         int mode = WeaponHelpers::MakeWeaponMode(WeaponHelpers::USE_USE, 0);
         if (targetId != ZERO_IDENT) {
-            ChosenActions::SetAction({Tla::ChosenUseItem, itemId, 0, ClientDefines::TARGET_CRITTER, targetId, mode, intArg}, append, false);
+            Critter? targetCr = Game.GetCritter(targetId);
+            if (targetCr == null) {
+                message = "target_missing";
+                return false;
+            }
+            ChosenActions::SetAction({Tla::ChosenUseItem, itemId, 0, ClientDefines::TARGET_CRITTER, targetId, mode, useParam}, append, false);
+        }
+        else if (auxId != ZERO_IDENT) {
+            Item? targetItem = Game.GetItem(auxId);
+            if (targetItem == null) {
+                message = "target_item_missing";
+                return false;
+            }
+            ChosenActions::SetAction({Tla::ChosenUseItem, itemId, 0, ClientDefines::TARGET_ITEM, auxId, mode, useParam}, append, false);
         }
         else {
-            ChosenActions::SetAction({Tla::ChosenUseItem, itemId, 0, ClientDefines::TARGET_SELF, 0, mode, intArg}, append, false);
+            ChosenActions::SetAction({Tla::ChosenUseItem, itemId, 0, ClientDefines::TARGET_SELF, 0, mode, useParam}, append, false);
         }
         message = "queued";
         return true;
@@ -715,7 +1256,7 @@ bool ExecuteCommand(string type, ident targetId, ident itemId, ident auxId, int 
         bool take = (intArg & 1) != 0;
         bool all = (intArg & 2) != 0;
         int count = intArg >> 2;
-        CurPlayer.ServerCall.OperateContainer(take, all, itemId, count);
+        CurPlayer.ServerCall.OperateContainer(take, all, itemId, count, int(Chosen.TransferType), Chosen.TransferContainerId, Chosen.TransferSession);
         message = "sent";
         return true;
     }
@@ -1064,12 +1605,14 @@ string BuildObservation()
                    BoolMember("hasChosen", HasChosen),
                    RawMember("account", AccountJson()),
                    RawMember("screen", ScreenJson(activeScreen, activeScreenName)),
+                   RawMember("uiPrompt", UiPromptJson(activeScreen)),
                    RawMember("mouse", Object({IntMember("x", Game.MousePos.x), IntMember("y", Game.MousePos.y)})),
                    RawMember("chosen", ChosenJson()),
                    RawMember("map", HasCurMap ? MapJson(CurMap) : "null"),
                    RawMember("critters", CrittersJson()),
                    RawMember("mapItems", MapItemsJson()),
                    RawMember("inventory", InventoryJson()),
+                   RawMember("barter", BarterJson()),
                    RawMember("quests", QuestsJson()),
                    RawMember("dialog", DialogJson()),
                    RawMember("availableActions", AvailableActionsJson())});
@@ -1092,6 +1635,81 @@ string ScreenJson(Gui::Screen? activeScreen, string activeScreenName)
     }
 
     return Object({StringMember("active", activeScreenName), BoolMember("modalActive", Gui::IsModalScreenActive()), RawMember("screens", Array(names))});
+}
+
+string UiPromptButtonJson(int index, string id, string text, string role, bool dangerous)
+{
+    return Object({IntMember("index", index),
+                   StringMember("id", id),
+                   StringMember("text", text),
+                   StringMember("role", role),
+                   BoolMember("enabled", true),
+                   BoolMember("dangerous", dangerous)});
+}
+
+string UiPromptJson(Gui::Screen? activeScreen)
+{
+    if (activeScreen == null) {
+        return Object({BoolMember("active", false)});
+    }
+
+    if (activeScreen.Num == GuiScreen::DialogBox) {
+        auto dialogBox = cast<GuiScreens::DialogBox::DialogBox>(activeScreen);
+        if (dialogBox.Answers < 1 || dialogBox.Answers > Dialogbox::MAX_DIALOG_BOX_ANSWERS || dialogBox.Session == 0) {
+            return Object({BoolMember("active", false)});
+        }
+
+        string promptText = MsgStr::GetGameText(Dialogbox::GetDialogTextStr(dialogBox.DialogType));
+        promptText = Game.FormatTags(promptText, dialogBox.Lexems);
+        string[] buttons = {};
+        for (int i = 0; i < dialogBox.Answers; i++) {
+            string answerText = MsgStr::GetGameText(Dialogbox::GetDialogTextStr(dialogBox.DialogType) + i + 1);
+            buttons.insertLast(UiPromptButtonJson(i,
+                                                  "answer_" + i,
+                                                  answerText,
+                                                  Dialogbox::GetDialogBoxAnswerRole(dialogBox.DialogType, i),
+                                                  Dialogbox::IsDialogBoxAnswerDangerous(dialogBox.DialogType, i)));
+        }
+
+        return Object({BoolMember("active", true),
+                       StringMember("screen", "DialogBox"),
+                       StringMember("kind", "dialog_box"),
+                       StringMember("title", Game.EnumToString(dialogBox.DialogType, true)),
+                       StringMember("text", promptText),
+                       StringMember("dialogId", Game.EnumToString(dialogBox.DialogType, true)),
+                       Int64Member("dialogBoxSession", int64(dialogBox.Session)),
+                       RawMember("buttons", Array(buttons))});
+    }
+
+    if (activeScreen.Num == GuiScreen::Elevator) {
+        auto elevator = cast<GuiScreens::Elevator::Elevator>(activeScreen);
+        if (!elevator.Valid || int(elevator.Data.length()) < 14) {
+            return Object({BoolMember("active", false)});
+        }
+
+        int answerCount = int(elevator.Data[13]);
+        int elevatorType = elevator.Type & 0xFFFF;
+        if (answerCount < 1 || answerCount > 16 || int(elevator.Data.length()) < 14 + answerCount * 4 ||
+            answerCount != Elevator::GetElevatorExpectedLevelCount(elevatorType)) {
+            return Object({BoolMember("active", false)});
+        }
+
+        string[] buttons = {};
+        for (int i = 0; i < answerCount; i++) {
+            int level = Elevator::GetElevatorDisplayLevel(elevatorType, i);
+            buttons.insertLast(UiPromptButtonJson(i, "level_" + level, "" + level, "choice", false));
+        }
+
+        return Object({BoolMember("active", true),
+                       StringMember("screen", "Elevator"),
+                       StringMember("kind", "elevator"),
+                       StringMember("title", "Elevator"),
+                       StringMember("text", ""),
+                       StringMember("currentMapProtoId", HasCurMap ? string(CurMap.ProtoId) : ""),
+                       RawMember("buttons", Array(buttons))});
+    }
+
+    return Object({BoolMember("active", false)});
 }
 
 string ChosenJson()
@@ -1143,12 +1761,16 @@ string CrittersJson()
 string CritterJson(Critter cr)
 {
     string dialogId = string(cr.DialogId);
+    int talkDistance = cr.TalkDistance != 0 ? cr.TalkDistance : Settings.Dialog.TalkDistance;
     return Object({IdentMember("id", cr.Id),
+                   StringMember("protoId", string(cr.ProtoId)),
                    StringMember("name", cr.Name),
                    IntMember("hexX", int(cr.Hex.x)),
                    IntMember("hexY", int(cr.Hex.y)),
                    BoolMember("isAlive", cr.IsAlive()),
                    BoolMember("inCombat", Time::IsTimeoutActive(cr.TimeoutBattle)),
+                   BoolMember("isNoTalk", cr.IsNoTalk),
+                   IntMember("talkDistance", talkDistance),
                    StringMember("dialogId", dialogId)});
 }
 
@@ -1165,13 +1787,43 @@ string MapItemsJson()
     return Array(entries);
 }
 
+void AddItemInteractionMembers(Item item, string[] & members)
+{
+    // В TLA двери и контейнеры пока представлены плоским Type/набором свойств, а не
+    // отдельными компонентами. Поэтому сначала определяем наличие контракта и только
+    // затем читаем относящиеся к нему состояния замка.
+    bool hasContainer = item.Type == ItemType::Container;
+    bool hasDoor = item.Type == ItemType::Door;
+    bool hasLocker = hasContainer || hasDoor;
+    members.insertLast(BoolMember("hasContainer", hasContainer));
+    members.insertLast(BoolMember("hasDoor", hasDoor));
+    members.insertLast(BoolMember("hasLocker", hasLocker));
+    members.insertLast(BoolMember("canOpen", hasLocker && item.IsCanOpen));
+    members.insertLast(BoolMember("opened", hasLocker && item.Opened));
+    members.insertLast(BoolMember("lockerLocked", hasLocker && item.Locker_Locked));
+    members.insertLast(BoolMember("lockerJammed", hasLocker && item.Locker_Jammed));
+    members.insertLast(BoolMember("lockerBroken", hasLocker && item.Locker_Broken));
+    members.insertLast(BoolMember("lockerNoOpen", hasLocker && item.Locker_NoOpen));
+    members.insertLast(BoolMember("isGag", hasLocker && item.IsGag));
+}
+
 string MapItemJson(Item item)
 {
-    return Object({IdentMember("id", item.Id),
-                   StringMember("protoId", string(item.ProtoId)),
-                   IntMember("hexX", int(item.Hex.x)),
-                   IntMember("hexY", int(item.Hex.y)),
-                   IntMember("count", int(item.Count))});
+    string[] members = {IdentMember("id", item.Id),
+                        StringMember("protoId", string(item.ProtoId)),
+                        IntMember("hexX", int(item.Hex.x)),
+                        IntMember("hexY", int(item.Hex.y)),
+                        IntMember("count", int(item.Count)),
+                        BoolMember("stackable", item.Stackable),
+                        IntMember("ownership", int(item.Ownership)),
+                        IntMember("cost", item.Cost),
+                        IntMember("weight", item.Weight),
+                        BoolMember("canUse", item.IsCanUse),
+                        BoolMember("canUseOnSmth", item.IsCanUseOnSmth),
+                        BoolMember("canPickUp", item.IsCanPickUp),
+                        RawMember("visualFeedback", ItemVisualFeedbackJson(item))};
+    AddItemInteractionMembers(item, members);
+    return Object(members);
 }
 
 string InventoryJson()
@@ -1191,10 +1843,57 @@ string InventoryJson()
 
 string InventoryItemJson(Item item)
 {
-    return Object({IdentMember("id", item.Id),
-                   StringMember("protoId", string(item.ProtoId)),
-                   IntMember("count", int(item.Count)),
-                   IntMember("slot", int(item.CritterSlot))});
+    string[] members = {IdentMember("id", item.Id),
+                        StringMember("protoId", string(item.ProtoId)),
+                        IntMember("count", int(item.Count)),
+                        IntMember("slot", int(item.CritterSlot)),
+                        BoolMember("stackable", item.Stackable),
+                        IntMember("ownership", int(item.Ownership)),
+                        IntMember("cost", item.Cost),
+                        IntMember("weight", item.Weight),
+                        BoolMember("canUse", item.IsCanUse),
+                        BoolMember("canUseOnSmth", item.IsCanUseOnSmth),
+                        BoolMember("canPickUp", item.IsCanPickUp),
+                        RawMember("visualFeedback", ItemVisualFeedbackJson(item))};
+    AddItemInteractionMembers(item, members);
+    return Object(members);
+}
+
+string ItemVisualFeedbackJson(Item item)
+{
+    return Object({BoolMember("timerCapable", Parameters::IsTimedUseItem(item))});
+}
+
+string BarterItemsJson(Item[] items)
+{
+    string[] entries = {};
+    int maxEntities = GetMaxObservedEntities();
+    for (int i = 0; i < items.length() && int(entries.length()) < maxEntities; i++) {
+        entries.insertLast(
+            Object({IdentMember("id", items[i].Id), StringMember("protoId", string(items[i].ProtoId)), IntMember("count", int(items[i].Count))}));
+    }
+    return Array(entries);
+}
+
+// Снимок четырёх коллекций NPC-бартера позволяет MCP проверять перенос в оффер и обратно без
+// хрупкого распознавания текста/иконок на скриншоте. Итоговую сделку всё равно валидирует сервер.
+string BarterJson()
+{
+    if (!HasChosen || Chosen.TransferType != TransferTypes::CritBarter) {
+        return Object({BoolMember("active", false)});
+    }
+
+    return Object({BoolMember("active", true),
+                   IdentMember("traderId", Chosen.TransferContainerId),
+                   Int64Member("session", int64(Chosen.TransferSession)),
+                   IntMember("coefficient", ClientItems::BarterCoefficient),
+                   BoolMember("masterTrader", ClientItems::BarterHasMasterTrader),
+                   Int64Member("playerOfferTotal", ClientItems::GetBarterCollectionCost(ClientDefines::ITEMS_BARTER_OFFER)),
+                   Int64Member("traderOfferTotal", ClientItems::GetBarterCollectionCost(ClientDefines::ITEMS_BARTER_OPPONENT_OFFER)),
+                   RawMember("playerInventory", BarterItemsJson(ClientItems::GetCollection(ClientItems::Collection::Inventory))),
+                   RawMember("playerOffer", BarterItemsJson(ClientItems::GetCollection(ClientItems::Collection::BarterOffer))),
+                   RawMember("traderInventory", BarterItemsJson(ClientItems::GetCollection(ClientItems::Collection::Loot))),
+                   RawMember("traderOffer", BarterItemsJson(ClientItems::GetCollection(ClientItems::Collection::BarterTraderOffer)))});
 }
 
 // Активные квесты управляемого персонажа. В TLA квесты — это отдельные uint8-свойства в группе
@@ -1256,10 +1955,13 @@ string AvailableActionsJson()
                          "operate_container",
                          "toggle_sneak",
                          "dialog_answer",
+                         "close_dialog",
+                         "ui_answer",
                          "say",
                          "clear_actions",
                          "close_screen",
                          "show_screen",
+                         "show_context_screen",
                          "hide_screen",
                          "save_screenshot",
                          "set_resolution",
@@ -1267,13 +1969,22 @@ string AvailableActionsJson()
                          "set_mouse_pos",
                          "mouse_click",
                          "key_press",
+                         "barter_transfer",
+                         "barter_offer",
+                         "barter_return_dialog",
+                         "craft",
                          "environment_query",
                          "qa_teleport_global",
                          "qa_teleport_hex",
                          "qa_teleport_map",
                          "qa_set_prop",
                          "qa_set_game_prop",
-                         "qa_give_item"};
+                         "qa_give_item",
+                         "qa_get_prop",
+                         "qa_get_text",
+                         "qa_get_text_pack",
+                         "qa_format_tags",
+                         "qa_show_dialog_box"};
     string[] entries = {};
     for (int i = 0; i < commands.length(); i++) {
         entries.insertLast(StringValue(commands[i]));
@@ -1355,6 +2066,11 @@ string IntMember(string name, int value)
     return "\"" + EscapeJson(name) + "\":" + value;
 }
 
+string Int64Member(string name, int64 value)
+{
+    return "\"" + EscapeJson(name) + "\":" + value;
+}
+
 string IdentMember(string name, ident value)
 {
     return "\"" + EscapeJson(name) + "\":" + value.str;
@@ -1408,8 +2124,39 @@ string EscapeJson(string value)
 
 #if SERVER
 
-// QA-телепорты. Все гейтированы AiControl.AllowQaCommands (Common, default False) — на боевом
-// сервере это no-op. Только для тест-харнесса: вывести персонажа на контент/глобалку.
+// QA-команды. Все гейтированы AiControl.AllowQaCommands (Common, default False) — на боевом
+// сервере это no-op. Используются только тест-харнессом для детерминированных fixtures.
+
+[[ServerRemoteCall]] [[Async]]
+void AiControlQaShowDialogBox(Player player)
+{
+    if (!Settings.AiControl.AllowQaCommands) {
+        return;
+    }
+    Critter? cr = player.GetControlledCritter();
+    if (cr == null || !Sync::Lock(cr)) {
+        return;
+    }
+    if (!cr.ControlledByPlayer || cr.IsDead()) {
+        return;
+    }
+
+    nanotime tick = Game.FrameTime;
+    if (cr.DialogBoxPending) {
+        bool expired = cr.DialogBoxPendingUntil == ZERO_NANOTIME || tick >= cr.DialogBoxPendingUntil;
+        if (!expired) {
+            return;
+        }
+        Dialogbox::ClearPendingDialogBox(cr);
+    }
+    if (cr.LastDialogBoxShownTick != ZERO_NANOTIME && tick < cr.LastDialogBoxShownTick + Dialogbox::NEXT_DIALOG_CALL) {
+        return;
+    }
+
+    // AskFollowGlobalGroupRuler имеет безопасный для fixture второй ответ: индекс 1 только
+    // погашает pending-контракт, не меняя группу или другие игровые данные.
+    Dialogbox::RunDialogBox(cr, DialogBoxType::AskFollowGlobalGroupRuler, 2, "|who:QA");
+}
 
 [[ServerRemoteCall]] [[Async]]
 void AiControlQaTeleportGlobal(Player player)
@@ -1445,7 +2192,7 @@ void AiControlQaTeleportHex(Player player, mpos hex)
 }
 
 [[ServerRemoteCall]] [[Async]]
-void AiControlQaTeleportMap(Player player, hstring mapPid, mpos hex)
+void AiControlQaTeleportMap(Player player, hstring locPid, hstring mapPid, mpos hex)
 {
     if (!Settings.AiControl.AllowQaCommands) {
         return;
@@ -1454,66 +2201,79 @@ void AiControlQaTeleportMap(Player player, hstring mapPid, mpos hex)
     if (cr == null) {
         return;
     }
-    // Поддержка синтаксиса "locationPid/mapProto" — попасть на конкретную под-карту локации
-    // (например vault_city/vcity). Без "/" локация и желаемая карта — одинаковый pid.
-    string[] pidParts = string(mapPid).split("/");
-    hstring locPid = pidParts[0].hstr();
-    hstring wantMapProto = pidParts.length() > 1 ? pidParts[1].hstr() : locPid;
-
-    // Сначала пробуем как карту по proto; если инстанса нет (статические карты грузятся лениво),
-    // резолвим через локацию locPid; если и локации нет (или прошлый sandbox-инстанс был уничтожен
-    // авто-сборкой) — для QA-теста создаём инстанс из прото на тестовой глобал-позиции и отключаем
-    // AutoGarbage, чтобы локация жила между прогонами.
-    Map? targetMap = Game.GetMap(wantMapProto);
-    if (targetMap == null) {
-        Location? loc = Game.GetLocation(locPid);
-        // Локация — серверная сущность; перед чтением её свойств (IsDestroyed/GetMapCount/GetMapByIndex)
-        // её нужно залочить (Sync::Lock покрывает локацию и её карты).
+    // Ищем карту именно внутри запрошенной локации: одинаковые map proto могут существовать в
+    // нескольких runtime-инстансах. Если локация ещё не загружена (или прошлый QA-инстанс был
+    // уничтожен авто-сборкой), создаём её на тестовой глобал-позиции и отключаем AutoGarbage.
+    // Для короткой формы заранее запоминаем существующую прямую карту: её pid может не быть pid'ом
+    // локации, и в таком случае нельзя вызывать CreateLocation с ним.
+    Map? directMap = locPid == mapPid ? Game.GetMap(mapPid) : null;
+    Location? loc = Game.GetLocation(locPid);
+    // Локация — серверная сущность; перед чтением её свойств (IsDestroyed/GetMapCount/GetMapByIndex)
+    // её нужно залочить (Sync::Lock покрывает локацию и её карты).
+    if (loc != null && !Sync::Lock(loc)) {
+        loc = null;
+    }
+    if (loc != null && (loc.IsDestroyed || loc.GetMapCount() == 0)) {
+        loc = null;
+    }
+    if (loc == null && directMap == null && !Game.CheckProtoLocation(locPid)) {
+        Game.Log("AiControl QA teleport: location proto not found " + locPid);
+        return;
+    }
+    if (loc == null && directMap == null) {
+        int zl = Settings.GlobalMap.GlobalMapZoneLength;
+        loc = Location::CreateLocation(locPid, ipos(zl * 10, zl * 10));
         if (loc != null && !Sync::Lock(loc)) {
             loc = null;
         }
-        if (loc != null && (loc.IsDestroyed || loc.GetMapCount() == 0)) {
-            loc = null;
-        }
-        if (loc == null) {
-            int zl = Settings.GlobalMap.GlobalMapZoneLength;
-            loc = Location::CreateLocation(locPid, ipos(zl * 10, zl * 10));
-            if (loc != null && !Sync::Lock(loc)) {
-                loc = null;
-            }
-            if (loc != null) {
-                loc.AutoGarbage = false;
-            }
-        }
-        if (loc != null && loc.GetMapCount() > 0) {
-            // Предпочитаем карту локации, чей ProtoId совпадает с желаемым (так "arroyo" ведёт на
-            // карту деревни, а "vault_city/vcity" — на интерьер vcity), иначе берём первую карту.
-            for (int i = 0; i < loc.GetMapCount(); i++) {
-                Map mapAtIndex = loc.GetMapByIndex(i);
-                if (mapAtIndex.ProtoId == wantMapProto) {
-                    targetMap = mapAtIndex;
-                    break;
-                }
-            }
-            if (targetMap == null) {
-                targetMap = loc.GetMapByIndex(0);
-            }
+        if (loc != null) {
+            loc.AutoGarbage = false;
         }
     }
+
+    Map? targetMap = null;
+    if (loc != null && loc.GetMapCount() > 0) {
+        for (int i = 0; i < loc.GetMapCount(); i++) {
+            Map mapAtIndex = loc.GetMapByIndex(i);
+            if (mapAtIndex.ProtoId == mapPid) {
+                targetMap = mapAtIndex;
+                break;
+            }
+        }
+        // Короткая форма с одинаковыми pid означает вход на первую карту локации.
+        if (targetMap == null && locPid == mapPid) {
+            targetMap = loc.GetMapByIndex(0);
+        }
+    }
+    // Для прямого map proto без одноимённой location сохраняем старый QA-сценарий.
+    if (targetMap == null && locPid == mapPid) {
+        targetMap = directMap;
+    }
     if (targetMap == null) {
-        Game.Log("AiControl QA teleport: map/location not found " + mapPid);
+        Game.Log("AiControl QA teleport: map/location not found " + locPid + "/" + mapPid);
         return;
     }
     if (!Sync::Lock(cr, targetMap)) {
-        Game.Log("AiControl QA teleport: lock failed for " + mapPid);
+        Game.Log("AiControl QA teleport: lock failed for " + locPid + "/" + mapPid);
         return;
     }
-    // Перенос (TransferToMap/CritterTransferToMapEntry) читает сущность локации карты-назначения,
-    // а Sync::Lock заменяет весь набор блокировок — без явного покрытия локации перенос падает с
-    // EntitySyncException (валидация синка ужесточилась). Лочим cr + целевую карту + её локацию вместе.
-    Location targetLoc = targetMap.GetLocation();
-    if (!Sync::Lock(cr, targetMap, targetLoc)) {
-        Game.Log("AiControl QA teleport: lock failed for " + mapPid);
+    // Перенос читает/меняет И карту-источник (текущую карту криттера, напр. repl1 сразу после
+    // регистрации), И целевую карту с их локациями. Sync::Lock заменяет весь набор блокировок: сначала
+    // лочим обе карты (cr уже залочен — можно взять его карту), чтобы прочитать их локации, затем полное
+    // покрытие cr+карты+локации — иначе EntitySyncException «Entity access without sync» внутри TransferToMap.
+    Map? srcMap = cr.GetMap();
+    if (srcMap != null && srcMap.Id != targetMap.Id) {
+        if (!Sync::Lock(array<Entity> = {cr, targetMap, srcMap})) {
+            Game.Log("AiControl QA teleport: lock failed for " + locPid + "/" + mapPid);
+            return;
+        }
+        if (!Sync::Lock(array<Entity> = {cr, targetMap, targetMap.GetLocation(), srcMap, srcMap.GetLocation()})) {
+            Game.Log("AiControl QA teleport: lock failed for " + locPid + "/" + mapPid);
+            return;
+        }
+    }
+    else if (!Sync::Lock(cr, targetMap, targetMap.GetLocation())) {
+        Game.Log("AiControl QA teleport: lock failed for " + locPid + "/" + mapPid);
         return;
     }
     // hex (0,0) => используем стандартный вход карты "0" (валидный гекс входа).
@@ -1526,7 +2286,7 @@ void AiControlQaTeleportMap(Player player, hstring mapPid, mpos hex)
 }
 
 [[ServerRemoteCall]] [[Async]]
-void AiControlQaSetProp(Player player, CritterProperty prop, int value)
+void AiControlQaSetProp(Player player, CritterProperty prop, int value, int requestId)
 {
     if (!Settings.AiControl.AllowQaCommands) {
         return;
@@ -1539,10 +2299,11 @@ void AiControlQaSetProp(Player player, CritterProperty prop, int value)
         return;
     }
     cr.SetAsInt(prop, value);
+    cr.PlayerClientCall.AiControlReceiveQaPropSet(prop, cr.GetAsInt(prop), requestId);
 }
 
 [[ServerRemoteCall]] [[Async]]
-void AiControlQaGetProp(Player player, CritterProperty prop)
+void AiControlQaGetProp(Player player, CritterProperty prop, int requestId)
 {
     if (!Settings.AiControl.AllowQaCommands) {
         return;
@@ -1554,7 +2315,7 @@ void AiControlQaGetProp(Player player, CritterProperty prop)
     if (!Sync::Lock(cr)) {
         return;
     }
-    cr.PlayerClientCall.AiControlReceiveQaProp(prop, cr.GetAsInt(prop));
+    cr.PlayerClientCall.AiControlReceiveQaProp(prop, cr.GetAsInt(prop), requestId);
 }
 
 [[ServerRemoteCall]] [[Async]]

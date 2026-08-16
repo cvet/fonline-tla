@@ -1,0 +1,135 @@
+// Test_Elevator — чистые тесты контракта типов, этажей, геометрии и индикатора лифта.
+namespace Test_Elevator
+{
+
+#if SERVER
+
+[[ModuleInit]]
+void InitTestElevator()
+{
+    Game.OnTestingInit.Subscribe(OnTestingInit);
+}
+
+[[Event]]
+void OnTestingInit()
+{
+    Testing::RegisterTest("elevator", "type_and_count", TypeAndCount);
+    Testing::RegisterTest("elevator", "display_levels", DisplayLevels);
+    Testing::RegisterTest("elevator", "level_bounds", LevelBounds);
+    Testing::RegisterTest("elevator", "button_rect", ButtonRect);
+    Testing::RegisterTest("elevator", "indicator_frame", IndicatorFrame);
+    Testing::RegisterTest("elevator", "numeric_scenery_params", NumericSceneryParams);
+    Testing::RegisterTest("elevator", "map_scenery_params", MapSceneryParams);
+}
+
+void TypeAndCount(Testing::TestContext ctx)
+{
+    if (!Testing::Expect(ctx, Elevator::IsElevatorTypeValid(0) && Elevator::IsElevatorTypeValid(8), "Граничные типы лифта допустимы")) {
+        return;
+    }
+    if (!Testing::Expect(ctx, !Elevator::IsElevatorTypeValid(-1) && !Elevator::IsElevatorTypeValid(9), "Типы вне таблицы отклоняются")) {
+        return;
+    }
+    if (!Testing::ExpectEq(ctx, Elevator::GetElevatorExpectedLevelCount(0), 4, "BOS 1234 содержит четыре этажа")) {
+        return;
+    }
+
+    Testing::Expect(ctx, Elevator::IsElevatorMapCountValid(5, 2) && !Elevator::IsElevatorMapCountValid(5, 3), "Число карт обязано совпадать с типом лифта");
+}
+
+void DisplayLevels(Testing::TestContext ctx)
+{
+    if (!Testing::ExpectEq(ctx, Elevator::GetElevatorDisplayLevel(6, 0), 3, "Military 346 начинается с третьего этажа")) {
+        return;
+    }
+    if (!Testing::ExpectEq(ctx, Elevator::GetElevatorDisplayLevel(6, 1), 4, "Второй уровень Military 346 отображается как четвёртый этаж")) {
+        return;
+    }
+    if (!Testing::ExpectEq(ctx, Elevator::GetElevatorDisplayLevel(6, 2), 6, "Третий уровень Military 346 отображается как шестой этаж")) {
+        return;
+    }
+    if (!Testing::ExpectEq(ctx, Elevator::GetElevatorDisplayLevel(7, 2), 6, "Последовательный Military 456 заканчивается шестым этажом")) {
+        return;
+    }
+
+    Testing::Expect(ctx, Elevator::GetElevatorDisplayLevel(6, -1) == -1 && Elevator::GetElevatorDisplayLevel(6, 3) == -1, "Индекс карты вне типа отклоняется");
+}
+
+void LevelBounds(Testing::TestContext ctx)
+{
+    if (!Testing::Expect(ctx, Elevator::IsElevatorLevelValid(3, 3, 3), "Первый этаж диапазона допустим")) {
+        return;
+    }
+    if (!Testing::Expect(ctx, Elevator::IsElevatorLevelValid(3, 3, 5), "Последний этаж диапазона допустим")) {
+        return;
+    }
+    if (!Testing::Expect(ctx,
+                         !Elevator::IsElevatorLevelValid(3, 3, 2) && !Elevator::IsElevatorLevelValid(3, 3, 6),
+                         "Этажи за границами диапазона отклоняются")) {
+        return;
+    }
+
+    Testing::ExpectEq(ctx, Elevator::GetElevatorMapParamIndex(3, 5), 4, "Последний этаж выбирает последний map-параметр");
+}
+
+void ButtonRect(Testing::TestContext ctx)
+{
+    if (!Testing::Expect(ctx, Elevator::IsElevatorButtonRectValid(11, 42, 58, 91), "Штатный прямоугольник кнопки допустим")) {
+        return;
+    }
+    if (!Testing::ExpectEq(ctx, Elevator::GetElevatorRectExtent(11, 58), 48, "Правая координата прямоугольника включительна")) {
+        return;
+    }
+    if (!Testing::ExpectEq(ctx, Elevator::GetElevatorRectExtent(42, 91), 50, "Нижняя координата прямоугольника включительна")) {
+        return;
+    }
+
+    Testing::Expect(ctx, !Elevator::IsElevatorButtonRectValid(58, 91, 11, 42), "Перевёрнутый прямоугольник отклоняется");
+}
+
+void IndicatorFrame(Testing::TestContext ctx)
+{
+    if (!Testing::ExpectEq(ctx, Elevator::ClampElevatorIndicatorFrame(-1), 0, "Кадр индикатора ограничивается снизу")) {
+        return;
+    }
+    if (!Testing::ExpectEq(ctx, Elevator::ClampElevatorIndicatorFrame(13), 12, "Кадр индикатора ограничивается сверху")) {
+        return;
+    }
+
+    Testing::Expect(ctx, Elevator::GetElevatorIndicatorFrameTime(6) == 0.5f, "Шестой этаж выбирает середину анимации из тринадцати кадров");
+}
+
+void NumericSceneryParams(Testing::TestContext ctx)
+{
+    int value = -1;
+    if (!Testing::Expect(ctx, Tla::TryParseSceneryInt("4".hstr(), value) && value == 4, "Числовой параметр декодируется из исходной строки, а не из хеша")) {
+        return;
+    }
+    if (!Testing::Expect(ctx, Tla::TryParseSceneryInt("0".hstr(), value) && value == 0, "Нулевой номер входа допустим")) {
+        return;
+    }
+
+    Testing::Expect(ctx,
+                    !Tla::TryParseSceneryInt("04".hstr(), value) && !Tla::TryParseSceneryInt("level".hstr(), value),
+                    "Неканонические и символьные параметры отклоняются");
+}
+
+void MapSceneryParams(Testing::TestContext ctx)
+{
+    if (!Testing::Expect(ctx,
+                         Tla::NormalizeSceneryContentId("Content::Map::mariposa_level1".hstr(), "Content::Map::") == Content::Map::mariposa_level1,
+                         "Авторский префикс карты снимается перед сравнением с runtime ProtoId")) {
+        return;
+    }
+    if (!Testing::Expect(ctx, Tla::NormalizeSceneryContentId("0".hstr(), "Content::Map::") == EMPTY_HSTRING, "Нулевой sentinel не добавляет фиктивный этаж")) {
+        return;
+    }
+
+    Testing::Expect(ctx,
+                    Tla::NormalizeSceneryContentId(Content::Map::q_silo1, "Content::Map::") == Content::Map::q_silo1,
+                    "Уже нормализованный proto-id карты сохраняется");
+}
+
+#endif
+
+}

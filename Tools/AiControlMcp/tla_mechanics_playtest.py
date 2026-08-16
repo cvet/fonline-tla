@@ -21,6 +21,7 @@ import json
 import socket
 import sys
 import time
+from pathlib import Path
 
 
 class BridgeError(Exception):
@@ -126,14 +127,16 @@ def close_modal(bridge: Bridge) -> bool:
     and the headless driver never sees it. Returns True if a modal was present and dismissed.
     """
     o = bridge.observe_safe() or {}
-    if o.get("dialog", {}).get("active") or o.get("screen", {}).get("modalActive"):
-        bridge.act("dialog_answer", intArg=0xF2)  # advance/close answer for dialog-type modals
-        time.sleep(0.5)
+    if o.get("dialog", {}).get("active"):
+        bridge.act("close_dialog")
+    elif o.get("screen", {}).get("modalActive"):
         bridge.act("close_screen")
-        bridge.act("clear_actions")
-        time.sleep(0.5)
-        return True
-    return False
+    else:
+        return False
+    time.sleep(0.5)
+    bridge.act("clear_actions")
+    time.sleep(0.5)
+    return True
 
 
 def manhattan(a: dict, x: int, y: int) -> int:
@@ -256,8 +259,7 @@ def run(args: argparse.Namespace) -> dict:
                          textEmpty=(d.get("text", "") == ""))
                     if (d.get("text", "") == ""):
                         report["findings"].append(f"dialog {d.get('dialogId')} opened with empty text (content/localization)")
-                    # advance/close the dialog
-                    bridge.act("dialog_answer", intArg=0)
+                    bridge.act("close_dialog")
                     break
                 if abs(cur[0] - tx) + abs(cur[1] - ty) <= 1:
                     break
@@ -306,8 +308,9 @@ def main() -> int:
     report = run(args)
     text = json.dumps(report, ensure_ascii=False, indent=2)
     if args.report:
-        with open(args.report, "w", encoding="utf-8") as fh:
-            fh.write(text)
+        report_path = Path(args.report)
+        report_path.parent.mkdir(parents=True, exist_ok=True)
+        report_path.write_text(text, encoding="utf-8")
     print(text)
     return 0 if report.get("ok") else 1
 

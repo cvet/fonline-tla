@@ -49,7 +49,7 @@ Warnings are treated as failures. Keep script compilation, resource baking, nati
 | `Bake Resources` | After edits in `Scripts/`, `Dialogs/`, `Maps/`, `Items/`, `Critters/`, `Texts/`, `Gui/`, or `TLA.fomain`. |
 | `Force Bake Resources` | When incremental baking may be stale. Use sparingly. |
 | `Compile AngelScript` | Fast script syntax/API check. |
-| `Build :: TLA_Server`, `Build :: TLA_ServerHeadless`, `Build :: TLA_Client`, `Build :: TLA_Mapper`, `Build :: TLA_Editor`, `Build :: TLA_Baker`, `Build :: TLA_ASCompiler`, `Build :: TLA_UnitTests` | Build one target in `Build/Auto`, `RelWithDebInfo`. |
+| `Build :: TLA_Server`, `Build :: TLA_ServerHeadless`, `Build :: TLA_Client`, `Build :: TLA_Mapper`, `Build :: TLA_Baker`, `Build :: TLA_ASCompiler`, `Build :: TLA_UnitTests` | Build one target in `Build/Auto`, `RelWithDebInfo`. |
 | `Prepare :: TLA_*` | `Bake Resources` plus the corresponding build target. |
 | `Launch :: TLA_Server [windows]` / `[linux]` | Build, bake, then run the server with `LocalTest`. |
 | `Launch :: TLA_UnitTests [windows]` / `[linux]` | Build, bake, then run engine unit tests. |
@@ -191,7 +191,7 @@ AngelScript embedded in screens lives in the `.fogui` JSON: `OnGlobalMouseDown`,
 
 - Use `Format :: Scripts`, `Format :: Prototypes`, `Format :: Main Config`, or `Format :: All` before handing off when touched files need formatting.
 - `FormatSource.bat` is a smaller formatter path for `Scripts/*.fos`, `Scripts/Json/*.fos`, `SourceExt/*`, and `Gui/*.fogui`.
-- `Tools/ScriptQuality/validate_scripts.py` is a quality *validator* (reports only; not a formatter) for `Scripts/*.fos`: banner tags, magic text-pack ids, hand-rolled-util calls, redundant bool returns, commented-out code, `namespace`==filename, `#if` balance, component `== null` probes, trailing blank line. (The former `cyrillic-comment` check was retired 2026-06-20 — script comments are Russian now; see [Docs/ScriptStyle.md](Docs/ScriptStyle.md).) Run `Analyze :: Script Quality` for a summary; `--ratchet` fails only on new violations vs `Tools/ScriptQuality/baseline.json`; `--fix` applies the few safe autofixes. See `Tools/NullableEstimate/validate_nullable.py` for the complementary `?`/FO_NULLABLE checks.
+- `Tools/ScriptQuality/validate_scripts.py` is a quality *validator* (reports only; not a formatter) for `Scripts/*.fos`: banner tags, magic text-pack ids, hand-rolled-util calls, redundant bool returns, commented-out code, `namespace`==filename, `#if` balance, component `== null` probes, unsafe location access from `ItemTrigger` callbacks, and trailing blank lines. (The former `cyrillic-comment` check was retired 2026-06-20 — script comments are Russian now; see [Docs/ScriptStyle.md](Docs/ScriptStyle.md).) Run `Analyze :: Script Quality` for a summary; `--ratchet` fails only on new violations vs `Tools/ScriptQuality/baseline.json`; `--fix` applies the few safe autofixes. See `Tools/NullableEstimate/validate_nullable.py` for the complementary script `?` and native `ptr<T>`/`nptr<T>` ABI checks.
 - Do not hand-edit generated files: `Scripts/Content.fos`, generated `Scripts/GuiScreens.fos` without the matching `.fogui` update, baked output under `Baking/`, cache files under `Cache/`, or generated `VERSION`.
 - Local working trees such as `TLA-Dev/`, `Baking/`, `Cache/`, and build folders are outputs/debug state, not canonical authored inputs.
 

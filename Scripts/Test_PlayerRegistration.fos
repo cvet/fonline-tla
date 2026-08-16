@@ -1,0 +1,53 @@
+// Test_PlayerRegistration — регрессии резервирования имени при создании нового аккаунта.
+// Проверяет, что незавершённый резерв уже занят, публикуется только для своего криттера
+// и полностью удаляется при откате транзакции входа.
+namespace Test_PlayerRegistration
+{
+
+#if SERVER
+
+const string TestPlayerName = "__tla_registration_reservation_test__";
+
+[[ModuleInit]]
+void InitTestPlayerRegistration()
+{
+    Game.OnTestingInit.Subscribe(OnTestingInit);
+}
+
+[[Event]]
+void OnTestingInit()
+{
+    Testing::RegisterTest("player_registration", "name_reservation_transaction", NameReservationTransaction);
+}
+
+void NameReservationTransaction(Testing::TestContext ctx)
+{
+    if (Game.DbHasRecord(PlayerRegistration::PlayerNamesCollectionName, TestPlayerName)) {
+        Game.DbRemoveRecord(PlayerRegistration::PlayerNamesCollectionName, TestPlayerName);
+    }
+
+    ident crId = ZERO_IDENT;
+    crId.value = 900000001;
+    ident otherCrId = ZERO_IDENT;
+    otherCrId.value = 900000002;
+    ident playerId = ZERO_IDENT;
+    playerId.value = 900000003;
+
+    PlayerRegistration::CreatePlayerNameReservation(TestPlayerName, crId);
+    Testing::Expect(ctx, PlayerRegistration::IsPlayerNameClaimed(TestPlayerName), "Незавершённый резерв имени уже должен считаться занятым");
+    Testing::Expect(ctx, PlayerRegistration::ResolvePlayerIdByName(TestPlayerName) == ZERO_IDENT, "До OnPlayerLogin резерв ещё не должен публиковать PlayerId");
+    Testing::Expect(ctx,
+                    !PlayerRegistration::CommitPlayerNameReservation(TestPlayerName, otherCrId, playerId),
+                    "Чужой криттер не должен подтвердить резерв имени");
+    Testing::Expect(ctx, PlayerRegistration::CommitPlayerNameReservation(TestPlayerName, crId, playerId), "Свой криттер должен подтвердить резерв имени");
+    Testing::Expect(ctx, PlayerRegistration::ResolvePlayerIdByName(TestPlayerName) == playerId, "Подтверждённый резерв должен разрешаться в PlayerId");
+
+    PlayerRegistration::RemovePlayerNameReservation(TestPlayerName, otherCrId);
+    Testing::Expect(ctx, PlayerRegistration::IsPlayerNameClaimed(TestPlayerName), "Чужой откат не должен удалять подтверждённое имя");
+    PlayerRegistration::RemovePlayerNameReservation(TestPlayerName, crId);
+    Testing::Expect(ctx, !PlayerRegistration::IsPlayerNameClaimed(TestPlayerName), "Откат владельца должен удалить резерв целиком");
+}
+
+#endif
+
+}

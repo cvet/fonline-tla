@@ -1,0 +1,237 @@
+// Test_CritterActions — чистые регрессии серверного контракта контейнерных transfer-сессий.
+namespace Test_CritterActions
+{
+
+#if SERVER
+
+[[ModuleInit]]
+void InitTestCritterActions()
+{
+    Game.OnTestingInit.Subscribe(OnTestingInit);
+}
+
+[[Event]]
+void OnTestingInit()
+{
+    Testing::RegisterTest("critter_actions", "transfer_type_allowlist", TransferTypeAllowlist);
+    Testing::RegisterTest("critter_actions", "item_visibility", ItemVisibility);
+    Testing::RegisterTest("critter_actions", "changeable_container_state", ChangeableContainerState);
+    Testing::RegisterTest("critter_actions", "container_action_ext", ContainerActionExt);
+    Testing::RegisterTest("critter_actions", "map_container_access", MapContainerAccess);
+    Testing::RegisterTest("critter_actions", "critter_container_range", CritterContainerRange);
+    Testing::RegisterTest("critter_actions", "container_volume", ContainerVolume);
+    Testing::RegisterTest("critter_actions", "container_self_move", ContainerSelfMove);
+    Testing::RegisterTest("critter_actions", "container_transfer_tuple", ContainerTransferTuple);
+    Testing::RegisterTest("critter_actions", "use_item_target_mode", UseItemTargetMode);
+    Testing::RegisterTest("critter_actions", "use_item_capability", UseItemCapability);
+    Testing::RegisterTest("critter_actions", "use_item_timer", UseItemTimer);
+}
+
+void TransferTypeAllowlist(Testing::TestContext ctx)
+{
+    if (!Testing::Expect(ctx, CritterActions::IsContainerTransferType(TransferTypes::CritLoot), "Лут разрешён общему контейнерному RPC")) {
+        return;
+    }
+    if (!Testing::Expect(ctx, CritterActions::IsContainerTransferType(TransferTypes::FarCont), "Дальний контейнер разрешён общему RPC")) {
+        return;
+    }
+    if (!Testing::Expect(ctx, !CritterActions::IsContainerTransferType(TransferTypes::Close), "Закрытая сессия не является контейнерной")) {
+        return;
+    }
+
+    Testing::Expect(ctx, !CritterActions::IsContainerTransferType(TransferTypes::CritBarter), "Бартер нельзя обойти контейнерным RPC");
+}
+
+void ItemVisibility(Testing::TestContext ctx)
+{
+    if (!Testing::Expect(ctx, !CritterActions::IsContainerItemVisible(TransferTypes::CritLoot, true, false), "NoLoot скрывается из снимка лута")) {
+        return;
+    }
+    if (!Testing::Expect(ctx, !CritterActions::IsContainerItemVisible(TransferTypes::CritSteal, false, true), "NoSteal скрывается из снимка кражи")) {
+        return;
+    }
+    if (!Testing::Expect(ctx,
+                         CritterActions::IsContainerItemVisible(TransferTypes::CritLoot, false, true),
+                         "NoSteal сам по себе не скрывает предмет при луте")) {
+        return;
+    }
+
+    Testing::Expect(ctx,
+                    CritterActions::IsContainerItemVisible(TransferTypes::HexContUp, true, true),
+                    "Флаги криттера не фильтруют обычный предметный контейнер");
+}
+
+void ChangeableContainerState(Testing::TestContext ctx)
+{
+    if (!Testing::Expect(ctx, CritterActions::IsContainerAccessOpen(false, false), "Непереключаемый контейнер доступен без Opened")) {
+        return;
+    }
+    if (!Testing::Expect(ctx, CritterActions::IsContainerAccessOpen(true, true), "Открытый переключаемый контейнер доступен")) {
+        return;
+    }
+
+    Testing::Expect(ctx, !CritterActions::IsContainerAccessOpen(true, false), "Закрытие переключаемого контейнера отзывает transfer capability");
+}
+
+void ContainerActionExt(Testing::TestContext ctx)
+{
+    if (!Testing::ExpectEq(ctx,
+                           CritterActions::EncodeContainerActionExt(TransferTypes::CritLoot, true, false),
+                           int(TransferTypes::CritLoot) * 10,
+                           "Обычный take кодируется нулём в единицах")) {
+        return;
+    }
+    if (!Testing::ExpectEq(ctx,
+                           CritterActions::EncodeContainerActionExt(TransferTypes::CritLoot, true, true),
+                           int(TransferTypes::CritLoot) * 10 + 1,
+                           "Take all кодируется единицей в единицах")) {
+        return;
+    }
+
+    Testing::ExpectEq(ctx,
+                      CritterActions::EncodeContainerActionExt(TransferTypes::CritLoot, false, true),
+                      int(TransferTypes::CritLoot) * 10 + 2,
+                      "Любой put кодируется двойкой в единицах");
+}
+
+void MapContainerAccess(Testing::TestContext ctx)
+{
+    ident mapId;
+    mapId.value = 1;
+    ident otherMapId;
+    otherMapId.value = 2;
+    if (!Testing::Expect(ctx,
+                         CritterActions::IsMapContainerAccessValid(ItemOwnership::MapHex, mapId, mapId, 2, 1),
+                         "Контейнер на своей карте в радиусе multihex доступен")) {
+        return;
+    }
+    if (!Testing::Expect(ctx,
+                         !CritterActions::IsMapContainerAccessValid(ItemOwnership::CritterInventory, mapId, mapId, 1, 0),
+                         "Инвентарный предмет нельзя открыть как map-контейнер")) {
+        return;
+    }
+    if (!Testing::Expect(ctx,
+                         !CritterActions::IsMapContainerAccessValid(ItemOwnership::MapHex, mapId, otherMapId, 1, 0),
+                         "Контейнер с другой карты недоступен")) {
+        return;
+    }
+
+    Testing::Expect(ctx, !CritterActions::IsMapContainerAccessValid(ItemOwnership::MapHex, mapId, mapId, 2, 0), "Удалённый контейнер недоступен");
+}
+
+void CritterContainerRange(Testing::TestContext ctx)
+{
+    if (!Testing::Expect(ctx, CritterActions::IsCritterContainerInRange(2, 0, 1), "Multihex цели входит в дистанцию открытия контейнера-криттера")) {
+        return;
+    }
+
+    Testing::Expect(ctx, !CritterActions::IsCritterContainerInRange(3, 0, 1), "Дистанция за границей обоих multihex отклоняется");
+}
+
+void ContainerVolume(Testing::TestContext ctx)
+{
+    int64 nextVolume = 0;
+    if (!Testing::Expect(ctx,
+                         CritterActions::TryAddContainerStackVolume(10, 2, 5, 20, nextVolume) && nextVolume == 20,
+                         "Стек должен точно заполнить оставшийся объём")) {
+        return;
+    }
+    if (!Testing::Expect(ctx, !CritterActions::TryAddContainerStackVolume(10, 3, 4, 20, nextVolume), "Стек сверх вместимости должен быть отклонён")) {
+        return;
+    }
+    if (!Testing::Expect(ctx,
+                         !CritterActions::TryAddContainerStackVolume(0, 2147483647, 2, 2147483647, nextVolume),
+                         "Умножение объёма большого стека не должно переполняться")) {
+        return;
+    }
+
+    Testing::Expect(ctx, !CritterActions::TryAddContainerStackVolume(21, 0, 1, 20, nextVolume), "Уже переполненный контейнер не принимает новые предметы");
+}
+
+void ContainerSelfMove(Testing::TestContext ctx)
+{
+    ident containerId;
+    containerId.value = 10;
+    ident otherItemId;
+    otherItemId.value = 11;
+    if (!Testing::Expect(ctx, CritterActions::IsContainerSelfMove(containerId, containerId), "Контейнер нельзя переместить внутрь самого себя")) {
+        return;
+    }
+    if (!Testing::Expect(ctx, !CritterActions::IsContainerSelfMove(otherItemId, containerId), "Другой предмет не является self-move")) {
+        return;
+    }
+
+    Testing::Expect(ctx, !CritterActions::IsContainerSelfMove(ZERO_IDENT, ZERO_IDENT), "Нулевые id не образуют валидный self-move");
+}
+
+void ContainerTransferTuple(Testing::TestContext ctx)
+{
+    ident containerId;
+    containerId.value = 11;
+    if (!Testing::Expect(ctx, ClientItems::IsSameContainerTransfer(4, containerId, 7, 4, containerId, 7), "Одинаковый session tuple должен совпадать")) {
+        return;
+    }
+
+    Testing::Expect(ctx, !ClientItems::IsSameContainerTransfer(4, containerId, 7, 4, containerId, 8), "Другая session не должна подтверждать pending-операцию");
+}
+
+void UseItemTargetMode(Testing::TestContext ctx)
+{
+    if (!Testing::Expect(ctx, CritterActions::HasSingleUseItemTarget(true, false, false), "Одна цель-криттер допустима")) {
+        return;
+    }
+    if (!Testing::Expect(ctx, !CritterActions::HasSingleUseItemTarget(false, false, false), "Использование без цели отклоняется")) {
+        return;
+    }
+
+    Testing::Expect(ctx, !CritterActions::HasSingleUseItemTarget(true, true, false), "Несколько target mode отклоняются");
+}
+
+void UseItemCapability(Testing::TestContext ctx)
+{
+    if (!Testing::Expect(ctx, CritterActions::IsUseItemCapabilityAllowed(true, true, false), "Self-use требует IsCanUse")) {
+        return;
+    }
+    if (!Testing::Expect(ctx, !CritterActions::IsUseItemCapabilityAllowed(true, false, true), "IsCanUseOnSmth не разрешает self-use")) {
+        return;
+    }
+    if (!Testing::Expect(ctx, CritterActions::IsUseItemCapabilityAllowed(false, false, true), "Внешняя цель требует IsCanUseOnSmth")) {
+        return;
+    }
+
+    Testing::Expect(ctx, !CritterActions::IsUseItemCapabilityAllowed(false, true, false), "IsCanUse не разрешает внешнюю цель");
+}
+
+void UseItemTimer(Testing::TestContext ctx)
+{
+    if (!Testing::Expect(ctx, CritterActions::IsUseItemTimerAllowed(true, true, 1), "Минимальный таймер разрешён таймерному self-use")) {
+        return;
+    }
+    if (!Testing::Expect(ctx, CritterActions::IsUseItemTimerAllowed(true, true, 599), "Максимальный таймер разрешён таймерному self-use")) {
+        return;
+    }
+    if (!Testing::Expect(ctx, !CritterActions::IsUseItemTimerAllowed(true, false, 10), "Таймер нельзя передать на внешнюю цель")) {
+        return;
+    }
+    if (!Testing::Expect(ctx, !CritterActions::IsUseItemTimerAllowed(true, true, 600), "Таймер выше формата 09:59 отклоняется")) {
+        return;
+    }
+    if (!Testing::Expect(ctx, CritterActions::IsUseItemTimerAllowed(false, true, 0), "Обычное применение обязано передавать нулевой timer")) {
+        return;
+    }
+    if (!Testing::Expect(ctx, !CritterActions::IsUseItemTimerAllowed(false, true, 1), "Обычный предмет не принимает скрытый timer-параметр")) {
+        return;
+    }
+
+    ident critterId;
+    critterId.value = 1;
+    ident otherCritterId;
+    otherCritterId.value = 2;
+    Testing::Expect(ctx,
+                    CritterActions::IsSelfUseTarget(critterId, critterId) && !CritterActions::IsSelfUseTarget(critterId, otherCritterId),
+                    "Wire self-target определяется только совпадающим id и нормализуется отдельно от event target handles");
+}
+
+#endif
+
+}

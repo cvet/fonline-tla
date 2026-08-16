@@ -1,29 +1,21 @@
 #!/usr/bin/env python3
-"""Validate placement of FO_NULLABLE and `?` nullability markers.
+"""Validate native ptr/nptr script ABI and AngelScript `?` contracts.
 
-The marker is a contract annotation. It documents "this handle may be null"
-to readers and, for the subset of types where codegen knows how to validate
-it (entity meta-types), is enforced by `NativeDataProvider::CheckArgNotNull`
-/ `CheckReturnNotNull` at the script ↔ native boundary. The validator
-catches the two placement mistakes that are always wrong:
+Engine-side script handles use explicit borrowed-pointer wrappers:
+`ptr<T>` is non-null and `nptr<T>` is nullable. Bare `T*` is rejected on
+script-facing surfaces, while ordinary internal C++ pointers and engine
+hooks remain outside this check. The native gate covers:
 
-Engine side (`Engine/Source/Scripting/*ScriptMethods.cpp`):
-  - FO_NULLABLE may only appear inside a function declaration that is
-    immediately preceded by `///@ ExportMethod`. Anywhere else the macro
-    is silently a no-op (it never reaches codegen).
-  - FO_NULLABLE must be adjacent to a pointer type — never a primitive
-    or a non-pointer value type. Stick a `?`/FO_NULLABLE on `int`, `bool`,
-    `mpos`, etc. and you've made a meaningless declaration.
+  - `FO_SCRIPT_API` declarations owned by `///@ ExportMethod`;
+  - members named by a `///@ ExportRefType ... Export = ...` list;
+  - `FindFunc<...>` / `CheckFunc<...>` script-signature template args.
+
+The removed `FO_NULLABLE` macro is rejected if it reappears in native code.
 
 Script side (`Scripts/**/*.fos`):
   - The `T?` suffix must be on a handle-able ref type. `int?`, `bool?`,
     `mpos?`, etc. are forbidden — AngelScript has no `null` value for
     these.
-
-Whether the marker triggers a runtime check or is purely declarative
-documentation depends on the underlying type (codegen plumbs the check
-for entity meta-types only). Both uses are valid — the validator does
-not require entity-typed targets.
 
 Exits non-zero with a list of violations. Used by CI and `Analyze ::
 Nullable Placement` task.
@@ -36,14 +28,13 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-ENGINE_METHODS_DIR = ROOT / "Engine" / "Source" / "Scripting"
+ENGINE_SOURCE_DIR = ROOT / "Engine" / "Source"
 SOURCE_EXT_DIR = ROOT / "SourceExt"
 SCRIPTS_ROOT = ROOT / "Scripts"
+NATIVE_SOURCE_SUFFIXES = frozenset({".cc", ".cpp", ".h", ".hpp"})
 
-# Types the `?` suffix / FO_NULLABLE marker is *never* meaningful for —
-# AngelScript has no `null` value of these types, and the engine's
-# preprocessor doesn't recognize them as handle types either. Marker on
-# any of these is a typo / leftover.
+# Types the `?` suffix is never meaningful for: AngelScript has no `null`
+# value of these types.
 SCRIPT_PRIMITIVE_TYPES = frozenset({
     "void", "bool",
     "int", "int8", "int16", "int32", "int64",
@@ -53,32 +44,37 @@ SCRIPT_PRIMITIVE_TYPES = frozenset({
     "mpos", "ipos", "mdir", "hdir", "any", "tpos", "ucolor",
 })
 
-# C++ engine primitives / value types where FO_NULLABLE would be a typo —
-# the marker is only meaningful on a pointer to a class.
-ENGINE_PRIMITIVE_TYPES = frozenset({
-    "void", "bool",
-    "int8_t", "int16_t", "int32_t", "int64_t",
-    "uint8_t", "uint16_t", "uint32_t", "uint64_t", "size_t",
-    "float32_t", "float64_t", "float", "double",
-    "string", "string_view", "hstring", "ident_t", "any_t",
-    "mpos", "ipos", "ipos32", "mdir", "hdir", "tpos", "ucolor",
-})
-
 EXPORT_METHOD_RE = re.compile(
-    r"^///@\s*ExportMethod[^\n]*\n"
-    r"FO_SCRIPT_API\s+"
-    r"(?:(FO_NULLABLE)\s+)?"             # group 1 = return-type marker
-    r"([A-Za-z_][\w:]*)\s*(\*?)\s+"      # group 2 = return type name, group 3 = `*` if pointer
-    r"([A-Za-z_]\w*)\s*\("                # group 4 = function name
-    r"([^)]*)\)",                          # group 5 = args text
+    r"^[ \t]*///@\s*ExportMethod\b[^\r\n]*\r?\n(?P<signature>[^\r\n]*)",
     re.MULTILINE,
 )
+EXPORT_REF_TYPE_RE = re.compile(
+    r"^[ \t]*///@\s*ExportRefType\b(?P<flags>[^\r\n]*)",
+    re.MULTILINE,
+)
+FO_SCRIPT_API_RE = re.compile(r"\bFO_SCRIPT_API\b")
+FO_NULLABLE_RE = re.compile(r"\bFO_NULLABLE\b")
+TEMPLATE_CALL_RE = re.compile(r"\b(?P<name>FindFunc|CheckFunc)\s*<")
+CPP_RAW_STRING_START_RE = re.compile(r'(?:u8|u|U|L)?R"([^ ()\\\t\r\n]{0,16})\(')
 
-FO_NULLABLE_OCCURRENCE_RE = re.compile(r"\bFO_NULLABLE\b")
+# A script handle may be namespaced and cv-qualified. The lookahead avoids
+# treating multiplication (`count * 2`) as a pointer declarator.
+RAW_POINTER_RE = re.compile(
+    r"(?<![\w:])(?:(?:const|volatile)\s+)*"
+    r"(?P<type>[A-Za-z_]\w*(?:::\w+)*)\s*\*"
+    r"(?=\s*(?:const\b|volatile\b|[A-Za-z_]\w*|[,>&)\[\];={}]|$))"
+)
 
 
 def find_line_number(text: str, offset: int) -> int:
     return text.count("\n", 0, offset) + 1
+
+
+def display_path(path: Path) -> str:
+    try:
+        return str(path.relative_to(ROOT))
+    except ValueError:
+        return str(path)
 
 
 def split_args(args_text: str) -> list[str]:
@@ -109,84 +105,198 @@ def split_args(args_text: str) -> list[str]:
     return pieces
 
 
-def parse_arg(arg_text: str) -> tuple[bool, str, bool, str]:
-    """Return (has_marker, type_name_without_modifiers, is_pointer, param_name)."""
-    a = arg_text.strip()
-    has_marker = a.startswith("FO_NULLABLE")
-    if has_marker:
-        a = a[len("FO_NULLABLE"):].lstrip()
-    # Drop default value if present
-    if "=" in a:
-        a = a.split("=", 1)[0].rstrip()
-    sep = a.rfind(" ")
-    if sep < 0:
-        return has_marker, a, False, ""
-    type_part = a[:sep].rstrip()
-    name = a[sep + 1:].strip()
-    is_pointer = type_part.rstrip().endswith("*")
-    type_name = type_part.rstrip("*&").strip()
-    return has_marker, type_name, is_pointer, name
+def mask_cpp_non_code(text: str, *, preserve_codegen_tags: bool = False) -> str:
+    """Blank C++ comments and literals while preserving offsets/newlines."""
+    chars = list(text)
+    n = len(text)
+    i = 0
+
+    def blank(start: int, end: int) -> None:
+        for pos in range(start, end):
+            if chars[pos] not in "\r\n":
+                chars[pos] = " "
+
+    while i < n:
+        if text.startswith("//", i):
+            end = text.find("\n", i + 2)
+            end = n if end == -1 else end
+            line_start = text.rfind("\n", 0, i) + 1
+            is_codegen_tag = text.startswith("///@", i) and not text[line_start:i].strip()
+            if not (preserve_codegen_tags and is_codegen_tag):
+                blank(i, end)
+            i = end
+            continue
+        if text.startswith("/*", i):
+            close = text.find("*/", i + 2)
+            end = n if close == -1 else close + 2
+            blank(i, end)
+            i = end
+            continue
+
+        raw_match = CPP_RAW_STRING_START_RE.match(text, i)
+        if raw_match is not None:
+            delimiter = raw_match.group(1)
+            close_token = ")" + delimiter + '"'
+            content_start = raw_match.end()
+            close = text.find(close_token, content_start)
+            end = n if close == -1 else close + len(close_token)
+            blank(i, end)
+            i = end
+            continue
+
+        prefix_len = 0
+        for prefix in ('u8"', 'u"', 'U"', 'L"', '"', "u8'", "u'", "U'", "L'", "'"):
+            if text.startswith(prefix, i):
+                prefix_len = len(prefix)
+                quote = prefix[-1]
+                break
+        if prefix_len:
+            j = i + prefix_len
+            while j < n:
+                if text[j] == "\\":
+                    j += 2
+                    continue
+                if text[j] == quote:
+                    j += 1
+                    break
+                j += 1
+            blank(i, min(j, n))
+            i = min(j, n)
+            continue
+        i += 1
+    return "".join(chars)
+
+
+def find_matching_delimiter(text: str, start: int, opening: str, closing: str) -> int:
+    depth = 0
+    for index in range(start, len(text)):
+        if text[index] == opening:
+            depth += 1
+        elif text[index] == closing:
+            depth -= 1
+            if depth == 0:
+                return index
+    return -1
+
+
+def previous_line(text: str, offset: int) -> str:
+    line_start = text.rfind("\n", 0, offset) + 1
+    previous_end = max(0, line_start - 1)
+    previous_start = text.rfind("\n", 0, previous_end) + 1
+    return text[previous_start:previous_end].strip()
+
+
+def validate_native_text(path: Path, text: str) -> list[str]:
+    """Validate one native source file. Kept pure for focused unit tests."""
+    if not any(token in text for token in ("ExportMethod", "ExportRefType", "FO_SCRIPT_API", "FindFunc", "CheckFunc", "FO_NULLABLE")):
+        return []
+
+    errors: list[str] = []
+    shown_path = display_path(path)
+    masked = mask_cpp_non_code(text)
+    tags_visible = mask_cpp_non_code(text, preserve_codegen_tags=True)
+    reported_raw_offsets: set[int] = set()
+
+    def report_raw(fragment: str, base_offset: int, surface: str) -> None:
+        for pointer in RAW_POINTER_RE.finditer(fragment):
+            offset = base_offset + pointer.start()
+            if offset in reported_raw_offsets:
+                continue
+            reported_raw_offsets.add(offset)
+            line = find_line_number(text, offset)
+            type_name = pointer.group("type")
+            errors.append(
+                f"{shown_path}:{line}: raw pointer '{type_name}*' in {surface} — "
+                "use ptr<T> for non-null or nptr<T> for nullable script handles"
+            )
+
+    # ExportMethod context is one line by codegen contract.
+    for match in EXPORT_METHOD_RE.finditer(tags_visible):
+        signature = match.group("signature")
+        signature_offset = match.start("signature")
+        report_raw(mask_cpp_non_code(signature), signature_offset, "`///@ ExportMethod` signature")
+
+    # Catch unannotated FO_SCRIPT_API declarations too, while intentionally
+    # excluding EngineHook: hooks use a separate native ABI and SetupBakersHook
+    # is not a script-callable binding.
+    for match in FO_SCRIPT_API_RE.finditer(masked):
+        line_start = text.rfind("\n", 0, match.start()) + 1
+        line_end = text.find("\n", match.end())
+        line_end = len(text) if line_end == -1 else line_end
+        owner_tag = previous_line(text, match.start())
+        if owner_tag.startswith("///@ EngineHook"):
+            continue
+        surface = "`///@ ExportMethod` signature" if owner_tag.startswith("///@ ExportMethod") else "FO_SCRIPT_API signature"
+        report_raw(masked[line_start:line_end], line_start, surface)
+
+    # Only members explicitly named after `Export =` are script ABI. Internal
+    # raw helpers and storage in the same class remain outside this gate.
+    for tag in EXPORT_REF_TYPE_RE.finditer(tags_visible):
+        export_match = re.search(r"\bExport\s*=\s*(?P<names>.*)$", tag.group("flags"))
+        if export_match is None:
+            continue
+        export_names = set(re.findall(r"[A-Za-z_]\w*", export_match.group("names")))
+        if not export_names:
+            continue
+
+        class_match = re.search(r"\b(?:class|struct)\s+[A-Za-z_]\w*[^;{]*\{", masked[tag.end():])
+        if class_match is None:
+            continue
+        class_open = tag.end() + class_match.end() - 1
+        class_close = find_matching_delimiter(masked, class_open, "{", "}")
+        if class_close == -1:
+            continue
+
+        block_offset = class_open + 1
+        for line in masked[block_offset:class_close].splitlines(keepends=True):
+            member_name = ""
+            for method_match in re.finditer(r"\b([A-Za-z_]\w*)\s*\(", line):
+                if method_match.group(1) in export_names:
+                    member_name = method_match.group(1)
+                    break
+            if not member_name:
+                for field_name in sorted(export_names):
+                    if re.search(rf"\b{re.escape(field_name)}\b\s*(?:\{{|=|;)", line):
+                        member_name = field_name
+                        break
+            if member_name:
+                report_raw(line, block_offset, f"exported `///@ ExportRefType` member '{member_name}'")
+            block_offset += len(line)
+
+    # FindFunc/CheckFunc template arguments describe AngelScript signatures.
+    # Balance nested templates so containers such as vector<Item*> are caught.
+    for call in TEMPLATE_CALL_RE.finditer(masked):
+        angle_open = call.end() - 1
+        angle_close = find_matching_delimiter(masked, angle_open, "<", ">")
+        if angle_close == -1:
+            continue
+        args_offset = angle_open + 1
+        report_raw(masked[args_offset:angle_close], args_offset, f"{call.group('name')} template arguments")
+
+    for marker in FO_NULLABLE_RE.finditer(masked):
+        line = find_line_number(text, marker.start())
+        errors.append(
+            f"{shown_path}:{line}: obsolete FO_NULLABLE marker — "
+            "use ptr<T> for non-null or nptr<T> for nullable script handles"
+        )
+
+    return errors
+
+
+def iter_native_files() -> list[Path]:
+    files: list[Path] = []
+    for root in (ENGINE_SOURCE_DIR, SOURCE_EXT_DIR):
+        if not root.is_dir():
+            continue
+        files.extend(path for path in root.rglob("*") if path.suffix in NATIVE_SOURCE_SUFFIXES)
+    return sorted(files)
 
 
 def validate_engine() -> list[str]:
     errors: list[str] = []
-    files = sorted(ENGINE_METHODS_DIR.glob("*ScriptMethods.cpp"))
-    if SOURCE_EXT_DIR.is_dir():
-        files += sorted(p for p in SOURCE_EXT_DIR.glob("*.cpp") if "ExportMethod" in p.read_text(encoding="utf-8", errors="ignore"))
-    for f in files:
-        text = f.read_text(encoding="utf-8", errors="replace")
-        # Track FO_NULLABLE offsets that fall inside a recognized ExportMethod
-        # signature; anything not seen there is an out-of-band misuse.
-        seen_marker_offsets: set[int] = set()
-
-        for m in EXPORT_METHOD_RE.finditer(text):
-            ret_marker = m.group(1)
-            ret_type = m.group(2)
-            ret_star = m.group(3)
-            func_name = m.group(4)
-            args_text = m.group(5)
-
-            if ret_marker is not None:
-                marker_offset = m.start(1)
-                seen_marker_offsets.add(marker_offset)
-                if not ret_star:
-                    line = find_line_number(text, marker_offset)
-                    errors.append(f"{f.relative_to(ROOT)}:{line}: FO_NULLABLE on non-pointer return type '{ret_type}' of '{func_name}' — the marker is only meaningful on pointer types")
-                elif ret_type in ENGINE_PRIMITIVE_TYPES:
-                    line = find_line_number(text, marker_offset)
-                    errors.append(f"{f.relative_to(ROOT)}:{line}: FO_NULLABLE on primitive return type '{ret_type}*' of '{func_name}' — only class-pointer returns can be null")
-
-            # Walk args and find their FO_NULLABLE markers
-            args_offset_base = m.start(5)
-            piece_offset = 0
-            for piece in split_args(args_text):
-                # Find the absolute offset of this piece's FO_NULLABLE if any
-                idx = args_text.find(piece, piece_offset)
-                if idx < 0:
-                    continue
-                piece_abs_start = args_offset_base + idx
-                piece_offset = idx + len(piece)
-
-                has_marker, type_name, is_pointer, param_name = parse_arg(piece)
-                if not has_marker:
-                    continue
-                marker_offset = piece_abs_start + piece.find("FO_NULLABLE")
-                seen_marker_offsets.add(marker_offset)
-                if not is_pointer:
-                    line = find_line_number(text, marker_offset)
-                    errors.append(f"{f.relative_to(ROOT)}:{line}: FO_NULLABLE on non-pointer parameter '{type_name} {param_name}' of '{func_name}' — the marker is only meaningful on pointer types")
-                elif type_name in ENGINE_PRIMITIVE_TYPES:
-                    line = find_line_number(text, marker_offset)
-                    errors.append(f"{f.relative_to(ROOT)}:{line}: FO_NULLABLE on primitive parameter '{type_name}* {param_name}' of '{func_name}' — only class-pointer args can be null")
-
-        # Any remaining FO_NULLABLE occurrence (not seen inside a recognized
-        # ExportMethod signature) is misuse.
-        for m in FO_NULLABLE_OCCURRENCE_RE.finditer(text):
-            if m.start() in seen_marker_offsets:
-                continue
-            line = find_line_number(text, m.start())
-            errors.append(f"{f.relative_to(ROOT)}:{line}: FO_NULLABLE outside an `///@ ExportMethod` signature — the macro is a no-op here")
-
+    for path in iter_native_files():
+        text = path.read_text(encoding="utf-8", errors="replace")
+        errors.extend(validate_native_text(path, text))
     return errors
 
 
@@ -448,12 +558,12 @@ def validate_event_and_remotecall_signatures() -> list[str]:
 
 
 def main() -> int:
-    errors_engine = validate_engine()
+    errors_native = validate_engine()
     errors_scripts = validate_scripts()
     errors_signatures = validate_event_and_remotecall_signatures()
-    if errors_engine:
-        print("=== Engine FO_NULLABLE placement errors ===", file=sys.stderr)
-        for e in errors_engine:
+    if errors_native:
+        print("=== Native ptr/nptr script ABI errors ===", file=sys.stderr)
+        for e in errors_native:
             print(e, file=sys.stderr)
         print(file=sys.stderr)
     if errors_scripts:
@@ -466,15 +576,15 @@ def main() -> int:
         for e in errors_signatures:
             print(e, file=sys.stderr)
         print(file=sys.stderr)
-    total = len(errors_engine) + len(errors_scripts) + len(errors_signatures)
+    total = len(errors_native) + len(errors_scripts) + len(errors_signatures)
     if total > 0:
         print(
             f"FAILED: {total} violation(s) "
-            f"({len(errors_engine)} engine, {len(errors_scripts)} script, {len(errors_signatures)} handler-mismatch)",
+            f"({len(errors_native)} native ABI, {len(errors_scripts)} script, {len(errors_signatures)} handler-mismatch)",
             file=sys.stderr,
         )
         return 1
-    print("OK: nullability marker placement is valid")
+    print("OK: nullability and native ptr/nptr script ABI contracts are valid")
     return 0
 
 

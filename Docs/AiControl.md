@@ -46,7 +46,7 @@ Declared in `Scripts/AiControl.fos` (`///@ Setting Client ...`) with defaults in
 | `AiControl.SkipRosterOnLogin` | `False` | Reserved (roster not ported in v1) |
 | `AiControl.ProfileObservationThresholdMs` | `0` | Reserved (profiling not ported in v1) |
 | `AiControl.CaptureRawInputEvents` | `False` | Reserved (raw input capture not ported in v1) |
-| `AiControl.AllowQaCommands` | `False` | Gate (Common, read on client+server) for the `qa_teleport_*` test commands. Keep off outside test harnesses. |
+| `AiControl.AllowQaCommands` | `False` | Gate (Common, read on client+server) for the `qa_*` setup/fixture commands. Keep off outside test harnesses. |
 
 Keep the listener on loopback. It binds the local client as a remotely controllable process if exposed.
 
@@ -82,9 +82,23 @@ Consumers must branch on `connected`, `hasMap`, `hasChosen` instead of assuming 
   inCombat (`TimeoutBattle` active), inSneakMode.
 - `map`: id, protoId, width, height.
 - `critters`: visible critters from `CurMap.GetCritters(CritterFindType::Any)` (chosen excluded): id,
-  name, hexX/Y, isAlive, inCombat, dialogId.
-- `mapItems`: visible map items tracked from `OnItemMapIn` / `OnItemMapOut`: id, protoId, hexX/Y, count.
-- `inventory`: `Chosen.GetItems()`: id, protoId, count, slot.
+  protoId, name, hexX/Y, isAlive, inCombat, isNoTalk, effective talkDistance, dialogId. The
+  `protoId` + `dialogId` pair lets quest tools distinguish authored NPC roles that happen to share a dialog;
+  `isNoTalk` and `talkDistance` explain silent client/server talk precondition failures.
+- In QA-enabled runs, an ordinary `talk_to` attempt also emits `talk_diagnostic`: the server reports
+  life/control/no-talk/map/distance/mutual-visibility checks and whether the normal dialog context actually
+  started. This is observational only; it calls the same `StartDialog`/`Dialogs::RunDialog` path and does not
+  bypass distance, visibility, demands, or synchronization.
+- `mapItems`: visible map items tracked from `OnItemMapIn` / `OnItemMapOut`: id, protoId, hexX/Y, count,
+  stackability, ownership, cost/weight, use/pick-up capabilities, and `visualFeedback.timerCapable`.
+- `inventory`: `Chosen.GetItems()`: the same real item metadata plus slot. Both item arrays also expose the
+  TLA door/container contract (`hasDoor`, `hasContainer`, `hasLocker`, `canOpen`, `opened`, lock/jam/broken/
+  no-open state, and `isGag`). Runners must select candidates from these fields instead of guessing safety
+  from a proto name or accepting an unchecked explicit id.
+- `barter`: active barter snapshot with `traderId`, transfer `session`, server-synchronized pricing metadata
+  (`coefficient`, `masterTrader`, `playerOfferTotal`, `traderOfferTotal`), plus `playerInventory`,
+  `playerOffer`, `traderInventory`, and `traderOffer` item arrays (`id`, `protoId`, `count`);
+  `active=false` outside Barter.
 - `quests`: active quests of the chosen. TLA models quests as per-quest `uint8` critter properties in the
   `Quests` group (value = stage, 0 = not started), not a `QuestProgress` array — so this lists the non-zero
   quest properties as `{ name, value }`. (Resolved quest titles/objective text are a later addition.)
@@ -120,8 +134,8 @@ Queued through `act`, consumed by the client loop, routed through normal player 
 | `attack_entity` | `targetId`, `intArg` (mode) | `CurPlayer.ServerCall.Attack` |
 | `pick_item` | `itemId`, `append` | `Tla::ChosenPickItem` (proto/hex resolved from the item) |
 | `pick_hex` | `x`, `y`, `append` | Pick a visible map item at the hex |
-| `use_item` | `itemId`, optional `targetId`, `intArg` (timer) | `Tla::ChosenUseItem` (self or target critter) |
-| `use_skill` | `stringArg` (skill `CritterProperty` name, e.g. `SkillFirstAid`/`SkillLockpick`/`SkillRepair`), optional `targetId`/`itemId`/`x`/`y` | `CurPlayer.ServerCall.UseSkill`. With no target it applies to the chosen (self-heal etc.). |
+| `use_item` | `itemId`, optional exactly one `targetId`/`auxId`, optional `stringArg` (`timer:<seconds>`) | `Tla::ChosenUseItem` on self, one critter, or one item. Timer mode is self-only and accepts only the canonical range `timer:1` through `timer:599` (no sign, whitespace, leading zeroes, target, or trailing text). |
+| `use_skill` | `stringArg` (skill `CritterProperty` name, e.g. `SkillFirstAid`/`SkillLockpick`/`SkillRepair`), optional `targetId`/`itemId`/`x`/`y`; static scenery also requires `sceneryProtoId` | `CurPlayer.ServerCall.UseSkill`. With no target it applies to the chosen (self-heal etc.); scenery proto and hex are transported separately. |
 | `reload` | `itemId`, `auxId` (ammo) | `CurPlayer.ServerCall.ReloadWeapon` |
 | `unload` | `itemId` | `Tla::ChosenUnloadWeapon` |
 | `move_item` | `itemId`, `intArg` (slot) | `CurPlayer.ServerCall.MoveInvItem` |
@@ -129,10 +143,16 @@ Queued through `act`, consumed by the client loop, routed through normal player 
 | `operate_container` | `itemId`, `intArg` (bit0 take, bit1 all, `>>2` count) | `CurPlayer.ServerCall.OperateContainer` (loot/container grid: take items) |
 | `craft` | `intArg` (craft id) | `CurPlayer.ServerCall.Rpc_CraftItem(FixboyButton, id, 0)` — runs a FixBoy recipe (server checks skill/materials/tools, consumes resources, grants the item) |
 | `toggle_sneak` | `append` | `Tla::ChosenSneak` — **sneak is stubbed in TLA**, returns `sneak_not_implemented_in_game` |
-| `dialog_answer` | `intArg` (answer index; `0xF2`=continue/close) | `CurPlayer.ServerCall.SpeechAnswer` |
+| `dialog_answer` | `intArg` (answer index; special links: `0xF1`=close, `0xF2`=barter) | `CurPlayer.ServerCall.SpeechAnswer` |
+| `close_dialog` | none | Semantically close the active dialog with `SpeechAnswer(0xF1)` |
 | `say` | `stringArg`, `intArg` (`SayType`) | `CurPlayer.ServerCall.ReceiveChosenSay` |
+| `barter_transfer` | `itemId`, `stringArg` source, positive `intArg` count | Move a stack between `player_inventory`/`player_offer` or `trader_inventory`/`trader_offer` in the active Barter UI |
+| `barter_offer` | none | Submit the assembled active barter offer through the normal client/server path |
+| `barter_return_dialog` | none | Return from active NPC barter to its dialog through the current validated transfer session |
 | `clear_actions` | none | Clear queued client actions |
 | `close_screen` / `show_screen` / `hide_screen` | `stringArg` (`GuiScreen` name) | GUI screen control |
+| `show_context_screen` | `stringArg` (`Aim`, `Use`, `Timer`, `Split`, or `SkillBox`), real item/target ids as required | Open a contextual screen with its normal `OnShow` parameter contract after validating the observed target, item ownership, stack, and timer/use capabilities. |
+| `ui_answer` | `intArg` (index) or `stringArg` (`answer_N`/`level_N`); `auxId` is the expected DialogBox session | Answer a semantic DialogBox/elevator prompt. DialogBox requires the session from the same observation and rejects a missing/stale session; elevator answers reject a DialogBox session. |
 | `save_screenshot` | `stringArg` (path) | `Game.SaveScreenshot` (framebuffer readback) |
 | `set_resolution` | `x`, `y` | `Game.SetResolution` |
 | `toggle_fullscreen` | none | `Game.ToggleFullscreen` |
@@ -152,28 +172,40 @@ not normal player abilities. Use them to reach content for mechanics/quest runs.
 | Type | Main params | Behavior |
 |------|-------------|----------|
 | `qa_teleport_hex` | `x`, `y` | Same-map reposition (`Critter.TransferToHex`); the engine snaps to the nearest movable hex. Useful to reach otherwise-blocked spots. |
-| `qa_teleport_map` | `stringArg` (map/location proto), optional `x`/`y` | Teleport to a content map. Resolves `Game.GetMap` → `Game.GetLocation` → and, if the static location is not yet instantiated, `Location::CreateLocation` a fresh instance; then transfers to the location's map whose `ProtoId` matches the requested pid (so `arroyo` lands on the `arroyo` village map with its quest-givers), else its first map (`"0"` entry when no hex given). |
+| `qa_teleport_map` | `stringArg` (`locationPid` or `locationPid/mapProto`), optional `x`/`y` | Teleport to a content map. The client validates both proto ids and sends them as separate known `hstring` values; the server resolves the requested map inside that location, creates a valid unloaded location when needed, and uses entry `"0"` when no hex is given. Unknown targets fail as `unknown_map_target` without a server exception. |
 | `qa_teleport_global` | none | `Critter.TransferToGlobal`. Note: a no-op from the `repl1` replication/limbo start map (it has no global coordinates); use `qa_teleport_map` to reach content. |
-| `qa_set_prop` | `stringArg` (CritterProperty name), `intArg` (value) | Set an int CRITTER property (`cr.SetAsInt`) — reputation/loyalty values, a prior quest stage, `CurrentHp`, limb-damage flags, etc. |
+| `qa_set_prop` | `stringArg` (CritterProperty name), `intArg` (value), optional `x` request id | Set an int CRITTER property (`cr.SetAsInt`) — reputation/loyalty values, a prior quest stage, `CurrentHp`, limb-damage flags, etc. A successful script-side write publishes `qa_prop_set` (`{prop, value, requestId}`); a missing/delayed matching event is retried by the caller. |
 | `qa_set_game_prop` | `stringArg` (GameProperty name), `intArg` (value) | Set an int GAME property (`Game.SetAsInt`) — world/quest flags that live on the game singleton, not the critter (e.g. `DenVirginIsAway`). Many dialog demands gate on these, so `qa_set_prop` alone can't satisfy them. |
 | `qa_give_item` | `stringArg` (item proto), `intArg` (count) | Give an item (`cr.AddItem`) — for quest items the giver doesn't hand out, or starting gear. |
-| `qa_get_prop` | `stringArg` (CritterProperty name) | Authoritative SERVER-side read of an int critter property. The server reads `cr.GetAsInt` and calls the client back (`AiControlReceiveQaProp`), which publishes a `qa_prop_value` event (`{prop, value}`). Needed because ~1/3 of quest flags are `Server`-scope (not `OwnerSync`) and therefore never appear in the client observation's `quests` — the only way to verify them is this round-trip. |
+| `qa_get_prop` | `stringArg` (CritterProperty name), optional `intArg` request id | Authoritative SERVER-side read of an int critter property. The server reads `cr.GetAsInt` and calls the client back (`AiControlReceiveQaProp`), which publishes a `qa_prop_value` event (`{prop, value, requestId}`). Needed because ~1/3 of quest flags are `Server`-scope (not `OwnerSync`) and therefore never appear in the client observation's `quests` — the only way to verify them is this round-trip. |
 | `qa_get_text` | `stringArg` (dialog id), `intArg` (string number) | Resolve a numbered NPC floating-text via `MsgStr::DialogTextKey` and return it in the command message (`text=<…>`). Debug tool for the numbered-text fix below; empty means the string isn't authored for that dialog. |
+| `qa_get_text_pack` | `intArg` (numeric id) | Resolve a row from the baked general `Text` pack for the client's active language via `TextPackKey(TextPackName::Text, …)` and return it as `text=<…>`. This verifies the runtime localization surface rather than only the authored `.fotxt` file. |
 | `qa_format_tags` | `stringArg` (text with tags) | Run a raw string through `Game.FormatTags` (resolves `@text`/`@arg`/`@sex`/… client-side) and return the result (`result=<…>`). Used to verify the three-token `@text Dialogs <dialogName> <key>@` path end-to-end. |
+| `qa_show_dialog_box` | none | Request a real server-backed `AskFollowGlobalGroupRuler` DialogBox with two answers for semantic/session and screenshot tests. The typed MCP wrapper is `tla_qa_show_dialog_box`; `answer_1` is the safe no-op choice. |
 
 `qa_get_prop` is asynchronous: the value arrives as a `qa_prop_value` event, not in the command's own
-completion message. Snapshot the event cursor (max `seq`), send `qa_get_prop`, then poll `events` for the
-`qa_prop_value` whose `prop` matches. `tla_quest_runner.py`'s `read_quest` does exactly this — it reads the
-client observation first (fast, for `OwnerSync` quests) and falls back to `qa_get_prop` when the property is
-absent client-side (`Server`-scope quests such as `KlamVaccination`).
+completion message. Snapshot the event cursor (max `seq`), send `qa_get_prop` with a non-zero request id, then
+poll `events` for the `qa_prop_value` whose `prop` and `requestId` both match. The correlation is required under
+load because a delayed response to an earlier read may arrive after the new cursor. `tla_quest_runner.py`'s
+`read_quest` does exactly this — it reads the client observation first (fast, for `OwnerSync` quests) and falls
+back to a correlated `qa_get_prop` when the property is absent client-side (`Server`-scope quests such as
+`KlamVaccination`).
 
-`qa_teleport_map` accepts `locationPid/mapProto` (e.g. `vault_city/vcity`) to land on a specific sub-map of a
-multi-map location. `qa_set_prop` / `qa_give_item` are the prerequisite-setup surface for quests gated by
+`qa_set_prop` has the same correlation requirement, with the request id transported in `x` because `intArg`
+already carries the property value. `tla_quest_runner.py` waits for a matching `qa_prop_set` event and resends
+the command when no matching acknowledgement arrives. The acknowledgement is sent only after `SetAsInt`.
+Entity locking remains an explicit `Game.Sync` cover in the `[[Async]]` script callback; no called engine
+function performs implicit synchronization.
+
+`qa_teleport_map` accepts `locationPid/mapProto` (e.g. `vault_city/vcity_courtyard`) to land on a specific
+sub-map of a multi-map location. The split is intentional: a synthetic combined `hstring` is not part of baked
+metadata and would be rejected by engine inbound validation. `qa_set_prop` / `qa_give_item` are the
+prerequisite-setup surface for quests gated by
 reputation, faction loyalty, prior quest state, or required items — set those up, then run the quest's normal
 dialog flow.
 
 `qa_teleport_map` is the practical way to put a test character on a real content map (e.g.
-`qa_teleport_map arroyo` lands on `arroyo_bridge` with its real NPCs). A freshly created location instance is
+`qa_teleport_map arroyo` lands on the `arroyo` village map with its real NPCs). A freshly created location instance is
 a sandbox copy of the proto's maps/NPCs — good for exercising map mechanics/dialogs, but not tied to the
 canonical world location's quest state.
 
@@ -205,10 +237,103 @@ Environment variables: `TLA_AI_HOST` (`127.0.0.1`), `TLA_AI_PORT` (`43011`), `TL
 
 Core MCP tools include `tla_ping`, `tla_status`, `tla_observe`, `tla_step`, `tla_sync`, `tla_events`,
 `tla_next_events`, `tla_act`, `tla_clear_actions`, the typed command tools (`tla_move_to_hex`, `tla_talk_to`,
-`tla_attack_entity`, `tla_pick_item`, `tla_use_item`, `tla_say`, `tla_dialog_answer`, ...), launch tools
+`tla_attack_entity`, `tla_pick_item`, `tla_use_item`, `tla_use_skill`, `tla_craft`, `tla_barter_transfer`,
+`tla_barter_offer`, `tla_barter_return_dialog`, `tla_close_dialog`, `tla_show_context_screen`,
+`tla_ui_answer`, `tla_qa_show_dialog_box`, ...), launch tools
 (`tla_launch*`, `tla_processes`, `tla_logs`), and the static schema/guide resources. Many advisory/agent
 tools were carried over from the sibling project and still assume sibling-project content; treat them as
 provisional until adapted to TLA content.
+
+TLA observations expose map positions as flat `hexX` / `hexY` fields. The navigation adapter normalizes those
+fields to its generic `hex: {x, y}` shape for the chosen critter, visible critters, and map items before planning.
+The current TLA bridge implements `path`, but not the sibling project's `tactical_path` query. `tla_nav_plan` and
+`tla_find_safe_step` therefore fall back to `path` only when the bridge explicitly reports
+`unknown_environment_query` or `unsupported_environment_query`; the result records `queryFallback`, while every
+other environment-query failure is returned unchanged.
+
+### Verified engine screenshots
+
+`tla_save_screenshot` captures the composed render target (world plus GUI). Use a standalone graphical client for
+visual regression runs: the embedded headless client produced structurally valid TGA files whose framebuffer was
+entirely black in the verified Windows setup. The headless mode remains useful for non-visual bridge/gameplay
+automation. The tool always waits for its own `command_completed`; callers do not need to set
+`waitForCompletion`. Before capture it optionally waits `settleMs` (250 ms by default), removes an old target,
+and confines the optional `.tga` path to `TLA_WORKSPACE_ROOT`. With no path it writes a timestamped file under
+`Workspace/AiControlScreenshots/`.
+
+The MCP capture result is a verification record, not just an acknowledgement: absolute and workspace-relative paths,
+existence/byte size, dimensions, pixel depth, SHA-256, TGA payload boundaries, sampled color/luminance metrics,
+`blankLike`, command completion, and `verified`. `verified=true` means command completion succeeded, the new file
+is an uncompressed 24/32-bit true-color TGA with a complete payload, and the sampled frame is not blank-like.
+Bad input (wrong extension or a path escape) is MCP `-32602`; command/file/format/blank failures are returned as
+`verified=false` with a structured `failure.stage` and `failure.message`. This generic check proves that a frame
+was produced, not that a particular window rendered its controls; the audit runners add content-specific ROI
+oracles below.
+
+For deterministic screen audits, direct `tla_show_screen` is safe only for parameterless screens in the right
+game state:
+
+| Audit path | Screens | Notes |
+|------------|---------|-------|
+| Direct show/capture/hide while in game | `Options`, `Inventory`, `Character`, `PipBoy`, `FixBoy`, `Menu`, `Credits` | No required `params`; inventory/character/PDA/crafting still need a chosen critter for meaningful content |
+| Open through the real mechanic, then capture | `Dialog`, `Barter`, `PickUp`, `Split`, `Aim`, `Radio`, `Timer`, `Use`, `SkillBox`, `Elevator`, `TownView`, `GmTown`, `Say`, `SayExtended`, `DialogBox`, `InputBox` | Their screen code consumes a target/item/location/dialog context; direct show can assert or render invalid state |
+| State-owned roots | `Login`, `Registration`, `Game`, `GlobalMap`, `Wait` | Reach these through connection, registration, map transfer, or wait state rather than stacking them over gameplay |
+
+The standalone audit runner uses the shared MCP client, waits for show/hide completion, checks that each screen
+became active, and applies a content oracle: controls for Options, stats for Inventory/Character, PipBoy body,
+FixBoy recipes, Menu buttons, and Credits text. Unknown screens are not marked verified unless the diagnostic
+`--allow-generic` opt-in is supplied. The runner writes a JSON manifest:
+
+```bash
+python Tools/AiControlMcp/tla_gui_screenshot_test.py
+python Tools/AiControlMcp/tla_gui_screenshot_test.py --screens Options,Inventory,PipBoy \
+  --output-dir Workspace/AiControlScreenshots/gui-smoke
+```
+
+`tla_context_gui_playtest.py` covers nine parameterized windows: `SkillBox`, `Aim`, `Split`, `Timer`,
+`Use`, `PickUp`, `Radio`, `Elevator`, and `DialogBox`. It selects real observed items/targets using the
+capability metadata above, opens the first five through `tla_show_context_screen`, opens PickUp and Radio
+through their normal mechanics, captures Elevator when already active or enters it through an authored trigger
+hex, and obtains DialogBox from `tla_qa_show_dialog_box`. Each capture has a window-specific ROI oracle.
+The `Aim` oracle checks its authored green labels rather than the gold text used by several other windows.
+DialogBox is closed with `tla_ui_answer` using `expectedSession`; a delayed answer cannot act on a replacement
+prompt. Its semantic buttons also expose safety metadata: `answer_0` is `role=confirm`, `dangerous=true`, while
+`answer_1` is the safe `role=cancel` choice. Agents must not treat an unlabelled first button as a harmless default.
+
+The default run captures every context that is available in the current world state. `--require-all` turns a
+missing prerequisite into failure. Elevator needs a known real trigger unless it is already active:
+
+```bash
+python Tools/AiControlMcp/tla_context_gui_playtest.py \
+  --output-dir Workspace/AiControlScreenshots/context-gui
+# First use tla_qa_teleport_map with mariposa/mariposa_level1.
+python Tools/AiControlMcp/tla_context_gui_playtest.py --screens Elevator \
+  --elevator-trigger-hex 101 43 --require-all
+```
+
+A live standalone-client run passed the eight Arroyo contexts available there plus the Mariposa Elevator run
+(**9/9** total). Timer was also verified beyond pixels: `timer:599` consumed one inventory dynamite and created
+one `active_dynamite`. The elevator exposed `level_1` through `level_3`; answering `level_2` through
+`tla_ui_answer` transferred the chosen from `mariposa_level1` to `mariposa_level2`.
+
+The runner deliberately does not bypass item safety: Split needs an owned stack, Timer an owned timer-capable
+item, Use an owned `canUseOnSmth` item and a real target, PickUp a visible safe unlocked container, and Radio
+an owned radio. Prepare those prerequisites through ordinary gameplay or gated QA setup commands.
+
+`tla_barter_playtest.py` covers the contextual `Dialog` → NPC `Barter` → `Dialog` lifecycle through MCP
+tools. It requires an in-game chosen critter and `AiControl.AllowQaCommands=True`; the runner grants caps,
+teleports to the requested trader, verifies pricing/session metadata and a completed offer refresh, captures all
+three UI states, and requires the assembled Barter frame to contain all four item panels, both totals, and the
+header display. It closes the dialog and writes `report.json` alongside the verified TGA files:
+
+```bash
+python Tools/AiControlMcp/tla_barter_playtest.py --map arroyo --npc-dialog-id arroyo_doc --hex 77 103 \
+  --output Workspace/AiControlBarterPlaytests/arroyo-doc
+# Add --hex X Y when the trader is not visible from the map entry.
+```
+
+Use `tla_window_screenshot` only when the OS window itself matters (window chrome, presentation under a specific
+desktop compositor, or a renderer diagnostic); it is Windows-only and is not the canonical composed-frame check.
 
 > NOTE: The adapter's launch orchestration reads TLA subconfigs (`Unpackaged`, `LocalTest`, `PublicGame`).
 > TLA does not use the sibling project's scene system, so `startupScenes` is empty. For now, launch the
@@ -252,9 +377,14 @@ for a single scripted run, not long iterative sessions. Use the persistent-serve
    `///@ ExportMethod` / `///@ EngineHook`). For headless smoke also build `TLA_ServerHeadless`.
 2. `Compile AngelScript` (or `Bake Resources`) — `Scripts/AiControl.fos` sees the generated client exports.
 3. `python Tools/AiControlMcp/smoke_ai_control_mcp.py --static-only` — schema/tool/resource/prompt discovery.
-4. Launch a client with `AiControl.Enabled = True` (above), then
+4. `python -m unittest Tools/AiControlMcp/test_ai_control_screenshot.py` — path confinement, raw TGA validation,
+   blank-like detection, event metadata, and typed command payload checks.
+5. Launch a client with `AiControl.Enabled = True` (above), then
    `python Tools/AiControlMcp/smoke_ai_control_mcp.py` — `tla_ping`, `tla_status`, `tla_observe`, the event
    cursor, and one harmless `tla_clear_actions` round-trip.
+6. With an in-game chosen critter, run `python Tools/AiControlMcp/tla_gui_screenshot_test.py` and inspect its
+   manifest plus TGA files. Run `python Tools/AiControlMcp/tla_context_gui_playtest.py` for the nine contextual
+   windows; use `--require-all` only after preparing every real item/map prerequisite.
 
 ## Playtest runner
 
@@ -279,30 +409,63 @@ and a Russian client (`--Client.Language russ`) so dialog text matches the Russi
 
 ```bash
 python Tools/AiControlMcp/tla_quest_runner.py --list
-python Tools/AiControlMcp/tla_quest_runner.py --quest cassidy_letter --report Workspace/cassidy.json
-python Tools/AiControlMcp/tla_quest_runner.py --quest klam_vaccination --report Workspace/klam.json
+python Tools/AiControlMcp/tla_quest_runner.py --quest cassidy_letter --name QuestCassidy1 --register \
+  --require-exercised --report Workspace/cassidy.json
+python Tools/AiControlMcp/tla_quest_runner.py --quest klam_vaccination --name QuestKlam1 --register \
+  --require-exercised --report Workspace/klam.json
 ```
+
+The same runner can discover localized answer paths before a quest spec is authored. `--trace-dialog`
+replays bounded paths against a visible NPC, reads the requested quest flag through the asynchronous
+server-authoritative `qa_get_prop` round-trip, and emits the answers that increase it. Candidates are ranked by
+stage advance and include the full visible `node_path` plus stable Russian keyword substrings:
+
+```bash
+python Tools/AiControlMcp/tla_quest_runner.py --trace-dialog --map arroyo \
+  --npc CassidyStage4 --dialog arroyo_cassidy --flag ArroyoCassidyLetter \
+  --npc-hex 82 113 --name TraceCass --register --trace-max-candidates 1 \
+  --report Build/_artifacts/trace-dialog/cassidy.json
+```
+
+Run the server with `--ServerNetwork.InactivityDisconnectTime 0` for a long trace. Use a disposable QA
+character: the runner restores the requested flag in `finally`, but arbitrary authored side effects such as
+items, dialog cooldowns, and other properties cannot be rolled back generically. `--setup-json` accepts either
+a JSON array or a path/`@path` to an array using the same `prop` / `game_prop` / `item` entries as quest specs.
+The traversal is bounded by `--trace-max-depth` (12), `--trace-max-paths` (96),
+`--trace-max-candidates` (8), and an internal `--trace-max-seconds` wall-clock budget (180). It uses
+priority-guided replay, tolerates one-shot first-meeting roots and randomized greeting/exit text, retries a
+missing or delayed `qa_get_prop` response under async load, and correlates delayed replies by request id.
+Property setup/reset uses the correlated `qa_prop_set` acknowledgement and resends an unacknowledged write;
+confirmed same-map teleports and `talk_to` actions are retried as well. First-time Debug
+    map loads get a 90-second observed transition window, configurable with `--map-timeout`; success still requires
+    observing the requested `map.protoId`. Reports expose `truncated`, `time_limit_reached`,
+`branch_errors`, `flag_restored`, and `restore_error` explicitly.
 
 A spec stage can carry a `setup` list — `{"prop"|"game_prop"|"item": name, "value"|"count": n}` — applied
 after the teleport and before talking, to satisfy a giver's prerequisite demands (an attribute like
 `Intellect`, a `CurrentHp`, a GAME flag, or a required inventory item). The dialog navigator auto-advances
 single-answer intros, never bails out on an exit-like answer while a fresh one remains, and remembers chosen
 answers across re-opens so each re-open explores a new branch — which is what makes a topic-tree giver like
-Mynoc reachable without hand-coding the exact path.
+Mynoc reachable without hand-coding the exact path. Current specs use monotonic stage targets: a completed
+character reports `already_satisfied=true` instead of wandering an obsolete dialog branch. Use
+`--require-exercised` for regression runs that must verify at least one real state transition.
 
-## Verified end-to-end (2026-06-21)
+## Verified end-to-end (2026-07-11)
 
 - `register` / `login` drive the real TLA auth path; a character spawns and `observe` populates
   `chosen` / `map` / `critters` / `mapItems` / `quests`.
 - `move_to_hex` moves the chosen to the exact target hex; `pick_item` / `talk_to` auto-walk to their target;
   `say`, `attack_entity`, `dialog_answer` are accepted and processed; dialogs open and advance by answer index.
-- Dialog observation captures `dialogId` / `talkerId` / answer structure (see the dialog note above on empty
-  text for start-map `repl_*` dialogs).
+- Dialog observation captures `dialogId` / `talkerId` / answer structure. A fresh `repl1` registration opened
+  the ordinary `repl_hubb_oper` dialog with readable speech and answer; an engine framebuffer capture also
+  confirmed the composed dialog window renders correctly. ContentQuality verifies every reachable speech and
+  answer in all 17 `repl_*.fodlg` files is present and non-empty in both languages (excluding invisible
+  pre-dialog routing node 1).
 - `environment_query path` correctly reports reachable vs unreachable target hexes (`reachable` /
   `pathLength`); `obstacles` lists blocked hexes — used by the playtest runner to pick reachable targets.
-- `qa_teleport_hex` repositions on the current map; `qa_teleport_map arroyo` reaches a real content map
-  (`arroyo_bridge`) with its real NPCs, where `tla_mechanics_playtest.py --teleport-map arroyo` probes 12/12
-  reachable targets and opens a real content dialog (`arroyo_laumer`).
+- `qa_teleport_hex` repositions on the current map; `qa_teleport_map arroyo` reaches the real `arroyo` village
+  map with its quest NPCs. Exact `vault_city/vcity_courtyard` targeting is verified through the split remote-call
+  contract; an unknown proto returns `unknown_map_target` without reaching server validation.
 - After the dialog text-key fix, a real quest dialog is read and navigated end-to-end: the agent walked the
   Savinelli caravan-escort dialog on `arroyo_bridge` through 5 readable speeches, choosing meaningful answers.
 - A real quest is **accepted with an observable state change**: on the `arroyo` village map the agent talked
@@ -311,14 +474,15 @@ Mynoc reachable without hand-coding the exact path.
   `letter_to_sindy` item added to inventory. (Caravan-escort quests, by contrast, are correctly time-gated —
   they only accept near departure.)
 - **A full quest cycle completes end-to-end** across two cities via teleport: after accepting the Cassidy
-  letter at Arroyo, the agent `qa_teleport_map vault_city` → `vcity_courtyard`, reaches Cindy (`vc_cindy` at
+  letter at Arroyo, the agent `qa_teleport_map vault_city/vcity_courtyard` reaches Cindy (`vc_cindy` at
   hex `65,55`), reads her dialog ("От Кэссиди?! ... Давай его скорей сюда!"), answers "Вот оно, держи.", and
   the quest advances to `CritterProperty::ArroyoCassidyLetter = 2` with the `letter_to_sindy` item consumed.
   (The `CreateLocation` sandbox instance DOES spawn the map-placed quest NPCs; an earlier "missing Cindy"
   reading was a wrong-hex lookup. After `qa_teleport_hex` on a large map, nudge a couple of hexes and
   re-`observe` to let the client sync nearby critters.)
-- The whole cycle is reproducible through `tla_quest_runner.py --quest cassidy_letter` (`ok: true`,
-  `ArroyoCassidyLetter` 0 → 1 → 2). `qa_teleport_map` sets `AutoGarbage=false` on the instances it creates
+- The whole cycle is reproducible through `tla_quest_runner.py --quest cassidy_letter --require-exercised`
+  (`ok: true`, `transitions_verified: 2`, `ArroyoCassidyLetter` 0 → 1 → 2). `qa_teleport_map` sets
+  `AutoGarbage=false` on the instances it creates
   (and recreates a destroyed one) so a content location persists across runner stages/runs.
 - **A second full quest cycle** runs on a single giver: `tla_quest_runner.py --quest arroyo_mynoc_oil`
   (`ok: true`, `ArroyoMynocOil` 0 → 1 → 2) — accept "Я принесу тебе смазку" (gated on `Intellect > 3`, set via
@@ -338,9 +502,53 @@ Mynoc reachable without hand-coding the exact path.
   then run the quest.
 - **Fixed an event-buffer flood:** `OnInputLost` fired every frame while the client window was unfocused (the
   normal state for an automated/headless client), pushing `input_lost` until it evicted real events
-  (`command_completed`, `qa_prop_value`) from the bounded event ring. It is now gated behind
+  (`command_completed`, `qa_prop_value`, `qa_prop_set`) from the bounded event ring. It is now gated behind
   `AiControl.CaptureRawInputEvents` (off by default), so automation runs see a clean event stream.
 - `smoke_ai_control_mcp.py` (static and live) and `tla_mechanics_playtest.py` pass.
+
+### Dialog trace seeds (2026-08-08)
+
+`--trace-dialog` was verified against a fresh Russian client and the real `CassidyStage4` NPC on `arroyo`.
+The bounded replay handled the one-shot introduction, found the three-answer path through "work" and the letter
+offer, and emitted `Да, конечно.` as the rank-1 candidate for `ArroyoCassidyLetter` (`0 → 1`). The JSON report
+recorded 5 explored paths, 1 root rebase, no branch errors, the complete node path, and a confirmed restore to
+the original value 0.
+
+The same live workflow covers the real Arroyo Mynoc placement (`protoId=EnclaveGuard`,
+`dialogId=arroyo_mynoc`) with `IntellectBase=6` supplied through the acknowledged setup path. Quest-guided
+ordering found `Я заметил... Твоя броня, она несколько поржавела...` → `Я принесу тебе смазку...` in 2 explored
+paths and 13.7 seconds, observed `ArroyoMynocOil` 0 → 1, reported no branch errors, and confirmed restore to 0.
+
+The Den seed is now live-verified across all four authored stages. The real `HomesteaderMale` / `den_smitty`
+path accepted the job (`DenSmittyFixit` 0 → 1); `MrHandy` / `den_mr_handy` exposed the Repair-85 diagnosis
+(1 → 2) and accepted `pump_parts` + `oil_can` + `super_tool_kit` (2 → 3); Smitty then accepted the report
+(3 → 4). Every trace found a ranked candidate without branch errors and restored the original flag value 0.
+Reports are `Build/_artifacts/trace-dialog/smitty-{accept,examine,repair,report}-live.json`. This validates 3 of
+the 7 Stage-0 trace quests.
+
+The fourth seed uses the real Klamath `MasterTrader` / `klam_hish` at hex 82,132. With `IntellectBase=6`,
+bounded replay found the five-answer path from looking for work through the name joke and vaccination offer to
+`Хорошо, не волнуйся. Я не промахнусь.`, observed `KlamVaccination` 0 → 1 in 5 explored paths and 20.97 seconds,
+reported no branch errors, and restored 0. The report is
+`Build/_artifacts/trace-dialog/klam-hish-accept-live.json`.
+
+The three fresh Arroyo traces complete the Stage-0 criterion. The normal Todd talk path first reported
+`no_visible_start_speech` despite an alive, talk-enabled, adjacent and mutually visible NPC. The project dialog
+parser was retaining the `@` sigil and full `Content::*` qualifier in script arguments; normalizing those values
+restored the authored loyalty demand, after which `ArroyoProofOfDeath` advanced 0 → 1 without a mechanic bypass.
+Todd's follow-up offer advanced `ArroyoLetterToLinnett` 0 → 1 with `ArroyoProofOfDeath=3` as its authored
+prerequisite. Finally, stable-slot replay handled Mynoc's randomized `@@` wording and exposed an unconditional
+minimum-group guard that contradicted the solo stage-1 dialog branch. Restricting that guard to stage 2 produced
+the full 13-answer path and `ArroyoMynocDefence` 0 → 1. All three runs had no branch errors and restored 0; reports
+are `Build/_artifacts/trace-dialog/arroyo-{todd-proof,letter-linnett,mynoc-defence}-live.json`. Stage-0 trace
+coverage is **7/7**.
+
+The next Den trace corrected a stale diagnosis and completed `DenMomSlut` end to end. The parser already inferred
+`DenVirginIsAway` as a Game property; the hidden answer came from comparing integer property value `"0"` with
+textual any value `"false"`. Dialog property booleans are now normalized to `0`/`1`, restoring all 51 authored
+boolean demand/results. Live replay advanced 0 → 1 at Mom in 27 paths, 1 → 2 at Virginia in 2 paths (executing
+`DenVirgin::GoAway`), and 2 → 3 at Mom in 1 path. All runs restored the original flag and had no branch/log errors.
+Reports are `Build/_artifacts/trace-dialog/den-{mom-slut-accept,virginia-away,mom-slut-report}-live.json`.
 
 ### Mechanics beyond dialog (verified 2026-06-21)
 
@@ -399,11 +607,11 @@ the right answers to appear*, via stage `setup` and the right client language:
 - **Non-quest flags.** Some "quest-like" props are not in `CritterPropertyGroup::Quests`, so they never appear
   in `observation.quests` (Arroyo `ArroyoDocHealing` is a `Server` flag, `Max = 2`). Pick targets that *are*
   `Group = Quests` if you want to assert progress from the observation.
-- **Known content-side snags** (need a fix in the content/baker, not the runner): Arroyo's Todd never opens a
-  dialog at all (a guard, not a loyalty gate — default `npc.Loyality.get(cr.Id, 5)` = 5 passes his `@! 1`);
-  Den Mom's "Virginia" accept answer stays hidden even after `qa_set_game_prop DenVirginIsAway 0`, because the
-  demand is written `Demand Property Player DenVirginIsAway` against a property declared `Property Game` — a
-  scope mismatch the baker resolves to a value the answer can't satisfy.
+- **Resolved parser migration defects.** Todd's `@!` loyalty argument had been hashed with the sigil after the
+  project dialog parser moved away from `ResolveGenericValue`; the parser now restores the legacy script-argument
+  spelling. Den Mom's hidden "Virginia" answer was not a Game/Player scope mismatch: the parser inferred the Game
+  owner correctly, but property boolean `false` remained text instead of integer `0`. Property booleans are now
+  normalized to their integer storage spelling, and both normal talk paths are live-green.
 
 The `QUESTS` dict ships three verified flows plus a `NOTE` documenting these knobs:
 
@@ -508,6 +716,7 @@ support already added). Verified via `qa_format_tags`: `@text Critters Algernon@
   encounters, party travel). Quest accept/turn-in itself already works via `qa_teleport_map` (the sandbox
   instance spawns the map-placed quest NPCs).
 - Resolved quest titles/objective text in `quests` (and faction, skills/abilities observation).
-- Richer screen/affordance surfaces (barter, container/loot grids, registration customization).
+- Richer screen/affordance surfaces beyond the current barter, container/item metadata, and nine-window
+  contextual GUI runner (registration customization and remaining mechanic-owned screens).
 - Content-driven playtest runners per quest/mechanic on top of `qa_teleport_map`; optionally adapt more of the
   ported advisory/agent-runtime adapter layer.

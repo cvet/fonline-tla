@@ -1,0 +1,131 @@
+// Test_Barter — чистые тесты legacy-формулы цены серверного бартера.
+namespace Test_Barter
+{
+
+#if SERVER
+
+[[ModuleInit]]
+void InitTestBarter()
+{
+    Game.OnTestingInit.Subscribe(OnTestingInit);
+}
+
+[[Event]]
+void OnTestingInit()
+{
+    Testing::RegisterTest("barter", "coefficient_bounds", CoefficientBounds);
+    Testing::RegisterTest("barter", "master_trader", MasterTrader);
+    Testing::RegisterTest("barter", "minimum_unit", MinimumUnit);
+    Testing::RegisterTest("barter", "zero_cost_sale", ZeroCostSale);
+    Testing::RegisterTest("barter", "per_unit_rounding", PerUnitRounding);
+    Testing::RegisterTest("barter", "equal_raw_offer_relation", EqualRawOfferRelation);
+    Testing::RegisterTest("barter", "stack_limit", StackLimit);
+    Testing::RegisterTest("barter", "offer_count_bounds", OfferCountBounds);
+}
+
+void CoefficientBounds(Testing::TestContext ctx)
+{
+    if (!Testing::ExpectEq(ctx, Barter::GetBarterCoefficient(10, 100), 5, "Отрицательная разница ограничивается снизу")) {
+        return;
+    }
+
+    if (!Testing::ExpectEq(ctx, Barter::GetBarterCoefficient(150, 100), 50, "Разница внутри диапазона сохраняется")) {
+        return;
+    }
+
+    Testing::ExpectEq(ctx, Barter::GetBarterCoefficient(300, 10), 95, "Большая разница ограничивается сверху");
+}
+
+void MasterTrader(Testing::TestContext ctx)
+{
+    if (!Testing::Expect(ctx, Barter::GetBuyUnitCost(101, 20, false) == 121, "Без Master Trader покупка включает наценку k")) {
+        return;
+    }
+
+    Testing::Expect(ctx, Barter::GetBuyUnitCost(101, 20, true) == 101, "Master Trader убирает наценку до базовой цены");
+}
+
+void MinimumUnit(Testing::TestContext ctx)
+{
+    if (!Testing::Expect(ctx, Barter::GetSaleUnitCost(1, 95) == 1, "Цена продажи не опускается ниже единицы")) {
+        return;
+    }
+
+    Testing::Expect(ctx, Barter::GetBuyUnitCost(0, 95, false) == 1, "Цена покупки предмета с нулевой Cost остаётся единицей");
+}
+
+void ZeroCostSale(Testing::TestContext ctx)
+{
+    if (!Testing::Expect(ctx, Barter::GetSaleUnitCost(0, 5) == 0, "Предмет с нулевой Cost нельзя продать за единицу")) {
+        return;
+    }
+
+    Testing::Expect(ctx,
+                    Barter::GetStackCost(Barter::GetSaleUnitCost(0, 5), 100, Barter::MaxBarterTotalCost) == -1,
+                    "Стек бесплатных предметов отклоняется как оффер");
+}
+
+void PerUnitRounding(Testing::TestContext ctx)
+{
+    int64 saleUnit = Barter::GetSaleUnitCost(101, 5);
+    if (!Testing::Expect(ctx, saleUnit == 95, "Цена продажи округляется вниз для одной единицы")) {
+        return;
+    }
+
+    if (!Testing::Expect(ctx, Barter::GetBuyUnitCost(101, 5, false) == 106, "Цена покупки округляется вниз для одной единицы")) {
+        return;
+    }
+
+    Testing::Expect(ctx,
+                    Barter::GetStackCost(saleUnit, 2, Barter::MaxBarterTotalCost) == 190,
+                    "Округлённая цена единицы умножается на количество без повторного округления");
+}
+
+void EqualRawOfferRelation(Testing::TestContext ctx)
+{
+    int k = Barter::GetBarterCoefficient(120, 100);
+    int64 saleUnit = Barter::GetSaleUnitCost(100, k);
+    int64 buyUnit = Barter::GetBuyUnitCost(100, k, false);
+
+    if (!Testing::Expect(ctx,
+                         !Barter::IsOfferCostEnough(saleUnit, buyUnit),
+                         "Равноценные по raw Cost предметы не образуют достаточный оффер после скидки и наценки")) {
+        return;
+    }
+
+    if (!Testing::Expect(ctx, Barter::IsOfferCostEnough(saleUnit * 2, buyUnit), "Увеличенный оффер проходит, когда оценённая продажа покрывает покупку")) {
+        return;
+    }
+
+    Testing::Expect(ctx, Barter::IsOfferCostEnough(100, 100), "Равные итоговые суммы принимаются");
+}
+
+void StackLimit(Testing::TestContext ctx)
+{
+    if (!Testing::Expect(ctx, Barter::GetStackCost(100, 10, 1000) == 1000, "Стоимость ровно на лимите допустима")) {
+        return;
+    }
+
+    if (!Testing::Expect(ctx, Barter::GetStackCost(101, 10, 1000) == -1, "Стоимость выше лимита отклоняется до умножения")) {
+        return;
+    }
+
+    Testing::Expect(ctx, Barter::GetStackCost(1, 0, 1000) == -1, "Неположительное количество отклоняется");
+}
+
+void OfferCountBounds(Testing::TestContext ctx)
+{
+    if (!Testing::Expect(ctx, Barter::CanIncreaseOfferCount(10, 7, 3, true), "Оффер может выбрать остаток стека ровно до Count")) {
+        return;
+    }
+
+    if (!Testing::Expect(ctx, !Barter::CanIncreaseOfferCount(10, 7, 4, true), "Повторный перенос не превышает реальный Count")) {
+        return;
+    }
+
+    Testing::Expect(ctx, !Barter::CanIncreaseOfferCount(1, 1, 1, false), "Нестакаемый предмет нельзя добавить в оффер повторно");
+}
+
+#endif
+
+}

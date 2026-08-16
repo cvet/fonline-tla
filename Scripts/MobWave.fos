@@ -148,7 +148,7 @@ class MobInfo
         return Game.GetCritter(MobId);
     }
 
-    void Save(Serializator::Serializator save)
+    void Save(Serializer::Serializer save)
     {
         save.Set(MobId);
         // Script (callback) не сериализуется — восстанавливается из прото/настройки при спавне.
@@ -160,7 +160,7 @@ class MobInfo
         save.Set(MobItemSlots);
     }
 
-    void Load(Serializator::Serializator load)
+    void Load(Serializer::Serializer load)
     {
         load.Get(MobId);
         // load.Get( Script );
@@ -191,9 +191,9 @@ class TargetInfo
     int Priority;            // Приоритет атаки данной цели
     ident[] MobsAttack = {}; // Id мобов, атакующих данную цель
 
-    void AttackTarget(Critter? mob) // Назначение плана атаки цели некоему мобу
+    void AttackTarget(Critter? mob, Critter? target) // Назначение плана атаки цели некоему мобу
     {
-        if (mob == null) {
+        if (mob == null || target == null) {
             return;
         }
 
@@ -201,7 +201,7 @@ class TargetInfo
             return;
         }
 
-        NpcPlanes::AddAttackPlane(mob, Priority, TargetId);
+        NpcPlanes::AddAttackPlane(mob, Priority, target);
         mob.OnNpcPlaneEnd.Subscribe(Pe);
         for (int i = 0; i < MobsAttack.length(); i++) {
             if (MobsAttack[i] == mob.Id) {
@@ -213,33 +213,14 @@ class TargetInfo
         DebugLog("Attacking! Id Target" + TargetId);
     }
 
-    int CountTargetAttackers() // Считает сколько атакующих для данной цели. Считаются только живые мобы
-    {
-        int attackers = 0;
-        for (int i = 0; i < MobsAttack.length(); i++) {
-            Critter? mob = Game.GetCritter(MobsAttack[i]);
-            if (mob == null) {
-                continue;
-            }
-
-            if (mob.IsDead()) {
-                continue;
-            }
-
-            attackers++;
-        }
-
-        return attackers;
-    }
-
-    void Save(Serializator::Serializator save)
+    void Save(Serializer::Serializer save)
     {
         save.Set(TargetId);
         save.Set(Priority);
         save.Set(MobsAttack);
     }
 
-    void Load(Serializator::Serializator load)
+    void Load(Serializer::Serializer load)
     {
         load.Get(TargetId);
         load.Get(Priority);
@@ -269,7 +250,7 @@ class WavePoint
         }
     }
 
-    void Save(Serializator::Serializator save)
+    void Save(Serializer::Serializer save)
     {
         save.Set(Type);
         save.Set(Entry);
@@ -277,7 +258,7 @@ class WavePoint
         save.Set(Hex.y);
     }
 
-    void Load(Serializator::Serializator load)
+    void Load(Serializer::Serializer load)
     {
         load.Get(Type);
         load.Get(Entry);
@@ -300,13 +281,10 @@ class WaveStep
     int TimeRepeat;              // Время повтора шага в игровых минутах
     any Param;                   // Дополнительный параметр
 
-    void DoAction(MobInfo? mi, Map? map, TargetInfo? ti)
+    [[Async]]
+    void DoAction(MobInfo mi, Map map, TargetInfo? ti)
     {
         DebugLog("Action type = " + Type);
-        if (mi == null || map == null) {
-            return;
-        }
-
         switch (Type) {
         case ORDER_TYPE_WAIT:
             DoActionWait(mi, map);
@@ -406,12 +384,13 @@ class WaveStep
     {
         DebugLog("DoActionAttack called");
         Critter? mob = mi.Mob();
-        if (mob == null) {
+        Critter? target = Game.GetCritter(ti.TargetId);
+        if (mob == null || target == null) {
             return;
         }
 
         mob.IsNoHome = false;
-        ti.AttackTarget(mob);
+        ti.AttackTarget(mob, target);
     }
 
     void DoActionDeleteMob(MobInfo mi)
@@ -426,6 +405,7 @@ class WaveStep
         DebugLog("Delete Event created");
     }
 
+    [[Async]]
     void DoActionTransferToMap(MobInfo mi)
     {
         Map? map = Game.GetMap(ident(Param));
@@ -438,12 +418,17 @@ class WaveStep
             return;
         }
 
+        Entity[] waveCover = Sync::Snapshot();
+        if (!Sync::LockForTransferToMap(mob, map, waveCover)) {
+            return;
+        }
+
         mpos hex;
         Point.GetCoords(map, hex);
         mob.TransferToMap(map, hex, HDIR_Random);
     }
 
-    void Save(Serializator::Serializator save)
+    void Save(Serializer::Serializer save)
     {
         save.Set(Type);
         save.Set(Radius);
@@ -455,7 +440,7 @@ class WaveStep
         Point.Save(save);
     }
 
-    void Load(Serializator::Serializator load)
+    void Load(Serializer::Serializer load)
     {
         load.Get(Type);
         load.Get(Radius);
@@ -491,7 +476,7 @@ class MobWave
 
     void Save()
     {
-        auto save = Serializator::Serializator();
+        auto save = Serializer::Serializer();
         int len = Steps.length();
         save.Set(len);
         for (int i = 0; i < len; i++) {
@@ -523,7 +508,11 @@ class MobWave
 
     void Load()
     {
-        auto load = Serializator::Serializator();
+        Steps.clear();
+        Targets.clear();
+        Mobs.clear();
+
+        auto load = Serializer::Serializer();
         if (load.SetData(Game.MobWaveData.get(Number, array<uint8>())) == 0) {
             return;
         }
@@ -640,6 +629,7 @@ class MobWave
         Steps.insertLast(ws);
     }
 
+    [[Async]]
     void RepeatStep()
     {
         WaveStep ws = Steps[CurrentStep];
@@ -680,6 +670,7 @@ class MobWave
         }
     }
 
+    [[Async]]
     void DoStep() // Выполнение текущего этапа
     {
         DebugLog("steps: " + Steps.length() + " curr = " + CurrentStep);
@@ -747,36 +738,291 @@ class MobWave
     }
 };
 
-[[TimeEvent]]
+bool TryGetExecutionStep(MobWave mv, int expectedStep, bool advanceStep, int& executionStep)
+{
+    if (mv.Steps.isEmpty() || mv.CurrentStep < 0 || mv.CurrentStep >= int(mv.Steps.length())) {
+        return false;
+    }
+    if (expectedStep >= 0 && mv.CurrentStep != expectedStep) {
+        return false;
+    }
+
+    executionStep = mv.CurrentStep;
+    if (advanceStep) {
+        executionStep++;
+        if (executionStep >= int(mv.Steps.length())) {
+            executionStep = 0;
+        }
+    }
+
+    return true;
+}
+
+void AddUniqueWaveCritter(Critter[] & critters, Critter cr)
+{
+    for (int i = 0; i < critters.length(); i++) {
+        if (critters[i] is cr) {
+            return;
+        }
+    }
+
+    critters.insertLast(cr);
+}
+
+void AddWaveCritter(ident crId, Critter[] & critters)
+{
+    if (crId == ZERO_IDENT) {
+        return;
+    }
+
+    Critter? cr = Game.GetCritter(crId);
+    if (cr != null) {
+        AddUniqueWaveCritter(critters, cr);
+    }
+}
+
+void CollectStepSearchTargets(MobWave mv, Map map, int executionStep, Critter[] & targets)
+{
+    WaveStep ws = mv.Steps[executionStep];
+    if (!ws.SearchForTargetsBefore) {
+        return;
+    }
+
+    mpos hex;
+    ws.Point.GetCoords(map, hex);
+    if (mv.AttackPlayers) {
+        targets.insertLast(map.GetCrittersInRadius(hex, ws.Radius, CritterFindType::NonDeadPlayers));
+    }
+    if (mv.AttackNpc) {
+        targets.insertLast(map.GetCrittersInRadius(hex, ws.Radius, CritterFindType::NonDeadNpc));
+    }
+}
+
+void CollectWaveParticipants(MobWave mv, Critter[] searchTargets, Critter[] & participants)
+{
+    for (int i = 0; i < mv.Mobs.length(); i++) {
+        AddWaveCritter(mv.Mobs[i].MobId, participants);
+    }
+    for (int i = 0; i < mv.Targets.length(); i++) {
+        AddWaveCritter(mv.Targets[i].TargetId, participants);
+        for (int j = 0; j < mv.Targets[i].MobsAttack.length(); j++) {
+            AddWaveCritter(mv.Targets[i].MobsAttack[j], participants);
+        }
+    }
+    for (int i = 0; i < searchTargets.length(); i++) {
+        AddUniqueWaveCritter(participants, searchTargets[i]);
+    }
+}
+
+Map? GetStepDestinationMap(MobWave mv, int executionStep)
+{
+    WaveStep ws = mv.Steps[executionStep];
+    if (ws.Type != ORDER_TYPE_TRANSIT) {
+        return null;
+    }
+
+    return Game.GetMap(ident(ws.Param));
+}
+
+bool SameWaveMap(Map? left, Map? right)
+{
+    if (left == null || right == null) {
+        return left == null && right == null;
+    }
+
+    return left is right;
+}
+
+bool IsWaveGraphCurrent(MobWave mv, Map sourceMap, int expectedStep, bool advanceStep, int executionStep, Critter[] participants, Map? destinationMap)
+{
+    if (mv.MapId != sourceMap.Id) {
+        return false;
+    }
+
+    int currentExecutionStep = -1;
+    if (!TryGetExecutionStep(mv, expectedStep, advanceStep, currentExecutionStep) || currentExecutionStep != executionStep) {
+        return false;
+    }
+
+    Map? currentDestinationMap = GetStepDestinationMap(mv, currentExecutionStep);
+    if (!SameWaveMap(currentDestinationMap, destinationMap)) {
+        return false;
+    }
+
+    Critter[] searchTargets = {};
+    CollectStepSearchTargets(mv, sourceMap, currentExecutionStep, searchTargets);
+    Critter[] currentParticipants = {};
+    CollectWaveParticipants(mv, searchTargets, currentParticipants);
+    for (int i = 0; i < currentParticipants.length(); i++) {
+        bool found = false;
+        for (int j = 0; j < participants.length(); j++) {
+            if (currentParticipants[i] is participants[j]) {
+                found = true;
+                break;
+            }
+        }
+        if (!found) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+// Карта волны служит сценарным владельцем её отложенных шагов. После каждого расширения
+// cover перечитываем MobWaveData: пока Game.Sync ожидал новый набор, другой callback мог
+// закончить предыдущий шаг. В итоговый набор входят все мобы, цели, назначенные атакующие,
+// найденные на карте кандидаты, их текущие карты и карта/локация для TRANSIT.
+[[Async]]
+bool LockWaveForExecution(int waveNumber, int expectedStep, bool advanceStep, Map? & sourceMap)
+{
+    sourceMap = null;
+
+    for (int attempt = 0; attempt < 16; attempt++) {
+        MobWave discovery = MobWave(waveNumber);
+        discovery.Load();
+        int executionStep = -1;
+        if (!TryGetExecutionStep(discovery, expectedStep, advanceStep, executionStep) || discovery.MapId == ZERO_IDENT) {
+            return false;
+        }
+
+        Map? map = Game.GetMap(discovery.MapId);
+        if (map == null || !Sync::Lock(map)) {
+            continue;
+        }
+
+        MobWave staged = MobWave(waveNumber);
+        staged.Load();
+        if (staged.MapId != map.Id || !TryGetExecutionStep(staged, expectedStep, advanceStep, executionStep)) {
+            continue;
+        }
+
+        Critter[] searchTargets = {};
+        CollectStepSearchTargets(staged, map, executionStep, searchTargets);
+        Critter[] participants = {};
+        CollectWaveParticipants(staged, searchTargets, participants);
+        Map? destinationMap = GetStepDestinationMap(staged, executionStep);
+
+        Entity[] participantCover = {map};
+        if (destinationMap != null) {
+            Sync::AddUniqueEntity(participantCover, destinationMap);
+        }
+        for (int i = 0; i < participants.length(); i++) {
+            Sync::AddUniqueEntity(participantCover, participants[i]);
+        }
+
+        if (!Sync::Lock(participantCover)) {
+            continue;
+        }
+
+        MobWave participantsLocked = MobWave(waveNumber);
+        participantsLocked.Load();
+        if (!IsWaveGraphCurrent(participantsLocked, map, expectedStep, advanceStep, executionStep, participants, destinationMap)) {
+            continue;
+        }
+
+        ident[] participantMapIds = array<ident>(participants.length());
+        Entity[] fullCover = participantCover.clone();
+        for (int i = 0; i < participants.length(); i++) {
+            participantMapIds[i] = participants[i].MapId;
+            Map? participantMap = participants[i].GetMap();
+            if (participantMap != null) {
+                Sync::AddUniqueEntity(fullCover, participantMap);
+            }
+        }
+
+        ident destinationLocationId = ZERO_IDENT;
+        if (destinationMap != null) {
+            Location destinationLocation = destinationMap.GetLocation();
+            destinationLocationId = destinationLocation.Id;
+            Sync::AddUniqueEntity(fullCover, destinationLocation);
+        }
+
+        if (!Sync::Lock(fullCover)) {
+            continue;
+        }
+
+        MobWave graphLocked = MobWave(waveNumber);
+        graphLocked.Load();
+        if (!IsWaveGraphCurrent(graphLocked, map, expectedStep, advanceStep, executionStep, participants, destinationMap)) {
+            continue;
+        }
+
+        bool topologyChanged = false;
+        for (int i = 0; i < participants.length(); i++) {
+            if (participants[i].MapId != participantMapIds[i]) {
+                topologyChanged = true;
+                break;
+            }
+        }
+        if (topologyChanged) {
+            continue;
+        }
+        if (destinationMap != null && destinationMap.GetLocation().Id != destinationLocationId) {
+            continue;
+        }
+
+        sourceMap = map;
+        return true;
+    }
+
+    return false;
+}
+
+[[TimeEvent]] [[Async]]
 void NextWaveStep(any value)
 {
-    MobWave mv = MobWave(value);
+    int waveNumber = int(value);
+    Map? sourceMap;
+    if (!LockWaveForExecution(waveNumber, -1, true, sourceMap) || sourceMap == null) {
+        return;
+    }
+
+    MobWave mv = MobWave(waveNumber);
     mv.Load();
+    if (mv.MapId != sourceMap.Id) {
+        return;
+    }
+
     mv.NextStep();
     mv.DoStep();
     mv.Save();
 }
 
-[[TimeEvent]]
+[[TimeEvent]] [[Async]]
 void DoRepeatStep(any[] values)
 {
-    MobWave mv = MobWave(values[0]);
+    if (values.length() < 2) {
+        return;
+    }
+
+    int waveNumber = int(values[0]);
+    int stepNumber = int(values[1]);
+    Map? sourceMap;
+    if (!LockWaveForExecution(waveNumber, stepNumber, false, sourceMap) || sourceMap == null) {
+        return;
+    }
+
+    MobWave mv = MobWave(waveNumber);
     mv.Load();
-    if (values[1] != mv.CurrentStep) {
+    if (mv.MapId != sourceMap.Id || stepNumber != mv.CurrentStep || stepNumber < 0 || stepNumber >= int(mv.Steps.length())) {
         return; // Шаг закончен, начат другой
     }
 
     mv.RepeatStep();
     mv.Save();
 
-    Game.StartTimeEvent(GameTime::GameSeconds(mv.Steps[values[1]].TimeRepeat * 60), DoRepeatStep, values); //SavedDeferredCall
+    int repeatMinutes = mv.Steps[stepNumber].TimeRepeat;
+    if (repeatMinutes > 0) {
+        Game.StartTimeEvent(GameTime::GameSeconds(repeatMinutes * 60), DoRepeatStep, values); //SavedDeferredCall
+    }
 }
 
-[[TimeEvent]]
+[[TimeEvent]] [[Async]]
 void DeleteSpawnedMob(any value)
 {
     Critter? mob = Game.GetCritter(value);
-    if (mob == null) {
+    if (mob == null || !Sync::LockCritterWithMap(mob)) {
         return;
     }
 
@@ -838,11 +1084,21 @@ void AddTransitStep(int waveNum, int radius, int timeNext, int x, int y, ident m
     AddStep(waveNum, ORDER_TYPE_TRANSIT, radius, timeNext, 0, true, true, 0, x, y, mapId);
 }
 
+[[Async]]
 void StartWave(int waveNum)
 {
     DebugLog("StartWaveCalled");
+    Map? sourceMap;
+    if (!LockWaveForExecution(waveNum, -1, false, sourceMap) || sourceMap == null) {
+        return;
+    }
+
     MobWave mw = MobWave(waveNum);
     mw.Load();
+    if (mw.MapId != sourceMap.Id) {
+        return;
+    }
+
     mw.DoStep();
     mw.Save();
 }

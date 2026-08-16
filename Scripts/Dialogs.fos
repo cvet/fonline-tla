@@ -168,8 +168,21 @@ void SpeechAnswer(Player player, int answerIndex)
         throw("SpeechAnswer - Critter is not talking", player);
     }
 
+    // Берём покрытие безусловно и включаем карту: демоды/результаты ответа могут читать карту/локацию
+    // (DR_PROP_MAP/DR_PROP_LOCATION, MapGeckCity::OpenDoor), а прежняя проверка при talker == null
+    // не брала лок вовсе и падала «Entity access without sync»
     Critter? talker = Game.GetCritter(cr.DialogContext.TalkerId);
-    if (talker != null && !Sync::Lock(cr, talker)) {
+    Map? crMap = cr.GetMap();
+    Entity[] cover = {cr};
+    if (crMap != null) {
+        cover.insertLast(crMap);
+    }
+
+    if (talker != null) {
+        cover.insertLast(talker);
+    }
+
+    if (!Sync::Lock(cover)) {
         return;
     }
 
@@ -878,7 +891,8 @@ int UseAnswerResults(Critter cr, Critter? talker, DialogAnswer answer)
             if (needCount < curCount) {
                 master.DestroyItem(pid, curCount - needCount);
             }
-            else {
+            else if (needCount > curCount) {
+                // При равенстве не зовём AddItem: движок бросает "Count arg must be positive" на нуле
                 master.AddItem(pid, needCount - curCount);
             }
 

@@ -41,7 +41,7 @@ The compiler now reports three nullability problems as warnings. Treat them as e
 
 | Warning | Meaning | Fix |
 |---------|---------|-----|
-| `Redundant null comparison: 'T@' is a non-nullable handle and can never be null` | A `== null` / `!= null` test on a value the compiler knows is non-null. | Remove the test. If the source *can* actually be null, mark the source `T?` (or the API `FO_NULLABLE`). |
+| `Redundant null comparison: 'T@' is a non-nullable handle and can never be null` | A `== null` / `!= null` test on a value the compiler knows is non-null. | Remove the test. If the source *can* actually be null, mark the script source `T?` or the native API handle `nptr<T>`. |
 | `Dereference of nullable handle 'T@?' without a null-check` | A field/method access on a `T?` value that has not been narrowed. | Narrow it first (see narrowing below), or — if it was over-marked — drop the `?`. |
 | `Redundant '?': initializer of type 'T@' cannot be null` | A `T? x = <non-null expr>;` local where the initializer is provably non-null. | Drop the `?`: `T x = <expr>;`. |
 
@@ -82,29 +82,31 @@ void OnCritterDamaged(Critter cr, Critter attacker, int32 damage) { ... }
 
 The AngelScript compiler now parses `?` natively and emits the compile-time diagnostics above, so per-arg nullability is checked while compiling. `validate_nullable.py` still enforces declaration↔handler parity across files (the compiler only sees one translation unit at a time), and the engine's runtime null guards on entity meta-types back it up — see «Runtime enforcement» below.
 
-## Engine side: `FO_NULLABLE` macro
+## Engine side: `ptr<T>` and `nptr<T>`
 
-Native methods declared with `///@ ExportMethod` in [Engine/Source/Scripting/](../Engine/Source/Scripting/) use the inverse-of-pointer-default macro `FO_NULLABLE`. Defined as empty in [Engine/Source/Essentials/BasicCore.h](../Engine/Source/Essentials/BasicCore.h), it documents the nullability contract that codegen emits into the AS-side metadata.
+Native script bindings express the contract in the type itself: `ptr<T>` is a borrowed non-null handle, while `nptr<T>` is a borrowed nullable handle. This applies to `///@ ExportMethod`, exported `///@ ExportRefType` members, script callback signatures (`FindFunc` / `CheckFunc`), exported events, and other generated script-facing surfaces. The former empty `FO_NULLABLE` macro has been removed.
 
 ```cpp
 ///@ ExportMethod
-FO_SCRIPT_API FO_NULLABLE Map* Server_Critter_GetMap(Critter* self)
+FO_SCRIPT_API nptr<Map> Server_Critter_GetMap(ptr<Critter> self)
 {
     return self->GetEngine()->EntityMngr.GetMap(self->GetMapId());
 }
 
 ///@ ExportMethod
-FO_SCRIPT_API void Server_Player_SwitchCritter(Player* self, FO_NULLABLE Critter* cr)
+FO_SCRIPT_API void Server_Player_SwitchCritter(ptr<Player> self, nptr<Critter> cr)
 {
     self->GetEngine()->SwitchPlayerCritter(self, cr);
 }
+
+auto callback = server->FindFunc<bool, ptr<Critter>, nptr<Item>>(funcName);
 ```
 
-The `self` (first parameter — `this` receiver) and the implicit `engine` parameter for global methods are **never** marked: AS validates `this` before dispatch.
+Bare handle pointers (`T*`) no longer carry a nullable contract at this boundary. Codegen rejects them; use `ptr<T>` or `nptr<T>`, including inside handle containers such as `vector<ptr<Item>>`. Raw pointers can still be valid in internal C++, low-level/C ABIs, and non-script engine hooks. See [Engine/Docs/SmartPointers.md](Engine/Docs/SmartPointers.md) for the full native pointer vocabulary.
 
 ## Runtime enforcement
 
-Runtime validation is plumbed through codegen-generated `MethodDesc::Call` lambdas, **not** the AS-to-native bridge. [Engine/BuildTools/codegen.py](../Engine/BuildTools/codegen.py) emits per-method calls to `NativeDataProvider::CheckArgNotNull` / `CheckReturnNotNull` (defined in [Engine/Source/Common/ScriptSystem.h](../Engine/Source/Common/ScriptSystem.h)) right before/after the native invocation:
+Runtime validation is plumbed through codegen-generated `MethodDesc::Call` lambdas, **not** the AS-to-native bridge. [Engine/BuildTools/codegen.py](Engine/BuildTools/codegen.py) emits per-method calls to `NativeDataProvider::CheckArgNotNull` / `CheckReturnNotNull` (defined in [Engine/Source/Common/ScriptSystem.h](Engine/Source/Common/ScriptSystem.h)) for non-null `ptr<T>` contracts right before/after the native invocation:
 
 ```
 MethodDesc::Call(call)
@@ -122,9 +124,9 @@ Violation surface: `ScriptException` with the method name, parameter name and ty
 - an entity relative (`Abstract<Entity>`, `Proto<Entity>`, `Static<Entity>` — currently `AbstractItem`, `ProtoCritter`, `ProtoItem`, `ProtoLocation`, `ProtoMap`, `StaticItem`),
 - a `///@ ExportRefType` class (`MovingContext`, `MapSpriteHolder`, `SpritePattern`, `VideoPlayback`, `ScriptImGui`).
 
-On the C++ engine side the matching pointer spellings (`Critter*`/`CritterView*`, `Map*`/`MapView*`, `ProtoItem*`, `StaticItem*`, `MovingContext*`, …) are all in scope. The membership test lives in `is_validated_pointer_meta_type(...)` in [Engine/BuildTools/codegen.py](../Engine/BuildTools/codegen.py); the [validate_nullable.py](#tooling) walker mirrors it by parsing `///@ ExportEntity` / `///@ ExportRefType` headers at runtime.
+On the C++ engine side the matching spellings are `ptr<Critter>` / `nptr<Critter>`, `ptr<CritterView>` / `nptr<CritterView>`, `ptr<Map>` / `nptr<Map>`, `ptr<ProtoItem>`, `ptr<StaticItem>`, `ptr<MovingContext>`, and so on. The membership test lives in `is_validated_pointer_meta_type(...)` in [Engine/BuildTools/codegen.py](Engine/BuildTools/codegen.py).
 
-Marking `?` / `FO_NULLABLE` on a primitive value type (`int`, `bool`, `mpos`, `hstring`, …) is the only misuse [validate_nullable.py](#tooling) flags — those types have no `null` representation, so the marker is meaningless.
+The project [validate_nullable.py](Tools/NullableEstimate/validate_nullable.py) gate rejects raw pointers in `ExportMethod`/`FO_SCRIPT_API`, exported `ExportRefType` members, and `FindFunc`/`CheckFunc` template arguments before baking reaches codegen. It deliberately ignores ordinary internal raw pointers and `SetupBakersHook`/other `///@ EngineHook` declarations.
 
 **Out of scope (not implemented yet):** script-to-script call validation. AS does not natively call our bridge for direct script→script invocation; runtime enforcement there would require patching the AS interpreter (`asCContext::ExecuteNext`). In practice script-to-script null contracts are kept by:
 - the static analyzer (see [Tooling](#tooling))
@@ -138,64 +140,45 @@ The current engine enforces these contracts during normal runtime, not only duri
 - Generated component accessors are not nullable probes. Check `Has<Component>` first (`cr.HasDialogContext`, `item.HasRadio`, etc.), then use the component accessor.
 - Worker-run callbacks that touch entities need sync coverage. Mark the callback `[[Async]]`, lock the relevant entities with `Sync::Lock...`, and remember that `Game.Sync(...)` replaces the held lock set.
 - Dialog metadata participates in baking. Special answer links used by `.fodlg` files need globally visible `///@ Enum DialogAnswerLink ...` declarations, otherwise the dialog baker cannot resolve them even if AngelScript compilation succeeds.
-- The client `Chosen` accessor (`Game.Chosen`) is **non-nullable and throws** when there is no chosen critter. Guard with `HasChosen` instead of a null-check: replace `if (Chosen == null) return;` with `if (!HasChosen) return;`, and place the `HasChosen` guard *before* any `Critter chosen = Chosen;` assignment (the assignment itself throws when absent). `Game.GetCritter`, `Game.GetItem`, `Critter.GetItem`, `Map.GetCritterAtScreenPos`, etc. are `FO_NULLABLE` — bind their results to `T?` and narrow.
+- The client `Chosen` accessor (`Game.Chosen`) is **non-nullable and throws** when there is no chosen critter. Guard with `HasChosen` instead of a null-check: replace `if (Chosen == null) return;` with `if (!HasChosen) return;`, and place the `HasChosen` guard *before* any `Critter chosen = Chosen;` assignment (the assignment itself throws when absent). Fallible native lookups such as `Game.GetCritter`, `Game.GetItem`, `Critter.GetItem`, and `Map.GetCritterAtScreenPos` return `nptr<T>` and surface as `T?` in script; bind and narrow them accordingly.
 - GUI screen warnings surface in the generated [Scripts/GuiScreens.fos](Scripts/GuiScreens.fos), but the fix belongs in the owning [Gui/*.fogui](Gui/) embedded code (the `?` markers live there in `Type? name` form; clang-format renders them `Type ? name` in the generated output). Edit the `.fogui`, regenerate with `Generate :: GuiScreens.fos`, then recompile — regeneration is faithful, so a fix in the source reproduces exactly.
 
 ## Tooling
 
-Four Python tools in [Tools/NullableEstimate/](../Tools/NullableEstimate/):
+The active tools are documented in [Tools/NullableEstimate/README.md](Tools/NullableEstimate/README.md):
 
 | Tool | Purpose |
 |------|---------|
-| `apply_nullables.py` | Scans `.fos` and strips dead defensive null guards on entity-pointer params that are NOT marked `?` — codegen / convention guarantees them non-null. Does **not** add or remove `?` markers; the author owns placement. Idempotent. |
-| `apply_native_nullable.py` | Walks `///@ ExportMethod` declarations in `Engine/Source/Scripting/*ScriptMethods.cpp` and strips dead defensive `if (param == nullptr) throw ...;` guards on entity-pointer params that are NOT marked `FO_NULLABLE` — codegen emits `NativeDataProvider::CheckArgNotNull` for those. Does **not** add or remove `FO_NULLABLE` markers; the author owns placement. Idempotent. |
-| `validate_nullable.py` | Read-only placement check. Fails when `FO_NULLABLE` appears outside an `///@ ExportMethod` signature, on a non-pointer / primitive type, or when a script `?` is applied to a primitive. The marker on a non-entity handle (RefType / script class) is **allowed** — codegen does not emit a runtime check for it, but the marker is valid declarative documentation. |
-| `estimate_nullables.py` | Read-only coverage report — counts function/parameter/return shapes across `.fos`. |
+| `validate_nullable.py` | Read-only gate for native `ptr<T>`/`nptr<T>` script ABI, obsolete `FO_NULLABLE`, script primitive `T?`, and Event/RemoteCall declaration-handler parity. |
+| `test_validate_nullable.py` | Focused synthetic unit tests for the native ABI gate, including its internal-pointer and `SetupBakersHook` exclusions. |
+| `apply_nullables.py` | Script-side analyzer/cleanup. `--check` verifies that its output would be unchanged. |
+| `estimate_nullables.py` | Read-only script nullability coverage report. |
 
-The applier tools accept `--check` (exit non-zero if dead defensive guards still exist) or `--dry-run` (preview without writing). `validate_nullable.py` is always read-only. CI uses these check modes to fail PRs that drift.
+`apply_native_nullable.py` remains only as a legacy helper for checking out pre-`ptr`/`nptr` engine revisions. It does not define the current native contract and is not part of the active gate.
 
-### Why the appliers don't auto-add markers
-
-Earlier revisions of the analyzers tried to infer marker placement from body shape (`return nullptr;` somewhere → mark return; no defensive throw + no dereference → mark param). The heuristics produced churn against a curated codebase: a one-liner `void TransferToMap(Critter* self, Map* map, mpos hex) { ... transfer(self, map, hex, ...); }` would round-trip to `FO_NULLABLE Map* map` because the body only forwards the pointer — but the contract is non-null. Author intent is the source of truth; the analyzer's job is now only to delete dead guards that codegen has made redundant.
+The validator deliberately does not infer whether an API should be nullable. Authors choose `T` versus `T?` in script and `ptr<T>` versus `nptr<T>` in native declarations; the tools verify that the chosen spelling is legal and consistent.
 
 ## Workflows
 
-### VS Code tasks ([.vscode/tasks.json](../.vscode/tasks.json))
+The VS Code `Analyze :: Nullable Placement` task runs `validate_nullable.py`; `Analyze :: Nullable All` combines it with the script analyzer and coverage report. CI in [.github/workflows/build.yml](.github/workflows/build.yml) runs the focused unit tests, the validator, and `apply_nullables.py --check`.
 
-Generators (modify code) — run after editing scripts or native exports:
-- `Generate :: Nullable Markers (Scripts)` → `apply_nullables.py`
-- `Generate :: Nullable Markers (Engine)` → `apply_native_nullable.py`
-- `Generate and Format All` → bundles both, then formatter pass
-
-Analyzers (check-only, exit non-zero on drift) — run before committing or in CI:
-- `Analyze :: Nullable Markers (Scripts)` → `apply_nullables.py --check`
-- `Analyze :: Nullable Markers (Engine)` → `apply_native_nullable.py --check`
-- `Analyze :: Nullable Placement` → `validate_nullable.py`
-- `Analyze :: Nullable Coverage` → `estimate_nullables.py`
-- `Analyze All` → bundles all four
-
-### CI
-
-`.github/workflows/ci.yml` (`analyze` job) runs the script and engine appliers in `--check` mode plus `validate_nullable.py` on every push and PR. Drift in either the script `?` markers, the native `FO_NULLABLE` annotations, or a misplaced marker (outside an `///@ ExportMethod` or on a non-entity type) fails the run with a hint pointing to the generator task to fix it.
-
-### Manual
+Manual equivalents:
 
 ```bash
-python Tools/NullableEstimate/apply_nullables.py          # apply script-side markers
-python Tools/NullableEstimate/apply_native_nullable.py    # apply engine-side markers
-python Tools/NullableEstimate/validate_nullable.py        # check placement
-python Tools/NullableEstimate/estimate_nullables.py       # report only
+python Tools/NullableEstimate/test_validate_nullable.py
+python Tools/NullableEstimate/validate_nullable.py
+python Tools/NullableEstimate/apply_nullables.py --check
+python Tools/NullableEstimate/estimate_nullables.py
 ```
 
-Append `--check` to either applier to verify idempotency without writing files.
+## Adding or editing contracts
 
-## Adding / editing markers
+Choose the contract explicitly at the declaration:
 
-When you write a new script function or native export, you can either:
-1. Write it however you want and run `Generate :: Nullable Markers` — the analyzer fills in the markers per the rule above and strips any dead defensive code.
-2. Write the marker yourself if you know better than the heuristic (e.g. user-facing API where you want to lock the contract). The analyzer is idempotent: it won't re-introduce dead checks once stripped, and respects existing markers when their pattern matches the rule.
-
-When the analyzer's heuristic gets it wrong (saw it with `dynamic_cast<X*>(param)` paths where param is genuinely nullable), prefer extending the heuristic in [apply_native_nullable.py](../Tools/NullableEstimate/apply_native_nullable.py) over a one-off manual edit — the next CI check will revert manual edits otherwise.
+1. Use `T` / `ptr<T>` when the handle must exist.
+2. Use `T?` / `nptr<T>` only when absence is a real state that the function handles.
+3. Use the same wrappers in exported ref-type accessors and `FindFunc`/`CheckFunc` template signatures.
+4. Run the focused tests and `validate_nullable.py` before baking.
 
 ## See also
 

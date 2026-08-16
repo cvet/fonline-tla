@@ -246,14 +246,92 @@ void DoUnload(Critter? cr, Item? item)
 
 #if SERVER
 
-// Серверный запуск диалога: под локом проверяем, что оба криттера живы и NPC разрешает разговор.
+// Серверный запуск диалога: под явным скриптовым покрытием проверяем обычные игровые предусловия.
+// В QA-режиме тот же путь дополнительно сообщает мосту точную причину отказа, не обходя механику.
 [[ServerRemoteCall]] [[Async]]
 void StartDialog(Player player, ident npcId)
 {
     Critter? cr = player.GetControlledCritter();
     Critter? npc = Game.GetCritter(npcId);
-    if (cr != null && npc != null && Sync::Lock(cr, npc) && cr.IsAlive() && npc.IsAlive() && !npc.ControlledByPlayer && !npc.IsNoTalk) {
-        Dialogs::RunDialog(cr, npc, false);
+    if (cr == null || npc == null || !Sync::Lock(cr, npc)) {
+        return;
+    }
+
+    bool playerAlive = cr.IsAlive();
+    bool npcAlive = npc.IsAlive();
+    bool npcControlled = npc.ControlledByPlayer;
+    bool npcNoTalk = npc.IsNoTalk;
+    bool sameMap = cr.MapId == npc.MapId;
+    int distance = sameMap ? Game.GetDistance(cr, npc) : -1;
+    int talkDistance = cr.TalkDistance != 0 ? cr.TalkDistance : Settings.Dialog.TalkDistance;
+    bool playerSeesNpc = sameMap && cr.IsSee(npc);
+    bool npcSeesPlayer = sameMap && npc.IsSee(cr);
+    int diagnosticStatus = AiControl::TalkDiagnosticEligible;
+
+    if (!playerAlive) {
+        diagnosticStatus = AiControl::TalkDiagnosticPlayerDead;
+    }
+    else if (!npcAlive) {
+        diagnosticStatus = AiControl::TalkDiagnosticNpcDead;
+    }
+    else if (npcControlled) {
+        diagnosticStatus = AiControl::TalkDiagnosticNpcControlled;
+    }
+    else if (npcNoTalk) {
+        diagnosticStatus = AiControl::TalkDiagnosticNpcNoTalk;
+    }
+    else if (npc.DialogId == EMPTY_HSTRING) {
+        diagnosticStatus = AiControl::TalkDiagnosticMissingDialog;
+    }
+    else if (!sameMap) {
+        diagnosticStatus = AiControl::TalkDiagnosticDifferentMap;
+    }
+    else if (distance > talkDistance) {
+        diagnosticStatus = AiControl::TalkDiagnosticOutOfRange;
+    }
+    else if (!playerSeesNpc) {
+        diagnosticStatus = AiControl::TalkDiagnosticPlayerCannotSeeNpc;
+    }
+    else if (!npcSeesPlayer) {
+        diagnosticStatus = AiControl::TalkDiagnosticNpcCannotSeePlayer;
+    }
+
+    if (Settings.AiControl.AllowQaCommands) {
+        cr.PlayerClientCall.AiControlReceiveTalkDiagnostic(npcId,
+                                                           diagnosticStatus,
+                                                           playerAlive,
+                                                           npcAlive,
+                                                           npcControlled,
+                                                           npcNoTalk,
+                                                           sameMap,
+                                                           distance,
+                                                           talkDistance,
+                                                           playerSeesNpc,
+                                                           npcSeesPlayer);
+    }
+
+    // Это исходные ранние проверки StartDialog. Остальные проверки остаются внутри RunDialog и потому
+    // сохраняют его нормальное поведение (включая исключение при невозможном разговоре).
+    if (!playerAlive || !npcAlive || npcControlled || npcNoTalk) {
+        return;
+    }
+
+    Entity[] heldEntities = Sync::SurvivingSnapshot();
+    Dialogs::RunDialog(cr, npc, false);
+
+    if (Settings.AiControl.AllowQaCommands && Sync::Restore(heldEntities) && !cr.IsDestroyed) {
+        int finalStatus = cr.HasDialogContext && cr.DialogContext.Talking ? AiControl::TalkDiagnosticStarted : AiControl::TalkDiagnosticNoVisibleStartSpeech;
+        cr.PlayerClientCall.AiControlReceiveTalkDiagnostic(npcId,
+                                                           finalStatus,
+                                                           playerAlive,
+                                                           npcAlive,
+                                                           npcControlled,
+                                                           npcNoTalk,
+                                                           sameMap,
+                                                           distance,
+                                                           talkDistance,
+                                                           playerSeesNpc,
+                                                           npcSeesPlayer);
     }
 }
 

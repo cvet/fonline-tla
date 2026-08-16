@@ -1,0 +1,160 @@
+// EnergyBarierSync — script-owned async-cover для переключения сетей энергобарьеров.
+// Удерживает базовые предметы, блокираторы и карты, затем перепроверяет состав сети и родительские карты.
+namespace EnergyBarierSync
+{
+
+#if SERVER
+
+// Снимок объектов сети без чтения свойств сущностей. После ожидания полного cover вызывающий
+// проверяет, что сеть не получила новый барьер.
+EnergyBarier::CBarier[] SnapshotBariers(EnergyBarier::CBariersNet net)
+{
+    EnergyBarier::CBarier[] result = {};
+    for (int i = 0; i < net.Bariers.length(); i++) {
+        result.insertLast(net.Bariers[i]);
+    }
+
+    return result;
+}
+
+bool SameBariers(EnergyBarier::CBariersNet net, EnergyBarier::CBarier[] snapshot)
+{
+    if (net.Bariers.length() != snapshot.length()) {
+        return false;
+    }
+
+    for (int i = 0; i < snapshot.length(); i++) {
+        if (net.Bariers[i] !is snapshot[i]) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+void CollectBarierModeEntities(EnergyBarier::CBarier barier, Entity[] entities)
+{
+    Sync::AddUniqueEntity(entities, barier.Barier);
+    for (int i = 0; i < barier.Blockers.length(); i++) {
+        Sync::AddUniqueEntity(entities, barier.Blockers[i]);
+    }
+}
+
+bool ContainsEntity(Entity[] entities, Entity entity)
+{
+    for (int i = 0; i < entities.length(); i++) {
+        if (entities[i] is entity) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+bool BarierModeEntitiesAreCovered(EnergyBarier::CBarier[] bariers, Entity[] entities)
+{
+    for (int i = 0; i < bariers.length(); i++) {
+        if (!ContainsEntity(entities, bariers[i].Barier)) {
+            return false;
+        }
+
+        for (int k = 0; k < bariers[i].Blockers.length(); k++) {
+            if (!ContainsEntity(entities, bariers[i].Blockers[k])) {
+                return false;
+            }
+        }
+    }
+
+    return true;
+}
+
+// Берёт полный cover для смены режима: базовые предметы и блокираторы удерживаются явно,
+// а карты покрывают всю дочернюю топологию и не дают параллельной инициализации изменить сеть.
+[[Async]]
+bool LockBarierModes(EnergyBarier::CBarier[] bariers)
+{
+    if (bariers.isEmpty()) {
+        return false;
+    }
+
+    while (true) {
+        Entity[] entities = {};
+        for (int i = 0; i < bariers.length(); i++) {
+            CollectBarierModeEntities(bariers[i], entities);
+        }
+
+        if (!Sync::Lock(entities)) {
+            return false;
+        }
+
+        ident[] mapIds = {};
+        for (int i = 0; i < bariers.length(); i++) {
+            ident mapId = bariers[i].Barier.MapId;
+            if (mapId == ZERO_IDENT) {
+                return false;
+            }
+
+            Map? map = Game.GetMap(mapId);
+            if (map == null) {
+                return false;
+            }
+
+            mapIds.insertLast(mapId);
+            Sync::AddUniqueEntity(entities, map);
+        }
+
+        if (!Sync::Lock(entities)) {
+            return false;
+        }
+
+        if (!BarierModeEntitiesAreCovered(bariers, entities)) {
+            continue;
+        }
+
+        bool topologyChanged = false;
+        for (int i = 0; i < bariers.length(); i++) {
+            if (bariers[i].Barier.MapId != mapIds[i]) {
+                topologyChanged = true;
+                break;
+            }
+
+            for (int k = 0; k < bariers[i].Blockers.length(); k++) {
+                if (bariers[i].Blockers[k].MapId != mapIds[i]) {
+                    topologyChanged = true;
+                    break;
+                }
+            }
+
+            if (topologyChanged) {
+                break;
+            }
+        }
+
+        if (!topologyChanged) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+[[Async]]
+bool LockBariersNet(EnergyBarier::CBariersNet net)
+{
+    while (true) {
+        EnergyBarier::CBarier[] snapshot = SnapshotBariers(net);
+        if (!LockBarierModes(snapshot)) {
+            return false;
+        }
+
+        if (SameBariers(net, snapshot)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+#endif
+
+}

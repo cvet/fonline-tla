@@ -88,30 +88,34 @@ EventResult RadioSkill(Item item, Critter cr, CritterProperty skill)
     return EventResult::StopChain;
 }
 
-[[TimeEvent]]
+[[TimeEvent]] [[Async]]
 void AndroidRadio(any[] values)
 {
+    if (values.length() < 4) {
+        return;
+    }
+
     DebugLog("AndroidRadio. ItemId:" + values[0] + "; MsgCount:" + values[1] + "; " + "radioChannel: " + values[2]);
     Item? item = Game.GetItem(values[0]);
-    if (item != null) {
-        if (item.SeAndroidRadioListened) {
-            Radio::SendChannelRadioMessage(values[3], TextPackKey(TextPackName::Text, "" + (STR_RADIO_MESSAGE)));
-            values[1] = values[1] + 1;
-            DebugLog("count radio messages:" + values[1]);
-            Critter? cr = Game.GetCritter(item.CritterId);
-            if (cr == null) {
-                return;
-            }
+    if (item == null || !Sync::LockItemWithParent(item) || !item.SeAndroidRadioListened || !item.HasRadio) {
+        return;
+    }
 
-            if (cr.SpecialAndroid < 2 && item.Radio.Channel == values[3]) { // Про локацию пока не известно, радио на нужной волне
-                cr.SpecialAndroid = 2;
-            }
+    Radio::SendChannelRadioMessage(values[3], TextPackKey(TextPackName::Text, "" + (STR_RADIO_MESSAGE)));
+    values[1] = values[1] + 1;
+    DebugLog("count radio messages:" + values[1]);
+    Critter? cr = item.GetCritter();
+    if (cr == null) {
+        return;
+    }
 
-            DebugLog("seAndroidValue: " + cr.SpecialAndroid);
-            if (values[1] < 5) { // Максимум 5 повторов раз в 20 секунд на нужной радиоволне
-                Game.StartTimeEvent(GameTime::GameSeconds(20), AndroidRadio, values);
-            }
-        }
+    if (cr.SpecialAndroid < 2 && item.Radio.Channel == values[3]) { // Про локацию пока не известно, радио на нужной волне
+        cr.SpecialAndroid = 2;
+    }
+
+    DebugLog("seAndroidValue: " + cr.SpecialAndroid);
+    if (values[1] < 5) { // Максимум 5 повторов раз в 20 секунд на нужной радиоволне
+        Game.StartTimeEvent(GameTime::GameSeconds(20), AndroidRadio, values);
     }
 }
 
@@ -406,19 +410,37 @@ void TransformPlayer(Map map, Critter player, Critter doctor)
     Game.StartTimeEvent(GameTime::GameSeconds(60), AwakePlayer, values); //SavedDeferredCall
 }
 
-[[TimeEvent]]
+[[TimeEvent]] [[Async]]
 void AwakePlayer(any[] values)
 {
+    if (values.length() < 3) {
+        return;
+    }
+
     Critter? player = Game.GetCritter(values[0]);
     Critter? doctor = Game.GetCritter(values[1]);
-    if (player != null && doctor != null) {
-        player.Experience += 4000;
-        Messaging::Info(player, TextPackKey(TextPackName::Text, "" + (STR_AWAKE)));
-        CritterState::ToDead(player, CritterActionAnim::DeadBack, null); // TODO: убрать
-        player.CurrentAp = 0;
-        CritterState::ToAlive(player);
-        Dialogs::RunDialog(player, doctor, true);
+    Map? map = Game.GetMap(ident(values[2]));
+    if (player == null || doctor == null || map == null) {
+        return;
     }
+
+    Critter[] critters = {player, doctor};
+    if (!Sync::LockCrittersWithMaps(critters)) {
+        return;
+    }
+
+    Entity[] cover = Sync::Snapshot();
+    Sync::AddUniqueEntity(cover, map);
+    if (!Sync::Lock(cover) || player.MapId != map.Id || doctor.MapId != map.Id) {
+        return;
+    }
+
+    player.Experience += 4000;
+    Messaging::Info(player, TextPackKey(TextPackName::Text, "" + (STR_AWAKE)));
+    CritterState::ToDead(player, CritterActionAnim::DeadBack, null); // TODO: убрать
+    player.CurrentAp = 0;
+    CritterState::ToAlive(player);
+    Dialogs::RunDialog(player, doctor, true);
 }
 
 [[DialogResult]]
@@ -464,11 +486,11 @@ void Warn(Critter player, StaticItem trigger, bool entered, mdir dir)
     }
 }
 
-[[TimeEvent]]
+[[TimeEvent]] [[Async]]
 void DeferredExplode(any value)
 {
     Map? map = Game.GetMap(ident(value));
-    if (map == null) {
+    if (map == null || !Sync::Lock(map)) {
         return;
     }
 
@@ -484,13 +506,15 @@ void DeferredExplode(any value)
     Game.StartTimeEvent(GameTime::GameSeconds(1), DeferredExplode, value); //SavedDeferredCall
 }
 
-[[TimeEvent]]
+[[TimeEvent]] [[Async]]
 void DeferredDestroyMap(any value)
 {
     Map? map = Game.GetMap(ident(value));
-    if (map != null) {
-        Game.DestroyLocation(map.GetLocation());
+    if (map == null || !Sync::LockMapWithLocation(map)) {
+        return;
     }
+
+    Game.DestroyLocation(map.GetLocation());
 }
 
 // Части тела в банках с биогелем
@@ -532,13 +556,15 @@ void PotInit(Item item, bool firstTime)
     item.OnCritterUse.Subscribe(PotUse);
 }
 
-[[TimeEvent]]
+[[TimeEvent]] [[Async]]
 void DefferedDestroyItem(any value)
 {
     Item? item = Game.GetItem(value);
-    if (item != null) {
-        Game.DestroyItem(item);
+    if (item == null || !Sync::LockItemWithParent(item)) {
+        return;
     }
+
+    Game.DestroyItem(item);
 }
 
 [[Event]]

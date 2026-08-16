@@ -238,20 +238,27 @@ class ComputerRiddleInfo
 };
 
 // Сброс загадки по таймеру: пока карта жива - генерируем новый код и перезапускаем таймер, иначе удаляем запись.
-[[TimeEvent]]
+[[TimeEvent]] [[Async]]
 void ResetRiddle(any[] values)
 {
-    ComputerRiddleInfo? riddle = GetRiddleInfo(values[0], values[1], values[2]);
-    if (riddle != null) {
-        if (Game.GetMap(ident(values[0])) != null) {
-            riddle.GenerateCode();
-            riddle.Save();
-            Game.StartTimeEvent(GameTime::GameSeconds(TIME_RESET), ResetRiddle, values); //SavedDeferredCall
-        }
-        else {
-            riddle.Erase();
-        }
+    if (values.length() < 3) {
+        return;
     }
+
+    ident mapId = values[0];
+    Map? map = Game.GetMap(mapId);
+    if (map == null || !Sync::Lock(map) || map.Id != mapId) {
+        return;
+    }
+
+    ComputerRiddleInfo? riddle = GetRiddleInfo(mapId, values[1], values[2]);
+    if (riddle == null) {
+        return;
+    }
+
+    riddle.GenerateCode();
+    riddle.Save();
+    Game.StartTimeEvent(GameTime::GameSeconds(TIME_RESET), ResetRiddle, values); //SavedDeferredCall
 }
 
 // Использование сценери-компьютера по навыку Наука: показывает игроку статус и открывает экран ввода кода.
@@ -315,22 +322,50 @@ void AnswerTrySolveRiddle(Critter player, hstring sceneryPid, mpos hex, string t
 }
 
 // Наградный показ карты "со спутника": выбирает случайную локацию неподалёку и переключает обзор игрока на её вход.
-[[TimeEvent]]
+[[TimeEvent]] [[Async]]
 void ShowCamera(any value)
 {
     Critter? cr = Game.GetCritter(value);
-    if (cr != null) {
-        Location[] locations = Location::GetLocationsInRadius(ipos(cr.WorldPos.x, cr.WorldPos.y), 300);
-        if (locations.length() > 0) {
-            Location loc = locations[Game.Random(0, locations.length() - 1)];
-            Map map = loc.GetMapByIndex(0);
-            Game.Log("ViewMap");
-            mpos hex;
-            if (Entrance::MapGetEntryCoords(map, 0, 0, hex)) {
-                Game.Log("Entry founded");
-                cr.ViewMap(map, 50, hex, 5);
-            }
+    if (cr == null || !Sync::Lock(cr) || !cr.ControlledByPlayer) {
+        return;
+    }
+
+    ipos playerWorldPos = cr.WorldPos;
+    Location[] allLocations = Game.GetLocations();
+    Location[] locations = {};
+    for (int i = 0; i < allLocations.length(); i++) {
+        Location loc = allLocations[i];
+        if (!Sync::Lock(cr, loc)) {
+            continue;
         }
+
+        if (!cr.ControlledByPlayer) {
+            return;
+        }
+        if (Math::Distance(playerWorldPos, loc.WorldPos) <= loc.Radius + 300) {
+            locations.insertLast(loc);
+        }
+    }
+
+    if (locations.isEmpty()) {
+        return;
+    }
+
+    Location loc = locations[Game.Random(0, locations.length() - 1)];
+    if (!Sync::Lock(cr, loc) || !cr.ControlledByPlayer || Math::Distance(playerWorldPos, loc.WorldPos) > loc.Radius + 300 || loc.GetMapCount() == 0) {
+        return;
+    }
+
+    Map map = loc.GetMapByIndex(0);
+    if (!Sync::Lock(cr, loc, map) || !cr.ControlledByPlayer || loc.GetMapByIndex(0).Id != map.Id || map.GetLocation().Id != loc.Id) {
+        return;
+    }
+
+    Game.Log("ViewMap");
+    mpos hex;
+    if (Entrance::MapGetEntryCoords(map, 0, 0, hex)) {
+        Game.Log("Entry founded");
+        cr.ViewMap(map, 50, hex, 5);
     }
 }
 

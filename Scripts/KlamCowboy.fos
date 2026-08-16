@@ -114,7 +114,7 @@ void InitCowboy(Map map, bool firstTime)
 // Обработчики игровых (отложенных) событий.
 // Раз в сутки запускает волну атаки на стадо. Если квест никем не взят — только перевзводит таймер.
 // После рестарта переустанавливается из InitCowboy.
-[[TimeEvent]]
+[[TimeEvent]] [[Async]]
 void StartAtack(any value)
 {
     if (GetQuestGlobalState() == ZERO_IDENT) {
@@ -125,6 +125,15 @@ void StartAtack(any value)
     Map? map = Game.GetMap(ident(value));
     if (map == null) {
         Game.Log("ERROR: map not valid ");
+        return;
+    }
+
+    if (!Sync::Lock(map)) {
+        return;
+    }
+
+    Critter? questPlayer;
+    if (!LockQuestPlayer(Sync::Snapshot(), questPlayer) || questPlayer == null) {
         return;
     }
 
@@ -141,14 +150,14 @@ void StartAtack(any value)
     FinishInvokeId = Game.StartTimeEvent(GameTime::GetNearSynchronizedTime(0, 0, 0, QUEST_TIME_END, 0, 0) - Game.SynchronizedTime, DeferredFinishQuest);
     // SavedDeferredCall — отложенный вызов должен переживать рестарт сервера (breadcrumb из исходника).
     Game.StartTimeEvent(GameTime::GameSeconds(GetTimeSpawn()), SpawnMobsLoop, value);
-    SetQuestState(2);
+    questPlayer.KlamTorrCowboy = 2;
 
     Game.StartTimeEvent((GameTime::GetNearSynchronizedTime(0, 0, 0, QUEST_TIME_START, 0, 0) - Game.SynchronizedTime), StartAtack, value);
 }
 
 // Очередной цикл волны: поднимает собак на тревогу и запускает порционный спавн мобов уровня/количества
 // под уровень игрока, после чего перевзводит сам себя на следующий интервал.
-[[TimeEvent]]
+[[TimeEvent]] [[Async]]
 void SpawnMobsLoop(any value)
 {
     if (GetQuestGlobalState() == ZERO_IDENT) {
@@ -158,6 +167,10 @@ void SpawnMobsLoop(any value)
     Map? map = Game.GetMap(ident(value));
     if (map == null) {
         Game.Log("ERROR: map not valid");
+        return;
+    }
+
+    if (!Sync::Lock(map)) {
         return;
     }
 
@@ -188,9 +201,13 @@ void SpawnMobsLoop(any value)
 // Создаёт мобов на точках входа заданной группы. Пока нужное количество не набрано, событие
 // перевзводит себя; счётчики прогресса и предохранитель от зацикливания передаются через values.
 // Сохранять в базе необязательно: вероятность обрыва рестартом мала и некритична.
-[[TimeEvent]]
+[[TimeEvent]] [[Async]]
 void SpawnMobs(any[] values)
 {
+    if (values.length() < 8) {
+        return;
+    }
+
     if (GetQuestGlobalState() == ZERO_IDENT) {
         return;
     }
@@ -198,6 +215,10 @@ void SpawnMobs(any[] values)
     Map? map = Game.GetMap(ident(values[0]));
     if (map == null) {
         Game.Log("ERROR: map not valid");
+        return;
+    }
+
+    if (!Sync::Lock(map)) {
         return;
     }
 
@@ -240,12 +261,16 @@ void SpawnMobs(any[] values)
 
 // Сторожевая собака лает, перемещается и выкрикивает реплику; повторяет до трёх раз, поднимая тревогу.
 // Это событие в базе не сохраняется — обрывается рестартом сервера.
-[[TimeEvent]]
+[[TimeEvent]] [[Async]]
 void DogAlert(any value)
 {
     Critter? dog = Game.GetCritter(value);
     if (dog == null) {
         Game.Log("ERROR: critter not valid");
+        return;
+    }
+
+    if (!Sync::LockCritterWithMap(dog)) {
         return;
     }
 
@@ -268,19 +293,23 @@ void DogAlert(any value)
 }
 
 // Завершение квеста по таймауту (наступил час окончания атак).
-[[TimeEvent]]
+[[TimeEvent]] [[Async]]
 void DeferredFinishQuest()
 {
     FinishQuest(FINISH_SUCCESS_TIME_OUT);
 }
 
 // Отложенное удаление трупа моба: убираем не сразу после смерти, а спустя интервал.
-[[TimeEvent]]
+[[TimeEvent]] [[Async]]
 void DeleteMobs(any value)
 {
     Critter? mob = Game.GetCritter(value);
     if (mob == null) {
         Game.Log("ERROR: critter not valid");
+        return;
+    }
+
+    if (!Sync::LockCritterWithMap(mob)) {
         return;
     }
 
@@ -293,12 +322,20 @@ void DeleteMobs(any value)
 
 // Воскрешение брамина: гекс под трупом может оказаться занят, поэтому пробуем повторно — до 10 попыток.
 // Если все попытки провалились, брамин остаётся мёртвым, а счётчик потерь пересчитывается по карте.
-[[TimeEvent]]
+[[TimeEvent]] [[Async]]
 void CowToAlive(any[] values)
 {
+    if (values.length() < 2) {
+        return;
+    }
+
     Critter? cow = Game.GetCritter(values[0]);
     if (cow == null) {
         Game.Log("ERROR: critter not valid");
+        return;
+    }
+
+    if (!Sync::LockCritterWithMap(cow)) {
         return;
     }
 
@@ -358,9 +395,13 @@ void MobIdle(Critter mob)
 }
 
 // Гибель брамина во время квеста: считаем потери, при гибели всего стада проваливаем квест.
-[[Event]]
+[[Event]] [[Async]]
 void CowDead(Critter cow, Critter killer)
 {
+    if (!Sync::LockCritterWithMap(cow)) {
+        return;
+    }
+
     if (GetQuestGlobalState() == ZERO_IDENT) {
         return;
     }
@@ -460,6 +501,7 @@ void GoodByeMob(Critter mob)
 
 // Вспомогательные функции.
 // Создаёт моба на координатах точки входа, навешивает план атаки, событийные подписки и idle-таймер.
+[[Async]]
 Critter? SpawnMob(Map map, int entGroup, int entNum, hstring npcPid, uint8 dir, hstring dialog, int level)
 {
     mpos hex;
@@ -486,6 +528,7 @@ Critter? SpawnMob(Map map, int entGroup, int entNum, hstring npcPid, uint8 dir, 
 }
 
 // Натравливает моба на случайного живого брамина; если живых браминов не осталось — проваливает квест.
+[[Async]]
 void MobSetAtackPlane(Map map, Critter mob)
 {
     Critter[] cows = map.GetCritters(CritterProperty::NpcRole, MapKlamath::RoleCows, CritterFindType::NonDeadNpc);
@@ -544,9 +587,15 @@ bool VerifyTime(int timeStart, int timeFinish)
 
 // Завершает квест: при провале останавливает таймер таймаута и ставит состояние провала, при успехе —
 // состояние с учётом числа погибших браминов; затем снимает глобальную привязку квеста к игроку.
+[[Async]]
 void FinishQuest(int state)
 {
     if (GetQuestGlobalState() == ZERO_IDENT) {
+        return;
+    }
+
+    Critter? player;
+    if (!LockQuestPlayer(Sync::SurvivingSnapshot(), player) || player == null) {
         return;
     }
 
@@ -556,10 +605,10 @@ void FinishQuest(int state)
             Game.StopTimeEvent(FinishInvokeId);
         }
 
-        SetQuestState(3);
+        player.KlamTorrCowboy = 3;
         break;
     case FINISH_SUCCESS_TIME_OUT:
-        SetQuestState(4 + CowsDeadCount);
+        player.KlamTorrCowboy = 4 + CowsDeadCount;
         break;
     }
 
@@ -577,6 +626,33 @@ void SetQuestGlobalState(ident status)
 ident GetQuestGlobalState()
 {
     return Game.KlamCowboy;
+}
+
+// Глобальное свойство хранит только id владельца квеста. Registry lookup возвращает
+// непокрытый handle, поэтому async-пути добавляют игрока к уже удерживаемой карте/криттерам
+// и после ожидания проверяют, что владелец квеста не сменился.
+[[Async]]
+bool LockQuestPlayer(Entity[] baseCover, Critter? & player)
+{
+    player = null;
+    ident playerId = GetQuestGlobalState();
+    if (playerId == ZERO_IDENT) {
+        return false;
+    }
+
+    Critter? candidate = Game.GetCritter(playerId);
+    if (candidate == null) {
+        return false;
+    }
+
+    Entity[] cover = Sync::SurvivingEntities(baseCover);
+    Sync::AddUniqueEntity(cover, candidate);
+    if (!Sync::Lock(cover) || GetQuestGlobalState() != playerId) {
+        return false;
+    }
+
+    player = candidate;
+    return true;
 }
 
 void SetQuestState(int state)

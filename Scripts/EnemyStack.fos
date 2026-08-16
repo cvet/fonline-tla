@@ -86,23 +86,45 @@ void ClearEnemyStack(Critter? cr)
     }
 }
 
-// Убирает из стека всех NPC, оставляя только врагов-игроков.
-void ClearEnemyStackNpc(Critter? cr)
+// Убирает из стека всех NPC, оставляя только врагов-игроков. Registry lookup не покрывает
+// найденных криттеров, поэтому перед чтением ControlledByPlayer блокируем владельца и весь
+// найденный набор одним скриптовым cover.
+[[Async]]
+bool ClearEnemyStackNpc(Critter? cr)
 {
-    if (cr != null) {
-        ident[] enemies = cr.EnemyStack.clone();
-        for (int i = 0; i < enemies.length();) {
-            Critter? npc = Game.GetCritter(enemies[i]);
-            if (npc != null && !npc.ControlledByPlayer) {
-                enemies.removeAt(i);
-            }
-            else {
-                i++;
-            }
-        }
-
-        cr.EnemyStack = enemies;
+    if (cr == null) {
+        return true;
     }
+
+    if (!Sync::Lock(cr)) {
+        return false;
+    }
+
+    ident[] enemies = cr.EnemyStack.clone();
+    Entity[] cover = {cr};
+    for (int i = 0; i < enemies.length(); i++) {
+        Critter? enemy = Game.GetCritter(enemies[i]);
+        if (enemy != null) {
+            Sync::AddUniqueEntity(cover, enemy);
+        }
+    }
+
+    if (!Sync::Lock(cover)) {
+        return false;
+    }
+
+    for (int i = 0; i < enemies.length();) {
+        Critter? enemy = Game.GetCritter(enemies[i]);
+        if (enemy != null && !enemy.ControlledByPlayer) {
+            enemies.removeAt(i);
+        }
+        else {
+            i++;
+        }
+    }
+
+    cr.EnemyStack = enemies;
+    return true;
 }
 
 #endif

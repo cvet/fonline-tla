@@ -82,7 +82,8 @@ AddEngineSources(
     CLIENT SourceExt/ClientAiBridge.cpp
     BAKER SourceExt/BakerExtension.cpp
     BAKER SourceExt/DialogBaker.h
-    BAKER SourceExt/DialogBaker.cpp)
+    BAKER SourceExt/DialogBaker.cpp
+    TESTS SourceExt/TestDialogs.cpp)
 
 RegisterEngineSources()
 

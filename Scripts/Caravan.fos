@@ -248,12 +248,17 @@ class CaravanLeaderInfo
     int Level;        // уровень проводника
     int Virtue;       // поведение
 
+    [[Async]]
     bool CheckLeaderInPos(bool startPos)
     {
         NpcPosition pos = (startPos ? StartPos.Copy() : EndPos.Copy());
 
         Critter? leader = GetLeader();
-        if (leader == null) {
+        if (leader == null || !Sync::LockCritterWithMap(leader)) {
+            return false;
+        }
+
+        if (CritterId != leader.Id) {
             return false;
         }
 
@@ -271,6 +276,7 @@ class CaravanLeaderInfo
         return (Game.GetDistance(leader.Hex, pos.Hex) <= LEADER_SEARCH_RADIUS);
     }
 
+    [[Async]]
     bool TransferToPos(bool startPos)
     {
         Map? map = (startPos ? StartPos.GetMap() : EndPos.GetMap());
@@ -280,6 +286,10 @@ class CaravanLeaderInfo
 
         Critter? leader = GetLeader();
         if (leader == null) {
+            return false;
+        }
+
+        if (!Sync::LockForTransferToMap(leader, map) || CritterId != leader.Id) {
             return false;
         }
 
@@ -293,10 +303,11 @@ class CaravanLeaderInfo
     }
 
     // установка лидера на указанную позицию
+    [[Async]]
     bool PlaceLeaderCritterToPos(NpcPosition pos)
     {
         Map? map = pos.GetMap();
-        if (map == null) {
+        if (map == null || !Sync::Lock(map)) {
             return false;
         }
 
@@ -316,6 +327,10 @@ class CaravanLeaderInfo
                        CritterProperty::Level,
                        Level};
         Critter leader = map.AddCritter(NpcPid, hex, HDIR_Random, Tla::GetCritPropsDict(props));
+
+        if (!Sync::Lock(map, leader) || leader.MapId != map.Id) {
+            return false;
+        }
 
         leader.CaravanCrvId = CaravanId;
         CritterId = leader.Id;
@@ -552,9 +567,14 @@ class CaravanGuardInfo
     // пытается поставить охранника с определенной долей вероятности.
     // если не удалось, возвращает  null
     // leader - проводник каравана
+    [[Async]]
     Critter? GetCritterGuard(Map map, Critter leader)
     {
         if (Game.Random(1, 100) > int(ChanceToJoin)) {
+            return null;
+        }
+
+        if (!Sync::Lock(map, leader) || leader.MapId != map.Id) {
             return null;
         }
 
@@ -578,6 +598,11 @@ class CaravanGuardInfo
                        CritterProperty::CaravanNervosityLvl,
                        IsNervous};
         Critter guard = map.AddCritter(Pid, hex, HDIR_Random, Tla::GetCritPropsDict(props));
+
+        if (!Sync::Lock(map, leader, guard) || leader.MapId != map.Id || guard.MapId != map.Id) {
+            return null;
+        }
+
         guard.SetupScript(InitScript);
         // если охранник помечен уникальным - отмечаем его присоединившимся и криттер больше не будет генериться данным методом
         if (IsUnique) {
@@ -774,6 +799,7 @@ class CaravanInfo
 
 // ищет на указанной карте криттера с нужным диалогом и прототипом
 // ищет только нпц
+[[Async]]
 Critter[] GetCrittersByDialogId(Map? map, hstring dialog, hstring pid)
 {
     Critter[] critters = {};
@@ -786,11 +812,34 @@ Critter[] GetCrittersByDialogId(Map? map, hstring dialog, hstring pid)
         return critters;
     }
 
-    Critter[] foundCrits = map.GetCritters(pid, CritterFindType::Npc);
-    for (int i = 0; i < foundCrits.length(); i++) {
-        if (foundCrits[i].DialogId == dialog) {
-            critters.insertLast(foundCrits[i]);
+    while (true) {
+        if (!Sync::Lock(map)) {
+            return critters;
         }
+
+        Critter[] foundCrits = map.GetCritters(pid, CritterFindType::Npc);
+        if (!Sync::Lock(map, foundCrits)) {
+            continue;
+        }
+
+        bool topologyChanged = false;
+        for (int i = 0; i < foundCrits.length(); i++) {
+            if (foundCrits[i].MapId != map.Id) {
+                topologyChanged = true;
+                break;
+            }
+        }
+        if (topologyChanged) {
+            continue;
+        }
+
+        for (int i = 0; i < foundCrits.length(); i++) {
+            if (foundCrits[i].DialogId == dialog) {
+                critters.insertLast(foundCrits[i]);
+            }
+        }
+
+        return critters;
     }
 
     return critters;
@@ -2883,10 +2932,10 @@ bool SheduleCaravan(int idCaravan, int prepareDay, int prepareHour, int startDay
     return true;
 }
 
-[[TimeEvent]]
+[[TimeEvent]] [[Async]]
 void StartPrepareCaravan(any[] values)
 {
-    if (values.length() == 0) {
+    if (values.length() < 5) {
         Game.Log("Shedule caravan error");
         return;
     }
@@ -2905,7 +2954,11 @@ void StartPrepareCaravan(any[] values)
     DebugLogVerbose("e_PrepareCaravan idCaravan = " + ci.CaravanId + ";");
     if (ci.Leader.CritterId != ZERO_IDENT) {
         Critter? leader = ci.Leader.GetLeader();
-        if (leader != null) {
+        if (leader != null && Sync::LockCritterWithMap(leader)) {
+            if (ci.Leader.CritterId != leader.Id) {
+                return;
+            }
+
             if (leader.IsDead()) {
                 Game.StartTimeEvent(Time::GameHours(4), StartPrepareCaravan, values);
                 return;
@@ -2918,7 +2971,7 @@ void StartPrepareCaravan(any[] values)
     PrepareCaravan(idCaravan);
 }
 
-[[TimeEvent]]
+[[TimeEvent]] [[Async]]
 void BeginCaravan(any[] values)
 {
     if (values.length() < 5) {
@@ -3347,6 +3400,7 @@ EventResult CaravanLeaderOnGlobal(Critter leader, int type, Item car, float x, f
 }
 
 /* ********************************* Этап№1 сбор заявок от игроков ********************************** */
+[[Async]]
 void PrepareCaravan(int CaravanId)
 {
     CaravanInfo? ci = GetCaravan(CaravanId);
@@ -3386,14 +3440,29 @@ void PrepareCaravan(int CaravanId)
     }
 
     leader = ci.Leader.GetLeader();
-    if (leader == null) {
+    if (leader == null || !Sync::LockCritterWithMap(leader)) {
+        return;
+    }
+    if (ci.Leader.CritterId != leader.Id) {
         return;
     }
 
     SetEvents(leader, ci.Leader.Virtue);
 }
 
+[[TimeEvent]] [[Async]]
+void PrepareCaravanDeferred(any caravanId)
+{
+    PrepareCaravan(caravanId);
+}
+
 /* ********************************** Этап№2 отправление каравана *********************************** */
+bool CanJoinPreparedCaravan(bool isDead, bool sameMap, int distance)
+{
+    return !isDead && sameMap && distance <= LEADER_SEARCH_RADIUS;
+}
+
+[[Async]]
 void StartCaravanImpl(any caravanId)
 {
     CaravanInfo? ci = GetCaravan(caravanId);
@@ -3402,11 +3471,7 @@ void StartCaravanImpl(any caravanId)
     }
 
     Critter? leader = ci.Leader.GetLeader();
-    if (leader == null) {
-        return;
-    }
-
-    if (leader.IsDead()) {
+    if (leader == null || !Sync::LockCritterWithMap(leader) || ci.Leader.CritterId != leader.Id || leader.IsDead()) {
         return;
     }
 
@@ -3424,24 +3489,19 @@ void StartCaravanImpl(any caravanId)
     int curPlayersInGrp = 0;
     // группа караванщиков
     Critter[] caravanGroup = {};
-    caravanGroup.insertLast(leader);
+    ident[] requestedPlayers = ci.PlayersRequested.clone();
     // всех игроков в группу, сколько разрешено
-    for (int i = 0; i < ci.PlayersRequested.length(); i++) {
-        Critter? player = Game.GetCritter(ci.PlayersRequested[i]);
-        if (player == null) {
+    for (int i = 0; i < requestedPlayers.length(); i++) {
+        Critter? player = Game.GetCritter(requestedPlayers[i]);
+        if (player == null || !Sync::Lock(leader, map, player)) {
             continue;
         }
 
-        if (player.IsDead()) {
-            continue;
+        if (leader.MapId != map.Id) {
+            return;
         }
 
-        Map? playerMap = player.GetMap();
-        if (player.GetMap() == null) {
-            continue;
-        }
-
-        if (Game.GetDistance(leader.Hex, player.Hex) <= LEADER_SEARCH_RADIUS) {
+        if (CanJoinPreparedCaravan(player.IsDead(), player.MapId == map.Id, Game.GetDistance(leader.Hex, player.Hex))) {
             ci.RequstedToGuard(player.Id);
             caravanGroup.insertLast(player);
             curPlayersInGrp++;
@@ -3465,7 +3525,7 @@ void StartCaravanImpl(any caravanId)
     // индекс из списка определений охранников
     int idx = 0;
     // добавление НПЦ-охранников в группу ci.CaravanGuards
-    while (caravanGroup.length() < ci.MaxGroup && ci.CaravanGuards.length() > 0) {
+    while (caravanGroup.length() + 1 < ci.MaxGroup && ci.CaravanGuards.length() > 0) {
         DebugLog("adding guards");
         numTry++;
         if (numTry >= 20) {
@@ -3480,14 +3540,23 @@ void StartCaravanImpl(any caravanId)
         }
     }
 
+    if (!Sync::LockForTransferToGlobalWithGroup(leader, caravanGroup) || leader.MapId != map.Id) {
+        return;
+    }
+    for (int i = 0; i < caravanGroup.length(); i++) {
+        if (caravanGroup[i].MapId != map.Id) {
+            return;
+        }
+    }
+
     // основной скрипт проводника
     leader.SetupScript(CaravanLeaderInit);
     ci.CaravanStatus = CRV_STATUS_START_MOVE;
     // начало движения по глобальной карте
-    leader.TransferToGlobal();
+    leader.TransferToGlobalWithGroup(caravanGroup);
 }
 
-[[TimeEvent]]
+[[TimeEvent]] [[Async]]
 void StartCaravan(any caravanId)
 {
     StartCaravanImpl(caravanId);
@@ -3626,20 +3695,22 @@ bool EndCaravan(Critter leader)
     return true;
 }
 
-[[TimeEvent]]
+[[TimeEvent]] [[Async]]
 void DeleteLeader(any value)
 {
     DebugLog("try delete leader");
     Critter? leader = Game.GetCritter(value);
-    if (leader != null) {
+    if (leader != null && Sync::LockCritterWithMap(leader)) {
         CaravanInfo? ci = GetCaravan(leader.CaravanCrvId);
         if (ci != null) {
-            ci.CaravanReset();
             CaravanLeaderInfo li = ci.Leader;
             if (li.CritterId != leader.Id) {
-                Game.Log("Wrong eader id");
+                Game.Log("Wrong leader id");
                 return;
             }
+
+            ci.CaravanReset();
+            li.CritterId = ZERO_IDENT;
         }
 
         if (!leader.ControlledByPlayer) {
@@ -3650,13 +3721,13 @@ void DeleteLeader(any value)
     DebugLog("success");
 }
 
-[[TimeEvent]]
+[[TimeEvent]] [[Async]]
 void TransferToStartPos(any value)
 {
     Critter? leader = Game.GetCritter(value);
-    if (leader != null) {
+    if (leader != null && Sync::LockCritterWithMap(leader)) {
         CaravanInfo? ci = GetCaravan(leader.CaravanCrvId);
-        if (ci != null) {
+        if (ci != null && ci.Leader.CritterId == leader.Id) {
             ci.Leader.TransferToPos(true);
         }
     }
@@ -3841,7 +3912,7 @@ void StartCaravan(Critter player, Critter npc)
     if (ci != null) {
         PutPlayerRequest2InfoImpl(player, npc);
         DebugLog("time start");
-        StartCaravanImpl(npc.CaravanCrvId);
+        Game.StartTimeEvent(Time::Asap(), StartCaravan, any(npc.CaravanCrvId));
     }
 }
 

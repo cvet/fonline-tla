@@ -214,6 +214,14 @@ uint8 GetRank(uint8 CNum)
     return (CNum - 1) % 13;
 }
 
+// Ранг карты cardIndex (0..CARD_COUNT-1) на руке игрока plNum.
+// Карты всех игроков лежат в одном плоском массиве, поэтому индекс считается как plNum * CARD_COUNT + cardIndex;
+// хелпер убирает это повторяющееся выражение из условий ИИ замены карт.
+uint8 GetHandRank(Critter pokerMan, uint8 plNum, int cardIndex)
+{
+    return GetRank(GameCards[pokerMan.PokerNumOfNpc][plNum * CARD_COUNT + cardIndex]);
+}
+
 string GetStrCard(uint8 num)
 {
     uint8 i, m;
@@ -607,7 +615,7 @@ void NpcReplaceCards(Critter pokerMan) // Замена карт у против�
     // стрейт флаш - ничего не менять
     // каре - ничего не менять
     // фул хаус - 90% ничего не менять 10% менять пару
-    // флаш - если до стрейт флаша не хватает одной карты, то с 20% вероятностью меняем карту.
+    // флаш - если до стрейт флаша не хватает одной карты, то с 5% вероятностью меняем карту
     // стрейт - если 4 карты одной масти, то 5% обмена последней
     // сет - обмен оставшихся 2ух карт
     // две пары - 90% обмен последней карты, 10% обмен трех карт
@@ -661,12 +669,98 @@ void NpcReplaceCards(Critter pokerMan) // Замена карт у против�
     }
 }
 
+// Возвращает 0-based индекс карты, которую выгоднее сбросить ради стрейта, либо -1.
+// Порядок сдачи не учитывается: для каждой отбрасываемой карты считаются все недостающие ранги,
+// способные дополнить оставшиеся четыре до обычного стрейта. При равном числе выходов сбрасывается
+// карта меньшего ранга, чтобы сохранить более сильную старшую карту.
+int FindNearStraightReplaceCard(uint8[] ranks)
+{
+    if (ranks.length() != CARD_COUNT) {
+        return -1;
+    }
+
+    int bestCard = -1;
+    int bestOutCount = 0;
+    for (int replaceCard = 0; replaceCard < CARD_COUNT; replaceCard++) {
+        bool[] heldRanks = array<bool>(CARD_ACE + 1);
+        bool uniqueRanks = true;
+        for (int cardIndex = 0; cardIndex < CARD_COUNT; cardIndex++) {
+            if (cardIndex == replaceCard) {
+                continue;
+            }
+
+            int rank = ranks[cardIndex];
+            if (rank > CARD_ACE || heldRanks[rank]) {
+                uniqueRanks = false;
+                break;
+            }
+
+            heldRanks[rank] = true;
+        }
+
+        if (!uniqueRanks) {
+            continue;
+        }
+
+        bool[] completionRanks = array<bool>(CARD_ACE + 1);
+        for (int straightStart = CARD_2; straightStart <= CARD_ACE - CARD_COUNT + 1; straightStart++) {
+            bool fitsStraight = true;
+            for (int rank = CARD_2; rank <= CARD_ACE; rank++) {
+                if (heldRanks[rank] && (rank < straightStart || rank >= straightStart + CARD_COUNT)) {
+                    fitsStraight = false;
+                    break;
+                }
+            }
+
+            if (!fitsStraight) {
+                continue;
+            }
+
+            for (int rank = straightStart; rank < straightStart + CARD_COUNT; rank++) {
+                if (!heldRanks[rank]) {
+                    completionRanks[rank] = true;
+                }
+            }
+        }
+
+        int outCount = 0;
+        for (int rank = CARD_2; rank <= CARD_ACE; rank++) {
+            if (completionRanks[rank]) {
+                outCount++;
+            }
+        }
+
+        if (outCount > bestOutCount || (outCount == bestOutCount && outCount > 0 && (bestCard == -1 || ranks[replaceCard] < ranks[bestCard]))) {
+            bestCard = replaceCard;
+            bestOutCount = outCount;
+        }
+    }
+
+    return bestCard;
+}
+
+// Помечает карту для стрейт-дро. Общий код HighCardReplace и FlushReplace: первая по результату
+// решает, нужен ли запасной вариант обмена, вторая вызывает его только в своей редкой ветке риска.
+bool MarkNearStraightReplace(uint8 i, Critter pokerMan)
+{
+    uint8[] ranks = array<uint8>(CARD_COUNT);
+    for (int cardIndex = 0; cardIndex < CARD_COUNT; cardIndex++) {
+        ranks[cardIndex] = GetHandRank(pokerMan, i, cardIndex);
+    }
+
+    int replaceCard = FindNearStraightReplaceCard(ranks);
+    if (replaceCard == -1) {
+        return false;
+    }
+
+    ReplCards[pokerMan.PokerNumOfNpc][i] = SetBit5(ReplCards[pokerMan.PokerNumOfNpc][i], replaceCard + 1, true);
+    return true;
+}
+
 void HighCardReplace(uint8 hc, uint8 i, Critter pokerMan)
 {
     uint8[] cSuits = {0, 0, 0, 0};
     int8 strfl1Card = -1;
-    uint8 iStraight = 0;
-    bool chStraight = false;
     for (uint8 c = 0; c < CARD_COUNT; c++) // Проверка на "почти флаш"
     {
         cSuits[GetSuit(GameCards[pokerMan.PokerNumOfNpc][i * CARD_COUNT + c])]++;
@@ -688,66 +782,14 @@ void HighCardReplace(uint8 hc, uint8 i, Critter pokerMan)
     }
     else // Проверка на "почти стрейт"
     {
-        for (uint8 c = 0; c < CARD_COUNT - 1; c++) {
-            if (GetRank(GameCards[pokerMan.PokerNumOfNpc][i * CARD_COUNT + c]) == GetRank(GameCards[pokerMan.PokerNumOfNpc][i * CARD_COUNT + c + 1]) - 1) {
-                iStraight++;
-            }
-        }
+        bool chStraight = MarkNearStraightReplace(i, pokerMan);
 
-        if (iStraight == 3) // Если 4 карты идут по порядку, значит, это почти стрейт
-        {
-            if (GetRank(GameCards[pokerMan.PokerNumOfNpc][i * CARD_COUNT]) != GetRank(GameCards[pokerMan.PokerNumOfNpc][i * CARD_COUNT + 1]) - 1) {
-                ReplCards[pokerMan.PokerNumOfNpc][i] = SetBit5(ReplCards[pokerMan.PokerNumOfNpc][i], 1, true);
-            }
-            else {
-                ReplCards[pokerMan.PokerNumOfNpc][i] = SetBit5(ReplCards[pokerMan.PokerNumOfNpc][i], 5, true);
-            }
-
-            chStraight = true;
-        }
-        else // В противном случае требуются дополнительные проверки
-        {
-            if (iStraight > 1) // До стрейта далеко, если подряд идут только 2 карты (или таковых вообще нет).
-            {
-                if ((GetRank(GameCards[pokerMan.PokerNumOfNpc][i * CARD_COUNT]) == GetRank(GameCards[pokerMan.PokerNumOfNpc][i * CARD_COUNT + 1]) - 1) and
-                    (GetRank(GameCards[pokerMan.PokerNumOfNpc][i * CARD_COUNT + 1]) == GetRank(GameCards[pokerMan.PokerNumOfNpc][i * CARD_COUNT + 2]) - 1)) {
-                    if (GetRank(GameCards[pokerMan.PokerNumOfNpc][i * CARD_COUNT + 2]) == GetRank(GameCards[pokerMan.PokerNumOfNpc][i * CARD_COUNT + 4]) - 2) {
-                        ReplCards[pokerMan.PokerNumOfNpc][i] = SetBit5(ReplCards[pokerMan.PokerNumOfNpc][i], 4, true);
-                        chStraight = true;
-                    }
-                }
-                else {
-                    if ((GetRank(GameCards[pokerMan.PokerNumOfNpc][i * CARD_COUNT + 2]) ==
-                         GetRank(GameCards[pokerMan.PokerNumOfNpc][i * CARD_COUNT + 3]) - 1) and
-                        (GetRank(GameCards[pokerMan.PokerNumOfNpc][i * CARD_COUNT + 3]) ==
-                         GetRank(GameCards[pokerMan.PokerNumOfNpc][i * CARD_COUNT + 4]) - 1)) {
-                        if (GetRank(GameCards[pokerMan.PokerNumOfNpc][i * CARD_COUNT]) == GetRank(GameCards[pokerMan.PokerNumOfNpc][i * CARD_COUNT + 2]) - 2) {
-                            ReplCards[pokerMan.PokerNumOfNpc][i] = SetBit5(ReplCards[pokerMan.PokerNumOfNpc][i], 2, true);
-                            chStraight = true;
-                        }
-                    }
-                    else {
-                        if ((GetRank(GameCards[pokerMan.PokerNumOfNpc][i * CARD_COUNT]) ==
-                             GetRank(GameCards[pokerMan.PokerNumOfNpc][i * CARD_COUNT + 1]) - 1) and
-                            (GetRank(GameCards[pokerMan.PokerNumOfNpc][i * CARD_COUNT + 3]) ==
-                             GetRank(GameCards[pokerMan.PokerNumOfNpc][i * CARD_COUNT + 4]) - 1)) {
-                            if (GetRank(GameCards[pokerMan.PokerNumOfNpc][i * CARD_COUNT + 1]) ==
-                                GetRank(GameCards[pokerMan.PokerNumOfNpc][i * CARD_COUNT + 3]) - 2) {
-                                ReplCards[pokerMan.PokerNumOfNpc][i] = SetBit5(ReplCards[pokerMan.PokerNumOfNpc][i], 3, true);
-                                chStraight = true;
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        if (not(chStraight)) // Проверка на "почти стрейт"
+        if (not(chStraight)) // Заготовки стрейта нет — меняем карты по запасному варианту
         {
             if (Game.Random(1, 10) <= 7) // обмен карт кроме наивысшего ранга
             {
                 for (uint8 c = 1; c <= CARD_COUNT; c++) {
-                    if (not(GetRank(GameCards[pokerMan.PokerNumOfNpc][i * CARD_COUNT + c - 1]) == hc)) {
+                    if (not(GetHandRank(pokerMan, i, c - 1) == hc)) {
                         ReplCards[pokerMan.PokerNumOfNpc][i] = SetBit5(ReplCards[pokerMan.PokerNumOfNpc][i], c, true);
                     }
                 }
@@ -771,7 +813,7 @@ void OnePairReplace(uint8 hc, uint8 i, Critter pokerMan)
         if (Game.Random(1, 10) <= 9) // обмен оставшихся карт
         {
             for (uint8 c = 1; c <= CARD_COUNT; c++) {
-                if (GetRank(GameCards[pokerMan.PokerNumOfNpc][i * CARD_COUNT + c - 1]) != hc) {
+                if (GetHandRank(pokerMan, i, c - 1) != hc) {
                     ReplCards[pokerMan.PokerNumOfNpc][i] = SetBit5(ReplCards[pokerMan.PokerNumOfNpc][i], c, true);
                 }
             }
@@ -780,7 +822,7 @@ void OnePairReplace(uint8 hc, uint8 i, Critter pokerMan)
         {
             uint8 highC = GetHighCard(i, GameCards[pokerMan.PokerNumOfNpc]);
             for (uint8 c = 1; c <= CARD_COUNT; c++) {
-                if (not(GetRank(GameCards[pokerMan.PokerNumOfNpc][i * CARD_COUNT + c - 1]) == highC)) {
+                if (not(GetHandRank(pokerMan, i, c - 1) == highC)) {
                     ReplCards[pokerMan.PokerNumOfNpc][i] = SetBit5(ReplCards[pokerMan.PokerNumOfNpc][i], c, true);
                 }
             }
@@ -801,7 +843,7 @@ void TwoPairReplace(uint8 i, Critter pokerMan)
                 continue;
             }
 
-            if (GetRank(GameCards[pokerMan.PokerNumOfNpc][i * CARD_COUNT + c]) == GetRank(GameCards[pokerMan.PokerNumOfNpc][i * CARD_COUNT + t])) {
+            if (GetHandRank(pokerMan, i, c) == GetHandRank(pokerMan, i, t)) {
                 notPair = false;
                 break;
             }
@@ -814,20 +856,20 @@ void TwoPairReplace(uint8 i, Critter pokerMan)
     }
 
     for (uint8 c = 0; c < CARD_COUNT; c++) {
-        if (GetRank(GameCards[pokerMan.PokerNumOfNpc][i * CARD_COUNT + c]) != GetRank(GameCards[pokerMan.PokerNumOfNpc][i * CARD_COUNT + tpCard[0]])) {
+        if (GetHandRank(pokerMan, i, c) != GetHandRank(pokerMan, i, tpCard[0])) {
             if (tpPair == -1) {
-                tpPair = GetRank(GameCards[pokerMan.PokerNumOfNpc][i * CARD_COUNT + c]);
+                tpPair = GetHandRank(pokerMan, i, c);
             }
             else {
-                if (int(GetRank(GameCards[pokerMan.PokerNumOfNpc][i * CARD_COUNT + c])) < tpPair) {
-                    tpPair = GetRank(GameCards[pokerMan.PokerNumOfNpc][i * CARD_COUNT + c]);
+                if (int(GetHandRank(pokerMan, i, c)) < tpPair) {
+                    tpPair = GetHandRank(pokerMan, i, c);
                 }
             }
         }
     }
 
     for (uint8 c = 0; c < CARD_COUNT; c++) {
-        if (int(GetRank(GameCards[pokerMan.PokerNumOfNpc][i * CARD_COUNT + c])) == tpPair) {
+        if (int(GetHandRank(pokerMan, i, c)) == tpPair) {
             if (tpCard[1] == -1) {
                 tpCard[1] = c;
             }
@@ -858,7 +900,7 @@ void TwoPairReplace(uint8 i, Critter pokerMan)
 void SetReplace(uint8 hc, uint8 i, Critter pokerMan)
 {
     for (uint8 c = 1; c <= CARD_COUNT; c++) {
-        if (not(GetRank(GameCards[pokerMan.PokerNumOfNpc][i * CARD_COUNT + c - 1]) == hc)) {
+        if (not(GetHandRank(pokerMan, i, c - 1) == hc)) {
             ReplCards[pokerMan.PokerNumOfNpc][i] = SetBit5(ReplCards[pokerMan.PokerNumOfNpc][i], c, true);
         }
     }
@@ -890,53 +932,12 @@ void StraightReplace(uint8 i, Critter pokerMan)
     }
 }
 
+// При флаше добираем до стрейт-флаша: разметка та же, что и для «почти стрейта», но запасного
+// варианта обмена здесь нет — если заготовки нет, карты не меняются.
 void FlushReplace(uint8 i, Critter pokerMan)
 {
-    uint8 iStraight = 0;
-    for (uint8 c = 0; c < CARD_COUNT - 1; c++) {
-        if (GetRank(GameCards[pokerMan.PokerNumOfNpc][i * CARD_COUNT + c]) == GetRank(GameCards[pokerMan.PokerNumOfNpc][i * CARD_COUNT + c + 1]) - 1) {
-            iStraight++;
-        }
-    }
-
-    if (iStraight == 3) // Если 4 карты идут по порядку, значит, это почти стрейт
-    {
-        if (GetRank(GameCards[pokerMan.PokerNumOfNpc][i * CARD_COUNT]) != GetRank(GameCards[pokerMan.PokerNumOfNpc][i * CARD_COUNT + 1]) - 1) {
-            ReplCards[pokerMan.PokerNumOfNpc][i] = SetBit5(ReplCards[pokerMan.PokerNumOfNpc][i], 1, true);
-        }
-        else {
-            ReplCards[pokerMan.PokerNumOfNpc][i] = SetBit5(ReplCards[pokerMan.PokerNumOfNpc][i], 5, true);
-        }
-    }
-    else // В противном случае требуются дополнительные проверки
-    {
-        if (iStraight > 1) // До стрейта далеко, если подряд идут только 2 карты (или таковых вообще нет).
-        {
-            if ((GetRank(GameCards[pokerMan.PokerNumOfNpc][i * CARD_COUNT]) == GetRank(GameCards[pokerMan.PokerNumOfNpc][i * CARD_COUNT + 1]) - 1) and
-                (GetRank(GameCards[pokerMan.PokerNumOfNpc][i * CARD_COUNT + 1]) == GetRank(GameCards[pokerMan.PokerNumOfNpc][i * CARD_COUNT + 2]) - 1)) {
-                if (GetRank(GameCards[pokerMan.PokerNumOfNpc][i * CARD_COUNT + 2]) == GetRank(GameCards[pokerMan.PokerNumOfNpc][i * CARD_COUNT + 4]) - 2) {
-                    ReplCards[pokerMan.PokerNumOfNpc][i] = SetBit5(ReplCards[pokerMan.PokerNumOfNpc][i], 4, true);
-                }
-            }
-            else {
-                if ((GetRank(GameCards[pokerMan.PokerNumOfNpc][i * CARD_COUNT + 2]) == GetRank(GameCards[pokerMan.PokerNumOfNpc][i * CARD_COUNT + 3]) - 1) and
-                    (GetRank(GameCards[pokerMan.PokerNumOfNpc][i * CARD_COUNT + 3]) == GetRank(GameCards[pokerMan.PokerNumOfNpc][i * CARD_COUNT + 4]) - 1)) {
-                    if (GetRank(GameCards[pokerMan.PokerNumOfNpc][i * CARD_COUNT]) == GetRank(GameCards[pokerMan.PokerNumOfNpc][i * CARD_COUNT + 2]) - 2) {
-                        ReplCards[pokerMan.PokerNumOfNpc][i] = SetBit5(ReplCards[pokerMan.PokerNumOfNpc][i], 2, true);
-                    }
-                }
-                else {
-                    if ((GetRank(GameCards[pokerMan.PokerNumOfNpc][i * CARD_COUNT]) == GetRank(GameCards[pokerMan.PokerNumOfNpc][i * CARD_COUNT + 1]) - 1) and
-                        (GetRank(GameCards[pokerMan.PokerNumOfNpc][i * CARD_COUNT + 3]) ==
-                         GetRank(GameCards[pokerMan.PokerNumOfNpc][i * CARD_COUNT + 4]) - 1)) {
-                        if (GetRank(GameCards[pokerMan.PokerNumOfNpc][i * CARD_COUNT + 1]) ==
-                            GetRank(GameCards[pokerMan.PokerNumOfNpc][i * CARD_COUNT + 3]) - 2) {
-                            ReplCards[pokerMan.PokerNumOfNpc][i] = SetBit5(ReplCards[pokerMan.PokerNumOfNpc][i], 3, true);
-                        }
-                    }
-                }
-            }
-        }
+    if (Game.Random(1, 20) == 1) {
+        MarkNearStraightReplace(i, pokerMan);
     }
 }
 

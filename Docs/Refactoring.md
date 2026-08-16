@@ -103,9 +103,8 @@ The active phases above are complete. What is intentionally not changed, and why
 
 - **Idioms — done where it applies.** Magic text ids were named in all active modules (Behemoth and
   the live map/quest modules). The residual sits in **dead code** (events under the disabled
-  `GameEvent::DeclareEvents`), **generated** `GuiScreens.fos` (validator-excluded), one **missing-string
-  ref** (`NrWriKidnap.fos:437` → text id 3354 absent from the pack — a separate content bug), and a
-  handful of **single-use** ids where a named const adds no readability. `flag-soups → enums` is gated
+  `GameEvent::DeclareEvents`), **generated** `GuiScreens.fos` (validator-excluded), and a handful of
+  **single-use** ids where a named const adds no readability. `flag-soups → enums` is gated
   by the plan's "non-serialized only" rule: the discriminator groups (`AI_PLANE_*`→`plane.Type`→
   serialized `Planes[]`, `TYPE_ORDER_*`/`ORDER_TYPE_*`→properties, `HF_*`/`MF_*`/`USE_*`→bitwise) are
   all serialized or bitwise, so none qualify. The two `any`/`double` `Tla::Clamp` sites are correct as
@@ -1093,3 +1092,260 @@ sync, assertion or fatal marker. `git diff --check` clean. Not committed (owner 
 Playtest additions from this wave: general responsiveness in crowds/combat (the ClientMain freeze), drug
 durations, NPC aimed-shot behaviour and burst decisions, warehouse-turret / V13-guardian aggression, weapon repair
 display and severity, and world-map fog coverage.
+
+### R3 Poker draw-order follow-up (2026-08-08)
+
+The NPC draw strategy still detected near-straights by comparing adjacent slots in the unsorted deal. The same
+five cards therefore produced different replacement decisions after a permutation, and most valid open-ended or
+inside draws were missed. `Poker::FindNearStraightReplaceCard` now evaluates each possible discard against every
+normal five-rank straight window, counts distinct completion ranks, and uses the lower discarded rank as the
+stable tie-break so the higher card is preserved. `HighCardReplace` and `FlushReplace` share that pure decision
+helper; the latter now also honours its documented 5% risk instead of always breaking a made flush whenever a
+near-straight happened to be detected. Repeated hand indexing in the touched replacement paths is centralized in
+`GetHandRank`.
+
+`Test_Poker::near_straight_replace` covers arbitrary deal order, a permutation of the same hand, inside and
+open-ended draws, the ace-high boundary, scattered ranks, duplicates, and an invalid hand size.
+
+**Verification:** Compile AngelScript succeeded with no warnings; full resource bake completed; project formatter
+is clean; script-quality ratchet and nullable ABI validator are green; focused server harness **1 passed, 0 failed,
+66 skipped**; full server harness **67 passed, 0 failed, 0 skipped**; `TLA_ServerHeadless` reached
+`Start server complete!` and shut down cleanly. No client/GUI surface changed, so this server-only batch did not
+require a screenshot comparison. Not committed (owner reviews).
+
+### R3 AI-control dialog tracing follow-up (2026-08-08)
+
+The Stage-0 quest workflow now has a bounded `tla_quest_runner.py --trace-dialog` discovery mode. It identifies
+the real giver by visible `protoId` + `dialogId`, replays localized answer paths with explicit depth/path/candidate
+bounds, ranks stage-increasing answers, records stable Russian keyword sets and full node paths, supports setup
+prerequisites, and restores the traced flag in `finally`. Replay handles first-meeting roots and randomized
+greeting/exit variants; it deliberately warns that items, dialog cooldowns, and unrelated properties require a
+disposable QA character.
+
+Live testing exposed two asynchronous races rather than engine-lock gaps. A `qa_get_prop` response can be
+missing or delayed under full-world async load, and an old reply could be mistaken for a newer read. The runner now
+retries within a bounded timeout, while the existing script RemoteCall echoes a correlation `requestId` in
+`qa_prop_value`; only the matching reply is accepted. Same-hex QA transfers are likewise retried until the
+client observes the requested hex. No implicit Engine synchronization was added: the explicit script
+`Game.Sync` covers remain the only potentially waiting synchronization on these paths.
+
+The fresh-client Cassidy seed produced the correct rank-1 answer `Да, конечно.` with the complete three-step
+path, `ArroyoCassidyLetter` 0 → 1, 5 explored paths, 1 root rebase, no branch errors, and a confirmed restore to
+0. This is one of the seven Stage-0 trace exit-criterion quests, not completion of the criterion.
+
+The second seed exposed three automation races under the full-world idle-job load. `qa_set_prop` now carries a
+request id and publishes `qa_prop_set` only after its `[[Async]]` script callback explicitly establishes the
+`Game.Sync` critter cover and performs `SetAsInt`; the runner retries unacknowledged writes without adding any
+implicit synchronization to the called engine function.
+Confirmed adjacent positions retain bounded `talk_to` retries, first-time Debug map loads have a configurable
+`--map-timeout` (90 seconds by default), and trace replay has an internal wall-clock budget so its `finally`
+restore is not left to an
+external shell watchdog. Quest-guided ordering also prioritizes the authored armour/rust/grease lead over
+Mynoc's large lore subtree.
+
+The resulting live Mynoc trace matched `protoId=EnclaveGuard` + `dialogId=arroyo_mynoc`, found the two-step path
+`Я заметил... Твоя броня...` → `Я принесу тебе смазку...`, observed `ArroyoMynocOil` 0 → 1 in 2 explored paths
+and 13.7 seconds, reported no branch errors, and confirmed restore to 0.
+
+The next live seed covered the complete Den Smitty robot chain. The real `HomesteaderMale` / `den_smitty` and
+`MrHandy` / `den_mr_handy` dialogs produced ranked, branch-error-free transitions `DenSmittyFixit`
+0 → 1 → 2 → 3 → 4, including the Repair-85 diagnosis and the three-item repair gate; each independently injected
+stage restored the original value 0. Cold Den loads exposed the old fixed transfer timeout at the exact map-load
+boundary, so both trace and authored quest runs now pass the validated `--map-timeout` through to strict
+`map.protoId` observation instead of weakening the oracle. Live reports are
+`Build/_artifacts/trace-dialog/smitty-{accept,examine,repair,report}-live.json`. Stage-0 trace coverage is now
+3/7.
+
+The fourth seed matched Klamath's real `MasterTrader` / `klam_hish` at hex 82,132. With `IntellectBase=6`, the
+ranked replay walked five visible answers from the work topic through the name joke and vaccination offer,
+observed `KlamVaccination` 0 → 1 in 5 explored paths and 20.97 seconds, reported no branch errors, and restored
+the original 0. Its report is `Build/_artifacts/trace-dialog/klam-hish-accept-live.json`; the full Klamath session
+logged zero script, sync, bag, fatal, or assertion markers. All 4 seed quests are now traced, so Stage-0 coverage
+is 4/7 with only the 3 fresh Arroyo quests remaining.
+
+The first fresh Arroyo probe revisited Todd instead of carrying forward the old generic "guard does not talk"
+label. Visible-critter observations now include `isNoTalk` and the effective `talkDistance`; the normal
+`DropMenuHandler::StartDialog` path publishes a QA-only server diagnostic before and after the same
+`Dialogs::RunDialog(cr, npc, false)` call. The real `HeroMaleDontUse` / `arroyo_todd` was alive, talk-enabled,
+adjacent, mutually visible, and reported `no_visible_start_speech`. That isolated a project dialog-parser
+migration bug: textual script arguments retained the `@` sigil (`@!` hashed as `@!` rather than `!`) and kept
+qualified content names (`Content::Location::modoc`) instead of the terminal id. `NormalizeDialogScriptValue`
+restores the legacy value contract, with native tests for sigils, content ids, numeric and boolean values. The
+same ordinary talk path then traced `ArroyoProofOfDeath` 0 → 1 in 11 paths with no branch errors and restored 0;
+the report is `Build/_artifacts/trace-dialog/arroyo-todd-proof-live.json`.
+
+The remaining fresh Arroyo traces are also live-green. Todd's second offer advanced
+`ArroyoLetterToLinnett` 0 → 1 in 3 explored paths after the authored proof prerequisite was injected. Mynoc's
+defence replay first exposed changing `@@` answer text; selectors now fall back to the same answer slot only when
+the answer count is unchanged, while still preferring unique exact text. It then exposed a gameplay bug: the
+dialog deliberately offered stage 1 to a solo level-5 player, but the shared quest helper silently applied the
+stage-2 minimum-group guard. That guard is now restricted to stage 2. A fresh live run explored 25 paths, followed
+the complete 13-answer conversation, advanced `ArroyoMynocDefence` 0 → 1, restored 0, and logged no branch,
+script, sync, fatal, or assertion error. Reports are
+`Build/_artifacts/trace-dialog/arroyo-letter-linnett-live.json` and
+`Build/_artifacts/trace-dialog/arroyo-mynoc-defence-live.json`. The Stage-0 trace criterion is now **7/7**.
+
+Loading Den also exposed two real time-event sync faults. `DenCooldude::Sing`, `DenKliff::Say`, both
+`DenBarBekkyBoy` announcements, and `DenVirgin::Check` now enter as `[[Async]]`, establish the full critter+map
+cover in script, and retry after one second if the entity moved or became unavailable before touching properties,
+movement, or messaging. No Engine synchronization was added. A fresh full Den session covering all four quest
+stages logged zero `Entity access without sync`, `EntitySyncException`, fatal, or assertion markers.
+
+The same session exposed `NpcBags::GetBag(6)` from the first `repl_bank_den` guard. Bag 6 does not exist in
+`BagsConfig.json`; the other ten guards on that map use configured bank-guard bag 42. The outlier now uses 42,
+and a ContentQuality contract scans every authored map bag reference against the server config. The four older
+orphans were then mapped by authored role: `intro_init` BOS privates 176 → BOS infantry 263,
+`redding_miners` supervisor Andrew 160 → Redding civilian 85, inner gate guard 230 → strong regulator 81, and
+the lone `sf_hubb` guard outlier 203 → the same Hubologist guard bag 117 as its peers. The contract now has no
+exceptions. Incremental bake rebuilt all three affected maps; a fresh headless world reached
+`Start server complete!` and remained free of `Bag … not found`, script, sync, fatal, and assertion markers.
+
+A follow-up Den Mom trace disproved the old `DenVirginIsAway` scope-mismatch hypothesis: the dialog parser already
+infers the property's Game owner and runtime reads it through `Game.GetAsInt`. The actual migration defect was the
+textual boolean RHS. Integer property 0 became any value `"0"`, authored `false` remained `"false"`, and
+`any.opEquals` compared those spellings directly. `NormalizeDialogPropertyValue` now restores the legacy
+`ResolveGenericValue` representation (`false` → `0`, `true` → `1`) for all 51 authored boolean property
+demand/results without changing script-argument conversions. Native dialog tests cover both value-normalization
+contracts. Fresh live traces then completed `DenMomSlut` 0 → 1 at Mom (27 paths), 1 → 2 at Virginia (2 paths,
+including `DenVirgin::GoAway`), and 2 → 3 at Mom (1 path); every run restored the original 0 and the server/client
+logs contained no script, sync, fatal, or assertion marker. Reports are
+`Build/_artifacts/trace-dialog/den-{mom-slut-accept,virginia-away,mom-slut-report}-live.json`.
+
+The `NrWriKidnap` arrival guard used general `Text` id 3354, but the English pack lacked the whole related
+3350–3354 block. All five English rows are now authored. A ContentQuality parity ratchet records the remaining
+103 legacy russ→engl gaps and rejects new omissions or English-only ids. AI Control gained the QA-gated
+`qa_get_text_pack` command and now advertises every implemented command; an isolated client forced to
+`Language=engl` resolved 3350 and 3354 from the baked runtime pack, while a negative id was rejected. No Engine
+or synchronization path was added, and the server/client logs contained no script, sync, fatal, or assertion
+marker (the headless client only reported the expected missing audio device).
+
+The same ratchet exposed a shifted Den Bekky id: English authored `Hmm...` as a second 1101 instead of the
+`STR_STEAL_FAIL` id 1100. The id is corrected without banning intentional duplicate-id random variants. The
+complete deathclaw-egg block 3490–3495 is now also authored in English; the MCP runtime lookup resolved 1100,
+1101 and every egg string from the freshly baked pack, preserving the late `@arg Hp@` substitution contract.
+The active Vault City Lynnet witness block 5920–5924, Hubologist laboratory alarm/opening lines 8030–8031,
+and split three-message race-start announcement 3857–3858 are also authored and covered. MCP resolved every new
+row from the baked English pack; the race strings retain the deliberate `prefix → player count → suffix` flow.
+
+The remaining-plan note about empty start-map `repl_*` dialog text was stale after the earlier dialog-key repair.
+A fresh character on `repl1` opened `repl_hubb_oper` through ordinary `talk_to` with readable speech and answer;
+the real 1024×768 engine framebuffer shows the dialog window composed correctly. A new ContentQuality contract
+checks every reachable speech and answer across all 17 `repl_*.fodlg` files in `russ` and `engl`, excluding only
+the intentionally invisible pre-dialog routing node. No missing or empty player-visible replication text remains.
+
+The next async batch fixed `Item::DeferredDestroyItem`, `Item::AutoCloseDoor`, and `ReddGates::CloseGates` without
+adding synchronization to Engine calls. The time-event callbacks are now `[[Async]]` and acquire their complete
+item/map/critter covers through script-side `Sync::Lock`; after reentrant `TransferToMap` calls they reacquire and
+validate the surviving topology before touching the door again. `AutoCloseDoor` also no longer treats the
+documented `SwitchLocker(..., false)` return value as a close failure and therefore does not enqueue a redundant
+post-close callback.
+
+The first Map batch migrated coastal weather, map radiation, the Modoc giant-wasp quest timeout, and the simple
+Primal Tribe nature/delete callbacks. Radiation snapshots recipients under the map lock, then reacquires
+`map + current critter` for every dose so a reentrant radiation death cannot invalidate the next iteration.
+The plan's `MapSfTanker::TankerIdle` candidate was stale: its async map/player cover was already present.
+
+The complex Primal Tribe raid graph is now migrated as well. Raid start, spawning, target selection, retargeting,
+and deferred quest-result delivery run only in `[[Async]]` jobs and acquire complete script-owned covers before
+entity access. Covers are reacquired after reentrant critter creation, destruction, movement-plane, and attack-plane
+operations; topology and role flags are revalidated before continuing. The synchronous map-enter event only
+schedules the raid job, and quest results are deduplicated and applied under one player lock at a time. A pure
+five-branch quest-stage resolver has a server script test. No direct `Game.Sync` or Engine-side synchronization was
+added. That script-harness run passed **68/68**, including the new Primal Tribe failure-stage contract.
+
+The NCR/Gecko energy-barrier time-event surface is now covered too. Deferred barrier initialization first locks
+the item, then atomically expands to its stable parent map; network and single-barrier mode changes acquire all
+base items, blockers, and parent maps in `EnergyBarierSync.fos`, then revalidate both `MapId` topology and the
+network snapshot before changing properties. No barrier callback calls `Game.Sync` directly. `ChangeNetMode` also
+coalesces its former one-identical-timer-per-barrier behavior into one network auto-enable timer. The pure auto-
+enable policy has a seven-branch server test, and every `EnergyBarier` time event is now `[[Async]]`. The full
+headless script harness passes **69/69** with no entity-sync exception.
+
+The Behemoth time-event surface is complete as well. `BehemothIdle` now uses the topology-aware
+`LockCritterWithMapAndLocation` helper, expands the same cover with the route target, and re-reads the current
+order, target, map, and location after waiting. `ShowCamera` is now `[[Async]]` and locks the player, viewed map,
+and map location before entering the Engine view call, with topology revalidation immediately beforehand. This
+module also contains no direct `Game.Sync`; three static contracts pin these rules.
+
+The scheduled Caravan preparation/departure/cleanup surface now follows the latest server transfer contracts too.
+`Sync.fos` provides `LockForTransferToMap` (critter + source map + destination map/location) and
+`LockForTransferToGlobalWithGroup` (leader + every member + every current source map); both acquire only through
+script-side `Game.Sync` and revalidate topology after waiting. All entity-touching Caravan time events and their
+helpers are `[[Async]]`; synchronous dialog results only enqueue the covered jobs. Departure now rejects a player
+from another map even when hex coordinates coincide and restores the legacy whole-group transfer through
+`TransferToGlobalWithGroup` instead of moving only the leader. Stale delete/return timers validate the current
+leader id before resetting or moving anything. The disabled `CaravansInit` subsystem remains disabled: startup and
+the pure four-branch member-policy test are green, but live route/escort E2E remains gated on the owner-coordinated
+fresh-database fix and re-enable. The full script harness passes **71/71** with no entity-sync exception.
+
+The next entity-id/time-event wave follows the newer destructive and registry-lookup contracts. `Sync.fos` now
+has `LockItemWithParent` (map, inventory, nested-container, and unowned cases), `LockMapWithLocation`, and
+`LockCrittersWithMaps`; every helper acquires through script-side `Game.Sync` and revalidates the ownership or
+topology after waiting. Deferred cleanup in `Base`, `GameEventCaches`, `GameEventStorehouse`, `Location`,
+`Navarro`, `SeAndroid`, and `SfInvasion` now supplies the entity plus the current parent required by
+`Game.DestroyItem`/`DestroyCritter`/`DestroyMap`/`DestroyLocation`. Simple location, map, and critter property
+timers in `SignalRocket`, `VcGuardsman`, `NrWriKidnap`, `Elevator`, `Jukebox`, `KlamJura`, `NcrKess`,
+`NcrCommon`, `NcrSmit`, `Resources`, `TownSupply`, and `V13Goris` are async and lock before their first read.
+
+Replication/explosion mechanics received the same treatment. Replicator surface cleanup holds its map cover
+while transferring players and destroying child items/NPCs; the delayed tank explosion stabilizes the quest
+critter, tank, tank parent, and map. It also fixes a real use-after-destroy bug by snapshotting `tankHex` before
+`Game.DestroyItem(item)`, and rejects a tank moved away from its authored map. `Explode` and `SmokeGrenade`
+timers validate serialized payload sizes, lock their charge/map/optional owner covers, and destroy smoke items
+with their current parents. Android radio/awakening and Replication Bank warning/attack timers now stabilize all
+participants and current maps; the bank attack still clears its pending-warning flag when the player vanished.
+
+A project contract now scans the current Engine scripting layer and fails if a script-exported method calls the
+blocking `SyncEntity`/`SyncEntities` primitives anywhere except the explicit `Server_Game_Sync` overloads.
+Server networking, movement, login, and other autonomous jobs retain their own job-entry synchronization, while
+AngelScript gameplay modules call `Game.Sync` only through `Sync.fos`. Non-blocking `EnsureEntitySynced`
+retention inside destructive Engine internals is intentionally outside this rule.
+
+The named conditional-callback tranche is now covered as well. `Purgatory::DeletePurgatory` holds the location
+cover while collecting child-map players and destroying the location. All six `MainIntro` scene callbacks validate
+their serialized payloads and lock the expected map/player before effects, death, replication, or notification.
+The shared `Replication::ReplicateCritter` path now stabilizes the global group, existing encounter location, source
+and destination topology before every transfer, reacquires the actual destination after nested transfer events, and
+locks all registry-resolved enemies before `EnemyStack` type filtering. This also makes a local-map car owner fail
+closed instead of throwing from a global-group lookup.
+
+`KlamCowboy` now runs its seven entity/map timers, spawn helpers, cow-death completion, and quest-owner update path
+as async script-owned operations. Vault City drill timers lock the commander, the complete saved squad, and all
+current maps before MarchQueue/SquadCommander registry lookups; the start check additionally rejects a player who
+moved to a different map even when the authored hex coordinates happen to match. Lynnet's delayed prisoner and
+witness dialogue similarly covers every speaker and map. Focused contracts pin all of these rules, and the current
+headless harness remains **71/71** with no sync exception. The four `NpcRevenge` map-loop/delayed callbacks are now
+async too and acquire their map before saved revenge state, child NPC queries, speeches, planes, or mode changes.
+
+`MobWave` now treats the authored source map as the script-owned serialization anchor for every deferred wave
+step. Each callback locks the map, reloads `Game.MobWaveData`, expands the cover to all saved mobs, targets,
+assigned attackers, newly found target candidates, their current maps, and the transit destination/location, then
+reloads and revalidates the graph after each wait. Transit preserves that complete cover while using
+`Sync::LockForTransferToMap`; dead-mob cleanup covers the critter and its current map. This closes both the stale
+wave-save race and the uncovered `TransferToMap` path without adding Engine-side synchronization.
+
+`Hunter` now covers the owner and all still-owned barter items before batch destruction, and retains the selected
+registry speaker through the delayed lure message. Rat relocation locks both authored maps, the location, only the
+role-400 hostile rats, role-401 allies, players, and every participant's current map; each transfer preserves that
+whole graph and revalidates the destination before assigning combat state. `Sync::LockCrittersWithMaps` therefore
+accepts fixed serialization entities just like the transfer helper.
+
+The Merc idle graph is script-owned as well. Both the repeating timer and global-map idle event enter an async
+implementation that first stabilizes merc, master, and their current maps. Cross-map following uses the full
+transfer cover, while joining a global group snapshots and locks its complete membership before reading the
+leader's charisma and calling `TransferToGlobalGroup`. `ReleaseMerc` now locks before any saved-property read,
+revalidates its home tuple after the transfer wait, and ignores a stale release timer when that NPC has already
+been hired again. A pure server regression pins this last policy. The remaining plain `[[TimeEvent]]` inventory is
+now **61** callbacks (not all access entities). The current headless script harness passes **72/72**, including
+`merc.stale_release_guard`, with no entity-sync, script-exception, assertion, or fatal marker in the server log.
+
+**Verification:** focused Python/contract tests and the full MCP suite are green (**119 passed**), alongside
+**128** ScriptQuality contract tests and **19** ContentQuality tests; project formatter checked all 345 inputs
+without changes; script-quality ratchet, nullable ABI validation, and `git diff --check` are clean. AngelScript
+compilation succeeded without warnings; forced resource bake rebuilt scripts, server data and all 550 maps.
+`TLA_Server`, `TLA_ServerHeadless`, the Baker, and `TLA_UnitTests` built successfully; the full native suite passed
+with exit 0 in 253.7 seconds, including the new dialog-value tests. The RelWithDebInfo client library compiled and
+linked, but its final deploy copy was blocked by an already-running owner client holding `TLA_Client.dll`; live
+testing therefore used an isolated client directory without stopping the owner process. The final Mynoc session
+reached `Start server complete!` and logged no script, sync, fatal, or assertion marker. No GUI surface changed,
+so no screenshot baseline changed in this server/dialog batch. Not committed (owner reviews).

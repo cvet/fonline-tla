@@ -715,57 +715,65 @@ bool AddCheckPlayerPosition(Critter guard, Critter player)
     return true;
 }
 
-[[TimeEvent]]
+[[TimeEvent]] [[Async]]
 void WarnGagPlayer(any[] values)
 {
+    if (values.length() < 4) {
+        return;
+    }
+
     Critter? guard = Game.GetCritter(values[0]);
-    if (guard == null) {
-        return;
-    }
-
     Critter? player = Game.GetCritter(values[1]);
-    if (player == null) {
+    if (guard == null || player == null) {
         return;
     }
 
-    if (!guard.IsSee(player)) {
+    Critter[] critters = {guard, player};
+    if (!Sync::LockCrittersWithMaps(critters) || guard.MapId == ZERO_IDENT || guard.MapId != player.MapId || !guard.IsSee(player)) {
         return;
     }
 
     Messaging::SayShout(guard, MsgStr::DialogTextKey(guard.DialogId, STR_WARN_PLAYER), "|pname: " + PlayerRegistration::GetPlayerName(player.Id));
 }
 
-[[TimeEvent]]
+[[TimeEvent]] [[Async]]
 void AttackGagPlayer(any[] values)
 {
+    if (values.length() < 4) {
+        return;
+    }
+
     Critter? guard = Game.GetCritter(values[0]);
-    if (guard != null) {
-        guard.ReplBankeIsAttackGagPlayer = false;
-        Critter? player = Game.GetCritter(values[1]);
-        if (player != null) {
-            if (player.ControlledByPlayer) {
-                Map? guardMap = guard.GetMap();
-                Map? playerMap = player.GetMap();
-                if (guardMap == null || playerMap == null) {
-                    return;
-                }
+    Critter? player = Game.GetCritter(values[1]);
+    if (guard == null || !Sync::LockCritterWithMap(guard)) {
+        return;
+    }
 
-                if (guardMap.Id != playerMap.Id) {
-                    return;
-                }
+    // Таймер завершает состояние предупреждения даже если игрок уже исчез.
+    guard.ReplBankeIsAttackGagPlayer = false;
+    if (player == null) {
+        return;
+    }
 
-                int oldX = values[2];
-                int oldY = values[3];
-                int newX = player.Hex.x;
-                int newY = player.Hex.y;
+    Critter[] critters = {guard, player};
+    if (!Sync::LockCrittersWithMaps(critters)) {
+        return;
+    }
 
-                if (oldX == newX && oldY == newY) {
-                    Messaging::SayShout(guard, MsgStr::DialogTextKey(guard.DialogId, STR_ATTACK_PLAYER));
-                    NpcPlanes::AddAttackPlane(guard, 0, player);
-                    SendMessage::ToAllOnMap(player, MESSAGE_PLAYER_ON_ATTACK_HEX, 0);
-                }
-            }
-        }
+    guard.ReplBankeIsAttackGagPlayer = false;
+    if (!player.ControlledByPlayer || guard.MapId == ZERO_IDENT || guard.MapId != player.MapId) {
+        return;
+    }
+
+    int oldX = values[2];
+    int oldY = values[3];
+    int newX = player.Hex.x;
+    int newY = player.Hex.y;
+
+    if (oldX == newX && oldY == newY) {
+        Messaging::SayShout(guard, MsgStr::DialogTextKey(guard.DialogId, STR_ATTACK_PLAYER));
+        NpcPlanes::AddAttackPlane(guard, 0, player);
+        SendMessage::ToAllOnMap(player, MESSAGE_PLAYER_ON_ATTACK_HEX, 0);
     }
 }
 

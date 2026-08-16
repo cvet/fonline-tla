@@ -9,6 +9,36 @@ static constexpr int32_t DIALOG_LINK_EXIT = 0;
 static constexpr int32_t DIALOG_LINK_BACK = -1;
 static constexpr string_view DIALOG_ANSWER_LINK_ENUM = "DialogAnswerLink";
 
+auto NormalizeDialogScriptValue(string value) -> any_t
+{
+    FO_STACK_TRACE_ENTRY();
+
+    if (!value.empty() && value.front() == '@') {
+        value.erase(0, 1);
+    }
+    else if (value.starts_with("Content::")) {
+        const size_t separator = value.rfind(':');
+        FO_VERIFY_AND_THROW(separator != string::npos && separator + 1 < value.size(), "Invalid dialog Content token", value);
+        value.erase(0, separator + 1);
+    }
+
+    return any_t {std::move(value)};
+}
+
+auto NormalizeDialogPropertyValue(string value) -> any_t
+{
+    FO_STACK_TRACE_ENTRY();
+
+    if (strvex(value).compare_ignore_case("true")) {
+        value = "1";
+    }
+    else if (strvex(value).compare_ignore_case("false")) {
+        value = "0";
+    }
+
+    return any_t {std::move(value)};
+}
+
 static auto IsDialogCommentOrEmpty(string_view line) -> bool
 {
     FO_STACK_TRACE_ENTRY();
@@ -820,7 +850,7 @@ auto DialogManager::LoadDemandResult(istringstream& input, bool is_demand) const
 
         // Value
         input >> svalue;
-        value = any_t {std::move(svalue)};
+        value = NormalizeDialogPropertyValue(std::move(svalue));
     } break;
     case DR_ITEM: {
         // Who
@@ -865,7 +895,7 @@ auto DialogManager::LoadDemandResult(istringstream& input, bool is_demand) const
                 throw DialogParseException("Invalid values count", values_count + 1);
             }
 
-            script_val[values_count] = any_t {std::move(value_str)};
+            script_val[values_count] = NormalizeDialogScriptValue(std::move(value_str));
             values_count++;
         }
 

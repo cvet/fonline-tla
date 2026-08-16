@@ -1,0 +1,53 @@
+// Test_MobWave — регрессии выбора исполняемого шага волны мобов.
+// Проверяет текущий, следующий и циклический шаг независимо от async-захвата графа сущностей.
+namespace Test_MobWave
+{
+
+#if SERVER
+
+[[ModuleInit]]
+void InitTestMobWave()
+{
+    Game.OnTestingInit.Subscribe(OnTestingInit);
+}
+
+[[Event]]
+void OnTestingInit()
+{
+    Testing::RegisterTest("mob_wave", "execution_step", ExecutionStep);
+}
+
+void ExecutionStep(Testing::TestContext ctx)
+{
+    MobWave::MobWave wave = MobWave::MobWave(1);
+    int executionStep = -1;
+    if (!Testing::Expect(ctx, !MobWave::TryGetExecutionStep(wave, -1, false, executionStep), "Волна без шагов не должна запускаться")) {
+        return;
+    }
+
+    wave.Steps.insertLast(MobWave::WaveStep());
+    wave.Steps.insertLast(MobWave::WaveStep());
+    if (!Testing::Expect(ctx,
+                         MobWave::TryGetExecutionStep(wave, -1, false, executionStep) && executionStep == 0,
+                         "Старт волны должен выполнять текущий нулевой шаг")) {
+        return;
+    }
+    if (!Testing::Expect(ctx,
+                         MobWave::TryGetExecutionStep(wave, -1, true, executionStep) && executionStep == 1,
+                         "NextWaveStep должен выбирать следующий шаг")) {
+        return;
+    }
+
+    wave.CurrentStep = 1;
+    if (!Testing::Expect(ctx,
+                         MobWave::TryGetExecutionStep(wave, -1, true, executionStep) && executionStep == 0,
+                         "Последний шаг должен циклически переходить к нулевому")) {
+        return;
+    }
+
+    Testing::Expect(ctx, !MobWave::TryGetExecutionStep(wave, 0, false, executionStep), "Просроченный repeat callback не должен выполнять другой текущий шаг");
+}
+
+#endif
+
+}

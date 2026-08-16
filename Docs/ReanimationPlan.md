@@ -219,9 +219,8 @@ the **`--trace-dialog` keyword-extraction helper (a Stage-0 gated deliverable, �
 reachability/skip.
 
 **Dependencies:** Track A harness **and the Stage-0 `--trace-dialog` + `catalog.yaml` deliverables
-(Stage 0 gates Stage 2)**; Track C for content/code bugs that block a quest (e.g. `DenMomSlut` scope
-mismatch, guard NPCs that never open dialog); faction-rep and time bridge gaps for the relevant
-quests.
+(Stage 0 gates Stage 2)**; Track C for content/code bugs that block a quest; faction-rep and time bridge gaps for
+the relevant quests. The former `DenMomSlut` and Arroyo guard-dialog blockers are fixed and live-traced.
 
 **Exit criteria:** Per region batch, all *automatable* quests are green and in the suite (counted
 against `catalog.yaml`, the 165 denominator); every `manual` quest is `manual-verified` or
@@ -239,15 +238,40 @@ breakage backlog with verified fixes.
    null-derefs in `GameEvent` (DeclareEvents), `Caravan` (`AddRoutePoint`/`CaravansInit`), and
    `BulletinBoard`, currently commented out in `Main.fos::start()`. This is owner-coordinated and is
    the gate for caravan escort quests and several game events.
-2. **Async sync long tail (~114 conditional time events lacking `Sync::Lock...`).** Batches: 2 Item
-   (`DeferredDestroyItem`, `AutoCloseDoor` in `Item.fos`), ~8 Map critter-iteration loops
-   (`MapSfTanker.fos::TankerIdle`, Behemoth, Caravan guard loops), ~104 any-value GetItem/GetCritter
-   sites. Add `if (!Sync::Lock...(x)) return;` covering the full entity set a callback touches.
-   These fire only under conditions and throw `EntitySyncException` when they do.
-3. **Content/data bugs:** `Bag N not found` (invalid critter `BagId` vs `BagsConfig.json`),
-   `DenVirginIsAway` Property scope mismatch (`Game` decl vs `Player` demand) hiding an answer,
-   guard NPCs (Arroyo Todd) that never open dialog, empty baked text in `repl_*` start-map dialogs,
-   missing text id 3354 (`NrWriKidnap.fos:437`).
+2. **Async sync long tail (~114 conditional time events initially lacking `Sync::Lock...`).** The first
+   Item batch (`DeferredDestroyItem`, `AutoCloseDoor`), `ReddGates::CloseGates`, `MapCoast::CoastLoop0`,
+   `MapRadiation::MapLoop`, `MapModoc::ResetWaspLoc`, and the full Primal Tribe raid/quest time-event graph are
+   fixed. Each callback is `[[Async]]` and owns its complete entity cover in script; reentrant transfer, radiation,
+   spawn/destroy, and plane-change paths reacquire and revalidate before continuing. Primal Tribe's synchronous
+   map-enter event now only schedules the covered raid job, while deferred quest results lock one player at a time.
+   The energy-barrier deferred initializer and NCR/Gecko network-mode callbacks now acquire their item/blocker/map
+   covers in `EnergyBarierSync.fos`, revalidate topology, and schedule only one auto-enable per network.
+   Behemoth route and camera timers now revalidate the current route target/map/location and cover the viewed
+   player/map/location before the Engine call. Caravan preparation, departure, deletion, and return time events
+   now run only as async jobs with script-owned covers; the latest transfer contracts are centralized in
+   `Sync::LockForTransferToMap` / `LockForTransferToGlobalWithGroup`. The next registry-id wave covers deferred
+   destructive calls, Replicator tank/surface cleanup, Explode/SmokeGrenade, Android radio/awakening,
+   Replication Bank warning/attack, NCR beggar/brahmin/Kess/Smit timers, TownSupply, and the simple Elevator,
+   Jukebox, Navarro, Resources, SignalRocket, and V13Goris callbacks. `LockItemWithParent`,
+   `LockMapWithLocation`, and `LockCrittersWithMaps` centralize current-parent/current-map revalidation.
+   `MapSfTanker::TankerIdle` was already migrated and has been removed from the stale candidate list. Purgatory
+   cleanup, all MainIntro scene callbacks plus the shared Replication path, the complete KlamCowboy timer chain,
+   the remaining VcGuardsman/VcLynnet timers, and all four NpcRevenge map-loop/delayed callbacks are now migrated
+   too. `MobWave` callbacks now reload their serialized state under the source-map cover, stabilize the complete
+   mob/target/current-map graph, and preserve it through covered map transit. A fresh tree scan leaves 64 plain
+   `[[TimeEvent]]` callbacks for triage (not all touch entities); prioritize the remaining Hunter/Merc,
+   invasion/siege, and combat-pattern callbacks by entity access and
+   destructive/transfer risk.
+3. **Content/data bugs:** all authored map bag references now resolve to configured bags: the live
+   `repl_bank_den` Bag 6 fault and the four older `intro_init`/`redding_miners`/`sf_hubb` orphans are fixed, and
+   the ContentQuality contract has no baseline exceptions. The dialog-parser migration blockers are also fixed:
+   Todd's hashed/content script arguments
+   and all 51 boolean property demand/results now preserve legacy values, with Todd and `DenMomSlut` live-green.
+   The missing English `NrWriKidnap` block 3350–3354 is fixed, parity-ratcheted, and verified through the baked
+   runtime pack; the shifted Den Bekky 1100 id and deathclaw-egg block 3490–3495 are fixed and runtime-verified
+   too. Active Lynnet 5920–5924, Hub Lab 8030–8031 and race-start 3857–3858 strings are now covered as well.
+   The former `repl_*` start-map text item was stale after the dialog-key fix: fresh live and
+   screenshot checks are green, and all 17 replication dialogs now have a bilingual coverage contract.
 4. **Intermittent `Mob::Idle` "Null assignment to non-nullable handle"** — verify whether recent
    engine MT/sanitizer fixes resolved it; **scheduled as a concrete Stage-4 task** (confirm
    non-recurrence under the `SOAK` profile, §2.2), not left as an open question; audit the
@@ -421,6 +445,14 @@ heavier dependents.
   action of Track B; quest batches **cannot start without it**. (Detailed contract + I/O in §5.2.)
   - *Exit criterion:* given a giver NPC + `dialogId`, `--trace-dialog` emits candidate answer-keyword
     sets **ranked by stage-advance**, for at least the 4 seed quests + 3 fresh Arroyo quests.
+  - *Checkpoint (2026-08-08):* the bounded CLI/replay implementation, correlated authoritative reads/writes,
+    internal wall-clock budget, configurable observed-map timeout, stable-slot replay for authored `@@` variants,
+    and unit contracts are in place. Live disposable-character traces cover Cassidy (`Да, конечно.`,
+    `ArroyoCassidyLetter` 0 → 1), Mynoc oil (`Я принесу тебе смазку...`, `ArroyoMynocOil` 0 → 1), all four Den
+    Smitty/Mr. Handy transitions (`DenSmittyFixit` 0 → 1 → 2 → 3 → 4), Klamath Hish (`KlamVaccination` 0 → 1),
+    and the three fresh Arroyo flags: Todd proof (`ArroyoProofOfDeath` 0 → 1), Todd's Linnett letter
+    (`ArroyoLetterToLinnett` 0 → 1), and Mynoc defence (`ArroyoMynocDefence` 0 → 1). Every run restores the
+    original flag; the trace deliverable meets its **7/7** exit criterion.
 - **Build `generate_catalog.py` (gated deliverable; the denominator).** Emit the authoritative
   inventory of the **165** `///@ Property Critter ... Group = Quests` flags into
   `Docs/Quests/catalog.yaml`, one entry per flag with `test_status`. `catalog.yaml` is THE denominator
@@ -473,8 +505,10 @@ subsystem needs a **direct functional probe**, which needs the observation primi
    - *BulletinBoard:* post one message and read it back.
    If the `qa_advance_time` spike came back *unsafe*, the Caravan probe falls back to an owner manual
    playtest and caravan escort quests stay `manual` (recorded in `catalog.yaml`).
-4. Async sync long-tail batches 1–2 (Item deferred-destroy/door, Map critter loops); content bugs
-   (Bag-not-found, DenVirginIsAway scope, guard-NPC dialog, repl_* text).
+4. Continue async sync long-tail batch 2 (remaining entity-id callbacks); the Item/ReddGates, first Map callback
+   groups, full Primal Tribe raid graph, energy-barrier callbacks, Behemoth timers, and Caravan scheduled
+   preparation/departure/cleanup surface are complete. Continue resolving fresh ContentQuality findings without
+   growing baselines.
 5. Stand up `Tools/ContentValidator/` Tier 1+2 (Track F) and wire into bake.
 **Produces:** system smoke coverage, subsystem-probe primitives, three subsystems back online **and
 probe-verified**, key bridge gaps closed, content validator gating bake.
@@ -529,7 +563,9 @@ redundant-bool-return ~0); `SOAK` (§2.2) still clean.
 **Entry:** Stage 3 exit.
 **Work:**
 - Full `ContentValidator` Tier 3/4 (orphans, quest read/write coverage); resolve or accept findings.
-- Localization parity pass (russ/engl text packs); fix empty `repl_*` text and missing text ids.
+- Continue the localization parity pass (russ/engl text packs): active `NrWriKidnap`, Den Bekky, deathclaw egg,
+  Lynnet witness, Hub Lab and race-start gaps are fixed and ratcheted, while replication dialogs have complete
+  bilingual reachable-text coverage; reduce the remaining explicit legacy gaps.
 - **`Mob::Idle` "Null assignment to non-nullable handle" — confirm non-recurrence under `SOAK`.**
   Treat the intermittent as a real task, not an open question: run the extended `SOAK` profile and
   confirm the `Mob::Idle` null does not recur; if it does, audit the `TryGoHome → AddWalkPlane →
@@ -735,7 +771,7 @@ a new bridge primitive. Method = the bridge command(s)/tool used.
 | System | Status | Method / primitive | Missing primitive |
 |--------|--------|--------------------|-------------------|
 | Movement | A | `move_to_hex`, `environment_query path` | — |
-| Dialogs | A | `talk_to`, `dialog_answer`; `dialog.*` observation | (content: empty repl_* text) |
+| Dialogs | A | `talk_to`, `dialog_answer`; `dialog.*` observation + replication-dialog screenshot | — |
 | Inventory ops | A | `move_item`, `drop_item`, `operate_container` | encumbrance: `chosen.weight` (gap) |
 | Item use | A | `use_item`, `reload`, `unload` | — |
 | Skills | A | `use_skill` | — |
@@ -766,7 +802,7 @@ batch below; the counts sum to 165 (arithmetic under the table).
 |-------|----------------|---------------|-------|-----------------------|-------|
 | 1 | Arroyo | `Arroyo*`, `arroyo_*` | 8 | `cassidy_letter`, `arroyo_mynoc_oil` | 6 new traces (ProofOfDeath, LetterToLinnett, MynocDefence, …) |
 | 2 | Klamath | `Klam*` | 12 | `klam_vaccination` (Server-scope) | SmilyModoc cross-town; FindTrappers/BugenLure long-chain |
-| 3 | Den — batch A (foundation) | `Den*` (Max≤4) | 13 | `den_smitty_robot` | Max≤4; **skip DenMomSlut** (scope bug → Track C) |
+| 3 | Den — batch A (foundation) | `Den*` (Max≤4) | 13 | `den_smitty_robot`, `DenMomSlut` live trace | Max≤4 |
 | 4 | Den — batch B (medium) | `Den*` (Max 3–5) | 13 | — | medium chains |
 | 5 | Den — batch C (deep) | `Den*` (deep/long) | 12 | — | remaining Den flags; deeper chains |
 | 6 | Modoc | `Mod*` | 10 | — | ModBaltasArmor multi-prop; brahmin/ghost chain |
@@ -775,7 +811,7 @@ batch below; the counts sum to 165 (arithmetic under the table).
 | 9 | NCR | `Ncr*`, `NCR*` | 19 | — | many long-chains deferred (21/15/11); `NcrReddingCaravanEscort` = `manual` |
 | 10 | San Francisco | `SF*` | 13 | — | good diversity; Imperator/ZAX long ones → long-chain batch |
 | 11 | Navarro | `Nav*` | 3 | — | all automatable; quick round |
-| 12 | New Reno | `NR*` | 3 | — | incl. NrWriKidnap (missing text id 3354 → Track C) |
+| 12 | New Reno | `NR*` | 3 | — | incl. NrWriKidnap (English 3350–3354 block fixed and runtime-verified) |
 | 13 | Broken Hills | `BH*` | 4 | — | BHRocketBase silo integration |
 | 14 | Vault 13 | `V13*` | 2 | — | small, late-game |
 | 15 | GameEvent / Replicator | `GERepl*` | 5 | — | **gated on GameEvent re-enable** (Stage 1) |
@@ -798,7 +834,7 @@ escorts (`Redd*CaravanEscort`, `NcrReddingCaravanEscort`, + the cross-region esc
 time-gated `manual` until caravans are re-enabled **and** the `qa_advance_time` spike succeeds;
 batch 15 (`GERepl*`) is blocked until GameEvent is re-enabled (Stage 1); Russian dialog keyword
 extraction is per-quest via `--trace-dialog` (grow `prefer[]` from its ranked alternates); content
-bugs (DenMomSlut scope, guard NPCs, NrWriKidnap text id 3354) hand off to Track C.
+the remaining content-validator backlog hands off to Track C.
 
 ---
 

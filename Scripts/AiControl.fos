@@ -34,12 +34,27 @@ namespace AiControl
 ///@ RemoteCall Server AiControlQaTeleportGlobal()
 ///@ RemoteCall Server AiControlQaTeleportHex(mpos hex)
 ///@ RemoteCall Server AiControlQaTeleportMap(hstring locPid, hstring mapPid, mpos hex)
-///@ RemoteCall Server AiControlQaSetProp(CritterProperty prop, int32 value)
+///@ RemoteCall Server AiControlQaSetProp(CritterProperty prop, int32 value, int32 requestId)
 ///@ RemoteCall Server AiControlQaSetGameProp(GameProperty prop, int32 value)
 ///@ RemoteCall Server AiControlQaGiveItem(hstring pid, int32 count)
-///@ RemoteCall Server AiControlQaGetProp(CritterProperty prop)
+///@ RemoteCall Server AiControlQaGetProp(CritterProperty prop, int32 requestId)
 ///@ RemoteCall Server AiControlQaShowDialogBox()
-///@ RemoteCall Client AiControlReceiveQaProp(CritterProperty prop, int32 value)
+///@ RemoteCall Client AiControlReceiveQaProp(CritterProperty prop, int32 value, int32 requestId)
+///@ RemoteCall Client AiControlReceiveQaPropSet(CritterProperty prop, int32 value, int32 requestId)
+///@ RemoteCall Client AiControlReceiveTalkDiagnostic(ident npcId, int32 status, bool playerAlive, bool npcAlive, bool npcControlled, bool npcNoTalk, bool sameMap, int32 distance, int32 talkDistance, bool playerSeesNpc, bool npcSeesPlayer)
+
+const int TalkDiagnosticEligible = 0;
+const int TalkDiagnosticStarted = 1;
+const int TalkDiagnosticNoVisibleStartSpeech = 2;
+const int TalkDiagnosticPlayerDead = 3;
+const int TalkDiagnosticNpcDead = 4;
+const int TalkDiagnosticNpcControlled = 5;
+const int TalkDiagnosticNpcNoTalk = 6;
+const int TalkDiagnosticDifferentMap = 7;
+const int TalkDiagnosticOutOfRange = 8;
+const int TalkDiagnosticPlayerCannotSeeNpc = 9;
+const int TalkDiagnosticNpcCannotSeePlayer = 10;
+const int TalkDiagnosticMissingDialog = 11;
 
 #if CLIENT
 
@@ -316,9 +331,84 @@ void ClearDialogState()
 // Ответ сервера на qa_get_prop: публикуем значение свойства как событие qa_prop_value (имя свойства +
 // числовое значение). Так раннер может верифицировать Server-scope квестовые флаги, невидимые в наблюдении.
 [[ClientRemoteCall]] [[Async]]
-void AiControlReceiveQaProp(CritterProperty prop, int value)
+void AiControlReceiveQaProp(CritterProperty prop, int value, int requestId)
 {
-    PushEvent(Object({StringMember("type", "qa_prop_value"), StringMember("prop", Game.EnumToString(prop, true)), IntMember("value", value)}));
+    PushEvent(Object({StringMember("type", "qa_prop_value"),
+                      StringMember("prop", Game.EnumToString(prop, true)),
+                      IntMember("value", value),
+                      IntMember("requestId", requestId)}));
+}
+
+// Подтверждение qa_set_prop приходит только после явного скриптового critter-cover и успешной записи.
+// Корреляция отделяет поздний ответ предыдущей попытки от текущей настройки предусловия.
+[[ClientRemoteCall]] [[Async]]
+void AiControlReceiveQaPropSet(CritterProperty prop, int value, int requestId)
+{
+    PushEvent(Object({StringMember("type", "qa_prop_set"),
+                      StringMember("prop", Game.EnumToString(prop, true)),
+                      IntMember("value", value),
+                      IntMember("requestId", requestId)}));
+}
+
+// Диагностика приходит из обычного StartDialog и только наблюдает его серверные проверки. Она не
+// открывает диалог в обход механик и не меняет состояние игрового мира.
+[[ClientRemoteCall]] [[Async]]
+void AiControlReceiveTalkDiagnostic(ident npcId, int status, bool playerAlive, bool npcAlive, bool npcControlled, bool npcNoTalk, bool sameMap, int distance,
+                                    int talkDistance, bool playerSeesNpc, bool npcSeesPlayer)
+{
+    PushEvent(Object({StringMember("type", "talk_diagnostic"),
+                      IdentMember("npcId", npcId),
+                      StringMember("status", TalkDiagnosticStatus(status)),
+                      BoolMember("playerAlive", playerAlive),
+                      BoolMember("npcAlive", npcAlive),
+                      BoolMember("npcControlled", npcControlled),
+                      BoolMember("npcNoTalk", npcNoTalk),
+                      BoolMember("sameMap", sameMap),
+                      IntMember("distance", distance),
+                      IntMember("talkDistance", talkDistance),
+                      BoolMember("playerSeesNpc", playerSeesNpc),
+                      BoolMember("npcSeesPlayer", npcSeesPlayer)}));
+}
+
+string TalkDiagnosticStatus(int status)
+{
+    if (status == TalkDiagnosticEligible) {
+        return "eligible";
+    }
+    if (status == TalkDiagnosticStarted) {
+        return "started";
+    }
+    if (status == TalkDiagnosticNoVisibleStartSpeech) {
+        return "no_visible_start_speech";
+    }
+    if (status == TalkDiagnosticPlayerDead) {
+        return "player_dead";
+    }
+    if (status == TalkDiagnosticNpcDead) {
+        return "npc_dead";
+    }
+    if (status == TalkDiagnosticNpcControlled) {
+        return "npc_controlled";
+    }
+    if (status == TalkDiagnosticNpcNoTalk) {
+        return "npc_no_talk";
+    }
+    if (status == TalkDiagnosticDifferentMap) {
+        return "different_map";
+    }
+    if (status == TalkDiagnosticOutOfRange) {
+        return "out_of_range";
+    }
+    if (status == TalkDiagnosticPlayerCannotSeeNpc) {
+        return "player_cannot_see_npc";
+    }
+    if (status == TalkDiagnosticNpcCannotSeePlayer) {
+        return "npc_cannot_see_player";
+    }
+    if (status == TalkDiagnosticMissingDialog) {
+        return "missing_dialog";
+    }
+    return "unknown";
 }
 
 [[Event]]
@@ -824,7 +914,8 @@ bool ExecuteCommand(string type, ident targetId, ident itemId, ident auxId, int 
             message = "unknown_property:" + stringArg;
             return false;
         }
-        CurPlayer.ServerCall.AiControlQaSetProp(prop, intArg);
+        // Для этой команды x используется как correlation id подтверждения записи.
+        CurPlayer.ServerCall.AiControlQaSetProp(prop, intArg, hexX);
         message = "qa_prop_set";
         return true;
     }
@@ -866,14 +957,14 @@ bool ExecuteCommand(string type, ident targetId, ident itemId, ident auxId, int 
             message = "unknown_property:" + stringArg;
             return false;
         }
-        CurPlayer.ServerCall.AiControlQaGetProp(prop);
+        CurPlayer.ServerCall.AiControlQaGetProp(prop, intArg);
         message = "qa_prop_requested";
         return true;
     }
     if (type == "qa_get_text") {
-        // Debug: resolve a dialog NUMBERED floating-text (the NPC Say/SayOnHead/Info lines) by dialog id +
-        // string number, through the same MsgStr::DialogTextKey the game now uses. Returns the text in the
-        // message — empty means the string isn't authored for that dialog.
+        // QA-чтение нумерованной реплики диалога (NPC Say/SayOnHead/Info) по id диалога и номеру строки
+        // через тот же MsgStr::DialogTextKey, который использует игра. Пустая строка означает, что текст
+        // для этого диалога не задан.
         if (!Settings.AiControl.AllowQaCommands) {
             message = "qa_commands_disabled";
             return false;
@@ -882,10 +973,24 @@ bool ExecuteCommand(string type, ident targetId, ident itemId, ident auxId, int 
         message = "text=<" + text + ">";
         return true;
     }
+    if (type == "qa_get_text_pack") {
+        // QA-чтение числовой строки общего пака Text через тот же TextPackKey, который используют игровые
+        // скрипты. Команда проверяет фактически запечённую локализацию активного языка клиента.
+        if (!Settings.AiControl.AllowQaCommands) {
+            message = "qa_commands_disabled";
+            return false;
+        }
+        if (intArg < 0) {
+            message = "invalid_text_id";
+            return false;
+        }
+        string text = Game.GetText(TextPackKey(TextPackName::Text, "" + intArg));
+        message = "text=<" + text + ">";
+        return true;
+    }
     if (type == "qa_format_tags") {
-        // Debug: run a raw string through Game.FormatTags (resolves @text/@arg/@sex/… on the client) and
-        // return the result. Used to verify the three-token `@text Dialogs <dialogName> <key>@` path
-        // end-to-end (the NPC floating/banker/poker text and NPC names).
+        // QA-прогон сырой строки через Game.FormatTags (клиентское разрешение @text/@arg/@sex/…) с
+        // возвратом результата. Нужен для сквозной проверки формы `@text Dialogs <dialogName> <key>@`.
         if (!Settings.AiControl.AllowQaCommands) {
             message = "qa_commands_disabled";
             return false;
@@ -1656,12 +1761,16 @@ string CrittersJson()
 string CritterJson(Critter cr)
 {
     string dialogId = string(cr.DialogId);
+    int talkDistance = cr.TalkDistance != 0 ? cr.TalkDistance : Settings.Dialog.TalkDistance;
     return Object({IdentMember("id", cr.Id),
+                   StringMember("protoId", string(cr.ProtoId)),
                    StringMember("name", cr.Name),
                    IntMember("hexX", int(cr.Hex.x)),
                    IntMember("hexY", int(cr.Hex.y)),
                    BoolMember("isAlive", cr.IsAlive()),
                    BoolMember("inCombat", Time::IsTimeoutActive(cr.TimeoutBattle)),
+                   BoolMember("isNoTalk", cr.IsNoTalk),
+                   IntMember("talkDistance", talkDistance),
                    StringMember("dialogId", dialogId)});
 }
 
@@ -1871,6 +1980,10 @@ string AvailableActionsJson()
                          "qa_set_prop",
                          "qa_set_game_prop",
                          "qa_give_item",
+                         "qa_get_prop",
+                         "qa_get_text",
+                         "qa_get_text_pack",
+                         "qa_format_tags",
                          "qa_show_dialog_box"};
     string[] entries = {};
     for (int i = 0; i < commands.length(); i++) {
@@ -2173,7 +2286,7 @@ void AiControlQaTeleportMap(Player player, hstring locPid, hstring mapPid, mpos 
 }
 
 [[ServerRemoteCall]] [[Async]]
-void AiControlQaSetProp(Player player, CritterProperty prop, int value)
+void AiControlQaSetProp(Player player, CritterProperty prop, int value, int requestId)
 {
     if (!Settings.AiControl.AllowQaCommands) {
         return;
@@ -2186,10 +2299,11 @@ void AiControlQaSetProp(Player player, CritterProperty prop, int value)
         return;
     }
     cr.SetAsInt(prop, value);
+    cr.PlayerClientCall.AiControlReceiveQaPropSet(prop, cr.GetAsInt(prop), requestId);
 }
 
 [[ServerRemoteCall]] [[Async]]
-void AiControlQaGetProp(Player player, CritterProperty prop)
+void AiControlQaGetProp(Player player, CritterProperty prop, int requestId)
 {
     if (!Settings.AiControl.AllowQaCommands) {
         return;
@@ -2201,7 +2315,7 @@ void AiControlQaGetProp(Player player, CritterProperty prop)
     if (!Sync::Lock(cr)) {
         return;
     }
-    cr.PlayerClientCall.AiControlReceiveQaProp(prop, cr.GetAsInt(prop));
+    cr.PlayerClientCall.AiControlReceiveQaProp(prop, cr.GetAsInt(prop), requestId);
 }
 
 [[ServerRemoteCall]] [[Async]]

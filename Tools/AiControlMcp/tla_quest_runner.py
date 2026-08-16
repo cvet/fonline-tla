@@ -13,13 +13,18 @@ Prereqs: a running server + client with AiControl.Enabled=True AND AiControl.All
 
 Usage:
   python Tools/AiControlMcp/tla_quest_runner.py --quest cassidy_letter [--report run.json]
+  python Tools/AiControlMcp/tla_quest_runner.py --trace-dialog --map arroyo \
+    --npc CassidyStage4 --dialog arroyo_cassidy --flag ArroyoCassidyLetter \
+    [--report trace.json]
   python Tools/AiControlMcp/tla_quest_runner.py --list
 """
 
 from __future__ import annotations
 
 import argparse
+from collections import deque
 import json
+import re
 import socket
 import sys
 import time
@@ -138,7 +143,7 @@ QUESTS = {
 #  - Server-scope quest flags: ~1/3 of quest properties are `Server` (not `OwnerSync`), so they never appear in
 #    the client observation's `quests`. read_quest() falls back to qa_get_prop (an authoritative server read)
 #    for those — e.g. KlamVaccination. The fast client path still serves the OwnerSync majority.
-#  - guard NPCs (Arroyo Todd) never open a dialog at all — not a loyalty gate (default loyalty 5 passes).
+#  - authored @@ text variants change visible wording while retaining the same stable answer slot.
 #  - localization: run the client with --Client.Language russ so dialog text matches the Russian `prefer`.
 #  - a few answers are gated by baker quirks (Den Mom's "Virginia" answer stays hidden even with the GAME
 #    flag set) — those need content-side attention, not just a spec.
@@ -149,12 +154,99 @@ AVOID = ["[выход]", "выход]", "[уходите]", "уходите]", "
          "не хочу", "мне пора", "я пош", "уйду", "уйти", "забудь", "отстань", "пойду", "нахрен",
          "налить", "выпь", "поторг", "торгу", "в другой раз", "барт"]
 
+ANSWER_KEYWORD_STOP_WORDS = {
+    "буду", "быть", "вас", "вам", "ваш", "вот", "все", "всё", "для", "его", "если", "есть",
+    "ещё", "или", "как", "когда", "мне", "может", "мой", "надо", "нет", "ничего", "она", "они",
+    "оно", "пока", "потом", "почему", "просто", "себя", "тебе", "тебя", "тогда", "только", "тут",
+    "уже", "хочу", "чего", "чтобы", "это", "этот", "этого", "этой", "этим", "этом", "я",
+}
+
+TRACE_DISCOVERY_HINTS = (
+    "работ", "задани", "помо", "дело", "просьб", "письм", "отнес", "принес",
+    "передам", "конечно", "соглас", "берусь", "брон", "ржав", "смаз", "робот",
+    "почин", "техник", "посмотр", "новост", "произош", "вирджин", "проблем",
+)
+TRACE_EXPLORATION_HINTS = ("искать", "разыск", "пойти")
+TRACE_LOW_PRIORITY_HINTS = (
+    "налей", "выпить", "выпью", "купить", "в налич", "товар", "торгов", "спасибо",
+    "мне пора", "лучше пойду", "не буду", "не могу", "нет, мне", "передумал", "другие планы",
+)
+
+
+def normalize_property_name(name):
+    """Accept plan-style Critter.Flag/CritterProperty::Flag spellings and return the QA property name."""
+    value = str(name).strip()
+    if "::" in value:
+        value = value.rsplit("::", 1)[-1]
+    if "." in value:
+        value = value.rsplit(".", 1)[-1]
+    if not value:
+        raise ValueError("quest flag must not be empty")
+    return value
+
+
+def answer_keyword_set(answer):
+    """Build stable substring candidates from a visible localized answer."""
+    normalized = " ".join(str(answer).strip().lower().split())
+    normalized = normalized.strip("[](){}<>.,!?;:\"'—–- ")
+    words = re.findall(r"[0-9a-zа-яё]+", normalized, flags=re.IGNORECASE)
+    distinctive = [
+        (index, word)
+        for index, word in enumerate(words)
+        if len(word) >= 4 and word not in ANSWER_KEYWORD_STOP_WORDS
+    ]
+    distinctive.sort(key=lambda entry: (-len(entry[1]), entry[0]))
+
+    keywords = []
+    if normalized:
+        keywords.append(normalized)
+    for _, word in distinctive[:3]:
+        if word not in keywords:
+            keywords.append(word)
+    return keywords
+
+
+def rank_trace_candidates(candidates):
+    ranked = sorted(
+        candidates,
+        key=lambda candidate: (
+            -candidate["stage_advance"],
+            -candidate["to_value"],
+            len(candidate["node_path"]),
+            candidate["answer"].casefold(),
+        ),
+    )
+    for rank, candidate in enumerate(ranked, start=1):
+        candidate["rank"] = rank
+    return ranked
+
+
+def trace_answer_selectors(answers):
+    """Order visible answers for discovery while retaining index/text replay selectors."""
+    selectors = []
+    for index, answer in enumerate(answers):
+        text = str(answer)
+        lowered = text.lower()
+        if any(hint in lowered for hint in TRACE_DISCOVERY_HINTS):
+            priority = 0
+        elif any(hint in lowered for hint in TRACE_EXPLORATION_HINTS):
+            priority = 1
+        elif any(hint in lowered for hint in TRACE_LOW_PRIORITY_HINTS):
+            priority = 3
+        else:
+            priority = 2
+        selectors.append((priority, index, {"index": index, "text": text, "answer_count": len(answers)}))
+    selectors.sort(key=lambda entry: (entry[0], entry[1]))
+    return [entry[2] for entry in selectors]
+
 
 def apply_setup(b, setup):
     """Apply quest prerequisites before a stage: critter props, game props, or granted items."""
     for s in setup or []:
         if "prop" in s:
-            b.act("qa_set_prop", stringArg=s["prop"], intArg=int(s["value"]))
+            # Confirm the write instead of treating command queuing as a server acknowledgement. A callback
+            # can still end without a result when its entity is destroyed while Game.Sync waits/acquires.
+            set_quest_value(b, s["prop"], int(s["value"]), timeout=30.0)
         elif "game_prop" in s:
             b.act("qa_set_game_prop", stringArg=s["game_prop"], intArg=int(s["value"]))
         elif "item" in s:
@@ -170,10 +262,17 @@ class DialogOpenError(BridgeError):
     pass
 
 
+class TraceRootChanged(BridgeError):
+    def __init__(self, observation):
+        super().__init__("dialog replay root changed")
+        self.observation = observation
+
+
 class Bridge:
     def __init__(self, host, port, token="", timeout=10.0):
         self.host, self.port, self.timeout = host, port, timeout
         self._buf = b""
+        self._qa_request_id = int(time.monotonic_ns() % 2147483646) + 1
         self._sock = socket.create_connection((host, port), timeout=timeout)
         self._sock.settimeout(timeout)
         if token:
@@ -208,6 +307,11 @@ class Bridge:
     def events(self, after_seq=0, limit=500):
         return self.call("events", {"afterSeq": after_seq, "limit": limit}).get("events", [])
 
+    def next_qa_request_id(self):
+        request_id = self._qa_request_id
+        self._qa_request_id = 1 if request_id >= 2147483647 else request_id + 1
+        return request_id
+
     def close(self):
         try:
             self._sock.close()
@@ -216,8 +320,9 @@ class Bridge:
 
 
 def quest_value(obs, name):
+    target = normalize_property_name(name)
     for q in (obs.get("quests") or []):
-        if name in str(q.get("name", "")):
+        if normalize_property_name(q.get("name", "")) == target:
             return q.get("value")
     return None
 
@@ -239,28 +344,49 @@ def quest_value_server(b, name, timeout=6.0):
     cursor = 0
     for e in b.events(0, 500):
         cursor = max(cursor, e.get("seq", 0))
-    b.act("qa_get_prop", stringArg=name)
+    request_id = b.next_qa_request_id()
+    b.act("qa_get_prop", stringArg=name, intArg=request_id)
     deadline = time.time() + timeout
     while time.time() < deadline:
         for e in b.events(cursor, 500):
             cursor = max(cursor, e.get("seq", 0))
             ev = e.get("event", {})  # bridge wraps payloads as {"event": {...}, "seq": N}
-            if ev.get("type") == "qa_prop_value" and name in str(ev.get("prop", "")):
+            if (
+                ev.get("type") == "qa_prop_value"
+                and ev.get("requestId") == request_id
+                and normalize_property_name(ev.get("prop", ""))
+                == normalize_property_name(name)
+            ):
                 return ev.get("value")
-        time.sleep(0.4)
+        remaining = deadline - time.time()
+        if remaining > 0:
+            time.sleep(min(0.4, remaining))
     return None
 
 
-def read_quest(b, name):
+def read_quest(b, name, server_timeout=30.0):
     """Quest value preferring the client observation (fast, OwnerSync quests), falling back to an
     authoritative server read when the property is absent client-side (Server-scope quest flags)."""
     v = quest_value(b.observe_safe() or {}, name)
     if v is not None:
         return v
-    return quest_value_server(b, name)
+    return read_quest_authoritative(b, name, timeout=server_timeout)
 
 
-def close_dialog(b):
+def read_quest_authoritative(b, name, timeout=30.0, attempts=10):
+    """Read server-first, retrying when an async request ends without a correlated response."""
+    deadline = time.monotonic() + max(0.0, timeout)
+    attempts = max(1, int(attempts))
+    for attempt in range(attempts):
+        remaining = max(0.0, deadline - time.monotonic())
+        attempt_timeout = remaining / (attempts - attempt)
+        value = quest_value_server(b, name, timeout=attempt_timeout)
+        if value is not None:
+            return value
+    return quest_value(b.observe_safe() or {}, name)
+
+
+def close_dialog(b, timeout=3.0):
     """Close any active dialog/modal so map transfers aren't blocked by an in-progress conversation."""
     o = b.observe_safe() or {}
     if o.get("dialog", {}).get("active"):
@@ -269,9 +395,13 @@ def close_dialog(b):
         b.act("close_screen")
     else:
         return
-    time.sleep(1)
+    wait_for_observation(
+        b,
+        lambda observation: not bool((observation.get("dialog") or {}).get("active"))
+        and not bool((observation.get("screen") or {}).get("modalActive")),
+        timeout,
+    )
     b.act("clear_actions")
-    time.sleep(1)
 
 
 def expected_map_proto(pid):
@@ -286,7 +416,7 @@ def observed_map_proto(observation):
     return map_info.get("protoId")
 
 
-def teleport_map(b, pid, timeout=30, poll_interval=2.0):
+def teleport_map(b, pid, timeout=60, poll_interval=2.0):
     close_dialog(b)
     expected_proto = expected_map_proto(pid)
     initial = b.observe()
@@ -360,8 +490,62 @@ def wait_for_observation(b, predicate, timeout, poll_interval=0.25):
         time.sleep(min(poll_interval, remaining))
 
 
-def open_dialog_near_npc(b, npc, teleport_timeout=3.0, dialog_timeout=5.0):
-    """Try every valid adjacent hex, accepting a teleport only after the chosen hex is observed."""
+def event_cursor(b):
+    cursor = 0
+    for event in b.events(0, 500):
+        cursor = max(cursor, event.get("seq", 0))
+    return cursor
+
+
+def read_talk_diagnostic(b, cursor, npc_id):
+    latest = None
+    for event in b.events(cursor, 500):
+        cursor = max(cursor, event.get("seq", 0))
+        payload = event.get("event", {})
+        if payload.get("type") == "talk_diagnostic" and payload.get("npcId") == npc_id:
+            latest = payload
+    return cursor, latest
+
+
+def format_talk_diagnostic(diagnostic):
+    if not diagnostic:
+        return ""
+    status = diagnostic.get("status", "unknown")
+    distance = diagnostic.get("distance")
+    talk_distance = diagnostic.get("talkDistance")
+    player_sees = diagnostic.get("playerSeesNpc")
+    npc_sees = diagnostic.get("npcSeesPlayer")
+    return (
+        f"server={status}, distance={distance}/{talk_distance}, "
+        f"playerSeesNpc={str(player_sees).lower()}, npcSeesPlayer={str(npc_sees).lower()}"
+    )
+
+
+def teleport_chosen_hex(b, target_hex, timeout, retry_interval=2.0):
+    """Retry the async QA transfer until the server-side transfer is observed."""
+    deadline = time.monotonic() + max(0.0, timeout)
+    while True:
+        b.act("qa_teleport_hex", x=target_hex[0], y=target_hex[1])
+        remaining = max(0.0, deadline - time.monotonic())
+        observation = wait_for_observation(
+            b,
+            lambda current: chosen_at_hex(current, target_hex),
+            min(retry_interval, remaining),
+        )
+        if observation is not None:
+            return observation
+        if time.monotonic() >= deadline:
+            return None
+
+
+def open_dialog_near_npc(
+    b,
+    npc,
+    teleport_timeout=10.0,
+    dialog_timeout=10.0,
+    talk_retry_interval=2.0,
+):
+    """Try every valid adjacent hex and retry talk while the confirmed position is retained."""
     initial = b.observe_safe()
     if initial is None:
         raise DialogOpenError(f"cannot open dialog with NPC {npc['id']}: client observation unavailable")
@@ -379,10 +563,7 @@ def open_dialog_near_npc(b, npc, teleport_timeout=3.0, dialog_timeout=5.0):
                 f"cannot open dialog with NPC {npc['id']}: client observation unavailable"
             )
         if not chosen_at_hex(current, target_hex):
-            b.act("qa_teleport_hex", x=target_hex[0], y=target_hex[1])
-            if wait_for_observation(
-                b, lambda observation: chosen_at_hex(observation, target_hex), teleport_timeout
-            ) is None:
+            if teleport_chosen_hex(b, target_hex, teleport_timeout) is None:
                 if b.observe_safe() is None:
                     raise DialogOpenError(
                         f"cannot open dialog with NPC {npc['id']}: client observation unavailable "
@@ -392,29 +573,48 @@ def open_dialog_near_npc(b, npc, teleport_timeout=3.0, dialog_timeout=5.0):
                 continue
 
         b.act("clear_actions")
-        b.act("talk_to", targetId=npc["id"])
-        if wait_for_observation(
-            b,
-            lambda observation: bool((observation.get("dialog") or {}).get("active")),
-            dialog_timeout,
-        ) is not None:
-            return target_hex
-        if b.observe_safe() is None:
-            raise DialogOpenError(
-                f"cannot open dialog with NPC {npc['id']}: client observation unavailable "
-                f"while waiting for dialog at {target_hex}"
-            )
-        failures.append(f"{target_hex}: dialog did not open")
+        cursor = event_cursor(b)
+        diagnostic = None
+        dialog_deadline = time.monotonic() + max(0.0, dialog_timeout)
+        while True:
+            b.act("talk_to", targetId=npc["id"])
+            remaining = max(0.0, dialog_deadline - time.monotonic())
+            if wait_for_observation(
+                b,
+                lambda observation: bool((observation.get("dialog") or {}).get("active")),
+                min(max(0.0, talk_retry_interval), remaining),
+            ) is not None:
+                return target_hex
+            cursor, current_diagnostic = read_talk_diagnostic(b, cursor, npc["id"])
+            if current_diagnostic is not None:
+                diagnostic = current_diagnostic
+            if b.observe_safe() is None:
+                raise DialogOpenError(
+                    f"cannot open dialog with NPC {npc['id']}: client observation unavailable "
+                    f"while waiting for dialog at {target_hex}"
+                )
+            if time.monotonic() >= dialog_deadline:
+                break
+        diagnostic_text = format_talk_diagnostic(diagnostic)
+        failures.append(
+            f"{target_hex}: dialog did not open"
+            + (f" ({diagnostic_text})" if diagnostic_text else "")
+        )
         b.act("clear_actions")
 
     details = "; ".join(failures) if failures else "no in-bounds adjacent hexes"
     raise DialogOpenError(f"cannot open dialog with NPC {npc['id']}: {details}")
 
 
-def find_npc(b, dialog_id, hint_hex=None):
-    """Find a visible NPC by dialogId; if hint_hex given and not visible, nudge there + re-observe to sync."""
+def find_npc(b, dialog_id, hint_hex=None, proto_id=None):
+    """Find a visible NPC by dialogId and optional protoId; nudge near hint_hex to refresh visibility."""
+    def matches(critter):
+        return critter.get("dialogId") == dialog_id and (
+            proto_id is None or critter.get("protoId") == proto_id
+        )
+
     o = b.observe()
-    hit = [c for c in (o.get("critters") or []) if c.get("dialogId") == dialog_id]
+    hit = [c for c in (o.get("critters") or []) if matches(c)]
     if hit:
         return hit[0]
     if hint_hex:
@@ -424,10 +624,336 @@ def find_npc(b, dialog_id, hint_hex=None):
             for _ in range(3):
                 time.sleep(2)
                 o = b.observe_safe() or {}
-                hit = [c for c in (o.get("critters") or []) if c.get("dialogId") == dialog_id]
+                hit = [c for c in (o.get("critters") or []) if matches(c)]
                 if hit:
                     return hit[0]
     return None
+
+
+def dialog_signature(observation):
+    dialog = (observation or {}).get("dialog") or {}
+    return (
+        bool(dialog.get("active")),
+        str(dialog.get("dialogId", "")),
+        str(dialog.get("text", "")),
+        tuple(str(answer) for answer in (dialog.get("answers") or [])),
+    )
+
+
+def dialog_replay_signature(observation):
+    """Ignore randomized greetings and cosmetic exit variants when comparing replay roots."""
+    active, dialog_id, _text, answers = dialog_signature(observation)
+    replayable_answers = tuple(
+        answer
+        for answer in answers
+        if answer.strip().lower().rstrip(".!?") != "ничего"
+        and "неважно" not in answer.lower()
+        and not any(marker in answer.lower() for marker in AVOID)
+    )
+    return active, dialog_id, "", replayable_answers
+
+
+def wait_for_dialog_update(b, previous_signature, timeout=3.0, poll_interval=0.15):
+    """Wait for a dialog answer to change/close the visible node, returning the latest observation."""
+    deadline = time.monotonic() + timeout
+    latest = b.observe_safe()
+    while latest is not None and time.monotonic() < deadline:
+        if dialog_signature(latest) != previous_signature:
+            return latest
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
+        time.sleep(min(poll_interval, remaining))
+        latest = b.observe_safe()
+    return latest
+
+
+def set_quest_value(b, quest, value, timeout=5.0, current_value=None, retry_interval=2.0):
+    """Set and observe a critter property through the async QA surface.
+
+    `qa_set_prop` only confirms that the client sent the async remote call. The script callback can still
+    end without writing if its critter is destroyed while Game.Sync waits/acquires, so both trace resets and
+    property prerequisites resend until the callback publishes a correlated acknowledgement after `SetAsInt`.
+    """
+    if current_value == value:
+        return current_value
+
+    deadline = time.monotonic() + max(0.0, timeout)
+    cursor = 0
+    for event in b.events(0, 500):
+        cursor = max(cursor, event.get("seq", 0))
+    request_id = b.next_qa_request_id()
+    observed = None
+
+    while True:
+        b.act("qa_set_prop", stringArg=quest, intArg=int(value), x=request_id)
+        attempt_deadline = min(
+            deadline,
+            time.monotonic() + max(0.0, retry_interval),
+        )
+        while True:
+            for event in b.events(cursor, 500):
+                cursor = max(cursor, event.get("seq", 0))
+                payload = event.get("event", {})
+                if (
+                    payload.get("type") == "qa_prop_set"
+                    and payload.get("requestId") == request_id
+                    and normalize_property_name(payload.get("prop", ""))
+                    == normalize_property_name(quest)
+                ):
+                    observed = payload.get("value")
+                    if observed == value:
+                        return observed
+
+            remaining = attempt_deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            time.sleep(min(0.2, remaining))
+
+        if time.monotonic() >= deadline:
+            raise BridgeError(f"could not set {quest}={value}; acknowledged {observed}")
+
+
+def resolve_trace_answer(answers, selector):
+    """Replay exact text first, then the same stable answer slot for authored @@ text variants."""
+    expected_index = int(selector["index"])
+    expected_text = str(selector["text"])
+    if 0 <= expected_index < len(answers) and answers[expected_index] == expected_text:
+        return expected_index
+    matching = [index for index, answer in enumerate(answers) if answer == expected_text]
+    if len(matching) == 1:
+        return matching[0]
+    if len(answers) == selector.get("answer_count") and 0 <= expected_index < len(answers):
+        return expected_index
+    return None
+
+
+def open_trace_root(
+    b, npc, dialog_id, quest, baseline, reset_timeout=5.0, current_value=None
+):
+    set_quest_value(
+        b, quest, baseline, timeout=reset_timeout, current_value=current_value
+    )
+    close_dialog(b)
+    open_dialog_near_npc(b, npc)
+    observation = b.observe_safe()
+    dialog = (observation or {}).get("dialog") or {}
+    if not dialog.get("active"):
+        raise DialogOpenError(f"dialog {dialog_id} did not become active")
+    if dialog_id and dialog.get("dialogId") != dialog_id:
+        raise DialogOpenError(
+            f"expected dialog {dialog_id}, observed {dialog.get('dialogId') or '<none>'}"
+        )
+    return observation
+
+
+def stabilize_trace_root(b, npc, dialog_id, quest, baseline, max_opens=4, reset_timeout=5.0):
+    """Confirm repeated opens share a base; answer-triggered one-shot changes are rebased later."""
+    observation = open_trace_root(b, npc, dialog_id, quest, baseline, reset_timeout=reset_timeout)
+    previous_signature = dialog_replay_signature(observation)
+    signatures = [previous_signature]
+    for open_count in range(2, max_opens + 1):
+        close_dialog(b)
+        observation = open_trace_root(
+            b, npc, dialog_id, quest, baseline, reset_timeout=reset_timeout
+        )
+        current_signature = dialog_replay_signature(observation)
+        signatures.append(current_signature)
+        if current_signature == previous_signature:
+            return observation, open_count
+        previous_signature = current_signature
+    raise DialogOpenError(
+        f"dialog {dialog_id} root did not stabilize after {max_opens} opens: "
+        + " -> ".join(repr(signature[3][:2]) for signature in signatures)
+    )
+
+
+def evaluate_trace_path(
+    b,
+    npc,
+    dialog_id,
+    quest,
+    baseline,
+    selectors,
+    answer_timeout=3.0,
+    reset_timeout=5.0,
+    current_value=None,
+    expected_root_signature=None,
+):
+    """Reset the traced flag, replay one visible answer path, and return its observed transitions."""
+    observation = open_trace_root(
+        b,
+        npc,
+        dialog_id,
+        quest,
+        baseline,
+        reset_timeout=reset_timeout,
+        current_value=current_value,
+    )
+    if (
+        expected_root_signature is not None
+        and dialog_replay_signature(observation) != expected_root_signature
+    ):
+        raise TraceRootChanged(observation)
+    node_path = []
+    current_value = baseline
+    for selector in selectors:
+        dialog = (observation or {}).get("dialog") or {}
+        answers = [str(answer) for answer in (dialog.get("answers") or [])]
+        answer_index = resolve_trace_answer(answers, selector)
+        if answer_index is None:
+            raise BridgeError(
+                f"trace path drifted at depth {len(node_path)}: answer {selector['text']!r} is unavailable"
+            )
+
+        before = current_value
+        previous_signature = dialog_signature(observation)
+        answer_text = answers[answer_index]
+        b.act("dialog_answer", intArg=answer_index)
+        observation = wait_for_dialog_update(b, previous_signature, timeout=answer_timeout)
+        after = read_quest_authoritative(b, quest)
+        current_value = after
+        node_path.append({
+            "dialog_text": dialog.get("text", ""),
+            "answer_index": answer_index,
+            "answer": answer_text,
+            "from_value": before,
+            "to_value": after,
+        })
+    return observation, node_path, current_value
+
+
+def trace_dialog_paths(
+    b,
+    npc,
+    dialog_id,
+    quest,
+    baseline,
+    max_depth=12,
+    max_paths=96,
+    max_candidates=8,
+    answer_timeout=3.0,
+    reset_timeout=5.0,
+    max_seconds=180.0,
+):
+    """Explore a bounded live dialog by replay, ranking answers that increase the requested quest flag.
+
+    Only the requested flag is restored between branches. The caller should use a disposable QA character
+    because arbitrary authored answer side effects (items and other properties) cannot be rolled back here.
+    """
+    started_at = time.monotonic()
+    deadline = started_at + max(0.0, max_seconds)
+    root, root_stabilization_opens = stabilize_trace_root(
+        b, npc, dialog_id, quest, baseline, reset_timeout=reset_timeout
+    )
+    root_dialog = (root or {}).get("dialog") or {}
+    root_signature = dialog_replay_signature(root)
+    queue = deque(
+        (tuple((selector,)), 1)
+        for selector in trace_answer_selectors(root_dialog.get("answers") or [])
+    )
+    expanded_states = set()
+    candidates = []
+    errors = []
+    explored_paths = 0
+    current_value = baseline
+    root_rebases = 0
+
+    while (
+        queue
+        and explored_paths < max_paths
+        and len(candidates) < max_candidates
+        and time.monotonic() < deadline
+    ):
+        selectors, depth = queue.popleft()
+        explored_paths += 1
+        try:
+            observation, node_path, current_value = evaluate_trace_path(
+                b,
+                npc,
+                dialog_id,
+                quest,
+                baseline,
+                selectors,
+                answer_timeout=answer_timeout,
+                reset_timeout=reset_timeout,
+                current_value=current_value,
+                expected_root_signature=root_signature,
+            )
+        except TraceRootChanged as exc:
+            current_value = baseline
+            root = exc.observation
+            root_dialog = (root or {}).get("dialog") or {}
+            root_signature = dialog_replay_signature(root)
+            root_rebases += 1
+            if root_rebases > 4:
+                errors.append({
+                    "path": [selector["text"] for selector in selectors],
+                    "error": "dialog replay root changed more than 4 times",
+                })
+                break
+            queue = deque(
+                (tuple((selector,)), 1)
+                for selector in trace_answer_selectors(root_dialog.get("answers") or [])
+            )
+            expanded_states.clear()
+            continue
+        except BridgeError as exc:
+            current_value = None
+            errors.append({"path": [selector["text"] for selector in selectors], "error": str(exc)})
+            continue
+
+        transition = node_path[-1]
+        before = transition["from_value"]
+        after = transition["to_value"]
+        if before is not None and after is not None and after > before:
+            candidates.append({
+                "answer": transition["answer"],
+                "keywords": answer_keyword_set(transition["answer"]),
+                "from_value": before,
+                "to_value": after,
+                "stage_advance": after - before,
+                "node_path": node_path,
+            })
+            continue
+
+        dialog = (observation or {}).get("dialog") or {}
+        answers = [str(answer) for answer in (dialog.get("answers") or [])]
+        if depth >= max_depth or not dialog.get("active") or not answers:
+            continue
+
+        state = (
+            str(dialog.get("dialogId", "")),
+            str(dialog.get("text", "")),
+            tuple(answers),
+            after,
+        )
+        if state in expanded_states:
+            continue
+        expanded_states.add(state)
+        children = trace_answer_selectors(answers)
+        for child in reversed(children):
+            queue.appendleft((selectors + (child,), depth + 1))
+
+    elapsed_seconds = time.monotonic() - started_at
+    time_limit_reached = bool(queue) and time.monotonic() >= deadline
+    return {
+        "baseline": baseline,
+        "dialog_id": dialog_id,
+        "root_stabilization_opens": root_stabilization_opens,
+        "root_rebases": root_rebases,
+        "explored_paths": explored_paths,
+        "max_depth": max_depth,
+        "max_paths": max_paths,
+        "max_candidates": max_candidates,
+        "candidate_limit_reached": len(candidates) >= max_candidates,
+        "max_seconds": max_seconds,
+        "elapsed_seconds": round(elapsed_seconds, 3),
+        "time_limit_reached": time_limit_reached,
+        "truncated": bool(queue),
+        "candidates": rank_trace_candidates(candidates),
+        "branch_errors": errors,
+    }
 
 
 def _is_avoid(a):
@@ -492,18 +1018,115 @@ def navigate_dialog(b, npc, prefer, target, quest, target_mode="at_least", max_s
     return steps, quest_target_reached(read_quest(b, quest), target, target_mode)
 
 
+def ensure_in_game(b, register, name, login_timeout):
+    if not b.observe().get("hasChosen"):
+        b.act("register" if register else "login", stringArg=name)
+        deadline = time.time() + login_timeout
+        while time.time() < deadline and not (b.observe_safe() or {}).get("hasChosen"):
+            time.sleep(1.5)
+    return bool(b.observe().get("hasChosen"))
+
+
+def load_setup_json(value):
+    if not value:
+        return []
+    source = str(value)
+    if source.startswith("@"):
+        source = Path(source[1:]).read_text(encoding="utf-8")
+    elif not source.lstrip().startswith("["):
+        path = Path(source)
+        if path.is_file():
+            source = path.read_text(encoding="utf-8")
+    parsed = json.loads(source)
+    if not isinstance(parsed, list) or not all(isinstance(entry, dict) for entry in parsed):
+        raise ValueError("--setup-json must be a JSON array of setup objects")
+    return parsed
+
+
+def run_trace(args):
+    quest = normalize_property_name(args.flag)
+    report = {
+        "mode": "trace-dialog",
+        "map": args.trace_map,
+        "npc": args.npc,
+        "dialog": args.dialog,
+        "flag": quest,
+        "ok": False,
+        "state_warning": "only the traced flag is restored; use a disposable QA character",
+    }
+    b = Bridge(args.host, args.port, args.token, args.timeout)
+    original_value = None
+    try:
+        if not ensure_in_game(b, args.register, args.name, args.login_timeout):
+            report["error"] = "could not enter game"
+            return report
+
+        teleport_map(b, args.trace_map, timeout=args.map_timeout)
+        setup = load_setup_json(args.setup_json)
+        original_value = read_quest_authoritative(b, quest)
+        if original_value is None:
+            report["error"] = f"quest flag {quest} is unavailable"
+            return report
+        apply_setup(b, setup)
+        baseline = read_quest_authoritative(b, quest)
+        if baseline is None:
+            report["error"] = f"quest flag {quest} is unavailable after setup"
+            return report
+        npc = find_npc(b, args.dialog, args.npc_hex, proto_id=args.npc)
+        report["npc_found"] = bool(npc)
+        report["setup_injected"] = setup
+        report["original_value"] = original_value
+        if not npc:
+            report["error"] = (
+                f"NPC proto {args.npc} with dialog {args.dialog} not found on {args.trace_map}"
+            )
+            return report
+
+        trace = trace_dialog_paths(
+            b,
+            npc,
+            args.dialog,
+            quest,
+            baseline,
+            max_depth=args.trace_max_depth,
+            max_paths=args.trace_max_paths,
+            max_candidates=args.trace_max_candidates,
+            answer_timeout=args.trace_answer_timeout,
+            reset_timeout=args.trace_reset_timeout,
+            max_seconds=args.trace_max_seconds,
+        )
+        report.update(trace)
+        report["ok"] = bool(trace["candidates"])
+        if not report["ok"]:
+            report["error"] = f"no answer advancing {quest} was found within trace bounds"
+        return report
+    except (BridgeError, DialogOpenError, OSError, ValueError, json.JSONDecodeError) as exc:
+        report["error"] = str(exc)
+        return report
+    finally:
+        if original_value is not None:
+            try:
+                set_quest_value(b, quest, original_value, timeout=args.trace_reset_timeout)
+                report["restored_value"] = original_value
+                report["flag_restored"] = True
+            except (BridgeError, OSError) as exc:
+                report["flag_restored"] = False
+                report["restore_error"] = str(exc)
+                report["ok"] = False
+        try:
+            close_dialog(b)
+        except (BridgeError, OSError):
+            pass
+        b.close()
+
+
 def run(args):
     spec = QUESTS[args.quest]
     report = {"quest": args.quest, "title": spec["title"], "ok": False, "stages": []}
     b = Bridge(args.host, args.port, args.token, args.timeout)
     try:
         # Enter game.
-        if not b.observe().get("hasChosen"):
-            b.act("register" if args.register else "login", stringArg=args.name)
-            deadline = time.time() + args.login_timeout
-            while time.time() < deadline and not (b.observe_safe() or {}).get("hasChosen"):
-                time.sleep(1.5)
-        if not b.observe().get("hasChosen"):
+        if not ensure_in_game(b, args.register, args.name, args.login_timeout):
             report["error"] = "could not enter game"
             return report
 
@@ -526,7 +1149,7 @@ def run(args):
                 })
                 continue
 
-            o = teleport_map(b, stage["map"])
+            o = teleport_map(b, stage["map"], timeout=args.map_timeout)
             apply_setup(b, stage.get("setup"))  # per-stage prerequisites (after teleport, before talking)
             npc = find_npc(b, stage["npc"], stage.get("npc_hex"))
             sr = {"stage": stage["name"], "map": (o.get("map") or {}).get("protoId"),
@@ -586,8 +1209,27 @@ def main():
     ap.add_argument("--require-exercised", action="store_true",
                     help="fail when all quest stages were already satisfied before the run")
     ap.add_argument("--login-timeout", type=float, default=45.0)
+    ap.add_argument("--map-timeout", type=float, default=90.0,
+                    help="seconds to wait for an observed map proto after QA teleport")
     ap.add_argument("--report", default="")
     ap.add_argument("--list", action="store_true", help="list known quest specs and exit")
+    ap.add_argument("--trace-dialog", action="store_true",
+                    help="discover visible answer paths that advance one quest flag")
+    ap.add_argument("--map", dest="trace_map", default="",
+                    help="location/map target used by --trace-dialog")
+    ap.add_argument("--npc", default="", help="NPC prototype id used by --trace-dialog")
+    ap.add_argument("--dialog", default="", help="expected dialog id used by --trace-dialog")
+    ap.add_argument("--flag", default="", help="Critter quest property traced by --trace-dialog")
+    ap.add_argument("--npc-hex", nargs=2, type=int, metavar=("X", "Y"),
+                    help="optional NPC visibility hint used by --trace-dialog")
+    ap.add_argument("--setup-json", default="",
+                    help="JSON array (or file path) with qa_set_prop/game_prop/give_item prerequisites")
+    ap.add_argument("--trace-max-depth", type=int, default=12)
+    ap.add_argument("--trace-max-paths", type=int, default=96)
+    ap.add_argument("--trace-max-candidates", type=int, default=8)
+    ap.add_argument("--trace-max-seconds", type=float, default=180.0)
+    ap.add_argument("--trace-answer-timeout", type=float, default=3.0)
+    ap.add_argument("--trace-reset-timeout", type=float, default=30.0)
     args = ap.parse_args()
 
     try:
@@ -600,7 +1242,34 @@ def main():
             print(f"{k}: {v['title']}")
         return 0
 
-    report = run(args)
+    if args.map_timeout <= 0:
+        ap.error("--map-timeout must be positive")
+
+    if args.trace_dialog:
+        missing = [
+            option
+            for option, value in (
+                ("--map", args.trace_map),
+                ("--npc", args.npc),
+                ("--dialog", args.dialog),
+                ("--flag", args.flag),
+            )
+            if not value
+        ]
+        if missing:
+            ap.error(f"--trace-dialog requires {', '.join(missing)}")
+        if (
+            args.trace_max_depth < 1
+            or args.trace_max_paths < 1
+            or args.trace_max_candidates < 1
+            or args.trace_max_seconds <= 0
+            or args.trace_answer_timeout <= 0
+            or args.trace_reset_timeout <= 0
+        ):
+            ap.error("trace bounds must be positive")
+        report = run_trace(args)
+    else:
+        report = run(args)
     text = json.dumps(report, ensure_ascii=False, indent=2)
     if args.report:
         report_path = Path(args.report)

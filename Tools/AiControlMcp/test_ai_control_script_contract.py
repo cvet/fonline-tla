@@ -42,6 +42,23 @@ class AiControlScriptContractTests(unittest.TestCase):
         missing = sorted(available_action_types(source) - handled_action_types(source))
         self.assertEqual(missing, [], f"AiControl advertises unsupported commands: {missing}")
 
+    def test_every_handled_script_action_is_advertised(self) -> None:
+        source = script_source()
+        missing = sorted(handled_action_types(source) - available_action_types(source))
+        self.assertEqual(missing, [], f"AiControl hides supported commands from availableActions: {missing}")
+
+    def test_qa_text_pack_lookup_uses_baked_active_language_text(self) -> None:
+        source = script_source()
+        start = source.index('if (type == "qa_get_text_pack")')
+        end = source.index('if (type == "qa_format_tags")', start)
+        command = source[start:end]
+
+        self.assertIn("if (!Settings.AiControl.AllowQaCommands)", command)
+        self.assertIn('message = "invalid_text_id"', command)
+        self.assertIn('TextPackKey(TextPackName::Text, "" + intArg)', command)
+        self.assertIn('message = "text=<" + text + ">"', command)
+        self.assertNotIn("Game.Sync", command)
+
     def test_semantic_ui_prompt_is_observed_and_executable(self) -> None:
         source = script_source()
         self.assertIn('RawMember("uiPrompt", UiPromptJson(activeScreen))', source)
@@ -57,6 +74,51 @@ class AiControlScriptContractTests(unittest.TestCase):
         source = script_source()
         self.assertIn('if (type == "show_context_screen")', source)
         self.assertIn('"show_context_screen",', source[source.index("string AvailableActionsJson()"):])
+
+    def test_visible_critters_expose_proto_and_dialog_identity_for_quest_tracing(self) -> None:
+        source = script_source()
+        critter_json = source[source.index("string CritterJson(Critter cr)"):]
+        critter_json = critter_json[:critter_json.index("string MapItemsJson()")]
+        self.assertIn('StringMember("protoId", string(cr.ProtoId))', critter_json)
+        self.assertIn('StringMember("dialogId", dialogId)', critter_json)
+        self.assertIn('BoolMember("isNoTalk", cr.IsNoTalk)', critter_json)
+        self.assertIn('IntMember("talkDistance", talkDistance)', critter_json)
+
+    def test_qa_property_reads_echo_the_request_identity(self) -> None:
+        source = script_source()
+        self.assertIn(
+            "AiControlQaGetProp(CritterProperty prop, int32 requestId)", source
+        )
+        self.assertIn(
+            "AiControlReceiveQaProp(CritterProperty prop, int32 value, int32 requestId)",
+            source,
+        )
+        self.assertIn('IntMember("requestId", requestId)', source)
+
+    def test_qa_property_writes_acknowledge_the_correlated_request(self) -> None:
+        source = script_source()
+        self.assertIn(
+            "AiControlQaSetProp(CritterProperty prop, int32 value, int32 requestId)",
+            source,
+        )
+        self.assertIn(
+            "AiControlReceiveQaPropSet(CritterProperty prop, int32 value, int32 requestId)",
+            source,
+        )
+        self.assertIn('StringMember("type", "qa_prop_set")', source)
+        self.assertIn("AiControlQaSetProp(prop, intArg, hexX)", source)
+
+    def test_normal_dialog_path_emits_qa_diagnostics_without_bypassing_dialogs(self) -> None:
+        source = script_source()
+        drop_menu_source = (PROJECT_ROOT / "Scripts" / "DropMenuHandler.fos").read_text(
+            encoding="utf-8-sig"
+        )
+        self.assertIn("AiControlReceiveTalkDiagnostic", source)
+        self.assertIn('StringMember("type", "talk_diagnostic")', source)
+        self.assertIn("Entity[] heldEntities = Sync::SurvivingSnapshot();", drop_menu_source)
+        self.assertIn("Dialogs::RunDialog(cr, npc, false);", drop_menu_source)
+        self.assertIn("Sync::Restore(heldEntities)", drop_menu_source)
+        self.assertNotIn("ignoreDistance : true", drop_menu_source)
 
     def test_timed_item_mode_reaches_the_bridge(self) -> None:
         payload = ai_control_mcp.typed_command_payload("tla_use_item", {"itemId": 7, "useMode": "timer:61"})

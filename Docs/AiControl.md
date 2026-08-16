@@ -82,7 +82,13 @@ Consumers must branch on `connected`, `hasMap`, `hasChosen` instead of assuming 
   inCombat (`TimeoutBattle` active), inSneakMode.
 - `map`: id, protoId, width, height.
 - `critters`: visible critters from `CurMap.GetCritters(CritterFindType::Any)` (chosen excluded): id,
-  name, hexX/Y, isAlive, inCombat, dialogId.
+  protoId, name, hexX/Y, isAlive, inCombat, isNoTalk, effective talkDistance, dialogId. The
+  `protoId` + `dialogId` pair lets quest tools distinguish authored NPC roles that happen to share a dialog;
+  `isNoTalk` and `talkDistance` explain silent client/server talk precondition failures.
+- In QA-enabled runs, an ordinary `talk_to` attempt also emits `talk_diagnostic`: the server reports
+  life/control/no-talk/map/distance/mutual-visibility checks and whether the normal dialog context actually
+  started. This is observational only; it calls the same `StartDialog`/`Dialogs::RunDialog` path and does not
+  bypass distance, visibility, demands, or synchronization.
 - `mapItems`: visible map items tracked from `OnItemMapIn` / `OnItemMapOut`: id, protoId, hexX/Y, count,
   stackability, ownership, cost/weight, use/pick-up capabilities, and `visualFeedback.timerCapable`.
 - `inventory`: `Chosen.GetItems()`: the same real item metadata plus slot. Both item arrays also expose the
@@ -168,19 +174,28 @@ not normal player abilities. Use them to reach content for mechanics/quest runs.
 | `qa_teleport_hex` | `x`, `y` | Same-map reposition (`Critter.TransferToHex`); the engine snaps to the nearest movable hex. Useful to reach otherwise-blocked spots. |
 | `qa_teleport_map` | `stringArg` (`locationPid` or `locationPid/mapProto`), optional `x`/`y` | Teleport to a content map. The client validates both proto ids and sends them as separate known `hstring` values; the server resolves the requested map inside that location, creates a valid unloaded location when needed, and uses entry `"0"` when no hex is given. Unknown targets fail as `unknown_map_target` without a server exception. |
 | `qa_teleport_global` | none | `Critter.TransferToGlobal`. Note: a no-op from the `repl1` replication/limbo start map (it has no global coordinates); use `qa_teleport_map` to reach content. |
-| `qa_set_prop` | `stringArg` (CritterProperty name), `intArg` (value) | Set an int CRITTER property (`cr.SetAsInt`) — reputation/loyalty values, a prior quest stage, `CurrentHp`, limb-damage flags, etc. |
+| `qa_set_prop` | `stringArg` (CritterProperty name), `intArg` (value), optional `x` request id | Set an int CRITTER property (`cr.SetAsInt`) — reputation/loyalty values, a prior quest stage, `CurrentHp`, limb-damage flags, etc. A successful script-side write publishes `qa_prop_set` (`{prop, value, requestId}`); a missing/delayed matching event is retried by the caller. |
 | `qa_set_game_prop` | `stringArg` (GameProperty name), `intArg` (value) | Set an int GAME property (`Game.SetAsInt`) — world/quest flags that live on the game singleton, not the critter (e.g. `DenVirginIsAway`). Many dialog demands gate on these, so `qa_set_prop` alone can't satisfy them. |
 | `qa_give_item` | `stringArg` (item proto), `intArg` (count) | Give an item (`cr.AddItem`) — for quest items the giver doesn't hand out, or starting gear. |
-| `qa_get_prop` | `stringArg` (CritterProperty name) | Authoritative SERVER-side read of an int critter property. The server reads `cr.GetAsInt` and calls the client back (`AiControlReceiveQaProp`), which publishes a `qa_prop_value` event (`{prop, value}`). Needed because ~1/3 of quest flags are `Server`-scope (not `OwnerSync`) and therefore never appear in the client observation's `quests` — the only way to verify them is this round-trip. |
+| `qa_get_prop` | `stringArg` (CritterProperty name), optional `intArg` request id | Authoritative SERVER-side read of an int critter property. The server reads `cr.GetAsInt` and calls the client back (`AiControlReceiveQaProp`), which publishes a `qa_prop_value` event (`{prop, value, requestId}`). Needed because ~1/3 of quest flags are `Server`-scope (not `OwnerSync`) and therefore never appear in the client observation's `quests` — the only way to verify them is this round-trip. |
 | `qa_get_text` | `stringArg` (dialog id), `intArg` (string number) | Resolve a numbered NPC floating-text via `MsgStr::DialogTextKey` and return it in the command message (`text=<…>`). Debug tool for the numbered-text fix below; empty means the string isn't authored for that dialog. |
+| `qa_get_text_pack` | `intArg` (numeric id) | Resolve a row from the baked general `Text` pack for the client's active language via `TextPackKey(TextPackName::Text, …)` and return it as `text=<…>`. This verifies the runtime localization surface rather than only the authored `.fotxt` file. |
 | `qa_format_tags` | `stringArg` (text with tags) | Run a raw string through `Game.FormatTags` (resolves `@text`/`@arg`/`@sex`/… client-side) and return the result (`result=<…>`). Used to verify the three-token `@text Dialogs <dialogName> <key>@` path end-to-end. |
 | `qa_show_dialog_box` | none | Request a real server-backed `AskFollowGlobalGroupRuler` DialogBox with two answers for semantic/session and screenshot tests. The typed MCP wrapper is `tla_qa_show_dialog_box`; `answer_1` is the safe no-op choice. |
 
 `qa_get_prop` is asynchronous: the value arrives as a `qa_prop_value` event, not in the command's own
-completion message. Snapshot the event cursor (max `seq`), send `qa_get_prop`, then poll `events` for the
-`qa_prop_value` whose `prop` matches. `tla_quest_runner.py`'s `read_quest` does exactly this — it reads the
-client observation first (fast, for `OwnerSync` quests) and falls back to `qa_get_prop` when the property is
-absent client-side (`Server`-scope quests such as `KlamVaccination`).
+completion message. Snapshot the event cursor (max `seq`), send `qa_get_prop` with a non-zero request id, then
+poll `events` for the `qa_prop_value` whose `prop` and `requestId` both match. The correlation is required under
+load because a delayed response to an earlier read may arrive after the new cursor. `tla_quest_runner.py`'s
+`read_quest` does exactly this — it reads the client observation first (fast, for `OwnerSync` quests) and falls
+back to a correlated `qa_get_prop` when the property is absent client-side (`Server`-scope quests such as
+`KlamVaccination`).
+
+`qa_set_prop` has the same correlation requirement, with the request id transported in `x` because `intArg`
+already carries the property value. `tla_quest_runner.py` waits for a matching `qa_prop_set` event and resends
+the command when no matching acknowledgement arrives. The acknowledgement is sent only after `SetAsInt`.
+Entity locking remains an explicit `Game.Sync` cover in the `[[Async]]` script callback; no called engine
+function performs implicit synchronization.
 
 `qa_teleport_map` accepts `locationPid/mapProto` (e.g. `vault_city/vcity_courtyard`) to land on a specific
 sub-map of a multi-map location. The split is intentional: a synthetic combined `hstring` is not part of baked
@@ -400,6 +415,32 @@ python Tools/AiControlMcp/tla_quest_runner.py --quest klam_vaccination --name Qu
   --require-exercised --report Workspace/klam.json
 ```
 
+The same runner can discover localized answer paths before a quest spec is authored. `--trace-dialog`
+replays bounded paths against a visible NPC, reads the requested quest flag through the asynchronous
+server-authoritative `qa_get_prop` round-trip, and emits the answers that increase it. Candidates are ranked by
+stage advance and include the full visible `node_path` plus stable Russian keyword substrings:
+
+```bash
+python Tools/AiControlMcp/tla_quest_runner.py --trace-dialog --map arroyo \
+  --npc CassidyStage4 --dialog arroyo_cassidy --flag ArroyoCassidyLetter \
+  --npc-hex 82 113 --name TraceCass --register --trace-max-candidates 1 \
+  --report Build/_artifacts/trace-dialog/cassidy.json
+```
+
+Run the server with `--ServerNetwork.InactivityDisconnectTime 0` for a long trace. Use a disposable QA
+character: the runner restores the requested flag in `finally`, but arbitrary authored side effects such as
+items, dialog cooldowns, and other properties cannot be rolled back generically. `--setup-json` accepts either
+a JSON array or a path/`@path` to an array using the same `prop` / `game_prop` / `item` entries as quest specs.
+The traversal is bounded by `--trace-max-depth` (12), `--trace-max-paths` (96),
+`--trace-max-candidates` (8), and an internal `--trace-max-seconds` wall-clock budget (180). It uses
+priority-guided replay, tolerates one-shot first-meeting roots and randomized greeting/exit text, retries a
+missing or delayed `qa_get_prop` response under async load, and correlates delayed replies by request id.
+Property setup/reset uses the correlated `qa_prop_set` acknowledgement and resends an unacknowledged write;
+confirmed same-map teleports and `talk_to` actions are retried as well. First-time Debug
+    map loads get a 90-second observed transition window, configurable with `--map-timeout`; success still requires
+    observing the requested `map.protoId`. Reports expose `truncated`, `time_limit_reached`,
+`branch_errors`, `flag_restored`, and `restore_error` explicitly.
+
 A spec stage can carry a `setup` list — `{"prop"|"game_prop"|"item": name, "value"|"count": n}` — applied
 after the teleport and before talking, to satisfy a giver's prerequisite demands (an attribute like
 `Intellect`, a `CurrentHp`, a GAME flag, or a required inventory item). The dialog navigator auto-advances
@@ -415,8 +456,11 @@ character reports `already_satisfied=true` instead of wandering an obsolete dial
   `chosen` / `map` / `critters` / `mapItems` / `quests`.
 - `move_to_hex` moves the chosen to the exact target hex; `pick_item` / `talk_to` auto-walk to their target;
   `say`, `attack_entity`, `dialog_answer` are accepted and processed; dialogs open and advance by answer index.
-- Dialog observation captures `dialogId` / `talkerId` / answer structure (see the dialog note above on empty
-  text for start-map `repl_*` dialogs).
+- Dialog observation captures `dialogId` / `talkerId` / answer structure. A fresh `repl1` registration opened
+  the ordinary `repl_hubb_oper` dialog with readable speech and answer; an engine framebuffer capture also
+  confirmed the composed dialog window renders correctly. ContentQuality verifies every reachable speech and
+  answer in all 17 `repl_*.fodlg` files is present and non-empty in both languages (excluding invisible
+  pre-dialog routing node 1).
 - `environment_query path` correctly reports reachable vs unreachable target hexes (`reachable` /
   `pathLength`); `obstacles` lists blocked hexes — used by the playtest runner to pick reachable targets.
 - `qa_teleport_hex` repositions on the current map; `qa_teleport_map arroyo` reaches the real `arroyo` village
@@ -458,9 +502,53 @@ character reports `already_satisfied=true` instead of wandering an obsolete dial
   then run the quest.
 - **Fixed an event-buffer flood:** `OnInputLost` fired every frame while the client window was unfocused (the
   normal state for an automated/headless client), pushing `input_lost` until it evicted real events
-  (`command_completed`, `qa_prop_value`) from the bounded event ring. It is now gated behind
+  (`command_completed`, `qa_prop_value`, `qa_prop_set`) from the bounded event ring. It is now gated behind
   `AiControl.CaptureRawInputEvents` (off by default), so automation runs see a clean event stream.
 - `smoke_ai_control_mcp.py` (static and live) and `tla_mechanics_playtest.py` pass.
+
+### Dialog trace seeds (2026-08-08)
+
+`--trace-dialog` was verified against a fresh Russian client and the real `CassidyStage4` NPC on `arroyo`.
+The bounded replay handled the one-shot introduction, found the three-answer path through "work" and the letter
+offer, and emitted `Да, конечно.` as the rank-1 candidate for `ArroyoCassidyLetter` (`0 → 1`). The JSON report
+recorded 5 explored paths, 1 root rebase, no branch errors, the complete node path, and a confirmed restore to
+the original value 0.
+
+The same live workflow covers the real Arroyo Mynoc placement (`protoId=EnclaveGuard`,
+`dialogId=arroyo_mynoc`) with `IntellectBase=6` supplied through the acknowledged setup path. Quest-guided
+ordering found `Я заметил... Твоя броня, она несколько поржавела...` → `Я принесу тебе смазку...` in 2 explored
+paths and 13.7 seconds, observed `ArroyoMynocOil` 0 → 1, reported no branch errors, and confirmed restore to 0.
+
+The Den seed is now live-verified across all four authored stages. The real `HomesteaderMale` / `den_smitty`
+path accepted the job (`DenSmittyFixit` 0 → 1); `MrHandy` / `den_mr_handy` exposed the Repair-85 diagnosis
+(1 → 2) and accepted `pump_parts` + `oil_can` + `super_tool_kit` (2 → 3); Smitty then accepted the report
+(3 → 4). Every trace found a ranked candidate without branch errors and restored the original flag value 0.
+Reports are `Build/_artifacts/trace-dialog/smitty-{accept,examine,repair,report}-live.json`. This validates 3 of
+the 7 Stage-0 trace quests.
+
+The fourth seed uses the real Klamath `MasterTrader` / `klam_hish` at hex 82,132. With `IntellectBase=6`,
+bounded replay found the five-answer path from looking for work through the name joke and vaccination offer to
+`Хорошо, не волнуйся. Я не промахнусь.`, observed `KlamVaccination` 0 → 1 in 5 explored paths and 20.97 seconds,
+reported no branch errors, and restored 0. The report is
+`Build/_artifacts/trace-dialog/klam-hish-accept-live.json`.
+
+The three fresh Arroyo traces complete the Stage-0 criterion. The normal Todd talk path first reported
+`no_visible_start_speech` despite an alive, talk-enabled, adjacent and mutually visible NPC. The project dialog
+parser was retaining the `@` sigil and full `Content::*` qualifier in script arguments; normalizing those values
+restored the authored loyalty demand, after which `ArroyoProofOfDeath` advanced 0 → 1 without a mechanic bypass.
+Todd's follow-up offer advanced `ArroyoLetterToLinnett` 0 → 1 with `ArroyoProofOfDeath=3` as its authored
+prerequisite. Finally, stable-slot replay handled Mynoc's randomized `@@` wording and exposed an unconditional
+minimum-group guard that contradicted the solo stage-1 dialog branch. Restricting that guard to stage 2 produced
+the full 13-answer path and `ArroyoMynocDefence` 0 → 1. All three runs had no branch errors and restored 0; reports
+are `Build/_artifacts/trace-dialog/arroyo-{todd-proof,letter-linnett,mynoc-defence}-live.json`. Stage-0 trace
+coverage is **7/7**.
+
+The next Den trace corrected a stale diagnosis and completed `DenMomSlut` end to end. The parser already inferred
+`DenVirginIsAway` as a Game property; the hidden answer came from comparing integer property value `"0"` with
+textual any value `"false"`. Dialog property booleans are now normalized to `0`/`1`, restoring all 51 authored
+boolean demand/results. Live replay advanced 0 → 1 at Mom in 27 paths, 1 → 2 at Virginia in 2 paths (executing
+`DenVirgin::GoAway`), and 2 → 3 at Mom in 1 path. All runs restored the original flag and had no branch/log errors.
+Reports are `Build/_artifacts/trace-dialog/den-{mom-slut-accept,virginia-away,mom-slut-report}-live.json`.
 
 ### Mechanics beyond dialog (verified 2026-06-21)
 
@@ -519,11 +607,11 @@ the right answers to appear*, via stage `setup` and the right client language:
 - **Non-quest flags.** Some "quest-like" props are not in `CritterPropertyGroup::Quests`, so they never appear
   in `observation.quests` (Arroyo `ArroyoDocHealing` is a `Server` flag, `Max = 2`). Pick targets that *are*
   `Group = Quests` if you want to assert progress from the observation.
-- **Known content-side snags** (need a fix in the content/baker, not the runner): Arroyo's Todd never opens a
-  dialog at all (a guard, not a loyalty gate — default `npc.Loyality.get(cr.Id, 5)` = 5 passes his `@! 1`);
-  Den Mom's "Virginia" accept answer stays hidden even after `qa_set_game_prop DenVirginIsAway 0`, because the
-  demand is written `Demand Property Player DenVirginIsAway` against a property declared `Property Game` — a
-  scope mismatch the baker resolves to a value the answer can't satisfy.
+- **Resolved parser migration defects.** Todd's `@!` loyalty argument had been hashed with the sigil after the
+  project dialog parser moved away from `ResolveGenericValue`; the parser now restores the legacy script-argument
+  spelling. Den Mom's hidden "Virginia" answer was not a Game/Player scope mismatch: the parser inferred the Game
+  owner correctly, but property boolean `false` remained text instead of integer `0`. Property booleans are now
+  normalized to their integer storage spelling, and both normal talk paths are live-green.
 
 The `QUESTS` dict ships three verified flows plus a `NOTE` documenting these knobs:
 

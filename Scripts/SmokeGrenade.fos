@@ -53,9 +53,13 @@ void SmokeBlast(Map map, mpos hex, hstring smokePid, ident ownerId)
     Game.StartTimeEvent(ZERO_TIMESPAN, DoSmokeBlast, values);
 }
 
-[[TimeEvent]]
+[[TimeEvent]] [[Async]]
 void DoSmokeBlast(any[] values)
 {
+    if (values.length() < 6) {
+        return;
+    }
+
     Map? map = Game.GetMap(ident(values[0]));
     if (map == null) {
         return;
@@ -65,13 +69,20 @@ void DoSmokeBlast(any[] values)
     int step = values[3];
     hstring pid = values[4];
     ident ownerId = values[5];
+
+    Critter? owner = ownerId != ZERO_IDENT ? Game.GetCritter(ownerId) : null;
+    Entity[] cover = {map};
+    if (owner != null) {
+        Sync::AddUniqueEntity(cover, owner);
+    }
+    if (!Sync::Lock(cover)) {
+        return;
+    }
+
     // Чем ниже навык метания у владельца, тем меньше шагов проживёт облако: штраф урезает радиус разлёта.
     int penaltyLowSkill = 0;
-    if (ownerId != ZERO_IDENT) {
-        Critter? cr = Game.GetCritter(ownerId);
-        if (cr != null) {
-            penaltyLowSkill = 4 - int(Math::Clamp(cr.SkillThrowing, 0, 100) / 25);
-        }
+    if (owner != null) {
+        penaltyLowSkill = 4 - int(Math::Clamp(owner.SkillThrowing, 0, 100) / 25);
     }
 
     if (step > (MAX_STEP - penaltyLowSkill)) {
@@ -111,7 +122,7 @@ void DoSmokeBlast(any[] values)
     Game.StartTimeEvent(GameTime::GameSeconds(1), DoSmokeBlast, values);
 }
 
-[[TimeEvent]]
+[[TimeEvent]] [[Async]]
 void DeleteSmokes(any[] values)
 {
     for (int i = 0; i < values.length(); i++) {
@@ -120,9 +131,11 @@ void DeleteSmokes(any[] values)
         }
 
         Item? item = Game.GetItem(values[i]);
-        if (item != null) {
-            Game.DestroyItem(item);
+        if (item == null || !Sync::LockItemWithParent(item)) {
+            continue;
         }
+
+        Game.DestroyItem(item);
     }
 }
 

@@ -199,70 +199,88 @@ void Initiation(Critter player, StaticItem trigger, bool entered, mdir dir)
 
 // Малый этап сцены: повторяющиеся вспышки молний по entry-гексам, пока двери не открыты.
 // Сам себя перезапускает раз в игровую секунду; гард по карте/криттеру отсекает случай, когда игрок ушёл
-[[TimeEvent]]
+[[TimeEvent]] [[Async]]
 void SmallEffect(any[] values)
 {
+    if (values.length() < 2) {
+        return;
+    }
+
     ident mapId = values[0];
     ident crId = values[1];
     if (mapId != ZERO_IDENT && crId != ZERO_IDENT) {
         Map? map = Game.GetMap(mapId);
         Critter? cr = Game.GetCritter(crId);
-        if (cr != null) {
-            Map? mapCr = cr.GetMap();
-            if (map != null && mapCr != null && (mapCr.Id == map.Id)) {
-                if (!map.IntroDoorsOpen) {
-                    Entrance::Entry[] entries = Entrance::ParseEntries(map, HEX_LIGHTNING);
-                    for (int i = 0; i < entries.length(); i++) {
-                        Effects::RunEffect(map, Content::Item::explode_emp, entries[i].Hex, Game.Random(1, 2));
-                        Game.Log("molniya");
-                    }
+        if (map == null || cr == null) {
+            return;
+        }
 
-                    Game.StartTimeEvent(GameTime::GameSeconds(1), SmallEffect, values); // SavedDeferredCall
-                }
+        Entity[] fixedCover = {map};
+        if (!Sync::LockCritterWithMapAndLocation(cr, fixedCover) || cr.MapId != map.Id) {
+            return;
+        }
+
+        if (!map.IntroDoorsOpen) {
+            Entrance::Entry[] entries = Entrance::ParseEntries(map, HEX_LIGHTNING);
+            for (int i = 0; i < entries.length(); i++) {
+                Effects::RunEffect(map, Content::Item::explode_emp, entries[i].Hex, Game.Random(1, 2));
+                Game.Log("molniya");
             }
+
+            Game.StartTimeEvent(GameTime::GameSeconds(1), SmallEffect, values); // SavedDeferredCall
         }
     }
 }
 
 // Завершающий этап сцены: финальный взрыв на гексе игрока, открытие дверей (флаг IntroDoorsOpen)
 // и сообщение об окончании инициации. Останавливает повтор SmallEffect через тот же флаг
-[[TimeEvent]]
+[[TimeEvent]] [[Async]]
 void MainEffect(any[] values)
 {
+    if (values.length() < 2) {
+        return;
+    }
+
     ident mapId = values[0];
     ident crId = values[1];
     if (mapId != ZERO_IDENT && crId != ZERO_IDENT) {
         Map? map = Game.GetMap(mapId);
         Critter? cr = Game.GetCritter(crId);
-        if (cr != null) {
-            Map? mapCr = cr.GetMap();
-            if (map != null && mapCr != null && (mapCr.Id == map.Id)) {
-                if (!map.IntroDoorsOpen) {
-                    Effects::RunEffect(map, Content::Item::explode_emp, cr.Hex, 3);
-                    map.IntroDoorsOpen = true;
-                    Messaging::Info(cr, TextPackKey(TextPackName::Text, "" + (STR_INITIATION_DONE)));
-                }
-            }
+        if (map == null || cr == null) {
+            return;
+        }
+
+        Entity[] fixedCover = {map};
+        if (!Sync::LockCritterWithMapAndLocation(cr, fixedCover) || cr.MapId != map.Id) {
+            return;
+        }
+
+        if (!map.IntroDoorsOpen) {
+            Effects::RunEffect(map, Content::Item::explode_emp, cr.Hex, 3);
+            map.IntroDoorsOpen = true;
+            Messaging::Info(cr, TextPackKey(TextPackName::Text, "" + (STR_INITIATION_DONE)));
         }
     }
 }
 
 // Стадия 1 сцены смерти: звук выстрела по игроку
-[[TimeEvent]]
+[[TimeEvent]] [[Async]]
 void KillPlayer(any value)
 {
     Critter? player = Game.GetCritter(value);
-    if (player != null) {
-        Effects::PlaySound(player, "WA@2XXX1.acm"); // выстрел
+    if (player == null || !Sync::LockCritterWithMap(player)) {
+        return;
     }
+
+    Effects::PlaySound(player, "WA@2XXX1.acm"); // выстрел
 }
 
 // Стадия 2 сцены смерти: предсмертный стон и перевод игрока в состояние «мёртв»
-[[TimeEvent]]
+[[TimeEvent]] [[Async]]
 void OnPlayerDead(any value)
 {
     Critter? player = Game.GetCritter(value);
-    if (player == null) {
+    if (player == null || !Sync::LockCritterWithMap(player)) {
         return;
     }
 
@@ -271,11 +289,11 @@ void OnPlayerDead(any value)
 }
 
 // Стадия 3 сцены: возвращаем игроку обычную модель, выдаём голодиск интро и запускаем репликацию (возрождение)
-[[TimeEvent]]
+[[TimeEvent]] [[Async]]
 void ReplicateCritter(any value)
 {
     Critter? player = Game.GetCritter(value);
-    if (player == null) {
+    if (player == null || !Sync::LockCritterWithMap(player)) {
         return;
     }
 
@@ -290,11 +308,11 @@ void ReplicateCritter(any value)
 }
 
 // Финал сцены: обнуляем счётчики репликации и уведомляем игрока о записи в Пип-бой
-[[TimeEvent]]
+[[TimeEvent]] [[Async]]
 void ShowMessage(any value)
 {
     Critter? player = Game.GetCritter(value);
-    if (player == null) {
+    if (player == null || !Sync::LockCritterWithMap(player)) {
         return;
     }
 

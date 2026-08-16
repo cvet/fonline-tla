@@ -376,11 +376,11 @@ static auto GetPropEnumIndex(ptr<const EngineMetadata> meta, string_view str, bo
 {
     FO_STACK_TRACE_ENTRY();
 
-    const auto* prop_global = meta->GetPropertyRegistrator(GameProperties::ENTITY_TYPE_NAME)->FindProperty(str).get();
-    const auto* prop_critter = meta->GetPropertyRegistrator(CritterProperties::ENTITY_TYPE_NAME)->FindProperty(str).get();
-    const auto* prop_item = meta->GetPropertyRegistrator(ItemProperties::ENTITY_TYPE_NAME)->FindProperty(str).get();
-    const auto* prop_location = meta->GetPropertyRegistrator(LocationProperties::ENTITY_TYPE_NAME)->FindProperty(str).get();
-    const auto* prop_map = meta->GetPropertyRegistrator(MapProperties::ENTITY_TYPE_NAME)->FindProperty(str).get();
+    const auto* prop_global = meta->GetPropertyRegistrar(GameProperties::ENTITY_TYPE_NAME)->FindProperty(str).get();
+    const auto* prop_critter = meta->GetPropertyRegistrar(CritterProperties::ENTITY_TYPE_NAME)->FindProperty(str).get();
+    const auto* prop_item = meta->GetPropertyRegistrar(ItemProperties::ENTITY_TYPE_NAME)->FindProperty(str).get();
+    const auto* prop_location = meta->GetPropertyRegistrar(LocationProperties::ENTITY_TYPE_NAME)->FindProperty(str).get();
+    const auto* prop_map = meta->GetPropertyRegistrar(MapProperties::ENTITY_TYPE_NAME)->FindProperty(str).get();
 
     int32_t count = 0;
     count += prop_global != nullptr ? 1 : 0;

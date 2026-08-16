@@ -84,13 +84,13 @@ void FO_NAMESPACE ServerInitHook(ptr<ServerEngine> server)
     ext_data.LookMinimum = strvex(server->Settings->GetCustomSetting("Look.LookMinimum")).to_int32();
     FO_VERIFY_AND_THROW(ext_data.LookMinimum != 0, "Look.LookMinimum setting must be set");
 
-    const auto* cr_props = server->GetPropertyRegistrator(Critter::ENTITY_TYPE_NAME).get();
+    const auto* cr_props = server->GetPropertyRegistrar(Critter::ENTITY_TYPE_NAME).get();
     ext_data.InSneakMode = cr_props->FindProperty("InSneakMode");
     FO_VERIFY_AND_THROW(ext_data.InSneakMode, "Critter property InSneakMode not found");
     ext_data.SneakCoefficient = cr_props->FindProperty("SneakCoefficient");
     FO_VERIFY_AND_THROW(ext_data.SneakCoefficient, "Critter property SneakCoefficient not found");
 
-    const auto* item_props = server->GetPropertyRegistrator(Item::ENTITY_TYPE_NAME).get();
+    const auto* item_props = server->GetPropertyRegistrar(Item::ENTITY_TYPE_NAME).get();
     ext_data.IsAlwaysView = item_props->FindProperty("IsAlwaysView");
     FO_VERIFY_AND_THROW(ext_data.IsAlwaysView, "Item property IsAlwaysView not found");
     ext_data.IsTrap = item_props->FindProperty("IsTrap");

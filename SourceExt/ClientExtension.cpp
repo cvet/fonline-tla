@@ -53,7 +53,7 @@ static auto HasFemaleSexTag(nptr<const CritterView> cr) -> bool
         return false;
     }
 
-    const auto* sex_tag_female = cr->GetProperties()->GetRegistrator()->FindProperty("SexTagFemale").get();
+    const auto* sex_tag_female = cr->GetProperties()->GetRegistrar()->FindProperty("SexTagFemale").get();
     return sex_tag_female != nullptr && cr->GetProperties()->GetValue<bool>(sex_tag_female);
 }
 

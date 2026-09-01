@@ -1,0 +1,127 @@
+// Test_Combat — тесты боевых формул: порядок применения брони в ReduceDamage и таблицы прицельной
+// стрельбы (GetAimApCost/GetHitAim). Проверяют арифметику и раскладку по частям тела, без мира и без боя.
+namespace Test_Combat
+{
+
+#if SERVER
+
+[[ModuleInit]]
+void InitTestCombat()
+{
+    Game.OnTestingInit.Subscribe(OnTestingInit);
+}
+
+[[Event]]
+void OnTestingInit()
+{
+    Testing::RegisterTest("combat", "damage_order_of_operations", DamageOrderOfOperations);
+    Testing::RegisterTest("combat", "damage_armor_absorbs_shot", DamageArmorAbsorbsShot);
+    Testing::RegisterTest("combat", "damage_integer_truncation", DamageIntegerTruncation);
+    Testing::RegisterTest("combat", "aim_ap_cost_per_location", AimApCostPerLocation);
+    Testing::RegisterTest("combat", "hit_aim_per_location", HitAimPerLocation);
+}
+
+// Порог вычитается ДО процентного сопротивления, и процент считается уже от уменьшенного числа.
+// Обратный порядок (сначала процент, потом порог) дал бы другой урон — этим тестом он и отличается.
+void DamageOrderOfOperations(Testing::TestContext ctx)
+{
+    // 100 * 2 / 2 = 100; 100 - 10 = 90; 90 - 45% = 45
+    if (!Testing::ExpectEq(ctx, Combat::ReduceDamage(100, 2, 2, 10, 50), 45, "Порог применяется до сопротивления")) {
+        return;
+    }
+
+    // Обратный порядок дал бы 100 - 50% = 50, затем 50 - 10 = 40
+    if (!Testing::Expect(ctx, Combat::ReduceDamage(100, 2, 2, 10, 50) != 40, "Сопротивление не применяется раньше порога")) {
+        return;
+    }
+
+    // Нулевая броня не меняет урон
+    Testing::ExpectEq(ctx, Combat::ReduceDamage(100, 2, 2, 0, 0), 100, "Без брони урон проходит целиком");
+}
+
+// Броня, поглотившая выстрел полностью, даёт ноль, а не отрицательный урон: иначе попадание лечило бы цель.
+void DamageArmorAbsorbsShot(Testing::TestContext ctx)
+{
+    if (!Testing::ExpectEq(ctx, Combat::ReduceDamage(10, 2, 2, 50, 0), 0, "Порог выше урона обнуляет выстрел")) {
+        return;
+    }
+
+    if (!Testing::ExpectEq(ctx, Combat::ReduceDamage(100, 2, 2, 0, 100), 0, "Стопроцентное сопротивление обнуляет выстрел")) {
+        return;
+    }
+
+    Testing::ExpectEq(ctx, Combat::ReduceDamage(0, 2, 2, 0, 0), 0, "Нулевой бросок даёт нулевой урон");
+}
+
+// Деление целочисленное и идёт сразу после умножения — остаток теряется до вычитания брони.
+void DamageIntegerTruncation(Testing::TestContext ctx)
+{
+    // 7 * 3 = 21; 21 / 2 = 10 (не 10.5)
+    if (!Testing::ExpectEq(ctx, Combat::ReduceDamage(7, 3, 2, 0, 0), 10, "Множитель и делитель дают целое с отсечением")) {
+        return;
+    }
+
+    // 1 * 1 / 2 = 0
+    Testing::ExpectEq(ctx, Combat::ReduceDamage(1, 1, 2, 0, 0), 0, "Урон меньше делителя отсекается в ноль");
+}
+
+// Стоимость прицела в ОД: каждая часть тела берёт свою настройку, парные конечности — общую.
+void AimApCostPerLocation(Testing::TestContext ctx)
+{
+    if (!Testing::ExpectEq(ctx, Combat::GetAimApCost(HitLocations::LocationNone), 0, "Без прицела стоимость нулевая")) {
+        return;
+    }
+
+    if (!Testing::ExpectEq(ctx, Combat::GetAimApCost(HitLocations::LocationUncalled), 0, "Непрямой выстрел не стоит ОД")) {
+        return;
+    }
+
+    if (!Testing::ExpectEq(ctx, Combat::GetAimApCost(HitLocations::LocationEyes), Settings.Combat.ApCostAimEyes, "Глаза берут свою настройку")) {
+        return;
+    }
+
+    if (!Testing::ExpectEq(ctx, Combat::GetAimApCost(HitLocations::LocationHead), Settings.Combat.ApCostAimHead, "Голова берёт свою настройку")) {
+        return;
+    }
+
+    // Парные конечности делят одну настройку — перепутанный case здесь и всплывёт
+    if (!Testing::ExpectEq(ctx, Combat::GetAimApCost(HitLocations::LocationLeftArm), Settings.Combat.ApCostAimArms, "Левая рука берёт настройку рук")) {
+        return;
+    }
+
+    if (!Testing::ExpectEq(ctx, Combat::GetAimApCost(HitLocations::LocationRightArm), Settings.Combat.ApCostAimArms, "Правая рука берёт настройку рук")) {
+        return;
+    }
+
+    if (!Testing::ExpectEq(ctx, Combat::GetAimApCost(HitLocations::LocationLeftLeg), Settings.Combat.ApCostAimLegs, "Левая нога берёт настройку ног")) {
+        return;
+    }
+
+    Testing::ExpectEq(ctx, Combat::GetAimApCost(HitLocations::LocationRightLeg), Settings.Combat.ApCostAimLegs, "Правая нога берёт настройку ног");
+}
+
+// Штраф к попаданию раскладывается по тем же частям тела, что и стоимость прицела.
+void HitAimPerLocation(Testing::TestContext ctx)
+{
+    if (!Testing::ExpectEq(ctx, Combat::GetHitAim(HitLocations::LocationNone), 0, "Без прицела штрафа нет")) {
+        return;
+    }
+
+    if (!Testing::ExpectEq(ctx, Combat::GetHitAim(HitLocations::LocationTorso), Settings.Combat.HitAimTorso, "Торс берёт свою настройку")) {
+        return;
+    }
+
+    if (!Testing::ExpectEq(ctx, Combat::GetHitAim(HitLocations::LocationGroin), Settings.Combat.HitAimGroin, "Пах берёт свою настройку")) {
+        return;
+    }
+
+    if (!Testing::ExpectEq(ctx, Combat::GetHitAim(HitLocations::LocationLeftArm), Settings.Combat.HitAimArms, "Левая рука берёт настройку рук")) {
+        return;
+    }
+
+    Testing::ExpectEq(ctx, Combat::GetHitAim(HitLocations::LocationRightLeg), Settings.Combat.HitAimLegs, "Правая нога берёт настройку ног");
+}
+
+#endif
+
+}

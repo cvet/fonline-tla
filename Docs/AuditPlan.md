@@ -15,10 +15,10 @@ Items 4, 5, 6 and 10 are local and are woven in wherever they fit.
 | 3 | Quality gates in CI | S | **done**, harness deferred |
 | 9 | Split the journal from the plan, add a systems map | M | **done** |
 | 4 | Record the single-threaded constraint | S | **done** |
-| 5 | Generated and test scripts into their own folders | S | planned |
+| 5 | Generated and test scripts into their own folders | S | **done** |
 | 6 | Fold the copied guard init back into `GuardLib` | M | re-scoped, blocked on 2 |
 | 10 | Mutable-globals allowlist becomes a boundary again | rule | **done** (rule written) |
-| 2 | Tests on the hot paths | L | planned |
+| 2 | Tests on the hot paths | L | in progress |
 | 1 | Tables out of code into authored data | XL | planned |
 | 7 | Cut the giant combat functions | L | planned |
 
@@ -106,7 +106,12 @@ same beside `Server.WorkerThreads`.
 2. Move `Test_*.fos` and `Testing.fos` to `Scripts/Tests/`.
 3. Update the tools that address these files by path.
 
-**Done when.** A search over `Scripts/*.fos` returns only hand-written gameplay code.
+**Outcome.** `Scripts/Tests/` holds the 26 suites, `Scripts/Generated/` the generated `GuiScreens.fos`, and
+the InterfaceEditor config writes there. Baking does not recurse, so both directories are listed in the
+`InputDirs` of the `Metadata` and `Scripts` resource packs — now stated in `AGENTS.md`.
+
+**Left in place.** `Content.fos`: nothing in the repository or the engine writes it, so its producer is
+unidentified and a move risks a duplicate namespace when something regenerates it at the old path.
 
 ---
 

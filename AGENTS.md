@@ -132,6 +132,12 @@ Native C++ conventions:
 - There are no `#include` directives; baking sees all `.fos` files. Cross-module calls use `Namespace::Function()`.
 - Use `#if SERVER`, `#if CLIENT`, and `#if MAPPER` carefully. Side-specific bugs are often missing or stray guards.
 - Keep authoritative gameplay state changes on the server. Client scripts should focus on UI, input, presentation, and client-only probes.
+- **A module you touch leaves the mutable-globals allowlist, or says why it stays.**
+  `Script.MutableGlobalsAllowedNamespaces` in `TLA.fomain` lists 75 namespaces — it was meant to mark
+  exceptions and now covers nearly the whole project, which is also what makes those modules hard to test in
+  isolation. Do not sweep the list; when a module is opened for any other reason, either move its mutable
+  state behind the module (a parameter, an accessor, per-entity storage) and drop the namespace, or add one
+  line to the module header saying what the global state is and why it has to be global.
 - Mark startup functions with `[[ModuleInit]]`; subscribe to events from `ModuleInit()`. Attribute-marked functions are called by their attribute system; move reusable logic into plain helpers instead of calling attribute entrypoints directly.
 - **Scripts take no entity cover, and the server runs single-threaded.** `Server.SingleThreadedLogic = True`
   pins the engine to one worker, so a script may read and mutate any entity it can reach without

@@ -11,8 +11,8 @@ Items 4, 5, 6 and 10 are local and are woven in wherever they fit.
 
 | # | Item | Size | Status |
 | - | ---- | ---- | ------ |
-| 8 | One aggregate verification task | S | planned |
-| 3 | Quality gates in CI | S | planned |
+| 8 | One aggregate verification task | S | **done** |
+| 3 | Quality gates in CI | S | **done**, harness deferred |
 | 9 | Split the journal from the plan, add a systems map | M | planned |
 | 4 | Record the single-threaded constraint | S | planned |
 | 5 | Generated and test scripts into their own folders | S | planned |
@@ -34,7 +34,9 @@ reassembled by hand every session.
    script harness → validators → formatters.
 2. Keep every step an existing task where one exists, so there is one definition per step.
 
-**Done when.** A single task runs the whole chain and its step order matches what CI runs (item 3).
+**Outcome.** `Verify :: All` chains bake → six target builds → engine unit tests → script harness →
+validators → formatters. Every step reuses an existing task except `Test :: Python Tools`, added because the
+156 tests under `Tools/` had none. Both are listed in the `AGENTS.md` task table.
 
 ---
 
@@ -48,8 +50,13 @@ the platform builds. It does not run the script harness (72 tests), `validate_sc
 1. Add a `quality-gates` job that bakes, then runs the four gates above.
 2. Reuse the ratchet baseline as-is; the job fails only on new violations.
 
-**Done when.** A pull request that adds a script-quality violation, a harness failure or a content-quality
-failure is red in CI.
+**Outcome.** A `quality-gates` job runs `validate_scripts --ratchet` and `pytest Tools -q` (156 tests) on
+every push and pull request.
+
+**Deferred, with the reason.** The script harness is not in CI yet: it needs a Linux server build plus a bake,
+and the binary layout under `Workspace/output/` in the runner differs from the local `Binaries/` tree. Writing
+that step blind would put an unverified job in front of everyone else's pull requests. It needs one session
+with a real runner to pin the path, and then it belongs in the same job.
 
 ---
 

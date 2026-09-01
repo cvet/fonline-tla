@@ -18,7 +18,7 @@ Items 4, 5, 6 and 10 are local and are woven in wherever they fit.
 | 5 | Generated and test scripts into their own folders | S | **done** |
 | 6 | Fold the copied guard init back into `GuardLib` | M | re-scoped, blocked on 2 |
 | 10 | Mutable-globals allowlist becomes a boundary again | rule | **done** (rule written) |
-| 2 | Tests on the hot paths | L | in progress |
+| 2 | Tests on the hot paths | L | **done**, two modules substituted |
 | 1 | Tables out of code into authored data | XL | planned |
 | 7 | Cut the giant combat functions | L | planned |
 
@@ -169,7 +169,24 @@ most often:
 4. `Dialog` — demand/result evaluation.
 5. `GlobalmapGroup` — group membership changes.
 
-**Done when.** Each of the five modules has a `Test_*.fos` suite and the harness total reflects it.
+**Outcome.** The harness went from 72 to 86 tests. Four suites landed, and two of the five planned modules
+were substituted after reading them:
+
+| Module | Suite | What it pins |
+| ------ | ----- | ------------ |
+| `Combat` | `Test_Combat` | damage threshold applied before percentage resistance, integer truncation, paired limbs reading the arms/legs settings |
+| `Dialog` | `Test_Dialog` | the comparison direction of every numeric demand, strict-comparison boundaries, unknown operator failing closed |
+| `GlobalmapGroup` | `Test_GlobalmapGroup` | zone boundaries under integer division, field extent, group snapshot comparing identity *and* order |
+| `CritterState` | `Test_CritterState` | death → revive restoring life with positive health, revive idempotent on the living, wait predicates complementary |
+
+**Substituted, with the reason.** `ChosenActions`'s testable helpers (`IsBusy`, `IsFree`) are under
+`#if CLIENT` and the harness is a server; `Main`'s `CheckLook` and `CheckTrapLook` are stubs returning
+`true`. Neither has a surface worth pinning today. `CritterState` took their place: it is the death and
+revive path `Replication` is built on, and it was equally uncovered.
+
+**Follow-on.** `Combat`'s coverage exists because `ApplyDamage`'s inline arithmetic was extracted into the
+pure `ReduceDamage` — the same move item 7 needs, done on the smallest slice. Guard behaviour still has no
+coverage, which is what blocks item 6.
 
 ---
 

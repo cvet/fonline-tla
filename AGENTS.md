@@ -46,6 +46,7 @@ Warnings are treated as failures. Keep script compilation, resource baking, nati
 
 | Task | When to use |
 | ---- | ----------- |
+| `Verify :: All` | The full pre-handoff chain: bake, build every target, engine unit tests, script harness, validators, formatters. Run this instead of reassembling the steps by hand; CI runs the same chain. |
 | `Bake Resources` | After edits in `Scripts/`, `Dialogs/`, `Maps/`, `Items/`, `Critters/`, `Texts/`, `Gui/`, or `TLA.fomain`. |
 | `Force Bake Resources` | When incremental baking may be stale. Use sparingly. |
 | `Compile AngelScript` | Fast script syntax/API check. |
@@ -56,6 +57,7 @@ Warnings are treated as failures. Keep script compilation, resource baking, nati
 | `Generate :: GuiScreens.fos` | Regenerate `Scripts/GuiScreens.fos` from `Gui/*.fogui`. |
 | `Generate :: Version` | Update `VERSION` via `Tools/GenerateVersion/generate_version.py`; do not hand-edit `VERSION`. |
 | `Format :: Scripts`, `Format :: Prototypes`, `Format :: Main Config`, `Format :: All` | Format the relevant authored files. |
+| `Test :: Python Tools` | The tooling test suites under `Tools/` (script/content quality, nullable, AI control bridge). |
 
 Typical command equivalents:
 

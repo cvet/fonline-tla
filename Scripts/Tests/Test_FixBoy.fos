@@ -18,6 +18,7 @@ void OnTestingInit()
     Testing::RegisterTest("fixboy", "recipe_ids_are_unique_and_dense", RecipeIdsAreUniqueAndDense);
     Testing::RegisterTest("fixboy", "recipe_records_are_well_formed", RecipeRecordsAreWellFormed);
     Testing::RegisterTest("fixboy", "leather_armor_recipe_golden_sample", LeatherArmorRecipeGoldenSample);
+    Testing::RegisterTest("fixboy", "table_fingerprint", TableFingerprint);
 }
 
 // Идентификаторы рецептов уходят клиенту и в свойства верстаков, поэтому обязаны быть уникальными
@@ -146,6 +147,70 @@ void LeatherArmorRecipeGoldenSample(Testing::TestContext ctx)
     }
 
     Testing::ExpectEq(ctx, leather.OnCraft[1], 60, "Порог навыка на крафт — 60");
+}
+
+// Отпечаток всей таблицы: агрегаты, которые ломаются при потере, перестановке или искажении полей
+// при переносе рецептов в данные. Значения сняты с текущей таблицы и должны пережить перенос.
+void TableFingerprint(Testing::TestContext ctx)
+{
+    int recipes = int(FixBoy::CraftList.length());
+    int expSum = 0;
+    int resourceEntries = 0;
+    int resourceCountSum = 0;
+    int toolEntries = 0;
+    int checkSum = 0;
+    int scripted = 0;
+
+    for (int i = 0; i < recipes; i++) {
+        FixBoy::MainCraft craft = FixBoy::CraftList[i];
+        expSum += craft.Experience;
+        resourceEntries += int(craft.NeedResources.length()) / 3;
+        toolEntries += int(craft.NeedTools.length()) / 3;
+
+        for (int r = 1; r < int(craft.NeedResources.length()); r += 3) {
+            resourceCountSum += int(craft.NeedResources[r]);
+        }
+
+        for (int v = 1; v < int(craft.OnView.length()); v += 2) {
+            checkSum += craft.OnView[v];
+        }
+
+        for (int c = 1; c < int(craft.OnCraft.length()); c += 2) {
+            checkSum += craft.OnCraft[c];
+        }
+
+        if (craft.Script != null) {
+            scripted++;
+        }
+    }
+
+    // Значения сняты с таблицы в коде. Перенос в данные обязан воспроизвести их все до единого;
+    // расхождение означает потерянную, лишнюю или искажённую запись.
+    if (!Testing::ExpectEq(ctx, recipes, 95, "Число рецептов")) {
+        return;
+    }
+
+    if (!Testing::ExpectEq(ctx, expSum, 15090, "Суммарный опыт по всем рецептам")) {
+        return;
+    }
+
+    if (!Testing::ExpectEq(ctx, resourceEntries, 276, "Число записей ресурсов")) {
+        return;
+    }
+
+    if (!Testing::ExpectEq(ctx, resourceCountSum, 728, "Суммарное количество ресурсов")) {
+        return;
+    }
+
+    if (!Testing::ExpectEq(ctx, toolEntries, 109, "Число записей инструментов")) {
+        return;
+    }
+
+    if (!Testing::ExpectEq(ctx, checkSum, 16409, "Сумма порогов всех проверок навыков")) {
+        return;
+    }
+
+    Testing::ExpectEq(ctx, scripted, 29, "Число рецептов со скриптом");
 }
 
 #endif

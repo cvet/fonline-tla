@@ -19,7 +19,7 @@ Items 4, 5, 6 and 10 are local and are woven in wherever they fit.
 | 6 | Fold the copied guard init back into `GuardLib` | M | re-scoped, blocked on 2 |
 | 10 | Mutable-globals allowlist becomes a boundary again | rule | **done** (rule written) |
 | 2 | Tests on the hot paths | L | **done**, two modules substituted |
-| 1 | Tables out of code into authored data | XL | planned |
+| 1 | Tables out of code into authored data | XL | net in place, migration next |
 | 7 | Cut the giant combat functions | L | planned |
 
 ---
@@ -202,8 +202,27 @@ About 10 % of hand-written script lines are content, not logic.
 2. Then caravans, reusing the format.
 3. `Worldmap` last, by then along a known path.
 
-**Done when.** A designer can change an encounter, a route or a recipe without recompiling scripts, and the
-tables are reachable by the content validators.
+**The mechanism is already proven in this project.** `CritterTypes.fos` and `NpcBags.fos` read
+`Game.ReadResource("...json")` and parse it with `Scripts/Json/`; the data lives in `Resources/ServerData/`.
+The migration follows that path rather than inventing one.
+
+**Safety net first — done.** `Test_FixBoy` now covers the table as it stands in code, so the migration is
+verifiable rather than hoped-for: recipe ids unique and dense, every out item, resource and tool resolving
+to a real proto, resources and tools in triples and skill checks in pairs, the first recipe reproduced field
+by field, and a fingerprint over the whole table — 95 recipes, 15 090 experience, 276 resource entries,
+728 resource units, 109 tool entries, 16 409 summed skill thresholds, 29 scripted recipes. The loaded table
+must reproduce all seven.
+
+**Three obstacles, with their answers.**
+1. *Proto ids.* JSON carries the name and the loader hashes it, losing the compile-time check that
+   `Content::Item::` gives today. The per-record proto resolution test is what replaces it.
+2. *Skill checks.* `CritterProperty` values must resolve from a name; the loader needs a small explicit
+   map for the properties the recipes actually use.
+3. *Scripted recipes.* 29 recipes bind a callback. The loader needs a name → function registry in
+   `FixBoy`, since a data file cannot hold a function handle.
+
+**Done when.** The recipes live in `Resources/ServerData/`, `Test_FixBoy` still passes unchanged, and a
+designer can change a recipe without recompiling scripts.
 
 ---
 

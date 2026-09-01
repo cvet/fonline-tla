@@ -13,11 +13,11 @@ Items 4, 5, 6 and 10 are local and are woven in wherever they fit.
 | - | ---- | ---- | ------ |
 | 8 | One aggregate verification task | S | **done** |
 | 3 | Quality gates in CI | S | **done**, harness deferred |
-| 9 | Split the journal from the plan, add a systems map | M | planned |
-| 4 | Record the single-threaded constraint | S | planned |
+| 9 | Split the journal from the plan, add a systems map | M | **done** |
+| 4 | Record the single-threaded constraint | S | **done** |
 | 5 | Generated and test scripts into their own folders | S | planned |
-| 6 | Fold the copied guard init back into `GuardLib` | S | planned |
-| 10 | Mutable-globals allowlist becomes a boundary again | rule | planned |
+| 6 | Fold the copied guard init back into `GuardLib` | M | re-scoped, blocked on 2 |
+| 10 | Mutable-globals allowlist becomes a boundary again | rule | **done** (rule written) |
 | 2 | Tests on the hot paths | L | planned |
 | 1 | Tables out of code into authored data | XL | planned |
 | 7 | Cut the giant combat functions | L | planned |
@@ -73,7 +73,9 @@ and `Docs/SourceTree.md`; the game has no systems map at all.
    covers it.
 3. Add `Docs/README.md` as the index, mirroring the engine's.
 
-**Done when.** A newcomer can name the ten main systems and their entry points without opening a `.fos`.
+**Outcome.** `Docs/Systems.md` maps the systems by area with side, entry point and coverage, and traces one
+player action through six of them in order. `Docs/README.md` indexes the set. The `Refactoring.md` narrative
+moved to `Docs/History/Refactoring-2026.md`, taking the plan from 1352 lines to 208.
 
 ---
 
@@ -88,7 +90,9 @@ remains in the config and looks live.
 1. State the constraint in `AGENTS.md` beside the synchronization section.
 2. Mark `Server.WorkerThreads` in `TLA.fomain` as inactive while the mode is on.
 
-**Done when.** Both files say that the multithreaded configuration is not supported by the current scripts.
+**Outcome.** `AGENTS.md` states the constraint with its measurement, and the three stale rules that still
+told maintainers to take a `Sync::` cover and mark `[[Async]]` were removed with it. `TLA.fomain` says the
+same beside `Server.WorkerThreads`.
 
 ---
 
@@ -112,11 +116,24 @@ remains in the config and looks live.
 copied into five modules and three of the five bodies are byte-identical, though `GuardLib.fos` exists for
 exactly this.
 
-**Steps.**
-1. Collapse the three identical copies onto `GuardLib`.
-2. Diff the two divergent copies; either parameterize the difference or record it as a drift bug.
+**Re-scoped after reading the code.** The measurement stands, the proposed fix does not. Two things the
+audit got wrong:
 
-**Done when.** Guard behaviour has one definition, or every remaining copy carries a written reason.
+- `GuardLib::GuardInit` is inside a commented-out migration block marked "не удалять" — `GuardLib` is a live
+  library (`CGuardsManager`, `ObservationPeriod`) but has no live guard-init to fold into.
+- The five copies are not redundant text. Each module subclasses `CGuardsManager` with its own dialog and
+  behaviour, and the eight handlers are three-line forwarders to *that module's* instance. They read
+  identically because engine event subscription takes a free function, and a free function cannot know which
+  module's manager to reach.
+
+**Real fix.** A registry in `GuardLib` that owns the subscription and dispatches to the manager registered
+for the critter, so the eight forwarders and `GuardInit` exist once. That is a design change to five live
+location subsystems with no test coverage at all.
+
+**Sequencing.** Blocked on item 2: cover guard behaviour first (appearance, alert escalation, attack,
+observation timer), then collapse. Doing it the other way round is an unverified rewrite of working content.
+
+**Done when.** Guard subscription has one definition, proven by tests that pass before and after.
 
 ---
 
@@ -128,7 +145,8 @@ project, so the mechanism no longer marks an exception.
 **Steps.** No sweep. Adopt the rule: a module touched for any other reason either leaves the allowlist or
 gains a header line saying why it stays.
 
-**Done when.** The rule is written down; the list shrinks as a side effect of other work.
+**Outcome.** The rule is in `AGENTS.md` under the AngelScript conventions. The list shrinks as modules are
+touched; nothing sweeps it.
 
 ---
 

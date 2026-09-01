@@ -9,7 +9,8 @@ this map deliberately does not repeat those: it gives the shape, and the headers
 ## How the code is wired
 
 - **No includes.** Baking sees every `.fos`; cross-module calls are `Namespace::Function()`. A file's
-  namespace always equals its filename.
+  namespace always equals its filename. Hand-written gameplay code is at the top of `Scripts/`;
+  `Generated/`, `Tests/` and `Json/` are separate, and every directory is listed in `TLA.fomain`.
 - **Three dispatchers, many subsystems.** `Main` (server), `ClientMain` (client) and `MapperMain` (mapper)
   subscribe to engine events in `ModuleInit` and delegate. Almost nothing else subscribes to world events
   directly; a subsystem exposes functions and its own narrow events instead.

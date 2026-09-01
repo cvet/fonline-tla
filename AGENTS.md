@@ -7,7 +7,7 @@ Project front door for AI maintainers working on **FOnline: The Life After** (TL
 - TLA is a multiplayer game built on top of the reusable **fonline-engine** submodule in `Engine/`.
 - The split is engine plus game:
   - `Engine/` - upstream engine submodule. Treat as external unless the task explicitly requires an engine change.
-  - `Scripts/*.fos` - AngelScript gameplay, dialogs, quests, AI, GUI behavior, and server/client hooks. The folder is flat except for `Scripts/Json/`.
+  - `Scripts/*.fos` - AngelScript gameplay, dialogs, quests, AI, GUI behavior, and server/client hooks. Hand-written gameplay code sits at the top level; `Scripts/Generated/` holds generated files, `Scripts/Tests/` the harness suites, `Scripts/Json/` the JSON helpers. Every script directory must be listed in the `InputDirs` of the `Metadata` and `Scripts` resource packs in `TLA.fomain` — baking does not recurse.
   - `SourceExt/*.cpp` / `SourceExt/*.h` - project-local native C++ extensions registered from `CMakeLists.txt`.
   - `Critters/`, `Items/`, `Maps/`, `Dialogs/`, `Gui/`, `Texts/`, `Resources/` - authored game content and assets.
   - `TLA.fomain` - master engine/game config and `[SubConfig]` profiles.
@@ -20,7 +20,7 @@ Project front door for AI maintainers working on **FOnline: The Life After** (TL
 
 - `Engine/` - pinned fonline-engine submodule. Do not edit in place for game behavior; advance the SHA in coordinated chunks.
 - `Scripts/Content.fos` - generated/baked content declarations. Do not hand-edit.
-- `Scripts/GuiScreens.fos` - generated screen bindings. Source of truth: `Gui/*.fogui` plus `Tools/InterfaceEditor/generate_gui_screens.py`. Do not hand-edit unless you also update the owning `.fogui` code as described below.
+- `Scripts/Generated/GuiScreens.fos` - generated screen bindings. Source of truth: `Gui/*.fogui` plus `Tools/InterfaceEditor/generate_gui_screens.py`. Do not hand-edit unless you also update the owning `.fogui` code as described below.
 - `Scripts/GuiScreensExt.fos` - hand-written companion to `GuiScreens.fos`; non-generated GUI logic lives here.
 - `Gui/*.fogui` - GUI definitions and embedded screen script code.
 - `SourceExt/CommonExtension.cpp` - SHA helpers shared by client/server.
@@ -53,7 +53,7 @@ Warnings are treated as failures. Keep script compilation, resource baking, nati
 | `Prepare :: TLA_*` | `Bake Resources` plus the corresponding build target. |
 | `Launch :: TLA_Server [windows]` / `[linux]` | Build, bake, then run the server with `LocalTest`. |
 | `Launch :: TLA_UnitTests [windows]` / `[linux]` | Build, bake, then run engine unit tests. |
-| `Generate :: GuiScreens.fos` | Regenerate `Scripts/GuiScreens.fos` from `Gui/*.fogui`. |
+| `Generate :: GuiScreens.fos` | Regenerate `Scripts/Generated/GuiScreens.fos` from `Gui/*.fogui`. |
 | `Generate :: Version` | Update `VERSION` via `Tools/GenerateVersion/generate_version.py`; do not hand-edit `VERSION`. |
 | `Format :: Scripts`, `Format :: Prototypes`, `Format :: Main Config`, `Format :: All` | Format the relevant authored files. |
 | `Test :: Python Tools` | The tooling test suites under `Tools/` (script/content quality, nullable, AI control bridge). |
@@ -166,7 +166,7 @@ Native C++ conventions:
 Authored inputs:
 
 ```text
-Scripts/*.fos, Scripts/Json/*.fos
+Scripts/*.fos, Scripts/Generated/*.fos, Scripts/Json/*.fos, Scripts/Tests/*.fos
 Critters/*.focr, Items/*.foitem, Maps/*.fomap
 Dialogs/*.fodlg, Gui/*.fogui, Texts/*.fotxt
 Resources/*
@@ -177,7 +177,7 @@ Pipeline:
 ```text
 Gui/*.fogui
   -> Tools/InterfaceEditor/generate_gui_screens.py
-  -> Scripts/GuiScreens.fos
+  -> Scripts/Generated/GuiScreens.fos
 
 Authored sources + generated script files
   -> BakeResources / ForceBakeResources
@@ -189,7 +189,7 @@ A file can bake successfully and still be semantically wrong. Debug content by s
 
 ## GuiScreens.fos Pitfall
 
-`Scripts/GuiScreens.fos` is generated **only** by `Tools/InterfaceEditor/generate_gui_screens.py`. The VS Code task `Generate :: GuiScreens.fos` is already wired to that script.
+`Scripts/Generated/GuiScreens.fos` is generated **only** by `Tools/InterfaceEditor/generate_gui_screens.py`. The VS Code task `Generate :: GuiScreens.fos` is already wired to that script.
 
 Do not use the legacy `Tools/InterfaceEditor/InterfaceEditor.exe -SilentGenerate` path for TLA generation; it emits an incompatible layout for this project.
 
@@ -197,15 +197,15 @@ AngelScript embedded in screens lives in the `.fogui` JSON: `OnGlobalMouseDown`,
 
 1. Find the owning `.fogui` file.
 2. Apply the same edit there.
-3. Apply the same edit to `Scripts/GuiScreens.fos` if the baked project needs the fix immediately.
+3. Apply the same edit to `Scripts/Generated/GuiScreens.fos` if the baked project needs the fix immediately.
 4. Regenerate only when screen identity or non-code `.fogui` properties change, or when you intentionally want to refresh generated output.
 
 ## Formatting And Generated Files
 
 - Use `Format :: Scripts`, `Format :: Prototypes`, `Format :: Main Config`, or `Format :: All` before handing off when touched files need formatting.
-- `FormatSource.bat` is a smaller formatter path for `Scripts/*.fos`, `Scripts/Json/*.fos`, `SourceExt/*`, and `Gui/*.fogui`.
+- `FormatSource.bat` is a smaller formatter path for `Scripts/`, `SourceExt/*`, and `Gui/*.fogui`.
 - `Tools/ScriptQuality/validate_scripts.py` is a quality *validator* (reports only; not a formatter) for `Scripts/*.fos`: banner tags, magic text-pack ids, hand-rolled-util calls, redundant bool returns, commented-out code, `namespace`==filename, `#if` balance, component `== null` probes, unsafe location access from `ItemTrigger` callbacks, and trailing blank lines. (The former `cyrillic-comment` check was retired 2026-06-20 — script comments are Russian now; see [Docs/ScriptStyle.md](Docs/ScriptStyle.md).) Run `Analyze :: Script Quality` for a summary; `--ratchet` fails only on new violations vs `Tools/ScriptQuality/baseline.json`; `--fix` applies the few safe autofixes. See `Tools/NullableEstimate/validate_nullable.py` for the complementary script `?` and native `ptr<T>`/`nptr<T>` ABI checks.
-- Do not hand-edit generated files: `Scripts/Content.fos`, generated `Scripts/GuiScreens.fos` without the matching `.fogui` update, baked output under `Baking/`, cache files under `Cache/`, or generated `VERSION`.
+- Do not hand-edit generated files: `Scripts/Content.fos`, generated `Scripts/Generated/GuiScreens.fos` without the matching `.fogui` update, baked output under `Baking/`, cache files under `Cache/`, or generated `VERSION`.
 - Local working trees such as `TLA-Dev/`, `Baking/`, `Cache/`, and build folders are outputs/debug state, not canonical authored inputs.
 
 ## Debugging

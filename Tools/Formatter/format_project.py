@@ -12,8 +12,7 @@ from typing import Sequence
 
 
 PROJECT_FORMAT_PATTERNS = [
-    'Scripts/*.fos',
-    'Scripts/Json/*.fos',
+    'Scripts/**/*.fos',
     'SourceExt/*.cpp',
     'SourceExt/*.h',
     'Gui/*.fogui',

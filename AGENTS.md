@@ -22,7 +22,6 @@ Project front door for AI maintainers working on **FOnline: The Life After** (TL
 - `Scripts/Content.fos` - generated/baked content declarations. Do not hand-edit.
 - `Scripts/GuiScreens.fos` - generated screen bindings. Source of truth: `Gui/*.fogui` plus `Tools/InterfaceEditor/generate_gui_screens.py`. Do not hand-edit unless you also update the owning `.fogui` code as described below.
 - `Scripts/GuiScreensExt.fos` - hand-written companion to `GuiScreens.fos`; non-generated GUI logic lives here.
-- `Scripts/Sync.fos` - script-side helpers around the engine `Game.Sync(...)` lock primitive for async worker code.
 - `Gui/*.fogui` - GUI definitions and embedded screen script code.
 - `SourceExt/CommonExtension.cpp` - SHA helpers shared by client/server.
 - `SourceExt/ServerExtension.cpp` - server image checks, dialog plumbing, visibility hooks, critter busy/free stubs.
@@ -92,7 +91,6 @@ Typical breakage points after a bump:
 - `///@ EngineHook` rename or signature change in `SourceExt/*Extension.cpp`.
 - AngelScript core type/API changes (`hstring`, `any`, `ident_t`, `mpos`/`mdir`, collection APIs).
 - Stricter AngelScript nullability and component access (`T?`, `Has<Component>`, no component `== null` probes).
-- Async worker sync requirements around entity and map access (`[[Async]]`, `Sync::Lock...`, `Game.Sync(...)` lock cover).
 - Logging or stack-trace API changes.
 - New init-path guards such as `if (IsTestingInProgress) return;`.
 - Baker/CMake API changes around `AddEngineSources(...)`, `AddDirSource(...)`, or generated metadata.
@@ -135,8 +133,15 @@ Native C++ conventions:
 - Use `#if SERVER`, `#if CLIENT`, and `#if MAPPER` carefully. Side-specific bugs are often missing or stray guards.
 - Keep authoritative gameplay state changes on the server. Client scripts should focus on UI, input, presentation, and client-only probes.
 - Mark startup functions with `[[ModuleInit]]`; subscribe to events from `ModuleInit()`. Attribute-marked functions are called by their attribute system; move reusable logic into plain helpers instead of calling attribute entrypoints directly.
-- Mark worker-run callbacks `[[Async]]` before they call async helpers such as `Sync::Lock...`. Time events and remote calls that touch map-visible critter state usually need `Sync::LockCritterWithMap(cr)` first.
-- `Game.Sync(...)` replaces the whole held lock set. If a callback needs several entities at once, lock the full cover in one call/helper instead of assuming an earlier lock remains held.
+- **Scripts take no entity cover, and the server runs single-threaded.** `Server.SingleThreadedLogic = True`
+  pins the engine to one worker, so a script may read and mutate any entity it can reach without
+  synchronizing first. The script-side `Sync` module and the `[[Async]]` markers that propagated from
+  `Game.Sync` were removed with it — do not reintroduce either.
+- **The multithreaded configuration is not supported by the current scripts.** Turning
+  `Server.SingleThreadedLogic` off still passes the harness (72/72), because the resulting
+  `Entity access without sync` throws are recoverable at the job frontier — but it logs 794 of them and
+  stops 253 time events by exception. `Server.WorkerThreads` therefore has no effect. Restoring the
+  multithreaded mode means restoring entity cover across the scripts, which is a project of its own.
 - Event handlers return `void` for implicit continue or `EventResult` for explicit `ContinueChain` / `StopChain`.
 - Do not pass inputs by `const &`. Use plain `&` only for genuine out/inout value-type parameters.
 - Treat `?` as the source contract for nullable handles. If a dictionary lookup or engine call can return `null`, bind it to a nullable local (`T?`) before narrowing it.

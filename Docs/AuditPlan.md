@@ -19,7 +19,7 @@ Items 4, 5, 6 and 10 are local and are woven in wherever they fit.
 | 6 | Fold the copied guard init back into `GuardLib` | M | re-scoped, blocked on 2 |
 | 10 | Mutable-globals allowlist becomes a boundary again | rule | **done** (rule written) |
 | 2 | Tests on the hot paths | L | **done**, two modules substituted |
-| 1 | Tables out of code into authored data | XL | net in place, migration next |
+| 1 | Tables out of code into authored data | XL | crafting done, caravans and worldmap next |
 | 7 | Cut the giant combat functions | L | planned |
 
 ---
@@ -221,8 +221,24 @@ must reproduce all seven.
 3. *Scripted recipes.* 29 recipes bind a callback. The loader needs a name → function registry in
    `FixBoy`, since a data file cannot hold a function handle.
 
-**Done when.** The recipes live in `Resources/ServerData/`, `Test_FixBoy` still passes unchanged, and a
-designer can change a recipe without recompiling scripts.
+**Stage 1 — crafting: done.** The 95 recipes live in `Resources/ServerData/CraftRecipes.json`; a 107-line
+loader replaced the 881-line `InitFixBoy`, and `FixBoy.fos` went from 1548 lines to 877. Skill-check
+properties and the 12 recipe scripts bind by name through closed registries that throw on an unknown name.
+`Test_FixBoy` passes unchanged against the loaded table.
+
+**What the net caught.** The first converter reproduced five of seven aggregates and lost 20 resource
+entries: five `AddNeedResources` calls carry their brace on the next line after clang-format, and the parser
+matched the literal `.AddNeedResources({`. The fingerprint failed before anything was migrated. This is the
+reason the net comes first, and the same trap waits in the two remaining tables.
+
+**Stage 2 — caravans (`CaravansInit`, 1 073 lines).** Same path: fingerprint first, then convert, then load.
+The records are wider (route points, leader, bags, teams, AI packets), so the format needs a pass of its own.
+
+**Stage 3 — encounters (`WorldmapInit`, 9 971 lines).** Last, by then along a known path. This is the one
+that pays: 86 % of an 11 587-line module, and the tables become reachable by the content validators.
+
+**Done when.** All three tables live in `Resources/ServerData/`, their tests pass unchanged, and a designer
+can change a recipe, a route or an encounter without recompiling scripts.
 
 ---
 

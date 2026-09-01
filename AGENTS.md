@@ -219,6 +219,9 @@ Pick the boundary before reaching for a heavy interactive session:
 
 ## Quick Reference
 
+- `Docs/README.md` - documentation index.
+- `Docs/Systems.md` - map of the gameplay systems: what they are, where they live, what covers them.
+- `Docs/AuditPlan.md` - the current improvement queue with the measurement behind each item.
 - `README.md` - repo-root overview.
 - `Docs/AiControl.md` - AI control bridge (client-side TCP test/automation) + the `Tools/AiControlMcp/` MCP adapter for observing/controlling a real client to test mechanics and quests.
 - `Docs/Refactoring.md` - Scripts/*.fos refactoring plan, phases, and running status.

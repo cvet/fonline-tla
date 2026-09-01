@@ -1,0 +1,153 @@
+// Test_FixBoy — сеть безопасности под таблицей рецептов крафта: форма записей, уникальность
+// идентификаторов и золотой образец. Тест обязан давать один и тот же результат до и после переноса
+// таблицы из кода в данные (пункт 1 в Docs/AuditPlan.md) — этим он и полезен.
+namespace Test_FixBoy
+{
+
+#if SERVER
+
+[[ModuleInit]]
+void InitTestFixBoy()
+{
+    Game.OnTestingInit.Subscribe(OnTestingInit);
+}
+
+[[Event]]
+void OnTestingInit()
+{
+    Testing::RegisterTest("fixboy", "recipe_ids_are_unique_and_dense", RecipeIdsAreUniqueAndDense);
+    Testing::RegisterTest("fixboy", "recipe_records_are_well_formed", RecipeRecordsAreWellFormed);
+    Testing::RegisterTest("fixboy", "leather_armor_recipe_golden_sample", LeatherArmorRecipeGoldenSample);
+}
+
+// Идентификаторы рецептов уходят клиенту и в свойства верстаков, поэтому обязаны быть уникальными
+// и идти без дыр: пропуск сместил бы выбор рецепта в интерфейсе.
+void RecipeIdsAreUniqueAndDense(Testing::TestContext ctx)
+{
+    int count = int(FixBoy::CraftList.length());
+    if (!Testing::Expect(ctx, count > 0, "Таблица рецептов не пуста")) {
+        return;
+    }
+
+    for (int i = 0; i < count; i++) {
+        if (!Testing::ExpectEq(ctx, FixBoy::CraftList[i].Id, i + 1, "Идентификатор рецепта совпадает с его позицией (индекс " + i + ")")) {
+            return;
+        }
+    }
+
+    Testing::Pass(ctx);
+}
+
+// Каждая запись описывает реальный предмет и разложена тройками (прототип, количество, флаг).
+// Нечётная длина списка ресурсов означала бы съехавшую запись — крафт молча потребовал бы не то.
+void RecipeRecordsAreWellFormed(Testing::TestContext ctx)
+{
+    for (int i = 0; i < int(FixBoy::CraftList.length()); i++) {
+        FixBoy::MainCraft craft = FixBoy::CraftList[i];
+        string where = " (рецепт " + craft.Id + ")";
+
+        if (!Testing::Expect(ctx, int(craft.OutItems.length()) >= 2 && int(craft.OutItems.length()) % 2 == 0, "Выход рецепта разложен парами" + where)) {
+            return;
+        }
+
+        hstring outPid = hstring(craft.OutItems[0]);
+        if (!Testing::Expect(ctx, Game.GetProtoItem(outPid).ProtoId == outPid, "Выходной предмет существует" + where)) {
+            return;
+        }
+
+        if (!Testing::Expect(ctx, int(craft.OutItems[1]) > 0, "Выходное количество положительно" + where)) {
+            return;
+        }
+
+        if (!Testing::Expect(ctx, craft.Experience >= 0, "Опыт за рецепт неотрицателен" + where)) {
+            return;
+        }
+
+        if (!Testing::Expect(ctx, int(craft.NeedResources.length()) % 3 == 0, "Ресурсы разложены тройками" + where)) {
+            return;
+        }
+
+        for (int r = 0; r < int(craft.NeedResources.length()); r += 3) {
+            hstring resPid = hstring(craft.NeedResources[r]);
+            if (!Testing::Expect(ctx, Game.GetProtoItem(resPid).ProtoId == resPid, "Ресурс существует" + where)) {
+                return;
+            }
+
+            if (!Testing::Expect(ctx, int(craft.NeedResources[r + 1]) > 0, "Количество ресурса положительно" + where)) {
+                return;
+            }
+        }
+
+        if (!Testing::Expect(ctx, int(craft.NeedTools.length()) % 3 == 0, "Инструменты разложены тройками" + where)) {
+            return;
+        }
+
+        for (int w = 0; w < int(craft.NeedTools.length()); w += 3) {
+            hstring toolPid = hstring(craft.NeedTools[w]);
+            if (!Testing::Expect(ctx, Game.GetProtoItem(toolPid).ProtoId == toolPid, "Инструмент существует" + where)) {
+                return;
+            }
+        }
+
+        // Проверки навыков разложены парами свойство/значение
+        if (!Testing::Expect(ctx, int(craft.OnView.length()) % 2 == 0, "Условия показа разложены парами" + where)) {
+            return;
+        }
+
+        if (!Testing::Expect(ctx, int(craft.OnCraft.length()) % 2 == 0, "Условия крафта разложены парами" + where)) {
+            return;
+        }
+    }
+
+    Testing::Pass(ctx);
+}
+
+// Золотой образец: первый рецепт таблицы целиком. Перенос таблицы в данные обязан воспроизвести
+// его до последнего числа, иначе перенос потерял или переставил поля.
+void LeatherArmorRecipeGoldenSample(Testing::TestContext ctx)
+{
+    FixBoy::MainCraft? craft = FixBoy::GetCraft(1);
+    if (craft == null) {
+        Testing::Fail(ctx, "Рецепт с идентификатором 1 должен существовать");
+        return;
+    }
+
+    FixBoy::MainCraft leather = craft;
+    if (!Testing::Expect(ctx, hstring(leather.OutItems[0]) == Content::Item::leather_armor, "Первый рецепт выдаёт кожаную броню")) {
+        return;
+    }
+
+    if (!Testing::ExpectEq(ctx, int(leather.OutItems[1]), 1, "Выдаётся одна штука")) {
+        return;
+    }
+
+    if (!Testing::ExpectEq(ctx, leather.Experience, 150, "Опыт за кожаную броню — 150")) {
+        return;
+    }
+
+    if (!Testing::ExpectEq(ctx, int(leather.NeedResources.length()), 9, "Требуется три ресурса")) {
+        return;
+    }
+
+    if (!Testing::Expect(ctx, hstring(leather.NeedResources[0]) == Content::Item::brahmin_skin, "Первый ресурс — шкура брамина")) {
+        return;
+    }
+
+    if (!Testing::ExpectEq(ctx, int(leather.NeedResources[1]), 2, "Шкур нужно две")) {
+        return;
+    }
+
+    if (!Testing::ExpectEq(ctx, int(leather.NeedTools.length()), 9, "Требуется три варианта инструмента")) {
+        return;
+    }
+
+    if (!Testing::ExpectEq(ctx, int(leather.OnCraft.length()), 2, "Одно условие на крафт")) {
+        return;
+    }
+
+    Testing::ExpectEq(ctx, leather.OnCraft[1], 60, "Порог навыка на крафт — 60");
+}
+
+#endif
+
+}

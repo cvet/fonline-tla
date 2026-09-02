@@ -20,7 +20,7 @@ Items 4, 5, 6 and 10 are local and are woven in wherever they fit.
 | 10 | Mutable-globals allowlist becomes a boundary again | rule | **done** (rule written) |
 | 2 | Tests on the hot paths | L | **done**, two modules substituted |
 | 1 | Tables out of code into authored data | XL | crafting done, caravans and worldmap next |
-| 7 | Cut the giant combat functions | L | planned |
+| 7 | Cut the giant combat functions | L | two slices done, rest needs a combat fixture |
 
 ---
 
@@ -231,11 +231,22 @@ entries: five `AddNeedResources` calls carry their brace on the next line after 
 matched the literal `.AddNeedResources({`. The fingerprint failed before anything was migrated. This is the
 reason the net comes first, and the same trap waits in the two remaining tables.
 
-**Stage 2 — caravans (`CaravansInit`, 1 073 lines).** Same path: fingerprint first, then convert, then load.
-The records are wider (route points, leader, bags, teams, AI packets), so the format needs a pass of its own.
+**Stage 2 — caravans (`CaravansInit`, 1 073 lines), measured.** 11 caravans built from ten call forms:
+`SetupCaravan` (11), `SetupCaravanLeader` (11), `SetupCaravanLiderPosition` (22), `SetupCaravanCabs` (7),
+`AddRoutePoint` (86), `AddGuardInfo` (58), `AddFollowerInfo` (6), `AddLootToCaravanCabs` (106),
+`SheduleCaravan` (11), backed by eight record classes. Three `SetupCaravanCabs` calls pass
+`Game.Random(a, b)`, so the table is not fully static — the data needs a min/max pair the loader rolls.
+Wider per record than crafting; the format is the work, not the volume.
 
-**Stage 3 — encounters (`WorldmapInit`, 9 971 lines).** Last, by then along a known path. This is the one
-that pays: 86 % of an 11 587-line module, and the tables become reachable by the content validators.
+**Stage 3 — encounters (`WorldmapInit`, 9 970 lines), measured.** Tall *and* wide: `AddGroup` (1 961),
+`AddEncounter` (1 322), `Fighting` (1 190), `SetZone` (892), `CheckProperty` (827), `AddItem` (769),
+`LocationPid` (436), `AssignProperty` (432), `Special` (429), `CheckParam` (423), `AddCritter` (391),
+`Dialog` (391). Twelve-plus chained methods, so the fingerprint has to cover every one of them before a
+converter is written. This is the item that pays most — 86 % of an 11 587-line module — and the one that
+must not be rushed.
+
+**Method, proven twice.** Fingerprint the live table from the running game → write the converter →
+require it to reproduce every aggregate → only then write the loader → re-run the tests unchanged.
 
 **Done when.** All three tables live in `Resources/ServerData/`, their tests pass unchanged, and a designer
 can change a recipe, a route or an encounter without recompiling scripts.
@@ -254,5 +265,14 @@ can change a recipe, a route or an encounter without recompiling scripts.
 1. `Combat::CombatAttack` → target selection, hit resolution, damage, effects.
 2. `Combat::ApplyDamage` → per-effect application.
 3. The rest by the same pattern, one at a time.
+
+**Started.** Two pure slices are out of `ApplyDamage` and covered by `Test_Combat`: `ReduceDamage` (the
+per-shot arithmetic) and `ApplyArmorModifiers` (threshold and resistance adjustment, including the finesse
+bonus that armour bypass silently cancels). `ApplyDamage` is 710 lines, `CombatAttack` still 1 393.
+
+**What the rest needs.** Everything remaining in both functions touches the world — targets, weapons,
+messages, broadcasts — so it cannot be extracted into pure helpers and tested the same way. The next slice
+needs a behavioural fixture: a map with an attacker and a target, and assertions on the resulting state.
+That fixture does not exist yet and is the real prerequisite, not more extraction.
 
 **Done when.** No gameplay function exceeds 250 lines, or the exceptions carry a written reason.

@@ -17,6 +17,8 @@ void OnTestingInit()
     Testing::RegisterTest("combat", "damage_order_of_operations", DamageOrderOfOperations);
     Testing::RegisterTest("combat", "damage_armor_absorbs_shot", DamageArmorAbsorbsShot);
     Testing::RegisterTest("combat", "damage_integer_truncation", DamageIntegerTruncation);
+    Testing::RegisterTest("combat", "armor_modifiers", ArmorModifiers);
+    Testing::RegisterTest("combat", "armor_resistance_is_clamped", ArmorResistanceIsClamped);
     Testing::RegisterTest("combat", "aim_ap_cost_per_location", AimApCostPerLocation);
     Testing::RegisterTest("combat", "hit_aim_per_location", HitAimPerLocation);
 }
@@ -120,6 +122,62 @@ void HitAimPerLocation(Testing::TestContext ctx)
     }
 
     Testing::ExpectEq(ctx, Combat::GetHitAim(HitLocations::LocationRightLeg), Settings.Combat.HitAimLegs, "Правая нога берёт настройку ног");
+}
+
+// Пробитие делит и порог, и сопротивление; ловкач под пробитием не работает — вычитание внутри
+// ветки гасится сложением после неё. Перк проникновения трогает только порог.
+void ArmorModifiers(Testing::TestContext ctx)
+{
+    int dt = 50;
+    int dr = 40;
+    Combat::ApplyArmorModifiers(false, false, false, 0, dt, dr);
+    if (!Testing::ExpectEq(ctx, dt, 50, "Без модификаторов порог не меняется") ||
+        !Testing::ExpectEq(ctx, dr, 40, "Без модификаторов сопротивление не меняется")) {
+        return;
+    }
+
+    dt = 50;
+    dr = 40;
+    Combat::ApplyArmorModifiers(false, true, false, 0, dt, dr);
+    if (!Testing::ExpectEq(ctx, dt, 10, "Проникновение делит порог на пять") || !Testing::ExpectEq(ctx, dr, 40, "Проникновение не трогает сопротивление")) {
+        return;
+    }
+
+    dt = 50;
+    dr = 40;
+    Combat::ApplyArmorModifiers(true, false, false, 0, dt, dr);
+    if (!Testing::ExpectEq(ctx, dt, 10, "Пробитие делит порог на пять") || !Testing::ExpectEq(ctx, dr, 8, "Пробитие делит сопротивление на пять")) {
+        return;
+    }
+
+    // Ловкач: +30 к сопротивлению обычным выстрелом, но под пробитием он гасится
+    dt = 50;
+    dr = 40;
+    Combat::ApplyArmorModifiers(false, false, true, 0, dt, dr);
+    if (!Testing::ExpectEq(ctx, dr, 70, "Ловкач добавляет тридцать к сопротивлению")) {
+        return;
+    }
+
+    dt = 50;
+    dr = 40;
+    Combat::ApplyArmorModifiers(true, false, true, 0, dt, dr);
+    Testing::ExpectEq(ctx, dr, 8, "Под пробитием ловкач не действует");
+}
+
+// Сопротивление зажато в 0..100: выше сотни выстрел лечил бы цель, ниже нуля — усиливал.
+void ArmorResistanceIsClamped(Testing::TestContext ctx)
+{
+    int dt = 0;
+    int dr = 90;
+    Combat::ApplyArmorModifiers(false, false, true, 50, dt, dr);
+    if (!Testing::ExpectEq(ctx, dr, 100, "Сопротивление не превышает ста")) {
+        return;
+    }
+
+    dt = 0;
+    dr = 10;
+    Combat::ApplyArmorModifiers(false, false, false, -100, dt, dr);
+    Testing::ExpectEq(ctx, dr, 0, "Сопротивление не опускается ниже нуля");
 }
 
 #endif

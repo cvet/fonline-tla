@@ -1766,18 +1766,9 @@ void ApplyDamage(AttackStruct attack, Critter target, int rounds, bool isCritica
     int targetDR = target.DamageResistance[dmgType];
     int targetDT = target.DamageThreshold[dmgType];
 
-    if (Flags::HasFlag(eff, Flags::HF_BYPASS_ARMOR) && dmgType != DamageTypes::Emp) {
-        targetDT /= 5;
-        targetDR /= 5;
-        targetDR -= (attacker != null ? (attacker.IsTraitFinesse ? 30 : 0) : 0);
-    }
-    else if (weaponPerk == ItemPerks::Penetrate) {
-        targetDT /= 5;
-    }
-
-    targetDR += (attacker != null ? (attacker.IsTraitFinesse ? 30 : 0) : 0);
-    targetDR += attack.DRMod; // всегда
-    targetDR = Math::Clamp(targetDR, 0, 100);
+    bool bypassArmor = Flags::HasFlag(eff, Flags::HF_BYPASS_ARMOR) && dmgType != DamageTypes::Emp;
+    bool finesse = attacker != null && attacker.IsTraitFinesse;
+    ApplyArmorModifiers(bypassArmor, weaponPerk == ItemPerks::Penetrate, finesse, attack.DRMod, targetDT, targetDR);
     int dmgMin = attack.DmgMin + attack.BonusDmg;
     int dmgMax = attack.DmgMax + attack.BonusDmg;
     int totalDmg = 0;
@@ -2704,6 +2695,25 @@ int FindCritterInArray(Critter[] crits, Critter cr)
     }
 
     return -1;
+}
+
+// Броня цели после модификаторов выстрела. Пробивающий удар делит и порог, и сопротивление, а бонус
+// ловкача внутри него вычитается ровно затем, чтобы следующее сложение вернуло его на место: под
+// пробитием ловкач не работает. Итог всегда зажимается в 0..100 — сопротивление выше сотни лечило бы.
+void ApplyArmorModifiers(bool bypassArmor, bool penetrate, bool finesse, int resistanceMod, int& damageThreshold, int& damageResistance)
+{
+    if (bypassArmor) {
+        damageThreshold /= 5;
+        damageResistance /= 5;
+        damageResistance -= finesse ? 30 : 0;
+    }
+    else if (penetrate) {
+        damageThreshold /= 5;
+    }
+
+    damageResistance += finesse ? 30 : 0;
+    damageResistance += resistanceMod;
+    damageResistance = Math::Clamp(damageResistance, 0, 100);
 }
 
 // Урон одного попадания после множителей и брони. Порядок здесь и есть правило: сначала множитель и

@@ -579,14 +579,14 @@ auto DialogManager::ParseDialog(string_view pack_name, string_view data) const -
     bool has_speech = false;
 
     auto flush_answer = [&]() {
-        if (current_answer != nullptr) {
+        if (current_answer) {
             current_speech->AnswersCount++;
             current_speech->Answers.emplace_back(current_answer.take_not_null());
         }
     };
 
     auto flush_speech = [&]() {
-        if (current_speech != nullptr) {
+        if (current_speech) {
             flush_answer();
             pack->SpeechesCount++;
             pack->Speeches.emplace_back(current_speech.take_not_null());

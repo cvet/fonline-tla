@@ -49,7 +49,7 @@ static auto ResolveTextArg(string_view name, string_view text_args) -> string;
 
 static auto HasFemaleSexTag(nptr<const CritterView> cr) -> bool
 {
-    if (cr == nullptr) {
+    if (!cr) {
         return false;
     }
 
@@ -112,11 +112,11 @@ static auto FormatTags(ptr<ClientEngine> client, string_view text, string_view t
 
             // Player name
             if (strex(tag).compare_ignore_case("pname")) {
-                tag = chosen != nullptr ? chosen->GetName() : "";
+                tag = chosen ? chosen->GetName() : "";
             }
             // Npc name
             else if (strex(tag).compare_ignore_case("nname")) {
-                tag = talker != nullptr ? talker->GetName() : "";
+                tag = talker ? talker->GetName() : "";
             }
             // Sex
             else if (strex(tag).compare_ignore_case("sex")) {

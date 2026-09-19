@@ -236,7 +236,7 @@ nptr<DialogPack> FO_NAMESPACE Server_Game_GetDialogPack(ptr<ServerEngine> server
     auto& ext_data = GetServerExtData(server);
     auto pack = ext_data.DialogMngr->GetDialog(packId);
 
-    if (pack == nullptr) {
+    if (!pack) {
         break_into_debugger();
         return nullptr;
     }
@@ -434,7 +434,7 @@ void FO_NAMESPACE Server_Critter_ViewMap(ptr<Critter> self, ptr<Map> map, int32_
     }
 
     auto player = self->GetPlayer();
-    if (player == nullptr) {
+    if (!player) {
         return;
     }
 

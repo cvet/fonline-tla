@@ -136,7 +136,7 @@ Native C++ conventions:
 - Use `#if SERVER`, `#if CLIENT`, and `#if MAPPER` carefully. Side-specific bugs are often missing or stray guards.
 - Keep authoritative gameplay state changes on the server. Client scripts should focus on UI, input, presentation, and client-only probes.
 - **A module you touch leaves the mutable-globals allowlist, or says why it stays.**
-  `AngelScript.MutableGlobalsAllowedNamespaces` in `TLA.fomain` lists 76 namespaces — it was meant to mark
+  `AngelScript.MutableGlobalsAllowedNamespaces` in `TLA.fomain` lists 77 namespaces — it was meant to mark
   exceptions and now covers nearly the whole project, which is also what makes those modules hard to test in
   isolation. Do not sweep the list; when a module is opened for any other reason, either move its mutable
   state behind the module (a parameter, an accessor, per-entity storage) and drop the namespace, or add one

@@ -29,7 +29,7 @@ void FO_NAMESPACE ClientInitHook(ptr<ClientEngine> client)
     FO_STACK_TRACE_ENTRY();
 
     if (!client->UserData) {
-        client->UserData = make_unique_del_ptr(SafeAlloc::MakeRaw<ClientExtData>().reinterpret_as<uint8_t>(), [](const uint8_t* ptr) FO_DEFERRED {
+        client->UserData = make_unique_del_ptr(safe_alloc::make_raw<ClientExtData>().reinterpret_as<uint8_t>(), [](const uint8_t* ptr) FO_DEFERRED {
             const auto* ext_data_ptr = reinterpret_cast<const ClientExtData*>(ptr);
             delete ext_data_ptr;
         });
@@ -192,7 +192,7 @@ static auto FormatTags(ptr<ClientEngine> client, string_view text, string_view t
             else if (tag.length() > 7 && tag[0] == 's' && tag[1] == 'c' && tag[2] == 'r' && tag[3] == 'i' && tag[4] == 'p' && tag[5] == 't' && tag[6] == ' ') {
                 string func_name = strex(tag.substr(7)).substring_until('$');
 
-                if (!client->CallFunc<string, string>(client->Hashes.ToHashedString(func_name), string(text_args), tag)) {
+                if (!client->CallFunc<string, string>(client->Hashes.to_hashed_string(func_name), string(text_args), tag)) {
                     tag = "";
                 }
             }

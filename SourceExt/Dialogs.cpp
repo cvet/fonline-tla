@@ -496,7 +496,7 @@ void DialogManager::LoadFromResources(const FileSystem& resources)
             AddDialog(std::move(pack));
         }
         catch (const DialogParseException& ex) {
-            ReportExceptionAndContinue(ex);
+            exceptions::report_and_continue(ex);
             errors++;
         }
     }
@@ -542,10 +542,10 @@ auto DialogManager::ParseDialog(string_view pack_name, string_view data) const -
 {
     FO_STACK_TRACE_ENTRY();
 
-    auto pack = SafeAlloc::MakeRefCounted<DialogPack>();
+    auto pack = safe_alloc::make_refcounted<DialogPack>();
     auto fodlg = ConfigFile(string(data), ConfigFileOption::CollectContent);
 
-    pack->PackId = _meta->Hashes.ToHashedString(pack_name);
+    pack->PackId = _meta->Hashes.to_hashed_string(pack_name);
 
     const bool has_new_dialog = fodlg.HasSection("Dialog");
 
@@ -638,9 +638,9 @@ auto DialogManager::ParseDialog(string_view pack_name, string_view data) const -
                 throw DialogParseException("Dialog syntax: Speech must contain only id", pack_name);
             }
 
-            auto speech = SafeAlloc::MakeRefCounted<DialogSpeech>();
+            auto speech = safe_alloc::make_refcounted<DialogSpeech>();
             speech->Id = speech_id;
-            speech->TextId = _meta->Hashes.ToHashedString(strex("Speech {}", speech->Id));
+            speech->TextId = _meta->Hashes.to_hashed_string(strex("Speech {}", speech->Id));
             speech->DlgScriptFuncName = hstring {};
 
             current_speech = speech;
@@ -667,7 +667,7 @@ auto DialogManager::ParseDialog(string_view pack_name, string_view data) const -
                 throw DialogParseException("Dialog syntax: invalid Script command", pack_name);
             }
 
-            current_speech->DlgScriptFuncName = _meta->Hashes.ToHashedString(args[0]);
+            current_speech->DlgScriptFuncName = _meta->Hashes.to_hashed_string(args[0]);
             continue;
         }
 
@@ -691,9 +691,9 @@ auto DialogManager::ParseDialog(string_view pack_name, string_view data) const -
                 throw DialogParseException("Dialog syntax: invalid Answer command", pack_name, args[0], link, answer_token_for_hash);
             }
 
-            auto answer = SafeAlloc::MakeRefCounted<DialogAnswer>();
+            auto answer = safe_alloc::make_refcounted<DialogAnswer>();
             answer->Link = link;
-            answer->TextId = _meta->Hashes.ToHashedString(strex("Speech {} Answer {}", current_speech->Id, answer_token_for_hash));
+            answer->TextId = _meta->Hashes.to_hashed_string(strex("Speech {} Answer {}", current_speech->Id, answer_token_for_hash));
 
             current_answer = answer;
             continue;
@@ -864,7 +864,7 @@ auto DialogManager::LoadDemandResult(istringstream& input, bool is_demand) const
 
         // Name
         input >> name;
-        id_hash = _meta->Hashes.ToHashedString(name);
+        id_hash = _meta->Hashes.to_hashed_string(name);
 
         // Operator
         string oper_token;
@@ -921,12 +921,12 @@ auto DialogManager::LoadDemandResult(istringstream& input, bool is_demand) const
     }
 
     // Fill
-    auto result = SafeAlloc::MakeRefCounted<DialogAnswerReq>();
+    auto result = safe_alloc::make_refcounted<DialogAnswerReq>();
     result->Type = type;
     result->Who = who;
     result->ParamIndex = id_index;
     result->ParamHash = id_hash;
-    result->AnswerScriptFuncName = _meta->Hashes.ToHashedString(script_name);
+    result->AnswerScriptFuncName = _meta->Hashes.to_hashed_string(script_name);
     result->Op = oper;
     result->ValuesCount = static_cast<uint8_t>(values_count);
     result->NoRecheck = no_recheck;

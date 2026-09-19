@@ -81,7 +81,7 @@ void DialogBaker::BakeFiles(const FileCollection& files, string_view target_path
             dialog_packs.emplace_back(std::move(pack));
         }
         catch (const DialogParseException& ex) {
-            WriteLog("Dialog baking error: {}", ex.what());
+            logging::write("Dialog baking error: {}", ex.what());
             errors++;
         }
     }
@@ -92,7 +92,7 @@ void DialogBaker::BakeFiles(const FileCollection& files, string_view target_path
             if (speech->DlgScriptFuncName) {
                 if (!server_engine.CheckFunc<void, ptr<CritterTag>, nptr<CritterTag>, string&>(speech->DlgScriptFuncName) && //
                     !server_engine.CheckFunc<int32_t, ptr<CritterTag>, nptr<CritterTag>, string&>(speech->DlgScriptFuncName)) {
-                    WriteLog("Dialog {} invalid start function {}", dlg_pack->PackId, speech->DlgScriptFuncName);
+                    logging::write("Dialog {} invalid start function {}", dlg_pack->PackId, speech->DlgScriptFuncName);
                     errors++;
                 }
             }
@@ -108,7 +108,7 @@ void DialogBaker::BakeFiles(const FileCollection& files, string_view target_path
                             (demand->ValuesCount == 5 && HasDialogScriptAttribute<bool, ptr<CritterTag>, nptr<CritterTag>, any_t, any_t, any_t, any_t, any_t>(server_engine, demand->AnswerScriptFuncName, "DialogDemand"));
 
                         if (!has_valid_demand) {
-                            WriteLog("Dialog {} answer demand invalid function {} (expected [[DialogDemand]])", dlg_pack->PackId, demand->AnswerScriptFuncName);
+                            logging::write("Dialog {} answer demand invalid function {} (expected [[DialogDemand]])", dlg_pack->PackId, demand->AnswerScriptFuncName);
                             errors++;
                         }
                     }
@@ -148,7 +148,7 @@ void DialogBaker::BakeFiles(const FileCollection& files, string_view target_path
                         const int32_t valid_count = (valid_void_result ? 1 : 0) + (valid_int_result ? 1 : 0);
 
                         if (found_count != 1 || valid_count != 1) {
-                            WriteLog("Dialog {} answer result invalid function {} (expected exactly one [[DialogResult]] overload)", dlg_pack->PackId, result->AnswerScriptFuncName);
+                            logging::write("Dialog {} answer result invalid function {} (expected exactly one [[DialogResult]] overload)", dlg_pack->PackId, result->AnswerScriptFuncName);
                             errors++;
                         }
                     }
@@ -221,7 +221,7 @@ void DialogTextBaker::BakeFiles(const FileCollection& files, string_view target_
             dialog_packs.emplace_back(std::move(pack));
         }
         catch (const DialogParseException& ex) {
-            WriteLog("Dialog text baking error: {}", ex.what());
+            logging::write("Dialog text baking error: {}", ex.what());
             errors++;
         }
     }
@@ -234,7 +234,7 @@ void DialogTextBaker::BakeFiles(const FileCollection& files, string_view target_
             const string lang_pack = dlg_pack_text.first;
 
             if (std::ranges::find_if(_context->Settings->BakeLanguages, [&](auto&& l) { return l == lang_pack; }) == _context->Settings->BakeLanguages.end()) {
-                WriteLog(LogType::Warning, "Dialog {} contains unsupported language {}", dlg_pack->PackId, lang_pack);
+                logging::write(logging::type::warning, "Dialog {} contains unsupported language {}", dlg_pack->PackId, lang_pack);
                 continue;
             }
 
@@ -252,7 +252,7 @@ void DialogTextBaker::BakeFiles(const FileCollection& files, string_view target_
                     text_pack.Merge(dlg_pack_text.second);
                 }
                 else {
-                    WriteLog("Dialog {} text intersection detected", dlg_pack->PackId);
+                    logging::write("Dialog {} text intersection detected", dlg_pack->PackId);
                     errors++;
                 }
             }

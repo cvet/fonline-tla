@@ -99,9 +99,9 @@ static auto GetJsonIdent(const nlohmann::json& object, string_view name) -> iden
 static void PushAiControlEvent(AiControlClientData& data, string_view event_json);
 static void RegisterAiControlLogCallback(AiControlClientData& data);
 static void UnregisterAiControlLogCallback(AiControlClientData& data) noexcept;
-static auto TryBuildAiControlLogExceptionEvent(LogType type, string_view message, const CatchedStackTraceData* st) -> std::optional<string>;
-static auto ClassifyAiControlLogException(LogType type, string_view message) -> string;
-static auto LogTypeToString(LogType type) noexcept -> string_view;
+static auto TryBuildAiControlLogExceptionEvent(logging::type type, string_view message, const stack_trace::catched_data* st) -> std::optional<string>;
+static auto ClassifyAiControlLogException(logging::type type, string_view message) -> string;
+static auto LogTypeToString(logging::type type) noexcept -> string_view;
 static auto TrimAiControlLogMessage(string_view message) -> string;
 static bool ContainsCaseInsensitive(string_view text, string_view needle) noexcept;
 
@@ -245,7 +245,7 @@ static auto EnsureAiControlData(ptr<ClientEngine> client) -> AiControlClientData
     ClientExtData& ext = GetClientExtData(client);
 
     if (!ext.AiControl) {
-        ext.AiControl = make_unique_del_ptr(SafeAlloc::MakeRaw<AiControlClientData>(), [](AiControlClientData* ptr) FO_DEFERRED {
+        ext.AiControl = make_unique_del_ptr(safe_alloc::make_raw<AiControlClientData>(), [](AiControlClientData* ptr) FO_DEFERRED {
             FO_STACK_TRACE_ENTRY();
 
             if (ptr != nullptr) {
@@ -294,7 +294,7 @@ static void RunAiControlBridge(AiControlClientData& data)
 
         while (!data.StopRequested.load(std::memory_order_acquire)) {
             if (!socket) {
-                socket = SafeAlloc::MakeUnique<asio::ip::tcp::socket>(context);
+                socket = safe_alloc::make_unique<asio::ip::tcp::socket>(context);
 
                 std::error_code accept_error;
                 acceptor.accept(*socket, accept_error);
@@ -744,7 +744,7 @@ static void RegisterAiControlLogCallback(AiControlClientData& data)
 
     data.LogCallbackKey = string(strex("AiControlLog.{}", data.Port).str());
 
-    SetLogCallback(data.LogCallbackKey, [&data](LogType type, string_view message, nptr<const CatchedStackTraceData> st) {
+    logging::set_callback(data.LogCallbackKey, [&data](logging::type type, string_view message, nptr<const stack_trace::catched_data> st) {
         if (!data.Running.load(std::memory_order_acquire) || data.StopRequested.load(std::memory_order_acquire)) {
             return;
         }
@@ -761,16 +761,16 @@ static void UnregisterAiControlLogCallback(AiControlClientData& data) noexcept
 
     try {
         if (!data.LogCallbackKey.empty()) {
-            SetLogCallback(data.LogCallbackKey, {});
+            logging::set_callback(data.LogCallbackKey, {});
             data.LogCallbackKey.clear();
         }
     }
     catch (...) {
-        BreakIntoDebugger();
+        break_into_debugger();
     }
 }
 
-static auto TryBuildAiControlLogExceptionEvent(LogType type, string_view message, const CatchedStackTraceData* st) -> std::optional<string>
+static auto TryBuildAiControlLogExceptionEvent(logging::type type, string_view message, const stack_trace::catched_data* st) -> std::optional<string>
 {
     FO_STACK_TRACE_ENTRY();
 
@@ -791,7 +791,7 @@ static auto TryBuildAiControlLogExceptionEvent(LogType type, string_view message
     return JsonDumpToString(event);
 }
 
-static auto ClassifyAiControlLogException(LogType type, string_view message) -> string
+static auto ClassifyAiControlLogException(logging::type type, string_view message) -> string
 {
     FO_STACK_TRACE_ENTRY();
 
@@ -807,25 +807,25 @@ static auto ClassifyAiControlLogException(LogType type, string_view message) -> 
     if (ContainsCaseInsensitive(message, "exception")) {
         return "exception";
     }
-    if (type == LogType::Error || ContainsCaseInsensitive(message, "error :")) {
+    if (type == logging::type::error || ContainsCaseInsensitive(message, "error :")) {
         return "error";
     }
 
     return {};
 }
 
-static auto LogTypeToString(LogType type) noexcept -> string_view
+static auto LogTypeToString(logging::type type) noexcept -> string_view
 {
     FO_NO_STACK_TRACE_ENTRY();
 
     switch (type) {
-    case LogType::Info:
+    case logging::type::info:
         return "info";
-    case LogType::InfoSection:
+    case logging::type::info_section:
         return "info_section";
-    case LogType::Warning:
+    case logging::type::warning:
         return "warning";
-    case LogType::Error:
+    case logging::type::error:
         return "error";
     default:
         break;

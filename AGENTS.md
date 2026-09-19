@@ -23,6 +23,7 @@ Project front door for AI maintainers working on **FOnline: The Life After** (TL
 - `Scripts/Content.fos` - generated/baked content declarations. Do not hand-edit.
 - `Scripts/Generated/GuiScreens.fos` - generated screen bindings. Source of truth: `Gui/*.fogui` plus `Tools/InterfaceEditor/generate_gui_screens.py`. Do not hand-edit unless you also update the owning `.fogui` code as described below.
 - `Scripts/GuiScreensExt.fos` - hand-written companion to `GuiScreens.fos`; non-generated GUI logic lives here.
+- `Scripts/ItemStacks.fos` - item counts and stacking. The engine handles single item instances only (it gives `Count` and `Stackable` no meaning and never merges), so units are added, counted, destroyed, split and moved through `ItemStacks::` - never `Critter.AddItem`, `Map.AddItem`, `Item.AddItem`, `Game.MoveItem`, `Game.DestroyItem(item, count)` or `Item.Clone(count)` directly. Covered by `Scripts/Tests/Test_ItemStacks.fos`.
 - `Scripts/UserOptions.fos` - what the options screen saves to the client's local config (`LocalSettings.focfg`, applied at the next start); keys must be `Group.Name`.
 - `Scripts/Sounds.fos` - play sounds through `Sounds::Play(name)`, not `Game.PlaySound`: the engine plays only an exact resource path, and `Sounds` maps TLA's names (any-case paths, bare Fallout names such as `LEVELUP.ACM`, `NAME_1..NAME_N` series) onto the baked paths.
 - `Gui/*.fogui` - GUI definitions and embedded screen script code.
@@ -157,6 +158,8 @@ Native C++ conventions:
 - Treat `?` as the source contract for nullable handles. If a dictionary lookup or engine call can return `null`, bind it to a nullable local (`T?`) before narrowing it.
 - The AngelScript compiler enforces nullability at compile time ("strong nullable"): it warns on redundant null comparisons, dereference of an un-narrowed `T?`, and a redundant `?` on a non-null initializer. Fix these — narrow `T?` locals with `if (x == null) return;` / `if (x != null)` / ternary / `&&`-`||` short-circuits, use `cast<T?>(x)` (not `cast<T>(x)`) when a downcast may fail and you test for `null`, and guard the throwing `Game.Chosen` accessor with `HasChosen` rather than `Chosen == null`. See [Nullability.md](Nullability.md) for the full rules.
 - Component properties are guarded by generated `Has<Component>` flags. Check `item.HasRadio`, `cr.HasDialogContext`, etc. before using the component accessor; do not compare the component accessor itself with `null`.
+- **Item stacking is the game's, not the engine's.** `ItemStacks::AddItem/CountItem/DestroyItem/MoveItem/SplitItem`
+  own `Count`, merging and splitting; the engine's own item calls create or move one instance and merge nothing.
 - **Engine settings are read-only at runtime.** A value that changes while the game runs belongs to its owner, not to
   `Settings`: `Game.Get/SetMusicVolume`, `Game.Get/SetSoundVolume`, `Game.IsFullscreen`, `Game.Is/SetAlwaysOnTop`,
   the `ScreenSize` and `CurrentLanguage` globals, `Map.SetManualScroll`, `Map.Get/SetVisibleLayers`. Settings the

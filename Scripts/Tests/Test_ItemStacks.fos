@@ -1,0 +1,204 @@
+// Test_ItemStacks — тесты стопок предметов: слияние при добавлении, отдельные экземпляры нестакуемых,
+// разделение при переносе и снятие единиц. Правила стопок переехали из движка в проект (Engine #214),
+// и эти тесты закрепляют то поведение, на которое опирается весь контент: торговля, награды квестов, лут.
+namespace Test_ItemStacks
+{
+
+#if SERVER
+
+[[ModuleInit]]
+void InitTestItemStacks()
+{
+    Game.OnTestingInit.Subscribe(OnTestingInit);
+}
+
+[[Event]]
+void OnTestingInit()
+{
+    Testing::RegisterTest("item_stacks", "units_merge_into_one_stack", UnitsMergeIntoOneStack);
+    Testing::RegisterTest("item_stacks", "non_stackable_units_are_separate_items", NonStackableUnitsAreSeparateItems);
+    Testing::RegisterTest("item_stacks", "move_splits_and_merges", MoveSplitsAndMerges);
+    Testing::RegisterTest("item_stacks", "destroy_takes_units_then_the_stack", DestroyTakesUnitsThenTheStack);
+    Testing::RegisterTest("item_stacks", "container_stacks_are_per_section", ContainerStacksArePerSection);
+}
+
+// Криттер для проверок: любой NPC на тестовой локации.
+Critter ? SpawnTestCritter(Testing::TestContext ctx)
+{
+    Location? loc = Testing::CreateTestLocation(ctx, Content::Location::desert_12);
+    if (loc == null) {
+        Testing::Fail(ctx, "Тестовая локация должна создаваться");
+        return null;
+    }
+
+    Map map = loc.GetMapByIndex(0);
+    mpos center = mpos(map.Size.width / 2, map.Size.height / 2);
+
+    for (int radius = 0; radius < 15; radius++) {
+        for (int dx = -radius; dx <= radius; dx++) {
+            for (int dy = -radius; dy <= radius; dy++) {
+                mpos probe = mpos(center.x + dx, center.y + dy);
+                if (probe.x > 0 && probe.y > 0 && int(probe.x) < map.Size.width - 1 && int(probe.y) < map.Size.height - 1 && map.IsHexMovable(probe)) {
+                    return Testing::SpawnTestNpc(ctx, map, Content::Critter::Brahmin, probe);
+                }
+            }
+        }
+    }
+
+    Testing::Fail(ctx, "На карте должен найтись проходимый гекс");
+    return null;
+}
+
+// Единицы стакуемого прототипа лежат одной стопкой: на этом держатся и торговля, и подсчёт патронов.
+void UnitsMergeIntoOneStack(Testing::TestContext ctx)
+{
+    Critter? npc = SpawnTestCritter(ctx);
+    if (npc == null) {
+        return;
+    }
+
+    Critter cr = npc;
+    Item first = ItemStacks::AddItem(cr, Content::Item::bottle_caps, 10);
+    if (!Testing::ExpectEq(ctx, first.Count, 10, "Первое добавление кладёт все единицы в одну стопку")) {
+        return;
+    }
+
+    Item second = ItemStacks::AddItem(cr, Content::Item::bottle_caps, 5);
+    if (!Testing::Expect(ctx, second.Id == first.Id, "Второе добавление сливается в ту же стопку")) {
+        return;
+    }
+
+    if (!Testing::ExpectEq(ctx, int(cr.GetItems(Content::Item::bottle_caps).length()), 1, "У криттера одна стопка прототипа")) {
+        return;
+    }
+
+    Testing::ExpectEq(ctx, ItemStacks::CountItem(cr, Content::Item::bottle_caps), 15, "Единицы сложились");
+}
+
+// Нестакуемый прототип создаёт отдельные экземпляры, и не больше, чем разрешает Critter.MaxAddUnstackableItems.
+void NonStackableUnitsAreSeparateItems(Testing::TestContext ctx)
+{
+    Critter? npc = SpawnTestCritter(ctx);
+    if (npc == null) {
+        return;
+    }
+
+    Critter cr = npc;
+    ItemStacks::AddItem(cr, Content::Item::sniper_rifle, 3);
+
+    if (!Testing::ExpectEq(ctx, int(cr.GetItems(Content::Item::sniper_rifle).length()), 3, "Каждая единица — отдельный предмет")) {
+        return;
+    }
+
+    if (!Testing::ExpectEq(ctx, ItemStacks::CountItem(cr, Content::Item::sniper_rifle), 3, "Единицы считаются по экземплярам")) {
+        return;
+    }
+
+    int limit = Settings.Critter.MaxAddUnstackableItems;
+    ItemStacks::AddItem(cr, Content::Item::leather_armor, limit + 5);
+    Testing::ExpectEq(ctx, int(cr.GetItems(Content::Item::leather_armor).length()), limit, "Одно добавление не превышает предел экземпляров");
+}
+
+// Перенос части стопки отделяет единицы, перенос остатка сливает стопки у получателя.
+void MoveSplitsAndMerges(Testing::TestContext ctx)
+{
+    Critter? first = SpawnTestCritter(ctx);
+    if (first == null) {
+        return;
+    }
+
+    Critter? second = SpawnTestCritter(ctx);
+    if (second == null) {
+        return;
+    }
+
+    Critter from = first;
+    Critter to = second;
+    Item stack = ItemStacks::AddItem(from, Content::Item::bottle_caps, 10);
+
+    Item? moved = ItemStacks::MoveItem(stack, 4, to);
+    if (!Testing::Expect(ctx, moved != null, "Перенос части стопки удаётся")) {
+        return;
+    }
+
+    if (!Testing::ExpectEq(ctx, ItemStacks::CountItem(from, Content::Item::bottle_caps), 6, "У источника остались непереданные единицы")) {
+        return;
+    }
+
+    if (!Testing::ExpectEq(ctx, ItemStacks::CountItem(to, Content::Item::bottle_caps), 4, "Получатель получил ровно перенесённое")) {
+        return;
+    }
+
+    if (!Testing::ExpectEq(ctx, stack.Count, 6, "Исходная стопка уменьшилась")) {
+        return;
+    }
+
+    ItemStacks::MoveItem(stack, stack.Count, to);
+
+    if (!Testing::ExpectEq(ctx, ItemStacks::CountItem(from, Content::Item::bottle_caps), 0, "Источник отдал остаток")) {
+        return;
+    }
+
+    if (!Testing::ExpectEq(ctx, ItemStacks::CountItem(to, Content::Item::bottle_caps), 10, "Получатель собрал все единицы")) {
+        return;
+    }
+
+    Testing::ExpectEq(ctx, int(to.GetItems(Content::Item::bottle_caps).length()), 1, "У получателя всё лежит одной стопкой");
+}
+
+// Снятие единиц уменьшает стопку, а снятие всех — уничтожает предмет.
+void DestroyTakesUnitsThenTheStack(Testing::TestContext ctx)
+{
+    Critter? npc = SpawnTestCritter(ctx);
+    if (npc == null) {
+        return;
+    }
+
+    Critter cr = npc;
+    ItemStacks::AddItem(cr, Content::Item::bottle_caps, 10);
+
+    ItemStacks::DestroyItem(cr, Content::Item::bottle_caps, 3);
+    if (!Testing::ExpectEq(ctx, ItemStacks::CountItem(cr, Content::Item::bottle_caps), 7, "Снялись ровно три единицы")) {
+        return;
+    }
+
+    ItemStacks::DestroyItem(cr, Content::Item::bottle_caps);
+    if (!Testing::ExpectEq(ctx, ItemStacks::CountItem(cr, Content::Item::bottle_caps), 0, "Снялись все единицы")) {
+        return;
+    }
+
+    Testing::ExpectEq(ctx, int(cr.GetItems(Content::Item::bottle_caps).length()), 0, "Пустая стопка не остаётся предметом");
+}
+
+// В контейнере единицы сливаются внутри своей секции, а разные секции держат свои стопки.
+void ContainerStacksArePerSection(Testing::TestContext ctx)
+{
+    Critter? npc = SpawnTestCritter(ctx);
+    if (npc == null) {
+        return;
+    }
+
+    Critter cr = npc;
+    Item cont = ItemStacks::AddItem(cr, Content::Item::backpack, 1);
+
+    Item main = ItemStacks::AddItem(cont, Content::Item::bottle_caps, 10, Tla::MakeContainerStack(1));
+    Item same = ItemStacks::AddItem(cont, Content::Item::bottle_caps, 5, Tla::MakeContainerStack(1));
+    if (!Testing::Expect(ctx, same.Id == main.Id, "Единицы одной секции сливаются в одну стопку")) {
+        return;
+    }
+
+    if (!Testing::ExpectEq(ctx, main.Count, 15, "Стопка секции собрала все единицы")) {
+        return;
+    }
+
+    Item other = ItemStacks::AddItem(cont, Content::Item::bottle_caps, 7, Tla::MakeContainerStack(2));
+    if (!Testing::Expect(ctx, other.Id != main.Id, "Другая секция держит свою стопку")) {
+        return;
+    }
+
+    Testing::ExpectEq(ctx, int(cont.GetItems(Tla::MakeContainerStack(2)).length()), 1, "Во второй секции одна стопка");
+}
+
+#endif
+
+}

@@ -229,8 +229,8 @@ void DialogTextBaker::BakeFiles(const FileCollection& files, string_view target_
     // Fill texts
     vector<pair<string, map<string, TextPack>>> lang_packs;
 
-    for (const auto& dlg_pack : dialog_packs) {
-        for (const auto& dlg_pack_text : dlg_pack->Texts) {
+    for (auto& dlg_pack : dialog_packs) {
+        for (auto& dlg_pack_text : dlg_pack->Texts) {
             const string lang_pack = dlg_pack_text.first;
 
             if (std::ranges::find_if(_context->Settings->BakeLanguages, [&](auto&& l) { return l == lang_pack; }) == _context->Settings->BakeLanguages.end()) {

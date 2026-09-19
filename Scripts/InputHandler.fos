@@ -5,9 +5,11 @@
 //  переключение настроек отображения и громкости, выбор курсора навыков/оружия, прокрутка карты
 //  удержанием стрелок и зум. Опирается на Gui::, Settings, GameTime::, ChosenActions::,
 //  GuiScreensExt:: и другие модули клиента.
-// Глобальное состояние: две половины ручной прокрутки карты (от курсора у края экрана и от стрелок).
-//  Движок хранит только итоговое направление в карте (Map.SetManualScroll), а каждая половина меняется
-//  своими событиями ввода, поэтому помнить их по отдельности может только слой ввода.
+// Глобальное состояние — то, что переключают клавиши во время игры (настройки движка неизменяемы):
+//  две половины ручной прокрутки карты (от курсора у края экрана и от стрелок; движок хранит в карте только
+//  итоговое направление, Map.SetManualScroll, а половины меняются своими событиями ввода), включённость
+//  прокрутки курсором для полноэкранного и оконного режимов (F8, начальные значения — из настроек Hex.*)
+//  и показ справки (F1).
 namespace InputHandler
 {
 
@@ -15,15 +17,33 @@ namespace InputHandler
 
 ScrollDirection MouseScroll = ScrollDirection::None;
 ScrollDirection KeyboardScroll = ScrollDirection::None;
+bool FullscreenEdgeScroll = true;
+bool WindowedEdgeScroll = false;
+bool HelpInfoShown = false;
 
 // Точка входа модуля: регистрирует колбэки ввода при старте клиента.
 [[ModuleInit]]
 void InitInputHandler()
 {
+    FullscreenEdgeScroll = Settings.Hex.FullscreenMouseScroll;
+    WindowedEdgeScroll = Settings.Hex.WindowedMouseScroll;
+
     Input::AddKeyDownCallback(OnKeyDown);
     Input::AddKeyUpCallback(OnKeyUp);
     Game.OnScreenChange.Subscribe(OnScreenChange);
     Game.OnMapLoaded.Subscribe(OnMapLoaded);
+}
+
+// Прокручивает ли курсор у края экрана карту в текущем режиме окна.
+bool IsEdgeScrollEnabled()
+{
+    return Game.IsFullscreen() ? FullscreenEdgeScroll : WindowedEdgeScroll;
+}
+
+// Показана ли справка (переключается F1).
+bool IsHelpInfoShown()
+{
+    return HelpInfoShown;
 }
 
 // Направления прокрутки одним набором флагов.
@@ -122,7 +142,7 @@ bool HandleHotkeys(KeyCode key)
     if (!Input::IsCtrlDown() && !Input::IsAltDown() && !Input::IsShiftDown()) {
         switch (key) {
         case KeyCode::F1:
-            Settings.Client.HelpInfo = !Settings.Client.HelpInfo;
+            HelpInfoShown = !HelpInfoShown;
             break;
 
         case KeyCode::F2:
@@ -146,11 +166,11 @@ bool HandleHotkeys(KeyCode key)
             break;
 
         case KeyCode::F8:
-            if (Settings.Render.Fullscreen) {
-                Settings.Hex.FullscreenMouseScroll = !Settings.Hex.FullscreenMouseScroll;
+            if (Game.IsFullscreen()) {
+                FullscreenEdgeScroll = !FullscreenEdgeScroll;
             }
             else {
-                Settings.Hex.WindowedMouseScroll = !Settings.Hex.WindowedMouseScroll;
+                WindowedEdgeScroll = !WindowedEdgeScroll;
             }
 
             SetMouseScroll(false, false, false, false);
@@ -381,10 +401,10 @@ bool HandleHotkeys(KeyCode key)
         case KeyCode::Add:
             if (!inputFocused) {
                 if (Input::IsCtrlDown()) {
-                    Settings.Audio.SoundVolume = Math::Clamp(Settings.Audio.SoundVolume + 2, 0, 100);
+                    Game.SetSoundVolume(Math::Clamp(Game.GetSoundVolume() + 2, 0, 100));
                 }
                 else if (Input::IsShiftDown()) {
-                    Settings.Audio.MusicVolume = Math::Clamp(Settings.Audio.MusicVolume + 2, 0, 100);
+                    Game.SetMusicVolume(Math::Clamp(Game.GetMusicVolume() + 2, 0, 100));
                 }
             }
 
@@ -393,10 +413,10 @@ bool HandleHotkeys(KeyCode key)
         case KeyCode::Subtract:
             if (!inputFocused) {
                 if (Input::IsCtrlDown()) {
-                    Settings.Audio.SoundVolume = Math::Clamp(Settings.Audio.SoundVolume - 2, 0, 100);
+                    Game.SetSoundVolume(Math::Clamp(Game.GetSoundVolume() - 2, 0, 100));
                 }
                 else if (Input::IsShiftDown()) {
-                    Settings.Audio.MusicVolume = Math::Clamp(Settings.Audio.MusicVolume - 2, 0, 100);
+                    Game.SetMusicVolume(Math::Clamp(Game.GetMusicVolume() - 2, 0, 100));
                 }
             }
 

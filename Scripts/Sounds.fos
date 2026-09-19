@@ -1,0 +1,122 @@
+// Sounds — сопоставление имён звуков с запечёнными ресурсами.
+// Движок проигрывает звук только по точному пути ресурса (разбор имён ушёл из него вместе с ACM, Engine #211),
+// а контент TLA называет звуки по-разному: полным путём в любом регистре ("sound/sfx/whn1xxx1.acm"), голым именем
+// файла Fallout с расширением или без ("LEVELUP.ACM", "ICIBOXX1") и серией NAME_1..NAME_N, из которой берётся
+// случайный вариант. Поиск индекса — чистые функции, общие для сторон (их покрывает Test_Sounds);
+// CLIENT: Play() строит индекс по Game.GetSoundNames() при первом звуке и проигрывает найденный путь.
+// Глобальное состояние: индекс звуков клиента. Он строится один раз за сессию — набор запечённых звуков
+// не меняется, а пересобирать его на каждый звук значило бы разбирать полторы тысячи путей.
+namespace Sounds
+{
+
+// Индекс звуков: ключ пути и ключ имени файла (оба в нижнем регистре, без расширения) -> путь ресурса
+class SoundIndex
+{
+    dict<string, string> ByPath = {};
+    dict<string, string> ByFileName = {};
+}
+
+// Ключ поиска: путь в нижнем регистре без расширения
+string
+KeyOf(string name)
+{
+    string key = name.lower();
+    int dot = key.findLast(".");
+
+    if (dot > key.findLast("/")) {
+        key = key.substr(0, dot);
+    }
+
+    return key;
+}
+
+// Имя файла из ключа — последняя часть пути
+string FileKeyOf(string key)
+{
+    int slash = key.findLast("/");
+    return slash >= 0 ? key.substr(slash + 1) : key;
+}
+
+// Индекс по списку путей; при совпадении ключей побеждает первый путь списка
+SoundIndex BuildIndex(string[] paths)
+{
+    SoundIndex index = SoundIndex();
+
+    for (int i = 0; i < int(paths.length()); i++) {
+        string key = KeyOf(paths[i]);
+        index.ByPath.setIfNotExist(key, paths[i]);
+        index.ByFileName.setIfNotExist(FileKeyOf(key), paths[i]);
+    }
+
+    return index;
+}
+
+// Путь по ключу: сначала полный путь, а голое имя (без каталога) ищется и среди имён файлов
+string Lookup(SoundIndex index, string key)
+{
+    if (index.ByPath.exists(key)) {
+        return index.ByPath.get(key);
+    }
+
+    if (key.find("/") < 0 && index.ByFileName.exists(key)) {
+        return index.ByFileName.get(key);
+    }
+
+    return "";
+}
+
+// Пути, которыми может прозвучать имя: один точный путь, либо вся серия NAME_1..NAME_N, либо ничего
+string[] Candidates(SoundIndex index, string name)
+{
+    string key = KeyOf(name);
+    string path = Lookup(index, key);
+
+    string[] found = {};
+
+    if (path != "") {
+        found.insertLast(path);
+        return found;
+    }
+
+    for (int i = 1;; i++) {
+        string variant = Lookup(index, key + "_" + i);
+        if (variant == "") {
+            break;
+        }
+
+        found.insertLast(variant);
+    }
+
+    return found;
+}
+
+#if CLIENT
+
+SoundIndex? ClientIndex;
+
+SoundIndex GetClientIndex()
+{
+    SoundIndex? index = ClientIndex;
+    if (index == null) {
+        SoundIndex built = BuildIndex(Game.GetSoundNames());
+        ClientIndex = built;
+        return built;
+    }
+
+    return index;
+}
+
+// Проигрывает звук по имени; false — такого звука нет среди запечённых ресурсов
+bool Play(string name)
+{
+    string[] candidates = Candidates(GetClientIndex(), name);
+    if (candidates.length() == 0) {
+        return false;
+    }
+
+    return Game.PlaySound(candidates[Game.Random(0, int(candidates.length()) - 1)]);
+}
+
+#endif
+
+}

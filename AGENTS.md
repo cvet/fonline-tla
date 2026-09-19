@@ -23,12 +23,14 @@ Project front door for AI maintainers working on **FOnline: The Life After** (TL
 - `Scripts/Content.fos` - generated/baked content declarations. Do not hand-edit.
 - `Scripts/Generated/GuiScreens.fos` - generated screen bindings. Source of truth: `Gui/*.fogui` plus `Tools/InterfaceEditor/generate_gui_screens.py`. Do not hand-edit unless you also update the owning `.fogui` code as described below.
 - `Scripts/GuiScreensExt.fos` - hand-written companion to `GuiScreens.fos`; non-generated GUI logic lives here.
+- `Scripts/Sounds.fos` - play sounds through `Sounds::Play(name)`, not `Game.PlaySound`: the engine plays only an exact resource path, and `Sounds` maps TLA's names (any-case paths, bare Fallout names such as `LEVELUP.ACM`, `NAME_1..NAME_N` series) onto the baked paths.
 - `Gui/*.fogui` - GUI definitions and embedded screen script code.
 - `SourceExt/CommonExtension.cpp` - SHA helpers shared by client/server.
 - `SourceExt/ServerExtension.cpp` - server image checks, dialog plumbing, visibility hooks, critter busy/free stubs.
 - `SourceExt/ClientExtension.cpp` / `SourceExt/ClientExtension.h` - `Game.FormatTags`, client critter busy/free stubs, `ClientInitHook` + `ClientExtData` (holds the AI control bridge state and embedded-client index).
 - `SourceExt/ClientAiBridge.cpp` - localhost TCP line protocol for the AI control bridge (client-side test/automation). Pairs with `Scripts/AiControl.fos` and `Tools/AiControlMcp/`. See [Docs/AiControl.md](Docs/AiControl.md).
-- `SourceExt/BakerExtension.cpp`, `SourceExt/DialogBaker.*`, `SourceExt/Dialogs.*` - dialog bake/runtime support.
+- `SourceExt/BakerExtension.cpp`, `SourceExt/DialogBaker.*`, `SourceExt/Dialogs.*` - dialog bake/runtime support; `SetupBakersHook` also registers the ACM loader with the engine's `AudioBaker`.
+- `SourceExt/AcmDecoder.*` - Fallout ACM decoder (a bit-exact port of the unpacker the engine dropped in #211) and `LoadAcmAudio`, the `AudioBaker` loader: every `.acm` is baked to Ogg Vorbis like any other sound, effects as mono and `sound/music/` as stereo, the way Fallout played them. Covered by `SourceExt/TestAcmDecoder.cpp`.
 - `SourceExt/ContentMigration.cpp` - TLA-specific content/data migrations.
 - `SourceExt/SHA/` - bundled SHA implementation wrapped as a static library.
 - `Tools/Formatter/format_project.py` and `FormatSource.bat` - formatting entry points. VS Code tasks use the Python formatter.

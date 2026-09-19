@@ -80,9 +80,12 @@ AddEngineSources(
     SERVER SourceExt/ServerExtension.cpp
     CLIENT SourceExt/ClientExtension.cpp
     CLIENT SourceExt/ClientAiBridge.cpp
+    BAKER SourceExt/AcmDecoder.h
+    BAKER SourceExt/AcmDecoder.cpp
     BAKER SourceExt/BakerExtension.cpp
     BAKER SourceExt/DialogBaker.h
     BAKER SourceExt/DialogBaker.cpp
+    TESTS SourceExt/TestAcmDecoder.cpp
     TESTS SourceExt/TestDialogs.cpp)
 
 RegisterEngineSources()

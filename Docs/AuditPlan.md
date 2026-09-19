@@ -144,7 +144,7 @@ observation timer), then collapse. Doing it the other way round is an unverified
 
 ## 10. Mutable-globals allowlist becomes a boundary again
 
-**Measurement.** `Script.MutableGlobalsAllowedNamespaces` lists 75 namespaces — nearly everything in the
+**Measurement.** `AngelScript.MutableGlobalsAllowedNamespaces` (formerly `Script.MutableGlobalsAllowedNamespaces`) listed 75 namespaces — nearly everything in the
 project, so the mechanism no longer marks an exception.
 
 **Steps.** No sweep. Adopt the rule: a module touched for any other reason either leaves the allowlist or

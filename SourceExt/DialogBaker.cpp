@@ -197,7 +197,7 @@ void DialogTextBaker::BakeFiles(const FileCollection& files, string_view target_
     bool something_changed = false;
 
     if (!filtered_files.empty()) {
-        for (const auto& lang_name : _context->Settings->BakeLanguages) {
+        for (const auto& lang_name : _context->Settings->Baking.BakeLanguages) {
             if (!_context->BakeChecker || _context->BakeChecker(strex("{}.Dialogs.{}.fotxt-bin", _context->PackName, lang_name), max_write_time)) {
                 something_changed = true;
             }
@@ -233,7 +233,7 @@ void DialogTextBaker::BakeFiles(const FileCollection& files, string_view target_
         for (auto& dlg_pack_text : dlg_pack->Texts) {
             const string lang_pack = dlg_pack_text.first;
 
-            if (std::ranges::find_if(_context->Settings->BakeLanguages, [&](auto&& l) { return l == lang_pack; }) == _context->Settings->BakeLanguages.end()) {
+            if (std::ranges::find_if(_context->Settings->Baking.BakeLanguages, [&](auto&& l) { return l == lang_pack; }) == _context->Settings->Baking.BakeLanguages.end()) {
                 logging::write(logging::type::warning, "Dialog {} contains unsupported language {}", dlg_pack->PackId, lang_pack);
                 continue;
             }
@@ -261,7 +261,7 @@ void DialogTextBaker::BakeFiles(const FileCollection& files, string_view target_
 
     // A bake language entry may carry a fallback declaration ("ru18:russ"), so both the ordering and the pack
     // fixup go through the parsed config instead of the raw setting strings
-    BakeLanguageConfig bake_languages = TextPack::ParseBakeLanguages(_context->Settings->BakeLanguages);
+    BakeLanguageConfig bake_languages = TextPack::ParseBakeLanguages(_context->Settings->Baking.BakeLanguages);
 
     std::ranges::stable_sort(lang_packs, [&](const auto& l, const auto& r) {
         const auto li = std::ranges::find(bake_languages.Languages, l.first);

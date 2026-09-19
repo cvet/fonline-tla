@@ -12,7 +12,7 @@ Project front door for AI maintainers working on **FOnline: The Life After** (TL
   - `Critters/`, `Items/`, `Maps/`, `Dialogs/`, `Gui/`, `Texts/`, `Resources/` - authored game content and assets.
   - `TLA.fomain` - master engine/game config and `[SubConfig]` profiles.
   - `CMakeLists.txt` / `CMakePresets.json` - build glue. Default local preset is `auto` into `Build/Auto`.
-- TLA scripts are AngelScript only. The engine also offers a managed (C#) backend; it stays off (`FO_MANAGED_SCRIPTING OFF` in `CMakeLists.txt`), and the `Script.ManagedScript*` settings the engine requires regardless are left empty in `TLA.fomain`.
+- TLA scripts are AngelScript only. The engine also offers a managed (C#) backend; it stays off (`FO_MANAGED_SCRIPTING OFF` in `CMakeLists.txt`), and the `ManagedScript.*` settings the engine requires regardless are left empty in `TLA.fomain`.
 - The user usually converses in Russian; answer the user in Russian unless asked otherwise.
 - **Script comment language is Russian** (owner decision 2026-06-20, reversing the prior English-only rule). In `Scripts/*.fos`: code comments and the per-file header block (see [Docs/ScriptStyle.md](Docs/ScriptStyle.md)) are written in Russian, and existing English comments are translated to Russian as files are touched. **Exception:** serialized/contract names stay English — `///@ Property/Enum/Setting/Event/RemoteCall`, proto ids, text-pack keys, and identifiers (renaming them risks save/network/content migration). Agent-facing markdown (`AGENTS.md`, most of `Docs/`) and native C++ (`SourceExt/`) remain English; player-facing text follows the existing localized pack structure.
 - Text packs are baked for `russ engl`; `Client.Language = engl` in the default config. When editing player-facing text, preserve the existing pack structure and update both language surfaces when the nearby content expects that.
@@ -136,7 +136,7 @@ Native C++ conventions:
 - Use `#if SERVER`, `#if CLIENT`, and `#if MAPPER` carefully. Side-specific bugs are often missing or stray guards.
 - Keep authoritative gameplay state changes on the server. Client scripts should focus on UI, input, presentation, and client-only probes.
 - **A module you touch leaves the mutable-globals allowlist, or says why it stays.**
-  `Script.MutableGlobalsAllowedNamespaces` in `TLA.fomain` lists 75 namespaces — it was meant to mark
+  `AngelScript.MutableGlobalsAllowedNamespaces` in `TLA.fomain` lists 76 namespaces — it was meant to mark
   exceptions and now covers nearly the whole project, which is also what makes those modules hard to test in
   isolation. Do not sweep the list; when a module is opened for any other reason, either move its mutable
   state behind the module (a parameter, an accessor, per-entity storage) and drop the namespace, or add one

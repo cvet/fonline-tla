@@ -7,11 +7,12 @@ Project front door for AI maintainers working on **FOnline: The Life After** (TL
 - TLA is a multiplayer game built on top of the reusable **fonline-engine** submodule in `Engine/`.
 - The split is engine plus game:
   - `Engine/` - upstream engine submodule. Treat as external unless the task explicitly requires an engine change.
-  - `Scripts/*.fos` - AngelScript gameplay, dialogs, quests, AI, GUI behavior, and server/client hooks. Hand-written gameplay code sits at the top level; `Scripts/Generated/` holds generated files, `Scripts/Tests/` the harness suites, `Scripts/Json/` the JSON helpers. Every script directory must be listed in the `InputDirs` of the `Metadata` and `Scripts` resource packs in `TLA.fomain` — baking does not recurse.
+  - `Scripts/*.fos` - AngelScript gameplay, dialogs, quests, AI, GUI behavior, and server/client hooks. Hand-written gameplay code sits at the top level; `Scripts/Generated/` holds generated files, `Scripts/Tests/` the harness suites, `Scripts/Json/` the JSON helpers, `Scripts/Core/` the utility library (`Gui`, `Math`, `Time`, `Color`, `Sprite`, `Tween`, ...) that the engine used to bundle and that TLA owns since the engine went backend-neutral. Every script directory must be listed in the `InputDirs` of the `Metadata` and `Scripts` resource packs in `TLA.fomain` — baking does not recurse.
   - `SourceExt/*.cpp` / `SourceExt/*.h` - project-local native C++ extensions registered from `CMakeLists.txt`.
   - `Critters/`, `Items/`, `Maps/`, `Dialogs/`, `Gui/`, `Texts/`, `Resources/` - authored game content and assets.
   - `TLA.fomain` - master engine/game config and `[SubConfig]` profiles.
   - `CMakeLists.txt` / `CMakePresets.json` - build glue. Default local preset is `auto` into `Build/Auto`.
+- TLA scripts are AngelScript only. The engine also offers a managed (C#) backend; it stays off (`FO_MANAGED_SCRIPTING OFF` in `CMakeLists.txt`), and the `Script.ManagedScript*` settings the engine requires regardless are left empty in `TLA.fomain`.
 - The user usually converses in Russian; answer the user in Russian unless asked otherwise.
 - **Script comment language is Russian** (owner decision 2026-06-20, reversing the prior English-only rule). In `Scripts/*.fos`: code comments and the per-file header block (see [Docs/ScriptStyle.md](Docs/ScriptStyle.md)) are written in Russian, and existing English comments are translated to Russian as files are touched. **Exception:** serialized/contract names stay English — `///@ Property/Enum/Setting/Event/RemoteCall`, proto ids, text-pack keys, and identifiers (renaming them risks save/network/content migration). Agent-facing markdown (`AGENTS.md`, most of `Docs/`) and native C++ (`SourceExt/`) remain English; player-facing text follows the existing localized pack structure.
 - Text packs are baked for `russ engl`; `Client.Language = engl` in the default config. When editing player-facing text, preserve the existing pack structure and update both language surfaces when the nearby content expects that.
@@ -166,7 +167,7 @@ Native C++ conventions:
 Authored inputs:
 
 ```text
-Scripts/*.fos, Scripts/Generated/*.fos, Scripts/Json/*.fos, Scripts/Tests/*.fos
+Scripts/*.fos, Scripts/Core/*.fos, Scripts/Generated/*.fos, Scripts/Json/*.fos, Scripts/Tests/*.fos
 Critters/*.focr, Items/*.foitem, Maps/*.fomap
 Dialogs/*.fodlg, Gui/*.fogui, Texts/*.fotxt
 Resources/*

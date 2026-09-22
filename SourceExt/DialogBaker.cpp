@@ -81,7 +81,7 @@ void DialogBaker::BakeFiles(const FileCollection& files, string_view target_path
             dialog_packs.emplace_back(std::move(pack));
         }
         catch (const DialogParseException& ex) {
-            WriteLog("Dialog baking error: {}", ex.what());
+            logging::write("Dialog baking error: {}", ex.what());
             errors++;
         }
     }
@@ -92,7 +92,7 @@ void DialogBaker::BakeFiles(const FileCollection& files, string_view target_path
             if (speech->DlgScriptFuncName) {
                 if (!server_engine.CheckFunc<void, ptr<CritterTag>, nptr<CritterTag>, string&>(speech->DlgScriptFuncName) && //
                     !server_engine.CheckFunc<int32_t, ptr<CritterTag>, nptr<CritterTag>, string&>(speech->DlgScriptFuncName)) {
-                    WriteLog("Dialog {} invalid start function {}", dlg_pack->PackId, speech->DlgScriptFuncName);
+                    logging::write("Dialog {} invalid start function {}", dlg_pack->PackId, speech->DlgScriptFuncName);
                     errors++;
                 }
             }
@@ -108,7 +108,7 @@ void DialogBaker::BakeFiles(const FileCollection& files, string_view target_path
                             (demand->ValuesCount == 5 && HasDialogScriptAttribute<bool, ptr<CritterTag>, nptr<CritterTag>, any_t, any_t, any_t, any_t, any_t>(server_engine, demand->AnswerScriptFuncName, "DialogDemand"));
 
                         if (!has_valid_demand) {
-                            WriteLog("Dialog {} answer demand invalid function {} (expected [[DialogDemand]])", dlg_pack->PackId, demand->AnswerScriptFuncName);
+                            logging::write("Dialog {} answer demand invalid function {} (expected [[DialogDemand]])", dlg_pack->PackId, demand->AnswerScriptFuncName);
                             errors++;
                         }
                     }
@@ -148,7 +148,7 @@ void DialogBaker::BakeFiles(const FileCollection& files, string_view target_path
                         const int32_t valid_count = (valid_void_result ? 1 : 0) + (valid_int_result ? 1 : 0);
 
                         if (found_count != 1 || valid_count != 1) {
-                            WriteLog("Dialog {} answer result invalid function {} (expected exactly one [[DialogResult]] overload)", dlg_pack->PackId, result->AnswerScriptFuncName);
+                            logging::write("Dialog {} answer result invalid function {} (expected exactly one [[DialogResult]] overload)", dlg_pack->PackId, result->AnswerScriptFuncName);
                             errors++;
                         }
                     }
@@ -197,7 +197,7 @@ void DialogTextBaker::BakeFiles(const FileCollection& files, string_view target_
     bool something_changed = false;
 
     if (!filtered_files.empty()) {
-        for (const auto& lang_name : _context->Settings->BakeLanguages) {
+        for (const auto& lang_name : _context->Settings->Baking.BakeLanguages) {
             if (!_context->BakeChecker || _context->BakeChecker(strex("{}.Dialogs.{}.fotxt-bin", _context->PackName, lang_name), max_write_time)) {
                 something_changed = true;
             }
@@ -221,7 +221,7 @@ void DialogTextBaker::BakeFiles(const FileCollection& files, string_view target_
             dialog_packs.emplace_back(std::move(pack));
         }
         catch (const DialogParseException& ex) {
-            WriteLog("Dialog text baking error: {}", ex.what());
+            logging::write("Dialog text baking error: {}", ex.what());
             errors++;
         }
     }
@@ -229,12 +229,12 @@ void DialogTextBaker::BakeFiles(const FileCollection& files, string_view target_
     // Fill texts
     vector<pair<string, map<string, TextPack>>> lang_packs;
 
-    for (const auto& dlg_pack : dialog_packs) {
-        for (const auto& dlg_pack_text : dlg_pack->Texts) {
+    for (auto& dlg_pack : dialog_packs) {
+        for (auto& dlg_pack_text : dlg_pack->Texts) {
             const string lang_pack = dlg_pack_text.first;
 
-            if (std::ranges::find_if(_context->Settings->BakeLanguages, [&](auto&& l) { return l == lang_pack; }) == _context->Settings->BakeLanguages.end()) {
-                WriteLog(LogType::Warning, "Dialog {} contains unsupported language {}", dlg_pack->PackId, lang_pack);
+            if (std::ranges::find_if(_context->Settings->Baking.BakeLanguages, [&](auto&& l) { return l == lang_pack; }) == _context->Settings->Baking.BakeLanguages.end()) {
+                logging::write(logging::type::warning, "Dialog {} contains unsupported language {}", dlg_pack->PackId, lang_pack);
                 continue;
             }
 
@@ -252,7 +252,7 @@ void DialogTextBaker::BakeFiles(const FileCollection& files, string_view target_
                     text_pack.Merge(dlg_pack_text.second);
                 }
                 else {
-                    WriteLog("Dialog {} text intersection detected", dlg_pack->PackId);
+                    logging::write("Dialog {} text intersection detected", dlg_pack->PackId);
                     errors++;
                 }
             }
@@ -261,7 +261,7 @@ void DialogTextBaker::BakeFiles(const FileCollection& files, string_view target_
 
     // A bake language entry may carry a fallback declaration ("ru18:russ"), so both the ordering and the pack
     // fixup go through the parsed config instead of the raw setting strings
-    BakeLanguageConfig bake_languages = TextPack::ParseBakeLanguages(_context->Settings->BakeLanguages);
+    BakeLanguageConfig bake_languages = TextPack::ParseBakeLanguages(_context->Settings->Baking.BakeLanguages);
 
     std::ranges::stable_sort(lang_packs, [&](const auto& l, const auto& r) {
         const auto li = std::ranges::find(bake_languages.Languages, l.first);

@@ -5,17 +5,96 @@
 //  переключение настроек отображения и громкости, выбор курсора навыков/оружия, прокрутка карты
 //  удержанием стрелок и зум. Опирается на Gui::, Settings, GameTime::, ChosenActions::,
 //  GuiScreensExt:: и другие модули клиента.
+// Глобальное состояние — то, что переключают клавиши во время игры (настройки движка неизменяемы):
+//  две половины ручной прокрутки карты (от курсора у края экрана и от стрелок; движок хранит в карте только
+//  итоговое направление, Map.SetManualScroll, а половины меняются своими событиями ввода), включённость
+//  прокрутки курсором для полноэкранного и оконного режимов (F8, начальные значения — из настроек Hex.*)
+//  и показ справки (F1).
 namespace InputHandler
 {
 
 #if CLIENT
 
+ScrollDirection MouseScroll = ScrollDirection::None;
+ScrollDirection KeyboardScroll = ScrollDirection::None;
+bool FullscreenEdgeScroll = true;
+bool WindowedEdgeScroll = false;
+bool HelpInfoShown = false;
+
 // Точка входа модуля: регистрирует колбэки ввода при старте клиента.
 [[ModuleInit]]
 void InitInputHandler()
 {
+    FullscreenEdgeScroll = Settings.Hex.FullscreenMouseScroll;
+    WindowedEdgeScroll = Settings.Hex.WindowedMouseScroll;
+
     Input::AddKeyDownCallback(OnKeyDown);
     Input::AddKeyUpCallback(OnKeyUp);
+    Game.OnScreenChange.Subscribe(OnScreenChange);
+    Game.OnMapLoaded.Subscribe(OnMapLoaded);
+}
+
+// Прокручивает ли курсор у края экрана карту в текущем режиме окна.
+bool IsEdgeScrollEnabled()
+{
+    return Game.IsFullscreen() ? FullscreenEdgeScroll : WindowedEdgeScroll;
+}
+
+// Показана ли справка (переключается F1).
+bool IsHelpInfoShown()
+{
+    return HelpInfoShown;
+}
+
+// Направления прокрутки одним набором флагов.
+ScrollDirection ScrollOf(bool left, bool right, bool up, bool down)
+{
+    int dirs = 0;
+    dirs |= left ? int(ScrollDirection::Left) : 0;
+    dirs |= right ? int(ScrollDirection::Right) : 0;
+    dirs |= up ? int(ScrollDirection::Up) : 0;
+    dirs |= down ? int(ScrollDirection::Down) : 0;
+    return ScrollDirection(dirs);
+}
+
+// Отдаёт карте объединение обеих половин прокрутки.
+void PushManualScroll()
+{
+    if (HasCurMap) {
+        CurMap.SetManualScroll(ScrollDirection(int(MouseScroll) | int(KeyboardScroll)));
+    }
+}
+
+// Прокрутка от курсора у края экрана: экран Game сообщает её на каждое движение мыши.
+void SetMouseScroll(bool left, bool right, bool up, bool down)
+{
+    MouseScroll = ScrollOf(left, right, up, down);
+    PushManualScroll();
+}
+
+// Прокручивает ли курсор карту в этом направлении (экран курсора рисует по нему стрелку).
+bool IsMouseScrolling(ScrollDirection dir)
+{
+    return (int(MouseScroll) & int(dir)) != 0;
+}
+
+// Показ любого экрана останавливает ручную прокрутку до следующего движения мыши или нажатия.
+[[Event]]
+void OnScreenChange(bool show, GuiScreen screenNum, dict<string, any> params)
+{
+    if (show) {
+        MouseScroll = ScrollDirection::None;
+        KeyboardScroll = ScrollDirection::None;
+        PushManualScroll();
+    }
+}
+
+// Новая карта начинает без прокрутки от курсора; удерживаемые стрелки продолжают прокручивать.
+[[Event]]
+void OnMapLoaded()
+{
+    MouseScroll = ScrollDirection::None;
+    PushManualScroll();
 }
 
 // Колбэк нажатия клавиши: обновляет состояние удерживаемых клавиш и,
@@ -63,7 +142,7 @@ bool HandleHotkeys(KeyCode key)
     if (!Input::IsCtrlDown() && !Input::IsAltDown() && !Input::IsShiftDown()) {
         switch (key) {
         case KeyCode::F1:
-            Settings.Client.HelpInfo = !Settings.Client.HelpInfo;
+            HelpInfoShown = !HelpInfoShown;
             break;
 
         case KeyCode::F2:
@@ -87,17 +166,14 @@ bool HandleHotkeys(KeyCode key)
             break;
 
         case KeyCode::F8:
-            if (Settings.Render.Fullscreen) {
-                Settings.Hex.FullscreenMouseScroll = !Settings.Hex.FullscreenMouseScroll;
+            if (Game.IsFullscreen()) {
+                FullscreenEdgeScroll = !FullscreenEdgeScroll;
             }
             else {
-                Settings.Hex.WindowedMouseScroll = !Settings.Hex.WindowedMouseScroll;
+                WindowedEdgeScroll = !WindowedEdgeScroll;
             }
 
-            Settings.Hex.ScrollMouseRight = false;
-            Settings.Hex.ScrollMouseLeft = false;
-            Settings.Hex.ScrollMouseDown = false;
-            Settings.Hex.ScrollMouseUp = false;
+            SetMouseScroll(false, false, false, false);
             break;
 
         case KeyCode::F9:
@@ -325,10 +401,10 @@ bool HandleHotkeys(KeyCode key)
         case KeyCode::Add:
             if (!inputFocused) {
                 if (Input::IsCtrlDown()) {
-                    Settings.Audio.SoundVolume = Math::Clamp(Settings.Audio.SoundVolume + 2, 0, 100);
+                    Game.SetSoundVolume(Math::Clamp(Game.GetSoundVolume() + 2, 0, 100));
                 }
                 else if (Input::IsShiftDown()) {
-                    Settings.Audio.MusicVolume = Math::Clamp(Settings.Audio.MusicVolume + 2, 0, 100);
+                    Game.SetMusicVolume(Math::Clamp(Game.GetMusicVolume() + 2, 0, 100));
                 }
             }
 
@@ -337,10 +413,10 @@ bool HandleHotkeys(KeyCode key)
         case KeyCode::Subtract:
             if (!inputFocused) {
                 if (Input::IsCtrlDown()) {
-                    Settings.Audio.SoundVolume = Math::Clamp(Settings.Audio.SoundVolume - 2, 0, 100);
+                    Game.SetSoundVolume(Math::Clamp(Game.GetSoundVolume() - 2, 0, 100));
                 }
                 else if (Input::IsShiftDown()) {
-                    Settings.Audio.MusicVolume = Math::Clamp(Settings.Audio.MusicVolume - 2, 0, 100);
+                    Game.SetMusicVolume(Math::Clamp(Game.GetMusicVolume() - 2, 0, 100));
                 }
             }
 
@@ -369,10 +445,11 @@ void HandlePressedKeys()
 {
     bool isGameWithoutConsole = (Gui::IsScreenActive(GuiScreen::Game) && !Gui::IsConsoleActive());
     Settings.View.MapZoomInProgress = (isGameWithoutConsole && Input::IsKeyPressed(KeyCode::Z));
-    Settings.Hex.ScrollKeybLeft = (isGameWithoutConsole && Input::IsKeyPressed(KeyCode::Left));
-    Settings.Hex.ScrollKeybRight = (isGameWithoutConsole && Input::IsKeyPressed(KeyCode::Right));
-    Settings.Hex.ScrollKeybUp = (isGameWithoutConsole && Input::IsKeyPressed(KeyCode::Up));
-    Settings.Hex.ScrollKeybDown = (isGameWithoutConsole && Input::IsKeyPressed(KeyCode::Down));
+    KeyboardScroll = ScrollOf(isGameWithoutConsole && Input::IsKeyPressed(KeyCode::Left),
+                              isGameWithoutConsole && Input::IsKeyPressed(KeyCode::Right),
+                              isGameWithoutConsole && Input::IsKeyPressed(KeyCode::Up),
+                              isGameWithoutConsole && Input::IsKeyPressed(KeyCode::Down));
+    PushManualScroll();
 }
 
 #endif

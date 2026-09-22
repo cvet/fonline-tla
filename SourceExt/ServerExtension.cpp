@@ -70,7 +70,7 @@ void FO_NAMESPACE ServerInitHook(ptr<ServerEngine> server)
 {
     FO_STACK_TRACE_ENTRY();
 
-    server->UserData = make_unique_del_ptr(SafeAlloc::MakeRaw<ServerExtData>().reinterpret_as<uint8_t>(), [](const uint8_t* ptr) FO_DEFERRED {
+    server->UserData = make_unique_del_ptr(safe_alloc::make_raw<ServerExtData>().reinterpret_as<uint8_t>(), [](const uint8_t* ptr) FO_DEFERRED {
         const auto* ext_data_ptr = reinterpret_cast<const ServerExtData*>(ptr);
         delete ext_data_ptr;
     });
@@ -98,7 +98,7 @@ void FO_NAMESPACE ServerInitHook(ptr<ServerEngine> server)
     ext_data.TrapValue = item_props->FindProperty("TrapValue");
     FO_VERIFY_AND_THROW(ext_data.TrapValue, "Item property TrapValue not found");
 
-    ext_data.DialogMngr = SafeAlloc::MakeUnique<DialogManager>(*server);
+    ext_data.DialogMngr = safe_alloc::make_unique<DialogManager>(*server);
     ext_data.DialogMngr->LoadFromResources(server->Resources);
 }
 
@@ -199,7 +199,7 @@ isize32 FO_NAMESPACE Server_Game_LoadImage(ptr<ServerEngine> server, uint32_t im
 
     auto image = ExtractSpriteResourceFrameImage(std::move(resource.Directions.front().Frames.front()));
 
-    auto simg = SafeAlloc::MakeUnique<ServerImage>();
+    auto simg = safe_alloc::make_unique<ServerImage>();
     simg->Width = image.Size.width;
     simg->Height = image.Size.height;
     simg->Data = std::move(image.Pixels);
@@ -236,8 +236,8 @@ nptr<DialogPack> FO_NAMESPACE Server_Game_GetDialogPack(ptr<ServerEngine> server
     auto& ext_data = GetServerExtData(server);
     auto pack = ext_data.DialogMngr->GetDialog(packId);
 
-    if (pack == nullptr) {
-        BreakIntoDebugger();
+    if (!pack) {
+        break_into_debugger();
         return nullptr;
     }
 
@@ -434,7 +434,7 @@ void FO_NAMESPACE Server_Critter_ViewMap(ptr<Critter> self, ptr<Map> map, int32_
     }
 
     auto player = self->GetPlayer();
-    if (player == nullptr) {
+    if (!player) {
         return;
     }
 

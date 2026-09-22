@@ -7,11 +7,12 @@ Project front door for AI maintainers working on **FOnline: The Life After** (TL
 - TLA is a multiplayer game built on top of the reusable **fonline-engine** submodule in `Engine/`.
 - The split is engine plus game:
   - `Engine/` - upstream engine submodule. Treat as external unless the task explicitly requires an engine change.
-  - `Scripts/*.fos` - AngelScript gameplay, dialogs, quests, AI, GUI behavior, and server/client hooks. The folder is flat except for `Scripts/Json/`.
+  - `Scripts/*.fos` - AngelScript gameplay, dialogs, quests, AI, GUI behavior, and server/client hooks. Hand-written gameplay code sits at the top level; `Scripts/Generated/` holds generated files, `Scripts/Tests/` the harness suites, `Scripts/Json/` the JSON helpers, `Scripts/Core/` the utility library (`Gui`, `Math`, `Time`, `Color`, `Sprite`, `Tween`, ...) that the engine used to bundle and that TLA owns since the engine went backend-neutral. Every script directory must be listed in the `InputDirs` of the `Metadata` and `Scripts` resource packs in `TLA.fomain` — baking does not recurse.
   - `SourceExt/*.cpp` / `SourceExt/*.h` - project-local native C++ extensions registered from `CMakeLists.txt`.
   - `Critters/`, `Items/`, `Maps/`, `Dialogs/`, `Gui/`, `Texts/`, `Resources/` - authored game content and assets.
   - `TLA.fomain` - master engine/game config and `[SubConfig]` profiles.
   - `CMakeLists.txt` / `CMakePresets.json` - build glue. Default local preset is `auto` into `Build/Auto`.
+- TLA scripts are AngelScript only. The engine also offers a managed (C#) backend; it stays off (`FO_MANAGED_SCRIPTING OFF` in `CMakeLists.txt`), and the `ManagedScript.*` settings the engine requires regardless are left empty in `TLA.fomain`.
 - The user usually converses in Russian; answer the user in Russian unless asked otherwise.
 - **Script comment language is Russian** (owner decision 2026-06-20, reversing the prior English-only rule). In `Scripts/*.fos`: code comments and the per-file header block (see [Docs/ScriptStyle.md](Docs/ScriptStyle.md)) are written in Russian, and existing English comments are translated to Russian as files are touched. **Exception:** serialized/contract names stay English — `///@ Property/Enum/Setting/Event/RemoteCall`, proto ids, text-pack keys, and identifiers (renaming them risks save/network/content migration). Agent-facing markdown (`AGENTS.md`, most of `Docs/`) and native C++ (`SourceExt/`) remain English; player-facing text follows the existing localized pack structure.
 - Text packs are baked for `russ engl`; `Client.Language = engl` in the default config. When editing player-facing text, preserve the existing pack structure and update both language surfaces when the nearby content expects that.
@@ -20,15 +21,18 @@ Project front door for AI maintainers working on **FOnline: The Life After** (TL
 
 - `Engine/` - pinned fonline-engine submodule. Do not edit in place for game behavior; advance the SHA in coordinated chunks.
 - `Scripts/Content.fos` - generated/baked content declarations. Do not hand-edit.
-- `Scripts/GuiScreens.fos` - generated screen bindings. Source of truth: `Gui/*.fogui` plus `Tools/InterfaceEditor/generate_gui_screens.py`. Do not hand-edit unless you also update the owning `.fogui` code as described below.
+- `Scripts/Generated/GuiScreens.fos` - generated screen bindings. Source of truth: `Gui/*.fogui` plus `Tools/InterfaceEditor/generate_gui_screens.py`. Do not hand-edit unless you also update the owning `.fogui` code as described below.
 - `Scripts/GuiScreensExt.fos` - hand-written companion to `GuiScreens.fos`; non-generated GUI logic lives here.
-- `Scripts/Sync.fos` - script-side helpers around the engine `Game.Sync(...)` lock primitive for async worker code.
+- `Scripts/ItemStacks.fos` - item counts and stacking. The engine handles single item instances only (it gives `Count` and `Stackable` no meaning and never merges), so units are added, counted, destroyed, split and moved through `ItemStacks::` - never `Critter.AddItem`, `Map.AddItem`, `Item.AddItem`, `Game.MoveItem`, `Game.DestroyItem(item, count)` or `Item.Clone(count)` directly. Covered by `Scripts/Tests/Test_ItemStacks.fos`.
+- `Scripts/UserOptions.fos` - what the options screen saves to the client's local config (`LocalSettings.focfg`, applied at the next start); keys must be `Group.Name`.
+- `Scripts/Sounds.fos` - play sounds through `Sounds::Play(name)`, not `Game.PlaySound`: the engine plays only an exact resource path, and `Sounds` maps TLA's names (any-case paths, bare Fallout names such as `LEVELUP.ACM`, `NAME_1..NAME_N` series) onto the baked paths.
 - `Gui/*.fogui` - GUI definitions and embedded screen script code.
 - `SourceExt/CommonExtension.cpp` - SHA helpers shared by client/server.
 - `SourceExt/ServerExtension.cpp` - server image checks, dialog plumbing, visibility hooks, critter busy/free stubs.
 - `SourceExt/ClientExtension.cpp` / `SourceExt/ClientExtension.h` - `Game.FormatTags`, client critter busy/free stubs, `ClientInitHook` + `ClientExtData` (holds the AI control bridge state and embedded-client index).
 - `SourceExt/ClientAiBridge.cpp` - localhost TCP line protocol for the AI control bridge (client-side test/automation). Pairs with `Scripts/AiControl.fos` and `Tools/AiControlMcp/`. See [Docs/AiControl.md](Docs/AiControl.md).
-- `SourceExt/BakerExtension.cpp`, `SourceExt/DialogBaker.*`, `SourceExt/Dialogs.*` - dialog bake/runtime support.
+- `SourceExt/BakerExtension.cpp`, `SourceExt/DialogBaker.*`, `SourceExt/Dialogs.*` - dialog bake/runtime support; `SetupBakersHook` also registers the ACM loader with the engine's `AudioBaker`.
+- `SourceExt/AcmDecoder.*` - Fallout ACM decoder (a bit-exact port of the unpacker the engine dropped in #211) and `LoadAcmAudio`, the `AudioBaker` loader: every `.acm` is baked to Ogg Vorbis like any other sound, effects as mono and `sound/music/` as stereo, the way Fallout played them. Covered by `SourceExt/TestAcmDecoder.cpp`.
 - `SourceExt/ContentMigration.cpp` - TLA-specific content/data migrations.
 - `SourceExt/SHA/` - bundled SHA implementation wrapped as a static library.
 - `Tools/Formatter/format_project.py` and `FormatSource.bat` - formatting entry points. VS Code tasks use the Python formatter.
@@ -46,6 +50,7 @@ Warnings are treated as failures. Keep script compilation, resource baking, nati
 
 | Task | When to use |
 | ---- | ----------- |
+| `Verify :: All` | The full pre-handoff chain: bake, build every target, engine unit tests, script harness, validators, formatters. Run this instead of reassembling the steps by hand; CI runs the same chain. |
 | `Bake Resources` | After edits in `Scripts/`, `Dialogs/`, `Maps/`, `Items/`, `Critters/`, `Texts/`, `Gui/`, or `TLA.fomain`. |
 | `Force Bake Resources` | When incremental baking may be stale. Use sparingly. |
 | `Compile AngelScript` | Fast script syntax/API check. |
@@ -53,9 +58,10 @@ Warnings are treated as failures. Keep script compilation, resource baking, nati
 | `Prepare :: TLA_*` | `Bake Resources` plus the corresponding build target. |
 | `Launch :: TLA_Server [windows]` / `[linux]` | Build, bake, then run the server with `LocalTest`. |
 | `Launch :: TLA_UnitTests [windows]` / `[linux]` | Build, bake, then run engine unit tests. |
-| `Generate :: GuiScreens.fos` | Regenerate `Scripts/GuiScreens.fos` from `Gui/*.fogui`. |
+| `Generate :: GuiScreens.fos` | Regenerate `Scripts/Generated/GuiScreens.fos` from `Gui/*.fogui`. |
 | `Generate :: Version` | Update `VERSION` via `Tools/GenerateVersion/generate_version.py`; do not hand-edit `VERSION`. |
 | `Format :: Scripts`, `Format :: Prototypes`, `Format :: Main Config`, `Format :: All` | Format the relevant authored files. |
+| `Test :: Python Tools` | The tooling test suites under `Tools/` (script/content quality, nullable, AI control bridge). |
 
 Typical command equivalents:
 
@@ -90,7 +96,6 @@ Typical breakage points after a bump:
 - `///@ EngineHook` rename or signature change in `SourceExt/*Extension.cpp`.
 - AngelScript core type/API changes (`hstring`, `any`, `ident_t`, `mpos`/`mdir`, collection APIs).
 - Stricter AngelScript nullability and component access (`T?`, `Has<Component>`, no component `== null` probes).
-- Async worker sync requirements around entity and map access (`[[Async]]`, `Sync::Lock...`, `Game.Sync(...)` lock cover).
 - Logging or stack-trace API changes.
 - New init-path guards such as `if (IsTestingInProgress) return;`.
 - Baker/CMake API changes around `AddEngineSources(...)`, `AddDirSource(...)`, or generated metadata.
@@ -132,14 +137,35 @@ Native C++ conventions:
 - There are no `#include` directives; baking sees all `.fos` files. Cross-module calls use `Namespace::Function()`.
 - Use `#if SERVER`, `#if CLIENT`, and `#if MAPPER` carefully. Side-specific bugs are often missing or stray guards.
 - Keep authoritative gameplay state changes on the server. Client scripts should focus on UI, input, presentation, and client-only probes.
+- **A module you touch leaves the mutable-globals allowlist, or says why it stays.**
+  `AngelScript.MutableGlobalsAllowedNamespaces` in `TLA.fomain` lists 78 namespaces — it was meant to mark
+  exceptions and now covers nearly the whole project, which is also what makes those modules hard to test in
+  isolation. Do not sweep the list; when a module is opened for any other reason, either move its mutable
+  state behind the module (a parameter, an accessor, per-entity storage) and drop the namespace, or add one
+  line to the module header saying what the global state is and why it has to be global.
 - Mark startup functions with `[[ModuleInit]]`; subscribe to events from `ModuleInit()`. Attribute-marked functions are called by their attribute system; move reusable logic into plain helpers instead of calling attribute entrypoints directly.
-- Mark worker-run callbacks `[[Async]]` before they call async helpers such as `Sync::Lock...`. Time events and remote calls that touch map-visible critter state usually need `Sync::LockCritterWithMap(cr)` first.
-- `Game.Sync(...)` replaces the whole held lock set. If a callback needs several entities at once, lock the full cover in one call/helper instead of assuming an earlier lock remains held.
+- **Scripts take no entity cover, and the server runs single-threaded.** `Server.SingleThreadedLogic = True`
+  pins the engine to one worker, so a script may read and mutate any entity it can reach without
+  synchronizing first. The script-side `Sync` module and the `[[Async]]` markers that propagated from
+  `Game.Sync` were removed with it — do not reintroduce either.
+- **The multithreaded configuration is not supported by the current scripts.** Turning
+  `Server.SingleThreadedLogic` off still passes the harness (72/72), because the resulting
+  `Entity access without sync` throws are recoverable at the job frontier — but it logs 794 of them and
+  stops 253 time events by exception. `Server.WorkerThreads` therefore has no effect. Restoring the
+  multithreaded mode means restoring entity cover across the scripts, which is a project of its own.
 - Event handlers return `void` for implicit continue or `EventResult` for explicit `ContinueChain` / `StopChain`.
 - Do not pass inputs by `const &`. Use plain `&` only for genuine out/inout value-type parameters.
 - Treat `?` as the source contract for nullable handles. If a dictionary lookup or engine call can return `null`, bind it to a nullable local (`T?`) before narrowing it.
 - The AngelScript compiler enforces nullability at compile time ("strong nullable"): it warns on redundant null comparisons, dereference of an un-narrowed `T?`, and a redundant `?` on a non-null initializer. Fix these — narrow `T?` locals with `if (x == null) return;` / `if (x != null)` / ternary / `&&`-`||` short-circuits, use `cast<T?>(x)` (not `cast<T>(x)`) when a downcast may fail and you test for `null`, and guard the throwing `Game.Chosen` accessor with `HasChosen` rather than `Chosen == null`. See [Nullability.md](Nullability.md) for the full rules.
 - Component properties are guarded by generated `Has<Component>` flags. Check `item.HasRadio`, `cr.HasDialogContext`, etc. before using the component accessor; do not compare the component accessor itself with `null`.
+- **Item stacking is the game's, not the engine's.** `ItemStacks::AddItem/CountItem/DestroyItem/MoveItem/SplitItem`
+  own `Count`, merging and splitting; the engine's own item calls create or move one instance and merge nothing.
+- **Engine settings are read-only at runtime.** A value that changes while the game runs belongs to its owner, not to
+  `Settings`: `Game.Get/SetMusicVolume`, `Game.Get/SetSoundVolume`, `Game.IsFullscreen`, `Game.Is/SetAlwaysOnTop`,
+  the `ScreenSize` and `CurrentLanguage` globals, `Map.SetManualScroll`, `Map.Get/SetVisibleLayers`. Settings the
+  scripts declare themselves (`///@ Setting`) stay writable. A toggle the game keeps across a session lives in the
+  module that owns it (`InputHandler`), and a player's choice that must survive a restart goes through
+  `UserOptions::Save`.
 - Use explicit time helpers (`Time::Milliseconds`, `Time::Seconds`, `Time::Asap`) for game timing where available.
 - Prefer engine/game geometry helpers such as `Game.GetDistance()`, `Game.GetDirection()`, pathing, and tracing APIs instead of inventing rectangular-grid math. TLA uses hex-grid assumptions.
 - Do not mask invariant failures with broad defensive fallbacks. Assert or fail loudly when an expected value is absent.
@@ -153,7 +179,7 @@ Native C++ conventions:
 Authored inputs:
 
 ```text
-Scripts/*.fos, Scripts/Json/*.fos
+Scripts/*.fos, Scripts/Core/*.fos, Scripts/Generated/*.fos, Scripts/Json/*.fos, Scripts/Tests/*.fos
 Critters/*.focr, Items/*.foitem, Maps/*.fomap
 Dialogs/*.fodlg, Gui/*.fogui, Texts/*.fotxt
 Resources/*
@@ -164,7 +190,7 @@ Pipeline:
 ```text
 Gui/*.fogui
   -> Tools/InterfaceEditor/generate_gui_screens.py
-  -> Scripts/GuiScreens.fos
+  -> Scripts/Generated/GuiScreens.fos
 
 Authored sources + generated script files
   -> BakeResources / ForceBakeResources
@@ -176,7 +202,7 @@ A file can bake successfully and still be semantically wrong. Debug content by s
 
 ## GuiScreens.fos Pitfall
 
-`Scripts/GuiScreens.fos` is generated **only** by `Tools/InterfaceEditor/generate_gui_screens.py`. The VS Code task `Generate :: GuiScreens.fos` is already wired to that script.
+`Scripts/Generated/GuiScreens.fos` is generated **only** by `Tools/InterfaceEditor/generate_gui_screens.py`. The VS Code task `Generate :: GuiScreens.fos` is already wired to that script.
 
 Do not use the legacy `Tools/InterfaceEditor/InterfaceEditor.exe -SilentGenerate` path for TLA generation; it emits an incompatible layout for this project.
 
@@ -184,15 +210,15 @@ AngelScript embedded in screens lives in the `.fogui` JSON: `OnGlobalMouseDown`,
 
 1. Find the owning `.fogui` file.
 2. Apply the same edit there.
-3. Apply the same edit to `Scripts/GuiScreens.fos` if the baked project needs the fix immediately.
+3. Apply the same edit to `Scripts/Generated/GuiScreens.fos` if the baked project needs the fix immediately.
 4. Regenerate only when screen identity or non-code `.fogui` properties change, or when you intentionally want to refresh generated output.
 
 ## Formatting And Generated Files
 
 - Use `Format :: Scripts`, `Format :: Prototypes`, `Format :: Main Config`, or `Format :: All` before handing off when touched files need formatting.
-- `FormatSource.bat` is a smaller formatter path for `Scripts/*.fos`, `Scripts/Json/*.fos`, `SourceExt/*`, and `Gui/*.fogui`.
+- `FormatSource.bat` is a smaller formatter path for `Scripts/`, `SourceExt/*`, and `Gui/*.fogui`.
 - `Tools/ScriptQuality/validate_scripts.py` is a quality *validator* (reports only; not a formatter) for `Scripts/*.fos`: banner tags, magic text-pack ids, hand-rolled-util calls, redundant bool returns, commented-out code, `namespace`==filename, `#if` balance, component `== null` probes, unsafe location access from `ItemTrigger` callbacks, and trailing blank lines. (The former `cyrillic-comment` check was retired 2026-06-20 — script comments are Russian now; see [Docs/ScriptStyle.md](Docs/ScriptStyle.md).) Run `Analyze :: Script Quality` for a summary; `--ratchet` fails only on new violations vs `Tools/ScriptQuality/baseline.json`; `--fix` applies the few safe autofixes. See `Tools/NullableEstimate/validate_nullable.py` for the complementary script `?` and native `ptr<T>`/`nptr<T>` ABI checks.
-- Do not hand-edit generated files: `Scripts/Content.fos`, generated `Scripts/GuiScreens.fos` without the matching `.fogui` update, baked output under `Baking/`, cache files under `Cache/`, or generated `VERSION`.
+- Do not hand-edit generated files: `Scripts/Content.fos`, generated `Scripts/Generated/GuiScreens.fos` without the matching `.fogui` update, baked output under `Baking/`, cache files under `Cache/`, or generated `VERSION`.
 - Local working trees such as `TLA-Dev/`, `Baking/`, `Cache/`, and build folders are outputs/debug state, not canonical authored inputs.
 
 ## Debugging
@@ -217,6 +243,9 @@ Pick the boundary before reaching for a heavy interactive session:
 
 ## Quick Reference
 
+- `Docs/README.md` - documentation index.
+- `Docs/Systems.md` - map of the gameplay systems: what they are, where they live, what covers them.
+- `Docs/AuditPlan.md` - the current improvement queue with the measurement behind each item.
 - `README.md` - repo-root overview.
 - `Docs/AiControl.md` - AI control bridge (client-side TCP test/automation) + the `Tools/AiControlMcp/` MCP adapter for observing/controlling a real client to test mechanics and quests.
 - `Docs/Refactoring.md` - Scripts/*.fos refactoring plan, phases, and running status.

@@ -1,0 +1,109 @@
+// Test_Sounds — тесты сопоставления имён звуков с путями ресурсов (Sounds): регистр, голые имена Fallout,
+// серии NAME_1..NAME_N. Индекс строится из списка путей того же вида, что отдаёт клиенту Game.GetSoundNames().
+namespace Test_Sounds
+{
+
+#if SERVER
+
+[[ModuleInit]]
+void InitTestSounds()
+{
+    Game.OnTestingInit.Subscribe(OnTestingInit);
+}
+
+[[Event]]
+void OnTestingInit()
+{
+    Testing::RegisterTest("sounds", "path_lookup_ignores_case_and_extension", PathLookupIgnoresCaseAndExtension);
+    Testing::RegisterTest("sounds", "bare_file_name_finds_the_path", BareFileNameFindsThePath);
+    Testing::RegisterTest("sounds", "numbered_series_is_the_fallback", NumberedSeriesIsTheFallback);
+    Testing::RegisterTest("sounds", "unknown_name_resolves_to_nothing", UnknownNameResolvesToNothing);
+}
+
+Sounds::SoundIndex MakeIndex()
+{
+    string[] paths = {"sound/SFX/WHN1XXX1.ACM",
+                      "sound/SFX/LEVELUP.ACM",
+                      "sound/SFX/ELV1_1.ACM",
+                      "sound/SFX/ELV1_2.ACM",
+                      "sound/SFX/ELV1_3.ACM",
+                      "sound/sfx/gas.wav",
+                      "sound/music/01hub.acm"};
+    return Sounds::BuildIndex(paths);
+}
+
+// Контент пишет пути в любом регистре и с любым регистром расширения: старый движок сравнивал их без учёта регистра
+void PathLookupIgnoresCaseAndExtension(Testing::TestContext ctx)
+{
+    Sounds::SoundIndex index = MakeIndex();
+
+    string[] exact = Sounds::Candidates(index, "sound/SFX/WHN1XXX1.ACM");
+    if (!Testing::ExpectEq(ctx, int(exact.length()), 1, "Точный путь находится")) {
+        return;
+    }
+
+    if (!Testing::Expect(ctx, exact[0] == "sound/SFX/WHN1XXX1.ACM", "Точный путь отдаётся как есть")) {
+        return;
+    }
+
+    string[] lower = Sounds::Candidates(index, "sound/sfx/whn1xxx1.acm");
+    if (!Testing::Expect(ctx, lower.length() == 1 && lower[0] == "sound/SFX/WHN1XXX1.ACM", "Путь в нижнем регистре находит ресурс")) {
+        return;
+    }
+
+    string[] noExt = Sounds::Candidates(index, "sound/music/01HUB");
+    Testing::Expect(ctx, noExt.length() == 1 && noExt[0] == "sound/music/01hub.acm", "Путь без расширения находит ресурс");
+}
+
+// Голое имя файла Fallout ("LEVELUP.ACM", "gas.wav", "ICIBOXX1") ищется по имени файла без каталога
+void BareFileNameFindsThePath(Testing::TestContext ctx)
+{
+    Sounds::SoundIndex index = MakeIndex();
+
+    string[] withExt = Sounds::Candidates(index, "LEVELUP.ACM");
+    if (!Testing::Expect(ctx, withExt.length() == 1 && withExt[0] == "sound/SFX/LEVELUP.ACM", "Голое имя с расширением находит ресурс")) {
+        return;
+    }
+
+    string[] withoutExt = Sounds::Candidates(index, "levelup");
+    if (!Testing::Expect(ctx, withoutExt.length() == 1 && withoutExt[0] == "sound/SFX/LEVELUP.ACM", "Голое имя без расширения находит ресурс")) {
+        return;
+    }
+
+    // Имя с каталогом ищется только как путь: чужой каталог не подменяется одноимённым файлом
+    string[] wrongDir = Sounds::Candidates(index, "sound/music/LEVELUP.ACM");
+    Testing::ExpectEq(ctx, int(wrongDir.length()), 0, "Имя с чужим каталогом не находит ресурс");
+}
+
+// Если точного имени нет, серия NAME_1..NAME_N даёт все варианты для случайного выбора
+void NumberedSeriesIsTheFallback(Testing::TestContext ctx)
+{
+    Sounds::SoundIndex index = MakeIndex();
+
+    string[] series = Sounds::Candidates(index, "ELV1");
+    if (!Testing::ExpectEq(ctx, int(series.length()), 3, "Серия из трёх вариантов находится целиком")) {
+        return;
+    }
+
+    if (!Testing::Expect(ctx, series[0] == "sound/SFX/ELV1_1.ACM" && series[2] == "sound/SFX/ELV1_3.ACM", "Варианты идут по номеру")) {
+        return;
+    }
+
+    string[] single = Sounds::Candidates(index, "ELV1_2");
+    Testing::Expect(ctx, single.length() == 1 && single[0] == "sound/SFX/ELV1_2.ACM", "Конкретный вариант серии находится сам по себе");
+}
+
+void UnknownNameResolvesToNothing(Testing::TestContext ctx)
+{
+    Sounds::SoundIndex index = MakeIndex();
+
+    if (!Testing::ExpectEq(ctx, int(Sounds::Candidates(index, "NOSUCHSOUND").length()), 0, "Неизвестное имя не находит ничего")) {
+        return;
+    }
+
+    Testing::ExpectEq(ctx, int(Sounds::Candidates(index, "").length()), 0, "Пустое имя не находит ничего");
+}
+
+#endif
+
+}

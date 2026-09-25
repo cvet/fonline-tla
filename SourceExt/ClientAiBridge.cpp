@@ -83,6 +83,7 @@ struct AiControlClientData
 static void StopAiControlBridge(AiControlClientData& data) noexcept;
 static void RunAiControlBridge(AiControlClientData& data);
 static auto HandleAiControlLine(AiControlClientData& data, string_view line, bool& authorized) -> string;
+static auto WriteAiControlResponse(asio::ip::tcp::socket& socket, string_view response) -> std::error_code;
 static auto BuildAiControlResponse(const nlohmann::json& id, nlohmann::json result) -> string;
 static auto BuildAiControlError(const nlohmann::json& id, int32_t code, string_view message) -> string;
 static auto BuildAiControlStatus(AiControlClientData& data) -> nlohmann::json;
@@ -266,6 +267,17 @@ static void RunAiControlBridge(AiControlClientData& data)
         bool authorized = data.Token.empty();
         unique_nptr<asio::ip::tcp::socket> socket;
 
+        // A failure of one connection closes only that connection: the bridge records it and keeps listening, so a
+        // client that goes away mid-request does not take the bridge down until the game restarts
+        auto drop_connection = [&data, &socket](string_view reason) {
+            {
+                scoped_lock locker(data.Locker);
+                data.LastError = string(reason);
+            }
+
+            socket.reset();
+        };
+
         while (!data.StopRequested.load(std::memory_order_acquire)) {
             if (!socket) {
                 socket = safe_alloc::make_unique<asio::ip::tcp::socket>(context);
@@ -279,10 +291,19 @@ static void RunAiControlBridge(AiControlClientData& data)
                     continue;
                 }
                 if (accept_error) {
-                    throw std::runtime_error(std::string(strex("AiControl accept failed: {}", accept_error.message()).str()));
+                    drop_connection(strex("AiControl accept failed: {}", accept_error.message()).str());
+                    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+                    continue;
                 }
 
-                socket->non_blocking(true);
+                std::error_code mode_error;
+                socket->non_blocking(true, mode_error);
+
+                if (mode_error) {
+                    drop_connection(strex("AiControl socket setup failed: {}", mode_error.message()).str());
+                    continue;
+                }
+
                 input.clear();
                 authorized = data.Token.empty();
                 continue;
@@ -301,31 +322,21 @@ static void RunAiControlBridge(AiControlClientData& data)
                 continue;
             }
             if (read_error) {
-                throw std::runtime_error(std::string(strex("AiControl read failed: {}", read_error.message()).str()));
+                drop_connection(strex("AiControl read failed: {}", read_error.message()).str());
+                continue;
             }
 
             input.append(buffer, read_size);
 
             if (input.size() > 1024 * 1024) {
-                {
-                    scoped_lock locker(data.Locker);
-                    data.LastError = strex("AiControl input exceeded 1 MiB cap ({} bytes); dropping connection", input.size()).str();
-                }
-
                 string error_response = BuildAiControlError(nullptr, -32600, "Request too large");
                 error_response += "\n";
-
-                std::error_code write_error;
-                socket->non_blocking(false);
-                (void)asio::write(*socket, asio::buffer(error_response), write_error);
-                socket->non_blocking(true);
-                ignore_unused(write_error);
-
-                socket.reset();
+                ignore_unused(WriteAiControlResponse(*socket, error_response));
+                drop_connection(strex("AiControl input exceeded 1 MiB cap ({} bytes); dropping connection", input.size()).str());
                 continue;
             }
 
-            while (true) {
+            while (socket) {
                 const size_t line_end = input.find('\n');
 
                 if (line_end == string::npos) {
@@ -339,13 +350,21 @@ static void RunAiControlBridge(AiControlClientData& data)
                     line.pop_back();
                 }
 
-                string response = HandleAiControlLine(data, line, authorized);
+                string response;
+
+                try {
+                    response = HandleAiControlLine(data, line, authorized);
+                }
+                catch (const std::exception& ex) {
+                    response = BuildAiControlError(nullptr, -32603, strex("Internal error: {}", ex.what()).str());
+                }
 
                 if (!response.empty()) {
                     response += "\n";
-                    socket->non_blocking(false);
-                    asio::write(*socket, asio::buffer(response));
-                    socket->non_blocking(true);
+
+                    if (std::error_code write_error = WriteAiControlResponse(*socket, response)) {
+                        drop_connection(strex("AiControl write failed: {}", write_error.message()).str());
+                    }
                 }
             }
         }
@@ -356,6 +375,22 @@ static void RunAiControlBridge(AiControlClientData& data)
     }
 
     data.Running.store(false, std::memory_order_release);
+}
+
+// Writes the whole response on a blocking socket and puts the socket back to non-blocking; the error is returned
+// rather than thrown, so a client that went away costs only its own connection
+static auto WriteAiControlResponse(asio::ip::tcp::socket& socket, string_view response) -> std::error_code
+{
+    std::error_code error;
+    socket.non_blocking(false, error);
+
+    if (!error) {
+        asio::write(socket, asio::buffer(response.data(), response.size()), error);
+    }
+
+    std::error_code mode_error;
+    socket.non_blocking(true, mode_error);
+    return error ? error : mode_error;
 }
 
 static auto HandleAiControlLine(AiControlClientData& data, string_view line, bool& authorized) -> string
@@ -560,7 +595,8 @@ static auto BuildAiControlEvents(AiControlClientData& data, uint64_t after_seq, 
 
 static auto JsonDumpToString(const nlohmann::json& value) -> string
 {
-    const std::string dumped = value.dump();
+    // Text the game hands over is not guaranteed to be valid UTF-8, and a strict dump would throw on the bridge thread
+    const std::string dumped = value.dump(-1, ' ', false, nlohmann::json::error_handler_t::replace);
     return string(dumped.c_str());
 }
 

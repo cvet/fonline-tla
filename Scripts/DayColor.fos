@@ -1,0 +1,113 @@
+// DayColor — дневной тон карты: по времени суток считает цвет, которым движок окрашивает спрайты карты, и силу
+// дневного света, и передаёт их движку через Map.SetDayColors. Сам движок кривую больше не читает (Engine #160),
+// а без этого модуля карта остаётся на белом тоне по умолчанию: крыши и всё, что не освещается, выгорает до белого.
+// Кривая — Map.DayColorTime / Map.DayColor карты, а если они пусты, то View.GlobalDayColorTime / GlobalDayColor.
+// Время карты — Map.FixedDayTime, если оно задано, иначе мировое Game.GlobalDayTime (его ведёт MapTime);
+// глобальный тон всегда идёт по мировому времени.
+// Расчёт кривой — чистые функции, общие для сторон (их покрывает Test_DayColor); CLIENT и MAPPER пересчитывают тон
+// каждый кадр без собственного состояния: движок сам пропускает неизменившийся тон, а после загрузки карты тон
+// снова белый, и следующий же кадр его заменяет.
+namespace DayColor
+{
+
+// Минут в сутках: кривая замкнута, последний ключ переходит в первый через полночь
+const int MINUTES_PER_DAY = 1440;
+
+// Кусочно-линейная интерполяция между четырьмя ключами кривой (цвета по каналам: R0..R3 G0..G3 B0..B3).
+// lightCapacity — доля дневного света 0..100, где 100 — самый тёмный ключ кривой, 0 — самый светлый
+ucolor ComputeColor(int[] times, uint8[] colors, int gameTime, int& lightCapacity)
+{
+    verify(times.length() == 4, "Day color curve must have 4 time keys");
+    verify(colors.length() == 12, "Day color curve must have 12 channel bytes");
+
+    int wrapped = gameTime % MINUTES_PER_DAY;
+    if (wrapped < 0) {
+        wrapped += MINUTES_PER_DAY;
+    }
+
+    int idx = 3;
+    int elapsed = wrapped >= times[3] ? wrapped - times[3] : wrapped + (MINUTES_PER_DAY - times[3]);
+    int duration = MINUTES_PER_DAY - times[3] + times[0];
+
+    for (int i = 0; i < 3; i++) {
+        if (wrapped >= times[i] && wrapped < times[i + 1]) {
+            idx = i;
+            elapsed = wrapped - times[i];
+            duration = times[i + 1] - times[i];
+            break;
+        }
+    }
+
+    if (duration == 0) {
+        duration = 1;
+    }
+
+    int next = idx < 3 ? idx + 1 : 0;
+    int r = LerpChannel(colors, 0, idx, next, elapsed, duration);
+    int g = LerpChannel(colors, 4, idx, next, elapsed, duration);
+    int b = LerpChannel(colors, 8, idx, next, elapsed, duration);
+
+    int maxBright = MaxChannel(colors, 0) + MaxChannel(colors, 4) + MaxChannel(colors, 8);
+    int minBright = MinChannel(colors, 0) + MinChannel(colors, 4) + MinChannel(colors, 8);
+    int lightFull = maxBright - minBright;
+    lightCapacity = lightFull == 0 ? 0 : Math::Clamp((maxBright - (r + g + b)) * 100 / lightFull, 0, 100);
+
+    return ucolor(uint8(r), uint8(g), uint8(b), 255);
+}
+
+int LerpChannel(uint8[] colors, int channelBase, int idx, int next, int elapsed, int duration)
+{
+    int from = int(colors[channelBase + idx]);
+    int to = int(colors[channelBase + next]);
+    return from + (to - from) * elapsed / duration;
+}
+
+int MaxChannel(uint8[] colors, int channelBase)
+{
+    int result = int(colors[channelBase]);
+    for (int i = 1; i < 4; i++) {
+        result = Math::Max(result, int(colors[channelBase + i]));
+    }
+    return result;
+}
+
+int MinChannel(uint8[] colors, int channelBase)
+{
+    int result = int(colors[channelBase]);
+    for (int i = 1; i < 4; i++) {
+        result = Math::Min(result, int(colors[channelBase + i]));
+    }
+    return result;
+}
+
+#if CLIENT || MAPPER
+
+[[ModuleInit]]
+void InitDayColor()
+{
+    Game.OnLoop.Subscribe(OnLoop);
+}
+
+[[Event]]
+void OnLoop()
+{
+    if (!HasCurMap) {
+        return;
+    }
+
+    Map map = CurMap;
+    int[] times = map.DayColorTime.length() > 0 ? map.DayColorTime : Settings.View.GlobalDayColorTime;
+    uint8[] colors = map.DayColor.length() > 0 ? map.DayColor : Settings.View.GlobalDayColor;
+    int globalTime = Game.GlobalDayTime;
+    int mapTime = map.FixedDayTime != 0 ? map.FixedDayTime : globalTime;
+
+    int mapLight = 0;
+    int globalLight = 0;
+    ucolor mapColor = ComputeColor(times, colors, mapTime, mapLight);
+    ucolor globalColor = ComputeColor(times, colors, globalTime, globalLight);
+    map.SetDayColors(mapColor, mapLight, globalColor, globalLight);
+}
+
+#endif
+
+}

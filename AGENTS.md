@@ -27,6 +27,7 @@ Project front door for AI maintainers working on **FOnline: The Life After** (TL
 - `Scripts/ItemStacks.fos` - item counts and stacking. The engine handles single item instances only (it gives `Count` and `Stackable` no meaning and never merges), so units are added, counted, destroyed, split and moved through `ItemStacks::` - never `Critter.AddItem`, `Map.AddItem`, `Item.AddItem`, `Game.MoveItem`, `Game.DestroyItem(item, count)` or `Item.Clone(count)` directly. Covered by `Scripts/Tests/Test_ItemStacks.fos`.
 - `Scripts/UserOptions.fos` - what the options screen saves to the client's local config (`LocalSettings.focfg`, applied at the next start); keys must be `Group.Name`.
 - `Scripts/Sounds.fos` - play sounds through `Sounds::Play(name)`, not `Game.PlaySound`: the engine plays only an exact resource path, and `Sounds` maps TLA's names (any-case paths, bare Fallout names such as `LEVELUP.ACM`, `NAME_1..NAME_N` series) onto the baked paths.
+- `Scripts/DayColor.fos` - the day/night tint. The engine no longer evaluates `DayColorTime` / `DayColor` itself: the client and the mapper push the tint every frame through `Map.SetDayColors`, and without it every map draws with the engine's white default, which blows roofs and other unlit sprites out to white. Covered by `Scripts/Tests/Test_DayColor.fos`.
 - `Gui/*.fogui` - GUI definitions and embedded screen script code.
 - `SourceExt/CommonExtension.cpp` - SHA helpers shared by client/server.
 - `SourceExt/ServerExtension.cpp` - server image checks, dialog plumbing, visibility hooks, critter busy/free stubs.

@@ -68,8 +68,6 @@ FO_END_NAMESPACE
 
 void FO_NAMESPACE ServerInitHook(ptr<ServerEngine> server)
 {
-    FO_STACK_TRACE_ENTRY();
-
     server->UserData = make_unique_del_ptr(safe_alloc::make_raw<ServerExtData>().reinterpret_as<uint8_t>(), [](const uint8_t* ptr) FO_DEFERRED {
         const auto* ext_data_ptr = reinterpret_cast<const ServerExtData*>(ptr);
         delete ext_data_ptr;
@@ -104,8 +102,6 @@ void FO_NAMESPACE ServerInitHook(ptr<ServerEngine> server)
 
 CritterVisibilityMode FO_NAMESPACE CheckCritterVisibilityHook(ptr<const ServerEngine> server, ptr<const Map> map, ptr<const Critter> cr, ptr<const Critter> target)
 {
-    FO_STACK_TRACE_ENTRY();
-
     if (IsTestingInProgress) {
         return GeometryHelper::GetDistance(cr->GetHex(), target->GetHex()) <= cr->GetLookDistance() ? CritterVisibilityMode::Full : CritterVisibilityMode::None;
     }
@@ -133,8 +129,6 @@ CritterVisibilityMode FO_NAMESPACE CheckCritterVisibilityHook(ptr<const ServerEn
 
 bool FO_NAMESPACE CheckItemVisibilityHook(ptr<const ServerEngine> server, ptr<const Map> map, ptr<const Critter> cr, ptr<const Item> item)
 {
-    FO_STACK_TRACE_ENTRY();
-
     ignore_unused(map);
 
     if (IsTestingInProgress) {
@@ -162,8 +156,6 @@ bool FO_NAMESPACE CheckItemVisibilityHook(ptr<const ServerEngine> server, ptr<co
 
 isize32 FO_NAMESPACE Server_Game_LoadImage(ptr<ServerEngine> server, uint32_t imageSlot, string_view imageName)
 {
-    FO_STACK_TRACE_ENTRY();
-
     if (IsTestingInProgress) {
         ignore_unused(server, imageSlot, imageName);
         return {};
@@ -211,8 +203,6 @@ isize32 FO_NAMESPACE Server_Game_LoadImage(ptr<ServerEngine> server, uint32_t im
 
 ucolor FO_NAMESPACE Server_Game_GetImageColor(ptr<ServerEngine> server, uint32_t imageSlot, ipos32 pos)
 {
-    FO_STACK_TRACE_ENTRY();
-
     auto& ext_data = GetServerExtData(server);
 
     if (imageSlot >= numeric_cast<uint32_t>(ext_data.ServerImages.size()) || !ext_data.ServerImages[imageSlot]) {
@@ -231,8 +221,6 @@ ucolor FO_NAMESPACE Server_Game_GetImageColor(ptr<ServerEngine> server, uint32_t
 
 nptr<DialogPack> FO_NAMESPACE Server_Game_GetDialogPack(ptr<ServerEngine> server, hstring packId)
 {
-    FO_STACK_TRACE_ENTRY();
-
     auto& ext_data = GetServerExtData(server);
     auto pack = ext_data.DialogMngr->GetDialog(packId);
 
@@ -246,8 +234,6 @@ nptr<DialogPack> FO_NAMESPACE Server_Game_GetDialogPack(ptr<ServerEngine> server
 
 string FO_NAMESPACE Server_Game_RunSpeechScript(ptr<ServerEngine> server, ptr<DialogSpeech> speech, ptr<Critter> cr, nptr<Critter> talker)
 {
-    FO_STACK_TRACE_ENTRY();
-
     string textArgs;
 
     if (speech->DlgScriptFuncName) {
@@ -270,8 +256,6 @@ string FO_NAMESPACE Server_Game_RunSpeechScript(ptr<ServerEngine> server, ptr<Di
 
 bool FO_NAMESPACE Server_Game_DialogScriptDemand(ptr<ServerEngine> server, ptr<DialogAnswerReq> demand, ptr<Critter> master, nptr<Critter> slave)
 {
-    FO_STACK_TRACE_ENTRY();
-
     ServerEngine* server_ptr = server.get();
     DialogAnswerReq* demand_ptr = demand.get();
     const auto master_arg = master;
@@ -302,8 +286,6 @@ bool FO_NAMESPACE Server_Game_DialogScriptDemand(ptr<ServerEngine> server, ptr<D
 
 int32_t FO_NAMESPACE Server_Game_DialogScriptResult(ptr<ServerEngine> server, ptr<DialogAnswerReq> result, ptr<Critter> master, nptr<Critter> slave)
 {
-    FO_STACK_TRACE_ENTRY();
-
     ServerEngine* server_ptr = server.get();
     DialogAnswerReq* result_ptr = result.get();
     const auto master_arg = master;
@@ -399,31 +381,23 @@ int32_t FO_NAMESPACE Server_Game_DialogScriptResult(ptr<ServerEngine> server, pt
 
 bool FO_NAMESPACE Server_Critter_IsFree(ptr<Critter> server)
 {
-    FO_STACK_TRACE_ENTRY();
-
     ignore_unused(server);
     return true;
 }
 
 bool FO_NAMESPACE Server_Critter_IsBusy(ptr<Critter> server)
 {
-    FO_STACK_TRACE_ENTRY();
-
     ignore_unused(server);
     return false;
 }
 
 void FO_NAMESPACE Server_Critter_Wait(ptr<Critter> server, int32_t ms)
 {
-    FO_STACK_TRACE_ENTRY();
-
     ignore_unused(server, ms);
 }
 
 void FO_NAMESPACE Server_Critter_ViewMap(ptr<Critter> self, ptr<Map> map, int32_t look, mpos hex, mdir dir)
 {
-    FO_STACK_TRACE_ENTRY();
-
     ignore_unused(look, dir);
 
     if (!map->GetSize().is_valid_pos(hex)) {

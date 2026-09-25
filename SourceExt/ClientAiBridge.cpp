@@ -107,8 +107,6 @@ static bool ContainsCaseInsensitive(string_view text, string_view needle) noexce
 
 bool FO_NAMESPACE Client_Game_AiControlStart(ptr<ClientEngine> client, bool enabled, string_view host, int32_t port, string_view token, int32_t maxQueuedCommands, int32_t maxEvents)
 {
-    FO_STACK_TRACE_ENTRY();
-
     AiControlClientData& data = EnsureAiControlData(client);
 
     StopAiControlBridge(data);
@@ -142,24 +140,18 @@ bool FO_NAMESPACE Client_Game_AiControlStart(ptr<ClientEngine> client, bool enab
 
 void FO_NAMESPACE Client_Game_AiControlStop(ptr<ClientEngine> client)
 {
-    FO_STACK_TRACE_ENTRY();
-
     AiControlClientData& data = EnsureAiControlData(client);
     StopAiControlBridge(data);
 }
 
 bool FO_NAMESPACE Client_Game_AiControlIsRunning(ptr<ClientEngine> client)
 {
-    FO_STACK_TRACE_ENTRY();
-
     AiControlClientData& data = EnsureAiControlData(client);
     return data.Running.load(std::memory_order_acquire) && !data.StopRequested.load(std::memory_order_acquire);
 }
 
 bool FO_NAMESPACE Client_Game_AiControlPullCommand(ptr<ClientEngine> client, uint32_t& commandSeq, string& type, ident_t& targetId, ident_t& itemId, ident_t& auxId, int32_t& hexX, int32_t& hexY, int32_t& screenX, int32_t& screenY, int32_t& intArg, string& stringArg, string& sceneryProtoId, bool& append)
 {
-    FO_STACK_TRACE_ENTRY();
-
     AiControlClientData& data = EnsureAiControlData(client);
     scoped_lock locker(data.Locker);
 
@@ -189,8 +181,6 @@ bool FO_NAMESPACE Client_Game_AiControlPullCommand(ptr<ClientEngine> client, uin
 
 void FO_NAMESPACE Client_Game_AiControlSetObservation(ptr<ClientEngine> client, string_view observationJson)
 {
-    FO_STACK_TRACE_ENTRY();
-
     AiControlClientData& data = EnsureAiControlData(client);
     scoped_lock locker(data.Locker);
 
@@ -200,16 +190,12 @@ void FO_NAMESPACE Client_Game_AiControlSetObservation(ptr<ClientEngine> client, 
 
 void FO_NAMESPACE Client_Game_AiControlPushEvent(ptr<ClientEngine> client, string_view eventJson)
 {
-    FO_STACK_TRACE_ENTRY();
-
     AiControlClientData& data = EnsureAiControlData(client);
     PushAiControlEvent(data, eventJson);
 }
 
 void FO_NAMESPACE Client_Game_AiControlCompleteCommand(ptr<ClientEngine> client, uint32_t commandSeq, bool success, string_view message)
 {
-    FO_STACK_TRACE_ENTRY();
-
     AiControlClientData& data = EnsureAiControlData(client);
 
     nlohmann::json event;
@@ -223,16 +209,12 @@ void FO_NAMESPACE Client_Game_AiControlCompleteCommand(ptr<ClientEngine> client,
 
 string FO_NAMESPACE Client_Game_AiControlGetStatus(ptr<ClientEngine> client)
 {
-    FO_STACK_TRACE_ENTRY();
-
     AiControlClientData& data = EnsureAiControlData(client);
     return JsonDumpToString(BuildAiControlStatus(data));
 }
 
 ident_t FO_NAMESPACE Client_Game_AiControlGetEntityId(ptr<ClientEngine> client, nptr<ClientEntity> entity)
 {
-    FO_STACK_TRACE_ENTRY();
-
     ignore_unused(client);
 
     return entity.get() != nullptr ? entity.get()->GetId() : ident_t {};
@@ -240,14 +222,10 @@ ident_t FO_NAMESPACE Client_Game_AiControlGetEntityId(ptr<ClientEngine> client, 
 
 static auto EnsureAiControlData(ptr<ClientEngine> client) -> AiControlClientData&
 {
-    FO_STACK_TRACE_ENTRY();
-
     ClientExtData& ext = GetClientExtData(client);
 
     if (!ext.AiControl) {
         ext.AiControl = make_unique_del_ptr(safe_alloc::make_raw<AiControlClientData>(), [](AiControlClientData* ptr) FO_DEFERRED {
-            FO_STACK_TRACE_ENTRY();
-
             if (ptr != nullptr) {
                 StopAiControlBridge(*ptr);
                 delete ptr;
@@ -260,8 +238,6 @@ static auto EnsureAiControlData(ptr<ClientEngine> client) -> AiControlClientData
 
 static void StopAiControlBridge(AiControlClientData& data) noexcept
 {
-    FO_NO_STACK_TRACE_ENTRY();
-
     data.StopRequested.store(true, std::memory_order_release);
     UnregisterAiControlLogCallback(data);
 
@@ -274,8 +250,6 @@ static void StopAiControlBridge(AiControlClientData& data) noexcept
 
 static void RunAiControlBridge(AiControlClientData& data)
 {
-    FO_STACK_TRACE_ENTRY();
-
     try {
         asio::io_context context;
         asio::ip::address address = asio::ip::make_address(data.Host);
@@ -386,7 +360,7 @@ static void RunAiControlBridge(AiControlClientData& data)
 
 static auto HandleAiControlLine(AiControlClientData& data, string_view line, bool& authorized) -> string
 {
-    FO_STACK_TRACE_ENTRY();
+    FO_TRACE_ZONE(Network);
 
     if (line.empty()) {
         return {};
@@ -443,8 +417,6 @@ static auto HandleAiControlLine(AiControlClientData& data, string_view line, boo
 
 static auto EnqueueAiControlCommand(AiControlClientData& data, const nlohmann::json& id, const nlohmann::json& params) -> string
 {
-    FO_STACK_TRACE_ENTRY();
-
     AiControlCommand command;
     command.Type = GetJsonString(params, "type");
 
@@ -482,8 +454,6 @@ static auto EnqueueAiControlCommand(AiControlClientData& data, const nlohmann::j
 
 static auto BuildAiControlResponse(const nlohmann::json& id, nlohmann::json result) -> string
 {
-    FO_STACK_TRACE_ENTRY();
-
     nlohmann::json response;
     response["jsonrpc"] = "2.0";
     response["id"] = id;
@@ -493,8 +463,6 @@ static auto BuildAiControlResponse(const nlohmann::json& id, nlohmann::json resu
 
 static auto BuildAiControlError(const nlohmann::json& id, int32_t code, string_view message) -> string
 {
-    FO_STACK_TRACE_ENTRY();
-
     nlohmann::json response;
     response["jsonrpc"] = "2.0";
     response["id"] = id;
@@ -504,8 +472,6 @@ static auto BuildAiControlError(const nlohmann::json& id, int32_t code, string_v
 
 static auto BuildAiControlStatus(AiControlClientData& data) -> nlohmann::json
 {
-    FO_STACK_TRACE_ENTRY();
-
     scoped_lock locker(data.Locker);
 
     nlohmann::json status;
@@ -523,8 +489,6 @@ static auto BuildAiControlStatus(AiControlClientData& data) -> nlohmann::json
 
 static auto BuildAiControlObservation(AiControlClientData& data) -> nlohmann::json
 {
-    FO_STACK_TRACE_ENTRY();
-
     string observation_json;
     uint64_t observation_seq = 0;
 
@@ -551,8 +515,6 @@ static auto BuildAiControlObservation(AiControlClientData& data) -> nlohmann::js
 
 static auto BuildAiControlEvents(AiControlClientData& data, uint64_t after_seq, size_t limit) -> nlohmann::json
 {
-    FO_STACK_TRACE_ENTRY();
-
     vector<AiControlEvent> events;
     uint64_t latest_seq = 0;
 
@@ -598,16 +560,12 @@ static auto BuildAiControlEvents(AiControlClientData& data, uint64_t after_seq, 
 
 static auto JsonDumpToString(const nlohmann::json& value) -> string
 {
-    FO_STACK_TRACE_ENTRY();
-
     const std::string dumped = value.dump();
     return string(dumped.c_str());
 }
 
 static auto GetJsonString(const nlohmann::json& object, string_view name, string_view def_value) -> string
 {
-    FO_STACK_TRACE_ENTRY();
-
     const std::string key(name);
 
     if (!object.contains(key)) {
@@ -632,8 +590,6 @@ static auto GetJsonString(const nlohmann::json& object, string_view name, string
 
 static auto GetJsonBool(const nlohmann::json& object, string_view name, bool def_value) -> bool
 {
-    FO_STACK_TRACE_ENTRY();
-
     const std::string key(name);
 
     if (!object.contains(key)) {
@@ -657,8 +613,6 @@ static auto GetJsonBool(const nlohmann::json& object, string_view name, bool def
 
 static auto GetJsonInt32(const nlohmann::json& object, string_view name, int32_t def_value) -> int32_t
 {
-    FO_STACK_TRACE_ENTRY();
-
     const std::string key(name);
 
     if (!object.contains(key)) {
@@ -679,8 +633,6 @@ static auto GetJsonInt32(const nlohmann::json& object, string_view name, int32_t
 
 static auto GetJsonUInt64(const nlohmann::json& object, string_view name, uint64_t def_value) -> uint64_t
 {
-    FO_STACK_TRACE_ENTRY();
-
     const std::string key(name);
 
     if (!object.contains(key)) {
@@ -704,8 +656,6 @@ static auto GetJsonUInt64(const nlohmann::json& object, string_view name, uint64
 
 static auto GetJsonIdent(const nlohmann::json& object, string_view name) -> ident_t
 {
-    FO_STACK_TRACE_ENTRY();
-
     const std::string key(name);
 
     if (!object.contains(key)) {
@@ -726,8 +676,6 @@ static auto GetJsonIdent(const nlohmann::json& object, string_view name) -> iden
 
 static void PushAiControlEvent(AiControlClientData& data, string_view event_json)
 {
-    FO_STACK_TRACE_ENTRY();
-
     scoped_lock locker(data.Locker);
 
     data.NextEventSeq++;
@@ -740,8 +688,6 @@ static void PushAiControlEvent(AiControlClientData& data, string_view event_json
 
 static void RegisterAiControlLogCallback(AiControlClientData& data)
 {
-    FO_STACK_TRACE_ENTRY();
-
     data.LogCallbackKey = string(strex("AiControlLog.{}", data.Port).str());
 
     logging::set_callback(data.LogCallbackKey, [&data](logging::type type, string_view message, nptr<const stack_trace::catched_data> st) {
@@ -757,8 +703,6 @@ static void RegisterAiControlLogCallback(AiControlClientData& data)
 
 static void UnregisterAiControlLogCallback(AiControlClientData& data) noexcept
 {
-    FO_NO_STACK_TRACE_ENTRY();
-
     try {
         if (!data.LogCallbackKey.empty()) {
             logging::set_callback(data.LogCallbackKey, {});
@@ -772,8 +716,6 @@ static void UnregisterAiControlLogCallback(AiControlClientData& data) noexcept
 
 static auto TryBuildAiControlLogExceptionEvent(logging::type type, string_view message, const stack_trace::catched_data* st) -> std::optional<string>
 {
-    FO_STACK_TRACE_ENTRY();
-
     const string category = ClassifyAiControlLogException(type, message);
     if (category.empty()) {
         return std::nullopt;
@@ -793,8 +735,6 @@ static auto TryBuildAiControlLogExceptionEvent(logging::type type, string_view m
 
 static auto ClassifyAiControlLogException(logging::type type, string_view message) -> string
 {
-    FO_STACK_TRACE_ENTRY();
-
     if (ContainsCaseInsensitive(message, "ScriptException") || ContainsCaseInsensitive(message, "Script exception")) {
         return "script_exception";
     }
@@ -816,8 +756,6 @@ static auto ClassifyAiControlLogException(logging::type type, string_view messag
 
 static auto LogTypeToString(logging::type type) noexcept -> string_view
 {
-    FO_NO_STACK_TRACE_ENTRY();
-
     switch (type) {
     case logging::type::info:
         return "info";
@@ -836,8 +774,6 @@ static auto LogTypeToString(logging::type type) noexcept -> string_view
 
 static auto TrimAiControlLogMessage(string_view message) -> string
 {
-    FO_STACK_TRACE_ENTRY();
-
     size_t begin = 0;
     size_t end = message.length();
 
@@ -853,8 +789,6 @@ static auto TrimAiControlLogMessage(string_view message) -> string
 
 static bool ContainsCaseInsensitive(string_view text, string_view needle) noexcept
 {
-    FO_NO_STACK_TRACE_ENTRY();
-
     if (needle.empty()) {
         return true;
     }
@@ -887,31 +821,23 @@ static bool ContainsCaseInsensitive(string_view text, string_view needle) noexce
 
 bool FO_NAMESPACE Client_Game_AiControlStart(ptr<ClientEngine> client, bool enabled, string_view host, int32_t port, string_view token, int32_t maxQueuedCommands, int32_t maxEvents)
 {
-    FO_STACK_TRACE_ENTRY();
-
     ignore_unused(client, enabled, host, port, token, maxQueuedCommands, maxEvents);
     return false;
 }
 
 void FO_NAMESPACE Client_Game_AiControlStop(ptr<ClientEngine> client)
 {
-    FO_STACK_TRACE_ENTRY();
-
     ignore_unused(client);
 }
 
 bool FO_NAMESPACE Client_Game_AiControlIsRunning(ptr<ClientEngine> client)
 {
-    FO_STACK_TRACE_ENTRY();
-
     ignore_unused(client);
     return false;
 }
 
 bool FO_NAMESPACE Client_Game_AiControlPullCommand(ptr<ClientEngine> client, uint32_t& commandSeq, string& type, ident_t& targetId, ident_t& itemId, ident_t& auxId, int32_t& hexX, int32_t& hexY, int32_t& screenX, int32_t& screenY, int32_t& intArg, string& stringArg, string& sceneryProtoId, bool& append)
 {
-    FO_STACK_TRACE_ENTRY();
-
     ignore_unused(client);
     commandSeq = 0;
     type = "";
@@ -931,37 +857,27 @@ bool FO_NAMESPACE Client_Game_AiControlPullCommand(ptr<ClientEngine> client, uin
 
 void FO_NAMESPACE Client_Game_AiControlSetObservation(ptr<ClientEngine> client, string_view observationJson)
 {
-    FO_STACK_TRACE_ENTRY();
-
     ignore_unused(client, observationJson);
 }
 
 void FO_NAMESPACE Client_Game_AiControlPushEvent(ptr<ClientEngine> client, string_view eventJson)
 {
-    FO_STACK_TRACE_ENTRY();
-
     ignore_unused(client, eventJson);
 }
 
 void FO_NAMESPACE Client_Game_AiControlCompleteCommand(ptr<ClientEngine> client, uint32_t commandSeq, bool success, string_view message)
 {
-    FO_STACK_TRACE_ENTRY();
-
     ignore_unused(client, commandSeq, success, message);
 }
 
 string FO_NAMESPACE Client_Game_AiControlGetStatus(ptr<ClientEngine> client)
 {
-    FO_STACK_TRACE_ENTRY();
-
     ignore_unused(client);
     return "{}";
 }
 
 ident_t FO_NAMESPACE Client_Game_AiControlGetEntityId(ptr<ClientEngine> client, nptr<ClientEntity> entity)
 {
-    FO_STACK_TRACE_ENTRY();
-
     ignore_unused(client, entity);
     return ident_t {};
 }

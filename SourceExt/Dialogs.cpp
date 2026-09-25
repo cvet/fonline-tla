@@ -11,8 +11,6 @@ static constexpr string_view DIALOG_ANSWER_LINK_ENUM = "DialogAnswerLink";
 
 auto NormalizeDialogScriptValue(string value) -> any_t
 {
-    FO_STACK_TRACE_ENTRY();
-
     if (!value.empty() && value.front() == '@') {
         value.erase(0, 1);
     }
@@ -27,8 +25,6 @@ auto NormalizeDialogScriptValue(string value) -> any_t
 
 auto NormalizeDialogPropertyValue(string value) -> any_t
 {
-    FO_STACK_TRACE_ENTRY();
-
     if (strvex(value).compare_ignore_case("true")) {
         value = "1";
     }
@@ -41,8 +37,6 @@ auto NormalizeDialogPropertyValue(string value) -> any_t
 
 static auto IsDialogCommentOrEmpty(string_view line) -> bool
 {
-    FO_STACK_TRACE_ENTRY();
-
     size_t start = 0;
 
     while (start < line.size() && std::isspace(static_cast<unsigned char>(line[start])) != 0) {
@@ -58,8 +52,6 @@ static auto IsDialogCommentOrEmpty(string_view line) -> bool
 
 static auto TryNormalizeDialogLinkValue(ptr<const EngineMetadata> meta, int64_t link, int32_t& normalized_link) -> bool
 {
-    FO_STACK_TRACE_ENTRY();
-
     if (link == DIALOG_LINK_EXIT) {
         normalized_link = DIALOG_LINK_EXIT;
         return true;
@@ -92,8 +84,6 @@ static auto TryNormalizeDialogLinkValue(ptr<const EngineMetadata> meta, int64_t 
 
 static auto TryResolveDialogAnswerLinkCanonical(ptr<const EngineMetadata> meta, int32_t link, string& canonical) -> bool
 {
-    FO_STACK_TRACE_ENTRY();
-
     int32_t normalized_link = 0;
     if (!TryNormalizeDialogLinkValue(meta, link, normalized_link)) {
         return false;
@@ -129,8 +119,6 @@ static auto TryResolveDialogAnswerLinkCanonical(ptr<const EngineMetadata> meta, 
 
 static auto TryParseDialogLinkToken(ptr<const EngineMetadata> meta, string_view token, int32_t& value, string& canonical) -> bool
 {
-    FO_STACK_TRACE_ENTRY();
-
     if (strvex(token).compare_ignore_case("Exit")) {
         value = DIALOG_LINK_EXIT;
         canonical = "Exit";
@@ -181,8 +169,6 @@ static auto TryParseDialogLinkToken(ptr<const EngineMetadata> meta, string_view 
 
 static auto TryParseDialogAnswerToken(ptr<const EngineMetadata> meta, string_view token, int32_t& link, string& token_for_hash) -> bool
 {
-    FO_STACK_TRACE_ENTRY();
-
     string base_token = string(token);
     size_t marker_count = 0;
 
@@ -216,8 +202,6 @@ static auto StripInlineDialogComment(string_view line) -> string
 
 static auto StartsWithIgnoreCase(string_view value, string_view prefix) -> bool
 {
-    FO_STACK_TRACE_ENTRY();
-
     if (value.size() < prefix.size()) {
         return false;
     }
@@ -227,8 +211,6 @@ static auto StartsWithIgnoreCase(string_view value, string_view prefix) -> bool
 
 static auto TryParseDialogTextEntryStart(string_view line, string& key1, string& key2, string& text, bool& completed) -> bool
 {
-    FO_STACK_TRACE_ENTRY();
-
     const string_view trimmed = strvex(line).trim();
 
     if (trimmed.empty() || trimmed.front() != '{') {
@@ -269,8 +251,6 @@ static auto TryParseDialogTextEntryStart(string_view line, string& key1, string&
 
 static auto CollectDialogLangSections(ConfigFile& fodlg, string_view pack_name) -> vector<string>
 {
-    FO_STACK_TRACE_ENTRY();
-
     vector<string> lang_sections;
 
     for (const string_view section_name : *fodlg.GetSections() | std::views::keys) {
@@ -292,7 +272,7 @@ static auto CollectDialogLangSections(ConfigFile& fodlg, string_view pack_name) 
 
 static void LoadDialogTextSection(const EngineMetadata& meta, ptr<DialogPack> pack, string_view pack_name, const string& lang_section_name, const string& lang_buf)
 {
-    FO_STACK_TRACE_ENTRY();
+    FO_TRACE_ZONE(Script);
 
     if (lang_section_name.size() != 4) {
         throw DialogParseException("Language length not equal 4", pack_name);
@@ -374,8 +354,6 @@ static void LoadDialogTextSection(const EngineMetadata& meta, ptr<DialogPack> pa
 
 static auto GetPropEnumIndex(ptr<const EngineMetadata> meta, string_view str, bool is_demand, uint8_t& type) -> int32_t
 {
-    FO_STACK_TRACE_ENTRY();
-
     const auto* prop_global = meta->GetPropertyRegistrar(GameProperties::ENTITY_TYPE_NAME)->FindProperty(str).get();
     const auto* prop_critter = meta->GetPropertyRegistrar(CritterProperties::ENTITY_TYPE_NAME)->FindProperty(str).get();
     const auto* prop_item = meta->GetPropertyRegistrar(ItemProperties::ENTITY_TYPE_NAME)->FindProperty(str).get();
@@ -434,8 +412,6 @@ static auto GetPropEnumIndex(ptr<const EngineMetadata> meta, string_view str, bo
 
 auto DialogAnswer::GetDemand(int32_t index) -> ptr<DialogAnswerReq>
 {
-    FO_STACK_TRACE_ENTRY();
-
     if (index < 0 || index >= DemandsCount) {
         throw DialogException("Dialog demand index out of range", index);
     }
@@ -445,8 +421,6 @@ auto DialogAnswer::GetDemand(int32_t index) -> ptr<DialogAnswerReq>
 
 auto DialogAnswer::GetResult(int32_t index) -> ptr<DialogAnswerReq>
 {
-    FO_STACK_TRACE_ENTRY();
-
     if (index < 0 || index >= ResultsCount) {
         throw DialogException("Dialog result index out of range", index);
     }
@@ -456,8 +430,6 @@ auto DialogAnswer::GetResult(int32_t index) -> ptr<DialogAnswerReq>
 
 auto DialogSpeech::GetAnswer(int32_t index) -> ptr<DialogAnswer>
 {
-    FO_STACK_TRACE_ENTRY();
-
     if (index < 0 || index >= AnswersCount) {
         throw DialogException("Dialog answer index out of range", index);
     }
@@ -467,8 +439,6 @@ auto DialogSpeech::GetAnswer(int32_t index) -> ptr<DialogAnswer>
 
 auto DialogPack::GetSpeech(int32_t index) -> ptr<DialogSpeech>
 {
-    FO_STACK_TRACE_ENTRY();
-
     if (index < 0 || index >= SpeechesCount) {
         throw DialogException("Dialog speech index out of range", index);
     }
@@ -479,12 +449,11 @@ auto DialogPack::GetSpeech(int32_t index) -> ptr<DialogSpeech>
 DialogManager::DialogManager(EngineMetadata& meta) :
     _meta {&meta}
 {
-    FO_STACK_TRACE_ENTRY();
 }
 
 void DialogManager::LoadFromResources(const FileSystem& resources)
 {
-    FO_STACK_TRACE_ENTRY();
+    FO_TRACE_ZONE(Script);
 
     size_t errors = 0;
     const auto files = resources.FilterFiles("fodlg");
@@ -508,8 +477,6 @@ void DialogManager::LoadFromResources(const FileSystem& resources)
 
 void DialogManager::AddDialog(refcount_ptr<DialogPack> pack)
 {
-    FO_STACK_TRACE_ENTRY();
-
     if (_dialogPacks.count(pack->PackId) != 0) {
         throw DialogManagerException("Dialog already added", pack->PackId);
     }
@@ -519,16 +486,12 @@ void DialogManager::AddDialog(refcount_ptr<DialogPack> pack)
 
 auto DialogManager::GetDialog(hstring pack_id) -> nptr<DialogPack>
 {
-    FO_STACK_TRACE_ENTRY();
-
     const auto it = _dialogPacks.find(pack_id);
     return it != _dialogPacks.end() ? it->second.get() : nullptr;
 }
 
 auto DialogManager::GetDialogs() -> vector<DialogPack*>
 {
-    FO_STACK_TRACE_ENTRY();
-
     vector<DialogPack*> result;
 
     for (auto& pack : _dialogPacks | std::views::values) {
@@ -540,7 +503,7 @@ auto DialogManager::GetDialogs() -> vector<DialogPack*>
 
 auto DialogManager::ParseDialog(string_view pack_name, string_view data) const -> refcount_ptr<DialogPack>
 {
-    FO_STACK_TRACE_ENTRY();
+    FO_TRACE_ZONE(Script);
 
     auto pack = safe_alloc::make_refcounted<DialogPack>();
     auto fodlg = ConfigFile(string(data), ConfigFileOption::CollectContent);
@@ -738,8 +701,6 @@ auto DialogManager::ParseDialog(string_view pack_name, string_view data) const -
 
 auto DialogManager::LoadDemandResult(istringstream& input, bool is_demand) const -> refcount_ptr<DialogAnswerReq>
 {
-    FO_STACK_TRACE_ENTRY();
-
     uint8_t who = DR_WHO_PLAYER;
     uint8_t oper = '=';
     int32_t values_count = 0;
@@ -941,8 +902,6 @@ auto DialogManager::LoadDemandResult(istringstream& input, bool is_demand) const
 
 auto DialogManager::GetDrType(string_view str) const -> uint8_t
 {
-    FO_STACK_TRACE_ENTRY();
-
     if (strvex(str).compare_ignore_case("Property")) {
         return DR_PROP_CRITTER;
     }
@@ -964,7 +923,5 @@ auto DialogManager::GetDrType(string_view str) const -> uint8_t
 
 auto DialogManager::CheckOper(uint8_t oper) const -> bool
 {
-    FO_STACK_TRACE_ENTRY();
-
     return oper == '>' || oper == '<' || oper == '=' || oper == '+' || oper == '-' || oper == '*' || oper == '/' || oper == '!' || oper == '}' || oper == '{';
 }

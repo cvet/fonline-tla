@@ -20,12 +20,11 @@ static auto HasDialogScriptAttribute(ScriptSystem& engine, hstring func_name, st
 DialogBaker::DialogBaker(shared_ptr<BakingContext> ctx) :
     BaseBaker(std::move(ctx), NAME)
 {
-    FO_STACK_TRACE_ENTRY();
 }
 
 void DialogBaker::BakeFiles(const FileCollection& files, string_view target_path) const
 {
-    FO_STACK_TRACE_ENTRY();
+    FO_TRACE_ZONE(Baking);
 
     // Collect dialog files
     vector<File> filtered_files;
@@ -170,12 +169,11 @@ void DialogBaker::BakeFiles(const FileCollection& files, string_view target_path
 DialogTextBaker::DialogTextBaker(shared_ptr<BakingContext> ctx) :
     BaseBaker(std::move(ctx), NAME)
 {
-    FO_STACK_TRACE_ENTRY();
 }
 
 void DialogTextBaker::BakeFiles(const FileCollection& files, string_view target_path) const
 {
-    FO_STACK_TRACE_ENTRY();
+    FO_TRACE_ZONE(Baking);
 
     if (!target_path.empty() && !strex(target_path).get_file_extension().starts_with("fotxt")) {
         return;

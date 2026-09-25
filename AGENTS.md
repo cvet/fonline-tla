@@ -123,7 +123,7 @@ Native C++ conventions:
 
 - Match existing engine/source style before introducing a new pattern.
 - Use `FO_SCRIPT_API` on exported methods/hooks.
-- For non-trivial engine/native functions, follow nearby stack-trace practice (`FO_STACK_TRACE_ENTRY()` or `FO_NO_STACK_TRACE_ENTRY()`), especially in engine-facing hooks.
+- Profiling zones follow the engine's placement rules (`Engine/Docs/Debugging.md`, "Placing zones"): `FO_TRACE_ZONE(<Category>)` opens a `.cpp` function that frames a tick, does a unit of real work (baking, parsing, a network request), can block, or is rare but expensive; accessors, small helpers, per-element code, `FO_SCRIPT_API` exports (their generated bindings are zoned) and tests take none. Stack traces are built without any per-function macro, so the former `FO_STACK_TRACE_ENTRY()` / `FO_NO_STACK_TRACE_ENTRY()` are gone.
 - Prefer `FO_RUNTIME_ASSERT` / `FO_RUNTIME_ASSERT_STR` for invariants over silent fallbacks.
 - Use fixed-width engine aliases (`int32_t`, `uint32_t`, `float32_t`, `size_t`, etc.) where the surrounding code does.
 - Use `numeric_cast` for numeric conversions when narrowing/widening matters.

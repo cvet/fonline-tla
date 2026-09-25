@@ -34,8 +34,6 @@ static constexpr std::array<uint8_t, 121> PAIRS_OF_11 = {0x00, 0x01, 0x02, 0x03,
 AcmDecoder::AcmDecoder(const_span<uint8_t> data) :
     _data {data}
 {
-    FO_STACK_TRACE_ENTRY();
-
     if ((GetBits(24) & 0xFFFFFF) != ACM_SIGNATURE || (GetBits(8) & 0xFF) != ACM_VERSION) {
         throw AcmDecoderException("Not an ACM stream");
     }
@@ -71,7 +69,7 @@ AcmDecoder::AcmDecoder(const_span<uint8_t> data) :
 
 auto AcmDecoder::Decode() -> vector<int16_t>
 {
-    FO_STACK_TRACE_ENTRY();
+    FO_TRACE_ZONE(Baking);
 
     FO_VERIFY_AND_THROW(!_decoded, "ACM stream is already decoded");
     _decoded = true;
@@ -95,8 +93,6 @@ auto AcmDecoder::Decode() -> vector<int16_t>
 
 auto AcmDecoder::ReadByte() noexcept -> uint32_t
 {
-    FO_NO_STACK_TRACE_ENTRY();
-
     // A truncated stream reads on as zeros, which is what the original portion reader handed out past the end
     if (_dataPos >= _data.size()) {
         return 0;
@@ -107,8 +103,6 @@ auto AcmDecoder::ReadByte() noexcept -> uint32_t
 
 void AcmDecoder::PrepareBits(int32_t bits) noexcept
 {
-    FO_NO_STACK_TRACE_ENTRY();
-
     while (bits > _availBits) {
         _nextBits |= ReadByte() << _availBits;
         _availBits += 8;
@@ -117,8 +111,6 @@ void AcmDecoder::PrepareBits(int32_t bits) noexcept
 
 auto AcmDecoder::GetBits(int32_t bits) noexcept -> uint32_t
 {
-    FO_NO_STACK_TRACE_ENTRY();
-
     PrepareBits(bits);
     uint32_t result = _nextBits;
     SkipBits(bits);
@@ -127,30 +119,22 @@ auto AcmDecoder::GetBits(int32_t bits) noexcept -> uint32_t
 
 void AcmDecoder::SkipBits(int32_t bits) noexcept
 {
-    FO_NO_STACK_TRACE_ENTRY();
-
     _availBits -= bits;
     _nextBits >>= bits;
 }
 
 auto AcmDecoder::Amplitude(int32_t index) const -> int32_t
 {
-    FO_NO_STACK_TRACE_ENTRY();
-
     return _amplitudes[numeric_cast<size_t>(AMPLITUDE_TABLE_MIDDLE + index)];
 }
 
 auto AcmDecoder::Cell(int32_t row, int32_t pass) -> int32_t&
 {
-    FO_NO_STACK_TRACE_ENTRY();
-
     return _someBuff[numeric_cast<size_t>(row) * numeric_cast<size_t>(_someSize) + numeric_cast<size_t>(pass)];
 }
 
 void AcmDecoder::MakeNewValues()
 {
-    FO_STACK_TRACE_ENTRY();
-
     CreateAmplitudeDictionary();
     UnpackValues();
 
@@ -161,8 +145,6 @@ void AcmDecoder::MakeNewValues()
 
 void AcmDecoder::CreateAmplitudeDictionary()
 {
-    FO_STACK_TRACE_ENTRY();
-
     int32_t power = numeric_cast<int32_t>(GetBits(4) & 0xF);
     int64_t step = numeric_cast<int64_t>(GetBits(16) & 0xFFFF);
     int32_t count = 1 << power;
@@ -190,8 +172,6 @@ void AcmDecoder::CreateAmplitudeDictionary()
 
 void AcmDecoder::FillColumn(int32_t pass, int32_t ind)
 {
-    FO_STACK_TRACE_ENTRY();
-
     switch (ind) {
     case 0:
         ZeroFill(pass);
@@ -241,8 +221,6 @@ void AcmDecoder::FillColumn(int32_t pass, int32_t ind)
 
 void AcmDecoder::UnpackValues()
 {
-    FO_STACK_TRACE_ENTRY();
-
     if (_packAttrs == 0) {
         return;
     }
@@ -279,8 +257,6 @@ void AcmDecoder::UnpackValues()
 // The first level keeps its running pair in shorts, which truncates it; the next levels keep ints
 void AcmDecoder::TransformFirstLevel(size_t block_start, int32_t size, int32_t blocks)
 {
-    FO_STACK_TRACE_ENTRY();
-
     vector<int16_t>& dec = _firstLevelDecomp;
     size_t row = numeric_cast<size_t>(size);
     int32_t row_0 = 0;
@@ -356,8 +332,6 @@ void AcmDecoder::TransformFirstLevel(size_t block_start, int32_t size, int32_t b
 
 void AcmDecoder::TransformNextLevel(size_t dec_start, size_t block_start, int32_t size, int32_t blocks)
 {
-    FO_STACK_TRACE_ENTRY();
-
     vector<int32_t>& dec = _nextLevelDecomp;
     size_t row = numeric_cast<size_t>(size);
     int32_t row_0 = 0;
@@ -413,8 +387,6 @@ void AcmDecoder::TransformNextLevel(size_t dec_start, size_t block_start, int32_
 
 void AcmDecoder::ZeroFill(int32_t pass)
 {
-    FO_NO_STACK_TRACE_ENTRY();
-
     for (int32_t i = 0; i < _packAttrs2; i++) {
         Cell(i, pass) = 0;
     }
@@ -422,8 +394,6 @@ void AcmDecoder::ZeroFill(int32_t pass)
 
 void AcmDecoder::LinearFill(int32_t pass, int32_t ind)
 {
-    FO_NO_STACK_TRACE_ENTRY();
-
     uint32_t mask = (1u << ind) - 1;
     int32_t base = -(1 << (ind - 1));
 
@@ -435,8 +405,6 @@ void AcmDecoder::LinearFill(int32_t pass, int32_t ind)
 // Zeros, often paired, and +-1
 void AcmDecoder::K1Bits3(int32_t pass)
 {
-    FO_NO_STACK_TRACE_ENTRY();
-
     for (int32_t i = 0; i < _packAttrs2; i++) {
         PrepareBits(3);
 
@@ -464,8 +432,6 @@ void AcmDecoder::K1Bits3(int32_t pass)
 // Zeros and +-1
 void AcmDecoder::K1Bits2(int32_t pass)
 {
-    FO_NO_STACK_TRACE_ENTRY();
-
     for (int32_t i = 0; i < _packAttrs2; i++) {
         PrepareBits(2);
 
@@ -483,8 +449,6 @@ void AcmDecoder::K1Bits2(int32_t pass)
 // Every triplet of -1, 0 and +1
 void AcmDecoder::T1Bits5(int32_t pass)
 {
-    FO_NO_STACK_TRACE_ENTRY();
-
     for (int32_t i = 0; i < _packAttrs2; i++) {
         uint32_t code = GetBits(5) & 0x1F;
 
@@ -514,8 +478,6 @@ void AcmDecoder::T1Bits5(int32_t pass)
 // -2..+2 with paired zeros
 void AcmDecoder::K2Bits4(int32_t pass)
 {
-    FO_NO_STACK_TRACE_ENTRY();
-
     for (int32_t i = 0; i < _packAttrs2; i++) {
         PrepareBits(4);
 
@@ -549,8 +511,6 @@ void AcmDecoder::K2Bits4(int32_t pass)
 // -2..+2
 void AcmDecoder::K2Bits3(int32_t pass)
 {
-    FO_NO_STACK_TRACE_ENTRY();
-
     for (int32_t i = 0; i < _packAttrs2; i++) {
         PrepareBits(3);
 
@@ -574,8 +534,6 @@ void AcmDecoder::K2Bits3(int32_t pass)
 // Every triplet of -2..+2
 void AcmDecoder::T2Bits7(int32_t pass)
 {
-    FO_NO_STACK_TRACE_ENTRY();
-
     for (int32_t i = 0; i < _packAttrs2; i++) {
         uint32_t code = GetBits(7) & 0x7F;
 
@@ -605,8 +563,6 @@ void AcmDecoder::T2Bits7(int32_t pass)
 // -3..+3 with paired zeros
 void AcmDecoder::K3Bits5(int32_t pass)
 {
-    FO_NO_STACK_TRACE_ENTRY();
-
     for (int32_t i = 0; i < _packAttrs2; i++) {
         PrepareBits(5);
 
@@ -644,8 +600,6 @@ void AcmDecoder::K3Bits5(int32_t pass)
 // -3..+3
 void AcmDecoder::K3Bits4(int32_t pass)
 {
-    FO_NO_STACK_TRACE_ENTRY();
-
     for (int32_t i = 0; i < _packAttrs2; i++) {
         PrepareBits(4);
 
@@ -673,8 +627,6 @@ void AcmDecoder::K3Bits4(int32_t pass)
 // -4..+4 with paired zeros
 void AcmDecoder::K4Bits5(int32_t pass)
 {
-    FO_NO_STACK_TRACE_ENTRY();
-
     for (int32_t i = 0; i < _packAttrs2; i++) {
         PrepareBits(5);
 
@@ -708,8 +660,6 @@ void AcmDecoder::K4Bits5(int32_t pass)
 // -4..+4
 void AcmDecoder::K4Bits4(int32_t pass)
 {
-    FO_NO_STACK_TRACE_ENTRY();
-
     for (int32_t i = 0; i < _packAttrs2; i++) {
         PrepareBits(4);
 
@@ -733,8 +683,6 @@ void AcmDecoder::K4Bits4(int32_t pass)
 // Every pair of -5..+5
 void AcmDecoder::T3Bits7(int32_t pass)
 {
-    FO_NO_STACK_TRACE_ENTRY();
-
     for (int32_t i = 0; i < _packAttrs2; i++) {
         uint32_t code = GetBits(7) & 0x7F;
 
@@ -756,8 +704,6 @@ void AcmDecoder::T3Bits7(int32_t pass)
 
 auto LoadAcmAudio(string_view fname, FileReader reader) -> AudioBaker::PcmAudio
 {
-    FO_STACK_TRACE_ENTRY();
-
     try {
         AcmDecoder decoder {reader.GetDataSpan()};
         FO_VERIFY_AND_THROW(decoder.GetSampleRate() > 0, "ACM stream declares no sample rate");

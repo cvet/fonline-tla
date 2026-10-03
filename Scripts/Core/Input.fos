@@ -9,6 +9,11 @@ funcdef void KeyUpCallback(KeyCode key);
 bool[] KeyPressed = {};
 bool[] MousePressed = {};
 
+// Движок шлёт OnInputLost каждый кадр, пока окно не в фокусе. Состояние сбрасывается один раз на потерю фокуса:
+// ввод, поданный без фокуса программно (Game.Simulate*, мост AiControl), доживает до своего отпускания
+bool InputLostActive = false;
+nanotime InputLostFrame = ZERO_NANOTIME;
+
 KeyDownCallback[] KeyDownCallbacks = {};
 KeyUpCallback[] KeyUpCallbacks = {};
 
@@ -64,6 +69,7 @@ void InitInput()
     Game.OnKeyDown.Subscribe(OnKeyDown);
     Game.OnKeyUp.Subscribe(OnKeyUp);
     Game.OnInputLost.Subscribe(OnInputLost);
+    Game.OnLoop.Subscribe(OnLoop);
 
     KeyPressed.resize(0x100);
     MousePressed.resize(MouseButton::Ext4 + 1);
@@ -120,7 +126,22 @@ void OnKeyUp(KeyCode key)
 [[Event]]
 void OnInputLost()
 {
-    InputLost();
+    bool alreadyLost = InputLostActive;
+    InputLostActive = true;
+    InputLostFrame = Game.FrameTime;
+
+    if (!alreadyLost) {
+        InputLost();
+    }
+}
+
+// Ввод движок разбирает раньше OnLoop, поэтому кадр без OnInputLost означает, что фокус вернулся
+[[Event]]
+void OnLoop()
+{
+    if (InputLostActive && InputLostFrame != Game.FrameTime) {
+        InputLostActive = false;
+    }
 }
 
 void MouseDown(MouseButton button) // Engine callback

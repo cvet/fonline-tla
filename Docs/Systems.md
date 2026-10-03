@@ -73,6 +73,14 @@ in the plan point at the same module from different sides.
 | `ClientMain` | C | 1 734 | `ModuleInit` — the client event dispatcher | — |
 | `PlayerRegistration` | S/C | 560 | `ModuleInit`; login and registration | `Test_PlayerRegistration` |
 | `Replication` | S | 519 | death, respawn, permanent death | — |
+| `MoveCursor` | C | 182 | `ModuleInit`; the move hex under the mouse | `Test_MoveCursor` |
+
+The cursor is spread over several places. The right button cycles `Gui::Cursor` (`GuiScreensExt::NextCursor`:
+move, attack when a weapon is active and no battle timeout runs, action); the left button acts by mode in
+`GameLMouseDown` of `Gui/Game.fogui`. `MoveCursor` draws the move hex in two parts around the map sprites, a
+cross on an unreachable hex and the step count while Shift is held; the `Cursor` screen (`Gui/Cursor.fogui`)
+draws the arrow cursors and, in attack mode, the hit chance from `ClientMain::ToHit`. The action cursor opens
+the `DropMenuHandler` menu over a critter or item when the left button is held (`Core/FixedDropMenu`).
 
 ### Interaction
 

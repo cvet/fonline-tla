@@ -113,6 +113,8 @@ AGENT_PERMISSION_MODES = {"observe_only", "command_safe", "full_gameplay", "raw_
 AGENT_POLICY_DEFAULT_DEPLOYMENT_MODE = "private_qa"
 AGENT_POLICY_DEFAULT_PERMISSION_MODE = "command_safe"
 AGENT_RUN_RAW_TOOLS = {"tla_mouse_click", "tla_key_press"}
+# Low-level input commands: hidden from affordances unless raw fallbacks are requested
+RAW_INPUT_COMMANDS = {"mouse_click", "mouse_down", "mouse_up", "mouse_move", "key_press", "key_down", "key_up"}
 AGENT_RUN_COMBAT_TOOLS = {"tla_attack_entity", "tla_attack_hex"}
 AGENT_RUN_DESTRUCTIVE_TOOLS = {"tla_roster_delete"}
 AGENT_RUN_FORBIDDEN_TOOLS = {
@@ -984,6 +986,36 @@ COMMAND_CATALOG: list[dict[str, Any]] = [
         "description": "Escape hatch for keyboard-only UI surfaces.",
         "required": ["intArg"],
         "parameters": {"intArg": "KeyCode enum value.", "stringArg": "Optional typed text."},
+    },
+    {
+        "type": "mouse_down",
+        "description": "Raw input: press and hold a mouse button (release it with mouse_up); used by hold interactions such as the action-cursor menu.",
+        "required": ["screenX", "screenY", "intArg"],
+        "parameters": {"screenX": "Screen X.", "screenY": "Screen Y.", "intArg": "MouseButton enum value."},
+    },
+    {
+        "type": "mouse_up",
+        "description": "Raw input: release a mouse button pressed by mouse_down.",
+        "required": ["screenX", "screenY", "intArg"],
+        "parameters": {"screenX": "Screen X.", "screenY": "Screen Y.", "intArg": "MouseButton enum value."},
+    },
+    {
+        "type": "mouse_move",
+        "description": "Raw input: move the mouse by the offset to the given point, as a player drag would (a pinned set_mouse_pos stays pinned).",
+        "required": ["screenX", "screenY"],
+        "parameters": {"screenX": "Screen X.", "screenY": "Screen Y."},
+    },
+    {
+        "type": "key_down",
+        "description": "Raw input: press and hold a key (release it with key_up), such as Shift for the move-cursor step count.",
+        "required": ["intArg"],
+        "parameters": {"intArg": "KeyCode enum value.", "stringArg": "Optional typed text."},
+    },
+    {
+        "type": "key_up",
+        "description": "Raw input: release a key pressed by key_down.",
+        "required": ["intArg"],
+        "parameters": {"intArg": "KeyCode enum value."},
     },
     {
         "type": "clear_actions",
@@ -5790,7 +5822,7 @@ def available_actions_payload(payload: Any, observation: dict[str, Any], argumen
     actions: list[dict[str, Any]] = []
 
     for command_type in action_types:
-        if not include_raw and command_type in {"mouse_click", "key_press"}:
+        if not include_raw and command_type in RAW_INPUT_COMMANDS:
             continue
 
         action = build_action_affordance(command_type, observation)
@@ -6022,7 +6054,7 @@ def action_candidates(command_type: str, observation: dict[str, Any]) -> list[di
         return [{"label": "no arguments", "arguments": {}, "reason": "command has no required arguments"}]
     if command_type == "close_screen":
         return [{"label": "close active modal screen", "arguments": {}, "reason": "active modal/top GUI screen blocks ordinary world actions"}]
-    if command_type in {"mouse_click", "key_press"}:
+    if command_type in RAW_INPUT_COMMANDS:
         return []
 
     return []
@@ -6541,6 +6573,11 @@ def action_argument_sources(command_type: str) -> dict[str, str]:
         "clear_actions": {},
         "mouse_click": {"screenX/screenY/button": "Raw input fallback; prefer semantic tools first."},
         "key_press": {"key/text": "Raw input fallback; prefer semantic tools first."},
+        "mouse_down": {"screenX/screenY/button": "Raw input fallback for hold interactions; pair with mouse_up."},
+        "mouse_up": {"screenX/screenY/button": "Releases a mouse_down."},
+        "mouse_move": {"screenX/screenY": "Raw input fallback for drags while a button is held."},
+        "key_down": {"key/text": "Raw input fallback for held keys; pair with key_up."},
+        "key_up": {"key": "Releases a key_down."},
     }
     return sources.get(command_type, {})
 

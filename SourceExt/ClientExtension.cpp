@@ -26,10 +26,8 @@ static std::atomic<int32_t> ClientEngineSpawnCounter {};
 
 void FO_NAMESPACE ClientInitHook(ptr<ClientEngine> client)
 {
-    FO_STACK_TRACE_ENTRY();
-
     if (!client->UserData) {
-        client->UserData = make_unique_del_ptr(SafeAlloc::MakeRaw<ClientExtData>().reinterpret_as<uint8_t>(), [](const uint8_t* ptr) FO_DEFERRED {
+        client->UserData = make_unique_del_ptr(safe_alloc::make_raw<ClientExtData>().reinterpret_as<uint8_t>(), [](const uint8_t* ptr) FO_DEFERRED {
             const auto* ext_data_ptr = reinterpret_cast<const ClientExtData*>(ptr);
             delete ext_data_ptr;
         });
@@ -40,8 +38,6 @@ void FO_NAMESPACE ClientInitHook(ptr<ClientEngine> client)
 
 int32_t FO_NAMESPACE Client_Game_GetEmbeddedClientIndex(ptr<ClientEngine> client)
 {
-    FO_STACK_TRACE_ENTRY();
-
     return GetClientExtData(client).EmbeddedClientIndex;
 }
 
@@ -49,7 +45,7 @@ static auto ResolveTextArg(string_view name, string_view text_args) -> string;
 
 static auto HasFemaleSexTag(nptr<const CritterView> cr) -> bool
 {
-    if (cr == nullptr) {
+    if (!cr) {
         return false;
     }
 
@@ -59,8 +55,6 @@ static auto HasFemaleSexTag(nptr<const CritterView> cr) -> bool
 
 static auto FormatTags(ptr<ClientEngine> client, string_view text, string_view text_args, nptr<CritterView> talker) -> string
 {
-    FO_STACK_TRACE_ENTRY();
-
     auto new_text = string(text);
 
     vector<string> dialogs;
@@ -112,11 +106,11 @@ static auto FormatTags(ptr<ClientEngine> client, string_view text, string_view t
 
             // Player name
             if (strex(tag).compare_ignore_case("pname")) {
-                tag = chosen != nullptr ? chosen->GetName() : "";
+                tag = chosen ? chosen->GetName() : "";
             }
             // Npc name
             else if (strex(tag).compare_ignore_case("nname")) {
-                tag = talker != nullptr ? talker->GetName() : "";
+                tag = talker ? talker->GetName() : "";
             }
             // Sex
             else if (strex(tag).compare_ignore_case("sex")) {
@@ -192,7 +186,7 @@ static auto FormatTags(ptr<ClientEngine> client, string_view text, string_view t
             else if (tag.length() > 7 && tag[0] == 's' && tag[1] == 'c' && tag[2] == 'r' && tag[3] == 'i' && tag[4] == 'p' && tag[5] == 't' && tag[6] == ' ') {
                 string func_name = strex(tag.substr(7)).substring_until('$');
 
-                if (!client->CallFunc<string, string>(client->Hashes.ToHashedString(func_name), string(text_args), tag)) {
+                if (!client->CallFunc<string, string>(client->Hashes.to_hashed_string(func_name), string(text_args), tag)) {
                     tag = "";
                 }
             }
@@ -218,8 +212,6 @@ static auto FormatTags(ptr<ClientEngine> client, string_view text, string_view t
 
 static auto ResolveTextArg(string_view name, string_view text_args) -> string
 {
-    FO_STACK_TRACE_ENTRY();
-
     size_t pos = 0;
 
     while (pos < text_args.length()) {
@@ -243,37 +235,27 @@ static auto ResolveTextArg(string_view name, string_view text_args) -> string
 
 string FO_NAMESPACE Client_Game_FormatTags(ptr<ClientEngine> client, string_view text, string_view textArgs)
 {
-    FO_STACK_TRACE_ENTRY();
-
     return FormatTags(client, text, textArgs, nullptr);
 }
 
 string FO_NAMESPACE Client_Game_FormatTags(ptr<ClientEngine> client, string_view text, string_view textArgs, nptr<CritterView> talker)
 {
-    FO_STACK_TRACE_ENTRY();
-
     return FormatTags(client, text, textArgs, talker);
 }
 
 bool FO_NAMESPACE Client_Critter_IsFree(ptr<CritterView> self)
 {
-    FO_STACK_TRACE_ENTRY();
-
     ignore_unused(self);
     return true;
 }
 
 bool FO_NAMESPACE Client_Critter_IsBusy(ptr<CritterView> self)
 {
-    FO_STACK_TRACE_ENTRY();
-
     ignore_unused(self);
     return false;
 }
 
 void FO_NAMESPACE Client_Critter_Wait(ptr<CritterView> self, int32_t ms)
 {
-    FO_STACK_TRACE_ENTRY();
-
     ignore_unused(self, ms);
 }

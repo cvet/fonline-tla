@@ -409,9 +409,10 @@ stalls the campaign.
 `H:/lf-30`/active sibling → recompile → Force Bake → build toolchain → build targets → headless
 startup → unit tests; fix fallout by category (new FIXED_SETTING in `TLA.fomain`, `///@ EngineHook`
 rename in `SourceExt/`, core type/API/nullability change in Scripts, async-sync requirement, baker/
-CMake `AddEngineSources` change, shader profile constraints). Note: engine default shader profile
-`ps_4_0_level_9_3` forbids `gl_FragCoord`/position reads — keep engine `.fofx` within the minimal
-profile; engine shader edits live in the submodule and must go upstream.
+CMake `AddEngineSources` change, shader constraints). Note: effects compile for Direct3D feature level
+10.0; level 9.3 code is opt-in (`Baking.Direct3DLevel9Shaders`, off in TLA because baking hangs on
+`MapSprite_Contour_1px.fofx` with it), and an effect that does not fit level 9.3 fails the bake when it is
+on; engine shader edits live in the submodule and must go upstream.
 
 **Tooling:** git submodule, `Force Bake Resources`, all gates, `H:/lf-30/AGENTS.md` as migration
 reference.

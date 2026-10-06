@@ -1,0 +1,95 @@
+// Test_DayColor — тесты кривой дневного тона (DayColor): тон на ключах кривой, интерполяция между ними, переход
+// через полночь и доля дневного света. Кривая — та же, что в TLA.fomain (View.GlobalDayColor / GlobalDayColorTime).
+namespace Test_DayColor
+{
+
+#if SERVER
+
+[[ModuleInit]]
+void InitTestDayColor()
+{
+    Game.OnTestingInit.Subscribe(OnTestingInit);
+}
+
+[[Event]]
+void OnTestingInit()
+{
+    Testing::RegisterTest("day_color", "keys_give_their_authored_color", KeysGiveTheirAuthoredColor);
+    Testing::RegisterTest("day_color", "between_keys_the_color_is_interpolated", BetweenKeysTheColorIsInterpolated);
+    Testing::RegisterTest("day_color", "night_wraps_through_midnight", NightWrapsThroughMidnight);
+}
+
+int[] Times()
+{
+    int[] times = {300, 600, 1140, 1380};
+    return times;
+}
+
+uint8[] Colors()
+{
+    uint8[] colors = {18, 128, 103, 51, 18, 128, 95, 40, 53, 128, 86, 29};
+    return colors;
+}
+
+bool ExpectColor(Testing::TestContext ctx, ucolor actual, int r, int g, int b, string what)
+{
+    return Testing::ExpectEq(ctx, int(actual.red), r, what + ": R") && Testing::ExpectEq(ctx, int(actual.green), g, what + ": G") &&
+           Testing::ExpectEq(ctx, int(actual.blue), b, what + ": B") && Testing::ExpectEq(ctx, int(actual.alpha), 255, what + ": A");
+}
+
+// Полдень — самый светлый ключ: нейтральный тон 128 (спрайт в своих цветах) и никакой доли ночи
+void KeysGiveTheirAuthoredColor(Testing::TestContext ctx)
+{
+    int light = -1;
+    ucolor noon = DayColor::ComputeColor(Times(), Colors(), 600, light);
+    if (!ExpectColor(ctx, noon, 128, 128, 128, "Полдень") || !Testing::ExpectEq(ctx, light, 0, "Полдень: доля ночи")) {
+        return;
+    }
+
+    // Доля ночи меряется от суммы самых ярких каналов до суммы самых тёмных (18 + 18 + 29), которой не достигает ни
+    // один ключ: рассвет (18, 18, 53) — (384 - 89) * 100 / (384 - 65) = 92
+    ucolor dawn = DayColor::ComputeColor(Times(), Colors(), 300, light);
+    if (!ExpectColor(ctx, dawn, 18, 18, 53, "Рассвет") || !Testing::ExpectEq(ctx, light, 92, "Рассвет: доля ночи")) {
+        return;
+    }
+
+    Testing::Pass(ctx);
+}
+
+// Между ключами каждый канал идёт линейно: половина пути от рассвета (300) к полудню (600)
+void BetweenKeysTheColorIsInterpolated(Testing::TestContext ctx)
+{
+    int light = -1;
+    ucolor morning = DayColor::ComputeColor(Times(), Colors(), 450, light);
+    if (!ExpectColor(ctx, morning, 73, 73, 90, "Утро")) {
+        return;
+    }
+
+    if (!Testing::Expect(ctx, light > 0 && light < 100, "Утро: доля ночи между ключами")) {
+        return;
+    }
+
+    Testing::Pass(ctx);
+}
+
+// Ночь от последнего ключа (1380) до первого (300) переходит через полночь, и время за сутками сворачивается
+void NightWrapsThroughMidnight(Testing::TestContext ctx)
+{
+    int light = -1;
+    ucolor midnight = DayColor::ComputeColor(Times(), Colors(), 0, light);
+    // 60 минут из 360: 51 + (18 - 51) * 60 / 360 = 46, 40 + (18 - 40) / 6 = 37, 29 + (53 - 29) / 6 = 33
+    if (!ExpectColor(ctx, midnight, 46, 37, 33, "Полночь")) {
+        return;
+    }
+
+    ucolor nextDay = DayColor::ComputeColor(Times(), Colors(), 600 + DayColor::MINUTES_PER_DAY, light);
+    if (!ExpectColor(ctx, nextDay, 128, 128, 128, "Полдень следующих суток")) {
+        return;
+    }
+
+    Testing::Pass(ctx);
+}
+
+#endif
+
+}

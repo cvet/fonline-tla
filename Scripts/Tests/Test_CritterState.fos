@@ -1,0 +1,151 @@
+// Test_CritterState — тесты перехода жив/мёртв (ToDead/ToAlive), на котором держится репликация,
+// и парных предикатов паузы (Wait/IsBusy/IsFree).
+namespace Test_CritterState
+{
+
+#if SERVER
+
+[[ModuleInit]]
+void InitTestCritterState()
+{
+    Game.OnTestingInit.Subscribe(OnTestingInit);
+}
+
+[[Event]]
+void OnTestingInit()
+{
+    Testing::RegisterTest("critter_state", "revive_restores_life", ReviveRestoresLife);
+    Testing::RegisterTest("critter_state", "revive_is_idempotent", ReviveIsIdempotent);
+    Testing::RegisterTest("critter_state", "wait_predicates_are_complementary", WaitPredicatesAreComplementary);
+}
+
+// Один проходимый гекс рядом с центром карты.
+bool FindMovableHex(Map map, mpos& hex)
+{
+    mpos center = mpos(map.Size.width / 2, map.Size.height / 2);
+
+    for (int radius = 0; radius < 15; radius++) {
+        for (int dx = -radius; dx <= radius; dx++) {
+            for (int dy = -radius; dy <= radius; dy++) {
+                mpos probe = mpos(center.x + dx, center.y + dy);
+                if (probe.x > 0 && probe.y > 0 && int(probe.x) < map.Size.width - 1 && int(probe.y) < map.Size.height - 1 && map.IsHexMovable(probe)) {
+                    hex = probe;
+                    return true;
+                }
+            }
+        }
+    }
+
+    return false;
+}
+
+Critter ? SpawnAt(Testing::TestContext ctx, Map& map)
+{
+    Location? loc = Testing::CreateTestLocation(ctx, Content::Location::desert_12);
+    if (loc == null) {
+        Testing::Fail(ctx, "Тестовая локация должна создаваться");
+        return null;
+    }
+
+    map = loc.GetMapByIndex(0);
+    mpos hex;
+    if (!FindMovableHex(map, hex)) {
+        Testing::Fail(ctx, "На карте должен найтись проходимый гекс");
+        return null;
+    }
+
+    return Testing::SpawnTestNpc(ctx, map, Content::Critter::Brahmin, hex);
+}
+
+// Воскрешение обязано вернуть криттера в живое состояние с положительным здоровьем: репликация
+// полагается на то, что после ToAlive криттер не остаётся мёртвым с нулевыми хитами.
+void ReviveRestoresLife(Testing::TestContext ctx)
+{
+    Map map;
+    Critter? npc = SpawnAt(ctx, map);
+    if (npc == null) {
+        return;
+    }
+
+    Critter cr = npc;
+    CritterState::ToDead(cr, CritterActionAnim::DeadFront, null);
+    if (!Testing::Expect(ctx, cr.IsDead(), "После ToDead криттер мёртв")) {
+        return;
+    }
+
+    if (!Testing::ExpectEq(ctx, cr.CurrentHp, 0, "Смерть обнуляет здоровье")) {
+        return;
+    }
+
+    if (!Testing::Expect(ctx, CritterState::ToAlive(cr), "Воскрешение на свободном гексе удаётся")) {
+        return;
+    }
+
+    if (!Testing::Expect(ctx, cr.IsAlive(), "После ToAlive криттер жив")) {
+        return;
+    }
+
+    Testing::Expect(ctx, cr.CurrentHp >= 1, "У воскрешённого криттера положительное здоровье");
+}
+
+// Повторное воскрешение живого — не ошибка и ничего не меняет: пути смерти вызывают его защитно.
+void ReviveIsIdempotent(Testing::TestContext ctx)
+{
+    Map map;
+    Critter? npc = SpawnAt(ctx, map);
+    if (npc == null) {
+        return;
+    }
+
+    Critter cr = npc;
+    if (!Testing::Expect(ctx, cr.IsAlive(), "Свежесозданный NPC жив")) {
+        return;
+    }
+
+    int hpBefore = cr.CurrentHp;
+    if (!Testing::Expect(ctx, CritterState::ToAlive(cr), "Воскрешение живого возвращает успех")) {
+        return;
+    }
+
+    if (!Testing::Expect(ctx, cr.IsAlive(), "Живой остаётся живым")) {
+        return;
+    }
+
+    Testing::ExpectEq(ctx, cr.CurrentHp, hpBefore, "Воскрешение живого не трогает здоровье");
+}
+
+// IsBusy/IsWait и IsFree — строгое дополнение друг друга; расхождение подвесило бы криттера
+// либо разрешило действие во время паузы.
+void WaitPredicatesAreComplementary(Testing::TestContext ctx)
+{
+    Map map;
+    Critter? npc = SpawnAt(ctx, map);
+    if (npc == null) {
+        return;
+    }
+
+    Critter cr = npc;
+    CritterState::Wait(cr, 0);
+    if (!Testing::Expect(ctx, CritterState::IsFree(cr), "Нулевая пауза оставляет криттера свободным")) {
+        return;
+    }
+
+    if (!Testing::Expect(ctx, !CritterState::IsBusy(cr), "Свободный криттер не занят")) {
+        return;
+    }
+
+    CritterState::Wait(cr, 60000);
+    if (!Testing::Expect(ctx, CritterState::IsBusy(cr), "После длинной паузы криттер занят")) {
+        return;
+    }
+
+    if (!Testing::Expect(ctx, CritterState::IsWait(cr), "Занятость и ожидание совпадают")) {
+        return;
+    }
+
+    Testing::Expect(ctx, !CritterState::IsFree(cr), "Занятый криттер не свободен");
+}
+
+#endif
+
+}

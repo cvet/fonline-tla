@@ -37,7 +37,7 @@ static constexpr uint8_t DR_WHO_PLAYER = 1;
 static constexpr uint8_t DR_WHO_NPC = 2;
 
 ///@ ExportRefType Server RefCounted Export = Type, Who, ParamIndex, ParamHash, AnswerScriptFuncName, NoRecheck, Op, ValuesCount, Value, ValueExt0, ValueExt1, ValueExt2, ValueExt3, ValueExt4
-class DialogAnswerReq : public RefCounted<DialogAnswerReq>
+class DialogAnswerReq : public refcounted<DialogAnswerReq>
 {
 public:
     uint8_t Type {DR_NONE};
@@ -57,7 +57,7 @@ public:
 };
 
 ///@ ExportRefType Server RefCounted Export = Link, TextId, DemandsCount, ResultsCount, GetDemand, GetResult
-class DialogAnswer : public RefCounted<DialogAnswer>
+class DialogAnswer : public refcounted<DialogAnswer>
 {
 public:
     auto GetDemand(int32_t index) -> ptr<DialogAnswerReq>;
@@ -72,7 +72,7 @@ public:
 };
 
 ///@ ExportRefType Server RefCounted Export = Id, TextId, DlgScriptFuncName, AnswersCount, GetAnswer
-class DialogSpeech : public RefCounted<DialogSpeech>
+class DialogSpeech : public refcounted<DialogSpeech>
 {
 public:
     auto GetAnswer(int32_t index) -> ptr<DialogAnswer>;
@@ -85,7 +85,7 @@ public:
 };
 
 ///@ ExportRefType Server RefCounted Export = PackId, SpeechesCount, GetSpeech
-class DialogPack : public RefCounted<DialogPack>
+class DialogPack : public refcounted<DialogPack>
 {
 public:
     auto GetSpeech(int32_t index) -> ptr<DialogSpeech>;

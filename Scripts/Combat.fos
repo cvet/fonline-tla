@@ -1537,7 +1537,7 @@ void CombatAttack(Critter cr, Critter target, AbstractItem weapon, int weaponMod
             if (realWeapon.Stackable) {
                 // Кладём на гекс
                 if (placeOnHex) {
-                    map.AddItem(targetHex, weapPid, 1);
+                    ItemStacks::AddItem(map, targetHex, weapPid, 1);
                 }
 
                 // Убираем 1 предмет
@@ -1766,33 +1766,16 @@ void ApplyDamage(AttackStruct attack, Critter target, int rounds, bool isCritica
     int targetDR = target.DamageResistance[dmgType];
     int targetDT = target.DamageThreshold[dmgType];
 
-    if (Flags::HasFlag(eff, Flags::HF_BYPASS_ARMOR) && dmgType != DamageTypes::Emp) {
-        targetDT /= 5;
-        targetDR /= 5;
-        targetDR -= (attacker != null ? (attacker.IsTraitFinesse ? 30 : 0) : 0);
-    }
-    else if (weaponPerk == ItemPerks::Penetrate) {
-        targetDT /= 5;
-    }
-
-    targetDR += (attacker != null ? (attacker.IsTraitFinesse ? 30 : 0) : 0);
-    targetDR += attack.DRMod; // всегда
-    targetDR = Math::Clamp(targetDR, 0, 100);
+    bool bypassArmor = Flags::HasFlag(eff, Flags::HF_BYPASS_ARMOR) && dmgType != DamageTypes::Emp;
+    bool finesse = attacker != null && attacker.IsTraitFinesse;
+    ApplyArmorModifiers(bypassArmor, weaponPerk == ItemPerks::Penetrate, finesse, attack.DRMod, targetDT, targetDR);
     int dmgMin = attack.DmgMin + attack.BonusDmg;
     int dmgMax = attack.DmgMax + attack.BonusDmg;
-    int rawDmg;
     int totalDmg = 0;
     dmgMul *= attack.DMMod;
     int dmgDiv = 2 * attack.DDMod;
     for (int i = 0; i < rounds; i++) {
-        rawDmg = Game.Random(dmgMin, dmgMax);
-        rawDmg *= dmgMul;
-        rawDmg /= dmgDiv;
-        rawDmg -= targetDT;
-        rawDmg -= (rawDmg * targetDR) / 100;
-        if (rawDmg > 0) {
-            totalDmg += rawDmg;
-        }
+        totalDmg += ReduceDamage(Game.Random(dmgMin, dmgMax), dmgMul, dmgDiv, targetDT, targetDR);
     }
 
     if (attacker != null) {
@@ -1824,7 +1807,7 @@ void ApplyDamage(AttackStruct attack, Critter target, int rounds, bool isCritica
         Item? realWeaponTarget = Tla::GetCritterHandItem(target);
         if (realWeaponTarget != null) {
             if (realWeaponTarget.Stackable) {
-                Item dropped = map.AddItem(target.Hex, realWeaponTarget.ProtoId, 1);
+                Item dropped = ItemStacks::AddItem(map, target.Hex, realWeaponTarget.ProtoId, 1);
                 if (realWeaponTarget.Count > 1) {
                     realWeaponTarget.Count = realWeaponTarget.Count - 1;
                 }
@@ -2457,7 +2440,7 @@ void CriticalFailure(Critter cr, AbstractItem weap, int weaponUse, ProtoItem? am
 
     if (Flags::HasFlag(eff, Flags::MF_WEAPON_DROPPED) && realWeapon != null) {
         if (realWeapon.Stackable) {
-            Item dropped = map.AddItem(cr.Hex, weapon.ProtoId, 1);
+            Item dropped = ItemStacks::AddItem(map, cr.Hex, weapon.ProtoId, 1);
             if (realWeapon.Count > 1) {
                 realWeapon.Count = realWeapon.Count - 1;
             }
@@ -2712,6 +2695,39 @@ int FindCritterInArray(Critter[] crits, Critter cr)
     }
 
     return -1;
+}
+
+// Броня цели после модификаторов выстрела. Пробивающий удар делит и порог, и сопротивление, а бонус
+// ловкача внутри него вычитается ровно затем, чтобы следующее сложение вернуло его на место: под
+// пробитием ловкач не работает. Итог всегда зажимается в 0..100 — сопротивление выше сотни лечило бы.
+void ApplyArmorModifiers(bool bypassArmor, bool penetrate, bool finesse, int resistanceMod, int& damageThreshold, int& damageResistance)
+{
+    if (bypassArmor) {
+        damageThreshold /= 5;
+        damageResistance /= 5;
+        damageResistance -= finesse ? 30 : 0;
+    }
+    else if (penetrate) {
+        damageThreshold /= 5;
+    }
+
+    damageResistance += finesse ? 30 : 0;
+    damageResistance += resistanceMod;
+    damageResistance = Math::Clamp(damageResistance, 0, 100);
+}
+
+// Урон одного попадания после множителей и брони. Порядок здесь и есть правило: сначала множитель и
+// делитель, затем вычитание порога, и только потом процентное сопротивление от уже уменьшенного числа.
+// Отрицательный результат означает, что броня поглотила выстрел целиком, а не что цель вылечили.
+int ReduceDamage(int rawDamage, int damageMul, int damageDiv, int damageThreshold, int damageResistance)
+{
+    int dmg = rawDamage;
+    dmg *= damageMul;
+    dmg /= damageDiv;
+    dmg -= damageThreshold;
+    dmg -= (dmg * damageResistance) / 100;
+
+    return dmg > 0 ? dmg : 0;
 }
 
 int GetAimApCost(int hitLocation)

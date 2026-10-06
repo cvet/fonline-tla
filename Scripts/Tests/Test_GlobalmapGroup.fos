@@ -1,0 +1,151 @@
+// Test_GlobalmapGroup — тесты зональной разбивки глобальной карты (GlobalMapZone и границы поля)
+// и сравнения состава группы (SameCritterGroup), на котором держатся снимки перед мутацией группы.
+namespace Test_GlobalmapGroup
+{
+
+#if SERVER
+
+[[ModuleInit]]
+void InitTestGlobalmapGroup()
+{
+    Game.OnTestingInit.Subscribe(OnTestingInit);
+}
+
+[[Event]]
+void OnTestingInit()
+{
+    Testing::RegisterTest("globalmap_group", "zone_boundaries", ZoneBoundaries);
+    Testing::RegisterTest("globalmap_group", "zone_field_extent", ZoneFieldExtent);
+    Testing::RegisterTest("globalmap_group", "group_snapshot_comparison", GroupSnapshotComparison);
+}
+
+// Зона — целочисленное деление координаты на длину зоны, поэтому вся длина принадлежит одной зоне,
+// а следующая начинается ровно на границе. Off-by-one здесь смещает все встречи на карте.
+void ZoneBoundaries(Testing::TestContext ctx)
+{
+    int len = GlobalmapGroup::GlobalMapZoneLength();
+    if (!Testing::Expect(ctx, len > 0, "Длина зоны должна быть положительной")) {
+        return;
+    }
+
+    if (!Testing::ExpectEq(ctx, GlobalmapGroup::GlobalMapZone(0), 0, "Начало координат лежит в нулевой зоне")) {
+        return;
+    }
+
+    if (!Testing::ExpectEq(ctx, GlobalmapGroup::GlobalMapZone(len - 1), 0, "Последняя координата зоны ещё нулевая")) {
+        return;
+    }
+
+    if (!Testing::ExpectEq(ctx, GlobalmapGroup::GlobalMapZone(len), 1, "Граница зоны начинает следующую")) {
+        return;
+    }
+
+    Testing::ExpectEq(ctx, GlobalmapGroup::GlobalMapZone(2 * len), 2, "Вторая граница начинает третью зону");
+}
+
+// Размеры поля выражены в зонах: последняя допустимая координата обязана попадать в последнюю зону,
+// иначе край карты уезжает за пределы таблицы встреч.
+void ZoneFieldExtent(Testing::TestContext ctx)
+{
+    int len = GlobalmapGroup::GlobalMapZoneLength();
+    int maxX = GlobalmapGroup::GlobalMapMaxX();
+    int maxY = GlobalmapGroup::GlobalMapMaxY();
+
+    if (!Testing::Expect(ctx, maxX > 0 && maxY > 0, "Поле глобальной карты должно иметь размер")) {
+        return;
+    }
+
+    if (!Testing::ExpectEq(ctx, maxX % len, 0, "Ширина поля кратна длине зоны")) {
+        return;
+    }
+
+    if (!Testing::ExpectEq(ctx, maxY % len, 0, "Высота поля кратна длине зоны")) {
+        return;
+    }
+
+    if (!Testing::ExpectEq(ctx, GlobalmapGroup::GlobalMapZone(maxX - 1), maxX / len - 1, "Правый край поля лежит в последней зоне")) {
+        return;
+    }
+
+    Testing::ExpectEq(ctx, GlobalmapGroup::GlobalMapZone(maxY - 1), maxY / len - 1, "Нижний край поля лежит в последней зоне");
+}
+
+// Два различных проходимых гекса рядом с центром карты — минимум для состава из двух криттеров.
+bool FindTwoMovableHexes(Map map, mpos& first, mpos& second)
+{
+    mpos center = mpos(map.Size.width / 2, map.Size.height / 2);
+    int found = 0;
+
+    for (int radius = 0; radius < 15 && found < 2; radius++) {
+        for (int dx = -radius; dx <= radius && found < 2; dx++) {
+            for (int dy = -radius; dy <= radius && found < 2; dy++) {
+                mpos probe = mpos(center.x + dx, center.y + dy);
+                if (probe.x > 0 && probe.y > 0 && int(probe.x) < map.Size.width - 1 && int(probe.y) < map.Size.height - 1 && map.IsHexMovable(probe)) {
+                    if (found == 0) {
+                        first = probe;
+                        found = 1;
+                    }
+                    else if (probe != first) {
+                        second = probe;
+                        found = 2;
+                    }
+                }
+            }
+        }
+    }
+
+    return found == 2;
+}
+
+// Снимок состава сравнивается по личности и по порядку: перестановка — это уже другой состав,
+// иначе мутация группы прошла бы по устаревшему снимку.
+void GroupSnapshotComparison(Testing::TestContext ctx)
+{
+    Critter[] empty = {};
+    if (!Testing::Expect(ctx, GlobalmapGroup::SameCritterGroup(empty, empty), "Пустые составы совпадают")) {
+        return;
+    }
+
+    Location? loc = Testing::CreateTestLocation(ctx, Content::Location::desert_12);
+    if (loc == null) {
+        Testing::Fail(ctx, "Тестовая локация должна создаваться");
+        return;
+    }
+
+    Map map = loc.GetMapByIndex(0);
+    mpos first;
+    mpos second;
+    if (!Testing::Expect(ctx, FindTwoMovableHexes(map, first, second), "На карте должны найтись два проходимых гекса")) {
+        return;
+    }
+
+    Critter? a = Testing::SpawnTestNpc(ctx, map, Content::Critter::Brahmin, first);
+    if (a == null) {
+        Testing::Fail(ctx, "Первый NPC должен спавниться");
+        return;
+    }
+
+    Critter? b = Testing::SpawnTestNpc(ctx, map, Content::Critter::Brahmin, second);
+    if (b == null) {
+        Testing::Fail(ctx, "Второй NPC должен спавниться");
+        return;
+    }
+
+    Critter[] ab = {a, b};
+    Critter[] ba = {b, a};
+    Critter[] justA = {a};
+
+    if (!Testing::Expect(ctx, GlobalmapGroup::SameCritterGroup(ab, ab), "Одинаковый состав в одинаковом порядке совпадает")) {
+        return;
+    }
+
+    if (!Testing::Expect(ctx, !GlobalmapGroup::SameCritterGroup(ab, ba), "Перестановка считается другим составом")) {
+        return;
+    }
+
+    Testing::Expect(ctx, !GlobalmapGroup::SameCritterGroup(ab, justA), "Состав другой длины не совпадает");
+}
+
+#endif
+
+}

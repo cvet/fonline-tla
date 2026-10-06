@@ -67,6 +67,8 @@ Keep the listener on loopback. It binds the local client as a remotely controlla
 | `events` | `{ "afterSeq": 0, "limit": 100 }` | Client events after a sequence number |
 | `act` | command object | Enqueues a command for the next client loop |
 
+The bridge serves one connection at a time; the next adapter is accepted once the current one closes. A connection that fails (a read or write error, typically a client that went away before its response was written) is closed and reported as `lastError` in `status`, and the bridge keeps listening. A request whose handling throws is answered with error `-32603` instead. Only a failure to open the listener stops the bridge.
+
 If `AiControl.Token` is non-empty, call `auth` first on every connection. The MCP adapter does this
 automatically when `TLA_AI_TOKEN` / `--token` is supplied.
 
@@ -80,6 +82,8 @@ Consumers must branch on `connected`, `hasMap`, `hasChosen` instead of assuming 
 
 - `chosen`: id, name, hexX/Y, level, currentHp, maxHp, experience, currentAp, actionPoints, isAlive,
   inCombat (`TimeoutBattle` active), inSneakMode.
+- `mouse`: x, y and `cursor` — the current `CursorType` (`Default` 0 = action, `Move` 1, `UseItem` 2, `UseWeapon` 3,
+  `UseSkill` 4, `Hand` 5); the right button cycles it in game.
 - `map`: id, protoId, width, height.
 - `critters`: visible critters from `CurMap.GetCritters(CritterFindType::Any)` (chosen excluded): id,
   protoId, name, hexX/Y, isAlive, inCombat, isNoTalk, effective talkDistance, dialogId. The
@@ -159,6 +163,9 @@ Queued through `act`, consumed by the client loop, routed through normal player 
 | `set_mouse_pos` | `screenX`, `screenY` | `Game.SetForcedMousePos` |
 | `mouse_click` | `screenX`, `screenY`, `intArg` (`MouseButton`) | `Game.SimulateMouseClick` |
 | `key_press` | `intArg` (`KeyCode`), `stringArg` | `Game.SimulateKeyboardPress` |
+| `mouse_down` / `mouse_up` | `screenX`, `screenY`, `intArg` (`MouseButton`) | `Game.SimulateMouseDown` / `Game.SimulateMouseUp`: hold a button across frames (the action-cursor menu opens on a held left button) |
+| `mouse_move` | `screenX`, `screenY` | `Game.SimulateMouseMove`: a relative move, as a drag while a button is held; a pinned `set_mouse_pos` stays pinned |
+| `key_down` / `key_up` | `intArg` (`KeyCode`), `stringArg` | `Input::KeyDown` / `Input::KeyUp`: hold a key (Shift shows the step count on the move cursor); the engine simulates key presses only as press-and-release |
 | `environment_query` | `intArg` (queryId), `screenX`/`screenY` (from-hex, `-1` = chosen), `x`/`y` (to-hex), `stringArg` (options) | Client geometry/path query; publishes an `environment_query_result` event by `queryId`. |
 
 Commands not yet supported in TLA return `unsupported:<type>` and `success=false`.
@@ -504,6 +511,10 @@ character reports `already_satisfied=true` instead of wandering an obsolete dial
   normal state for an automated/headless client), pushing `input_lost` until it evicted real events
   (`command_completed`, `qa_prop_value`, `qa_prop_set`) from the bounded event ring. It is now gated behind
   `AiControl.CaptureRawInputEvents` (off by default), so automation runs see a clean event stream.
+- **Held input survives an unfocused client:** the same per-frame `OnInputLost` made `Input` release every
+  pressed button and key on the next frame, so a simulated hold (the action-cursor menu, a drag) could not be
+  driven. `Input` now resets once per focus loss (the first `OnInputLost` after input was live), and the bridge
+  exposes `mouse_down` / `mouse_up` / `mouse_move` and `key_down` / `key_up` to hold input across frames.
 - `smoke_ai_control_mcp.py` (static and live) and `tla_mechanics_playtest.py` pass.
 
 ### Dialog trace seeds (2026-08-08)

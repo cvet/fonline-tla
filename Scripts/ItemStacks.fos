@@ -1,0 +1,333 @@
+// ItemStacks — стопки предметов: количество единиц в одном предмете и их слияние/разделение.
+// Движок с Engine #214 знает только экземпляры: не сливает предметы, не делит их и не придаёт смысла Count и
+// Stackable. Правила TLA повторяют прежние движковые: единицы прототипа у криттера лежат одной стопкой (первый его
+// предмет в любом слоте), в контейнере — одной стопкой на секцию (пустая секция совпадает с любой), на гексе карты
+// стопки не сливаются; нестакуемый прототип добавляется отдельными экземплярами, не больше
+// Critter.MaxAddUnstackableItems за раз.
+// SERVER: добавление, перенос с разделением и слиянием, уничтожение единиц; единица по умолчанию у нового предмета.
+// SERVER + CLIENT: подсчёт единиц прототипа у криттера. CLIENT: локальная копия предмета с заданным числом единиц.
+namespace ItemStacks
+{
+
+///@ Property Item Common bool Stackable
+///@ Property Item Common int32 Count Mutable PublicSync Persistent
+///@ Setting Server int32 Critter.MaxAddUnstackableItems
+
+#if SERVER
+
+[[ModuleInit]]
+void InitItemStacks()
+{
+    // Раньше остальных обработчиков инициализации: они уже должны видеть хотя бы одну единицу
+    Game.OnItemInit.Subscribe(OnItemInit, EventPriority::Highest);
+}
+
+// Новый предмет без количества — одна единица: прототипы количества обычно не задают
+[[Event]]
+void OnItemInit(Item item, bool firstTime)
+{
+    if (firstTime && item.Count == 0) {
+        item.Count = 1;
+    }
+}
+
+// Стопка прототипа у криттера, в которую сливаются единицы: первый его предмет в любом слоте.
+Item? FindStack(Critter cr, hstring pid)
+{
+    Item[] items = cr.GetItems(pid);
+    return items.length() != 0 ? items[0] : null;
+}
+
+// Стопка прототипа в контейнере: первый его предмет в секции (пустая секция совпадает с любой).
+Item? FindStack(Item cont, hstring pid, any stackId)
+{
+    Item[] items = cont.GetItems(stackId);
+
+    for (int i = 0; i < int(items.length()); i++) {
+        if (items[i].ProtoId == pid) {
+            return items[i];
+        }
+    }
+
+    return null;
+}
+
+// Сколько единиц прототипа у криттера во всех его предметах.
+int CountItem(Critter cr, hstring pid)
+{
+    Item[] items = cr.GetItems(pid);
+    int count = 0;
+
+    for (int i = 0; i < int(items.length()); i++) {
+        count += items[i].Count;
+    }
+
+    return count;
+}
+
+// Сколько экземпляров создаёт одно добавление нестакуемого прототипа.
+int UnstackableInstances(int count)
+{
+    return Math::Min(count, Settings.Critter.MaxAddUnstackableItems);
+}
+
+// Новый отсоединённый предмет прототипа с count единицами.
+Item CreateUnits(hstring pid, int count)
+{
+    Item item = Game.CreateItem(pid);
+
+    if (count != 1) {
+        verify(item.Stackable, "Only a stackable item holds more than one unit", pid, count);
+        item.Count = count;
+    }
+
+    return item;
+}
+
+// Предмет, в котором оказались единицы после помещения; помещение, которое не состоялось, — ошибка.
+Item Placed(Item? placed, hstring pid)
+{
+    verify(placed != null, "Item placement did not take place", pid);
+    return placed;
+}
+
+// Добавляет криттеру count единиц прототипа: стакуемые сливаются в его стопку или ложатся одним новым предметом,
+// нестакуемые создаются отдельными экземплярами. Отвечает последним предметом, в котором оказались единицы.
+Item AddItem(Critter cr, hstring pid, int count)
+{
+    verify(count > 0, "Count arg must be positive", cr, pid, count);
+
+    Item? stack = FindStack(cr, pid);
+    if (stack != null && stack.Stackable) {
+        stack.Count += count;
+        return stack;
+    }
+
+    if (Game.GetProtoItem(pid).Stackable) {
+        return Placed(Game.MoveItem(CreateUnits(pid, count), cr), pid);
+    }
+
+    Item? last = null;
+    for (int i = 0; i < UnstackableInstances(count); i++) {
+        last = Placed(Game.MoveItem(CreateUnits(pid, 1), cr), pid);
+    }
+
+    verify(last != null, "Adding non-stackable units must create an instance", cr, pid);
+    return last;
+}
+
+// То же для контейнера и его секции.
+Item AddItem(Item cont, hstring pid, int count, any stackId)
+{
+    verify(count > 0, "Count arg must be positive", cont, pid, count);
+
+    Item? stack = FindStack(cont, pid, stackId);
+    if (stack != null && stack.Stackable) {
+        stack.Count += count;
+        return stack;
+    }
+
+    if (Game.GetProtoItem(pid).Stackable) {
+        return Placed(Game.MoveItem(CreateUnits(pid, count), cont, stackId), pid);
+    }
+
+    Item? last = null;
+    for (int i = 0; i < UnstackableInstances(count); i++) {
+        last = Placed(Game.MoveItem(CreateUnits(pid, 1), cont, stackId), pid);
+    }
+
+    verify(last != null, "Adding non-stackable units must create an instance", cont, pid);
+    return last;
+}
+
+// Кладёт count единиц прототипа на гекс: на земле стопки не сливаются. Отвечает первым положенным предметом.
+Item AddItem(Map map, mpos hex, hstring pid, int count)
+{
+    return AddItem(map, hex, pid, count, dict<ItemProperty, int> = {});
+}
+
+// То же с начальными значениями свойств, которые получает каждый положенный предмет.
+Item AddItem(Map map, mpos hex, hstring pid, int count, dict<ItemProperty, int> props)
+{
+    verify(count > 0, "Count arg must be positive", map, pid, count);
+
+    int instances = Game.GetProtoItem(pid).Stackable ? 1 : UnstackableInstances(count);
+    Item? first = null;
+
+    for (int i = 0; i < instances; i++) {
+        Item item = props.isEmpty() ? Game.CreateItem(pid) : Game.CreateItem(pid, props);
+        if (instances == 1 && count != 1) {
+            item.Count = count;
+        }
+
+        Item placed = Placed(Game.MoveItem(item, map, hex), pid);
+        if (first == null) {
+            first = placed;
+        }
+    }
+
+    verify(first != null, "Adding units must place an item", map, pid);
+    return first;
+}
+
+// Отделяет count единиц стопки в отсоединённую копию со всеми свойствами источника.
+// Копию никто не видит, пока вызывающий не поместит её к держателю.
+Item SplitItem(Item item, int count)
+{
+    verify(item.Stackable, "Only a stackable item can be split", item);
+    verify(count > 0 && count < item.Count, "Split count must leave units on both sides", item, count, item.Count);
+
+    int rest = item.Count - count;
+    Item split = Game.CloneItem(item);
+    item.Count = rest;
+    split.Count = count;
+    return split;
+}
+
+// Уничтожает count единиц предмета: всю стопку, если единиц не больше count, иначе уменьшает её.
+void DestroyItem(Item item, int count)
+{
+    if (count <= 0) {
+        return;
+    }
+
+    if (count >= item.Count) {
+        Game.DestroyItem(item);
+    }
+    else {
+        item.Count -= count;
+    }
+}
+
+// Уничтожает count единиц прототипа у криттера. Стакуемые берутся из его стопки; нестакуемые — по экземпляру,
+// сначала из инвентаря, потом из остальных слотов.
+void DestroyItem(Critter cr, hstring pid, int count)
+{
+    if (count <= 0) {
+        return;
+    }
+
+    if (Game.GetProtoItem(pid).Stackable) {
+        Item? stack = FindStack(cr, pid);
+        if (stack != null) {
+            DestroyItem(stack, count);
+        }
+
+        return;
+    }
+
+    for (int i = 0; i < count; i++) {
+        Item? item = cr.GetItem(pid);
+        if (item == null) {
+            break;
+        }
+
+        Game.DestroyItem(item);
+    }
+}
+
+// Уничтожает все единицы прототипа у криттера.
+void DestroyItem(Critter cr, hstring pid)
+{
+    DestroyItem(cr, pid, CountItem(cr, pid));
+}
+
+// Переносит count единиц предмета криттеру: сливает в его стопку, если она есть, иначе помещает сам предмет или
+// отделённую часть. Отвечает предметом, в котором оказались единицы, или null, если помещение не состоялось.
+Item? MoveItem(Item item, int count, Critter toCr)
+{
+    verify(count > 0 && count <= item.Count, "Invalid item move count", item, count);
+
+    if (item.Ownership == ItemOwnership::CritterInventory && item.CritterId == toCr.Id) {
+        return item;
+    }
+
+    if (item.Stackable) {
+        Item? stack = FindStack(toCr, item.ProtoId);
+        if (stack != null) {
+            Merge(stack, item, count);
+            return stack;
+        }
+    }
+
+    Item piece = item.Stackable && count < item.Count ? SplitItem(item, count) : item;
+    return Game.MoveItem(piece, toCr);
+}
+
+// То же для контейнера и его секции.
+Item? MoveItem(Item item, int count, Item toCont, any stackId)
+{
+    verify(count > 0 && count <= item.Count, "Invalid item move count", item, count);
+
+    if (item.Ownership == ItemOwnership::ItemContainer && item.ContainerId == toCont.Id && item.ContainerStack == stackId) {
+        return item;
+    }
+
+    if (item.Stackable) {
+        Item? stack = FindStack(toCont, item.ProtoId, stackId);
+        if (stack != null && stack.Id != item.Id) {
+            Merge(stack, item, count);
+            return stack;
+        }
+    }
+
+    Item piece = item.Stackable && count < item.Count ? SplitItem(item, count) : item;
+    return Game.MoveItem(piece, toCont, stackId);
+}
+
+// То же для гекса карты: на земле стопки не сливаются.
+Item? MoveItem(Item item, int count, Map toMap, mpos hex)
+{
+    verify(count > 0 && count <= item.Count, "Invalid item move count", item, count);
+
+    if (item.Ownership == ItemOwnership::MapHex && item.MapId == toMap.Id && item.Hex == hex) {
+        return item;
+    }
+
+    Item piece = item.Stackable && count < item.Count ? SplitItem(item, count) : item;
+    return Game.MoveItem(piece, toMap, hex);
+}
+
+// Сливает count единиц source в стопку target: target растёт, source теряет эти единицы и уничтожается, если
+// отдал все.
+void Merge(Item target, Item source, int count)
+{
+    verify(target.Id != source.Id, "An item stack cannot merge into itself", target);
+    verify(target.ProtoId == source.ProtoId && target.Stackable, "Only stacks of one stackable prototype merge", target, source);
+
+    target.Count += count;
+    DestroyItem(source, count);
+}
+
+#endif
+
+#if CLIENT
+
+// Сколько единиц прототипа у криттера, как их видит клиент.
+int CountItem(Critter cr, hstring pid)
+{
+    Item[] items = cr.GetItems();
+    int count = 0;
+
+    for (int i = 0; i < int(items.length()); i++) {
+        if (items[i].ProtoId == pid) {
+            count += items[i].Count;
+        }
+    }
+
+    return count;
+}
+
+// Локальная копия предмета с count единицами: для списков предложений и предпросмотра, серверу она не видна.
+Item CloneItem(Item item, int count)
+{
+    verify(count > 0 && (count == 1 || item.Stackable), "A local copy holds a positive count, only a stack more than one", item, count);
+
+    Item copy = item.Clone();
+    copy.Count = count;
+    return copy;
+}
+
+#endif
+
+}

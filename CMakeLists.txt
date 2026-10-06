@@ -20,7 +20,7 @@ SetOptionValues(
     FO_ENABLE_3D OFF
     FO_ANGELSCRIPT_SCRIPTING ON
     FO_NATIVE_SCRIPTING OFF
-    FO_MONO_SCRIPTING OFF
+    FO_MANAGED_SCRIPTING OFF
     FO_GEOMETRY HEXAGONAL
     FO_MAP_HEX_WIDTH 32
     FO_MAP_HEX_HEIGHT 16
@@ -80,9 +80,12 @@ AddEngineSources(
     SERVER SourceExt/ServerExtension.cpp
     CLIENT SourceExt/ClientExtension.cpp
     CLIENT SourceExt/ClientAiBridge.cpp
+    BAKER SourceExt/AcmDecoder.h
+    BAKER SourceExt/AcmDecoder.cpp
     BAKER SourceExt/BakerExtension.cpp
     BAKER SourceExt/DialogBaker.h
     BAKER SourceExt/DialogBaker.cpp
+    TESTS SourceExt/TestAcmDecoder.cpp
     TESTS SourceExt/TestDialogs.cpp)
 
 RegisterEngineSources()

@@ -1,0 +1,182 @@
+// MoveCursor — курсор передвижения по карте: в режиме CursorType::Move гекс под мышью рисуется на земле в две части,
+// как в Fallout. Нижняя (move_pre) ложится под криттеров и стены, верхняя, полупрозрачная (move_post), проступает
+// поверх них, чтобы цель была видна и за персонажем. Недостижимый гекс помечается крестом (move_x), а с зажатым Shift
+// на гексе выводится длина пути в шагах.
+// До Engine #116 этот курсор рисовал движок (MapView::SetCursorPos/DrawCursor); теперь он скриптовый и рисуется в
+// событиях отрисовки карты. Над интерфейсом и вне карты гекса нет — там экран Cursor показывает обычную стрелку.
+// Сторона: CLIENT (оценка цели — чистая функция без стороны, её покрывает Test_MoveCursor).
+// Связи: Gui (режим курсора), GuiScreens::Cursor (стрелка), InputHandler (прокрутка у края), Input (Shift).
+// Глобальное состояние — спрайты курсора и найденный путь до гекса под мышью: курсор у клиента один, а искать путь
+// каждый кадр дорого, поэтому результат переживает кадр.
+namespace MoveCursor
+{
+
+// Гекс под курсором недостижим: рисуется крест
+const int Unreachable = -1;
+// Путь до того же гекса перепроверяется с этим периодом: его могут перекрыть двери и другие криттеры
+const int PathRefreshMs = 250;
+// Спрайты курсора стоят на 2 пикселя выше клетки гекса — так их ставил прежний движковый курсор
+const int SpriteOffsetY = -2;
+
+// Можно ли вообще идти на гекс, до поиска пути: не на свою клетку, живым, и не на непроходимый гекс — кроме клеток,
+// до которых многогексовый криттер дотягивается собой
+bool CanTarget(int distance, bool hexMovable, int multihex, bool alive)
+{
+    if (distance == 0 || !alive) {
+        return false;
+    }
+
+    return hexMovable || (multihex != 0 && distance <= multihex);
+}
+
+#if CLIENT
+
+Sprite::Sprite PreSprite = Sprite::Sprite();
+Sprite::Sprite PostSprite = Sprite::Sprite();
+Sprite::Sprite CrossSprite = Sprite::Sprite();
+bool SpritesLoaded = false;
+
+// Кэш на кадр: курсор проверяют обе части гекса на каждом куске карты и экран Cursor
+nanotime CheckedFrame = ZERO_NANOTIME;
+ipos CheckedMousePos;
+bool CheckedIsHex = false;
+mpos CheckedHex;
+
+// Последний найденный путь
+ident PathMapId;
+mpos PathFrom;
+mpos PathTarget;
+nanotime PathTime = ZERO_NANOTIME;
+int PathSteps = Unreachable;
+
+[[ModuleInit]]
+void InitMoveCursor()
+{
+    Game.OnRenderMap_BeforeSprites.Subscribe(OnRenderMapBeforeSprites);
+    Game.OnRenderMap_AfterSpritesAndFog.Subscribe(OnRenderMapAfterSpritesAndFog);
+}
+
+// Рисуется ли курсор гексом и на каком: режим передвижения, есть персонаж, сверху игровой экран, мышь не над его
+// интерфейсом, не прокручивает карту у края экрана и указывает на гекс. Когда нет — экран Cursor рисует стрелку
+bool IsHexCursor(mpos& hex)
+{
+    if (CheckedFrame != Game.FrameTime || CheckedMousePos != Game.MousePos) {
+        CheckedFrame = Game.FrameTime;
+        CheckedMousePos = Game.MousePos;
+        CheckedIsHex = FindHexUnderMouse(CheckedHex);
+    }
+
+    hex = CheckedHex;
+    return CheckedIsHex;
+}
+
+// Нижняя часть — под спрайтами карты
+[[Event]]
+void OnRenderMapBeforeSprites(Map map, irect drawArea)
+{
+    mpos hex;
+    if (Settings.Gui.HideCursor || !IsHexCursor(hex)) {
+        return;
+    }
+
+    LoadSprites();
+    PreSprite.Draw(GetDrawPos(map, drawArea, hex));
+}
+
+// Верхняя часть и отметка — над спрайтами и туманом
+[[Event]]
+void OnRenderMapAfterSpritesAndFog(Map map, irect drawArea)
+{
+    mpos hex;
+    if (Settings.Gui.HideCursor || !IsHexCursor(hex)) {
+        return;
+    }
+
+    LoadSprites();
+    ipos pos = GetDrawPos(map, drawArea, hex);
+    PostSprite.Draw(pos);
+
+    int steps = GetPathSteps(map, Chosen, hex);
+    if (steps == Unreachable) {
+        CrossSprite.Draw(pos);
+    }
+    else if (Input::IsShiftDown()) {
+        Game.DrawText("" + steps,
+                      pos,
+                      isize(Settings.Geometry.MapHexWidth, Settings.Geometry.MapHexHeight),
+                      Color::White,
+                      TextFormat(FontType::Default, FontFlag(int(FontFlag::CenterX) | int(FontFlag::CenterY)), 0));
+    }
+}
+
+bool FindHexUnderMouse(mpos& hex)
+{
+    if (Gui::Cursor != CursorType::Move || !HasChosen || !HasCurMap) {
+        return false;
+    }
+
+    if (InputHandler::IsMouseScrolling(InputHandler::ScrollOf(true, true, true, true))) {
+        return false;
+    }
+
+    Gui::Screen? screen = Gui::GetActiveScreen();
+    if (screen == null || screen.Num != GuiScreen::Game || screen.FindMouseHit() != null) {
+        return false;
+    }
+
+    return CurMap.GetHexAtScreenPos(Game.MousePos, hex);
+}
+
+// Левый верхний угол спрайта курсора внутри куска карты, который сейчас рисуется
+ipos GetDrawPos(Map map, irect drawArea, mpos hex)
+{
+    return map.GetHexMapPos(hex) - ipos(drawArea.x, drawArea.y) + ipos(0, SpriteOffsetY);
+}
+
+int GetPathSteps(Map map, Critter chosen, mpos hex)
+{
+    bool samePath = map.Id == PathMapId && chosen.Hex == PathFrom && hex == PathTarget;
+    if (samePath && Game.FrameTime < PathTime + Time::Milliseconds(PathRefreshMs)) {
+        return PathSteps;
+    }
+
+    PathMapId = map.Id;
+    PathFrom = chosen.Hex;
+    PathTarget = hex;
+    PathTime = Game.FrameTime;
+    PathSteps = Unreachable;
+
+    int distance = Game.GetDistance(chosen.Hex, hex);
+    if (CanTarget(distance, map.IsHexMovable(hex), chosen.Multihex, chosen.IsAlive())) {
+        int length = map.GetPathLength(chosen, hex, 0);
+        if (length > 0) {
+            PathSteps = length;
+        }
+    }
+
+    return PathSteps;
+}
+
+void LoadSprites()
+{
+    if (SpritesLoaded) {
+        return;
+    }
+
+    SpritesLoaded = true;
+    string prefix = Settings.Geometry.MapDataPrefix;
+    LoadSprite(PreSprite, prefix + "move_pre.png");
+    LoadSprite(PostSprite, prefix + "move_post.png");
+    LoadSprite(CrossSprite, prefix + "move_x.png");
+}
+
+// Спрайты курсора — часть геометрии карты (Geometry.MapDataPrefix), без них курсор передвижения не нарисовать
+void LoadSprite(Sprite::Sprite sprite, string name)
+{
+    bool loaded = sprite.Load(name);
+    verify(loaded, "Move cursor sprite is missing", name);
+}
+
+#endif
+
+}

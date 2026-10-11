@@ -5,6 +5,18 @@ Game-side documentation for FOnline: The Life After. The engine keeps its own se
 
 Start with [../AGENTS.md](../AGENTS.md) for repository practices, then with the map below.
 
+## Engine build configuration
+
+TLA enables `FO_DATA_SOURCE_DAT`, `FO_DATA_SOURCE_ZIP`, `FO_IMAGE_FRM` and `FO_IMAGE_RIX`
+in `CMakeLists.txt` for its authored Fallout archives and images. PNG, TGA and FOFRM
+importers are built in. `Server.DbStorage = Memory` needs no optional database provider.
+To select persistent storage, enable its positive `FO_DATABASE_JSON`, `FO_DATABASE_SQLITE`
+or `FO_DATABASE_MONGO` CMake option and reconfigure. Engine `2026.1.26-dev` requires new
+empty storage for JSON and SQLite; it does not convert their old formats.
+See the Engine's [component selection](../Engine/Docs/en/how-to/build/project-configuration.md#optional-native-components)
+and [storage upgrade boundary](../Engine/Docs/en/explanation/persistence/index.md#storage-formats-and-upgrade-boundary).
+After an Engine update, rebuild and rebake matching client/server outputs before running them.
+
 ## Orientation
 
 | Document | What it answers |

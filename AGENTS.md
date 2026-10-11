@@ -33,8 +33,8 @@ Project front door for AI maintainers working on **FOnline: The Life After** (TL
 - `SourceExt/ServerExtension.cpp` - server image checks, dialog plumbing, visibility hooks, critter busy/free stubs.
 - `SourceExt/ClientExtension.cpp` / `SourceExt/ClientExtension.h` - `Game.FormatTags`, client critter busy/free stubs, `ClientInitHook` + `ClientExtData` (holds the AI control bridge state and embedded-client index).
 - `SourceExt/ClientAiBridge.cpp` - localhost TCP line protocol for the AI control bridge (client-side test/automation). Pairs with `Scripts/AiControl.fos` and `Tools/AiControlMcp/`. See [Docs/AiControl.md](Docs/AiControl.md).
-- `SourceExt/BakerExtension.cpp`, `SourceExt/DialogBaker.*`, `SourceExt/Dialogs.*` - dialog bake/runtime support; `SetupBakersHook` also registers the ACM loader with the engine's `AudioBaker`.
-- `SourceExt/AcmDecoder.*` - Fallout ACM decoder (a bit-exact port of the unpacker the engine dropped in #211) and `LoadAcmAudio`, the `AudioBaker` loader: every `.acm` is baked to Ogg Vorbis like any other sound, effects as mono and `sound/music/` as stereo, the way Fallout played them. Covered by `SourceExt/TestAcmDecoder.cpp`.
+- `SourceExt/BakerExtension.cpp`, `SourceExt/DialogBaker.*`, `SourceExt/Dialogs.*` - dialog bake/runtime support.
+- `Engine/Source/Tools/AudioBaker-Acm.*` - optional Fallout ACM importer, enabled by `FO_AUDIO_ACM` in `CMakeLists.txt`: `.acm` is baked to Ogg Vorbis, effects as mono and `sound/music/` as stereo. Decoder regressions live in `Engine/Source/Tests/Test_AudioBakerAcm.cpp`; `Test_AudioBaker.cpp` covers baked output and disabled requests.
 - `SourceExt/ContentMigration.cpp` - TLA-specific content/data migrations.
 - `SourceExt/SHA/` - bundled SHA implementation wrapped as a static library.
 - `Tools/Formatter/format_project.py` and `FormatSource.bat` - formatting entry points. VS Code tasks use the Python formatter.

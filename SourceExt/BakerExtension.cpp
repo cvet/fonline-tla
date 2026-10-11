@@ -1,7 +1,5 @@
 #include "Common.h"
 
-#include "AcmDecoder.h"
-#include "AudioBaker.h"
 #include "Baker.h"
 #include "DialogBaker.h"
 
@@ -23,13 +21,5 @@ void FO_NAMESPACE SetupBakersHook(const_span<string> request_bakers, vector<uniq
     }
     if (vec_exists(request_bakers, DialogTextBaker::NAME)) {
         bakers.emplace_back(safe_alloc::make_unique<DialogTextBaker>(ctx));
-    }
-
-    // Fallout sound effects and music ship as ACM, which the engine no longer decodes: the audio baker takes it as
-    // one more source format and bakes it to Ogg Vorbis like any other
-    for (auto& baker : bakers) {
-        if (auto audio_baker = baker.dyn_cast<AudioBaker>()) {
-            audio_baker->AddLoader(LoadAcmAudio, {"acm"});
-        }
     }
 }

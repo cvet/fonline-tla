@@ -22,6 +22,7 @@ SetOptionValues(
     FO_DATA_SOURCE_ZIP ON
     FO_IMAGE_FRM ON
     FO_IMAGE_RIX ON
+    FO_AUDIO_ACM ON
     FO_ANGELSCRIPT_SCRIPTING ON
     FO_NATIVE_SCRIPTING OFF
     FO_MANAGED_SCRIPTING OFF
@@ -84,12 +85,9 @@ AddEngineSources(
     SERVER SourceExt/ServerExtension.cpp
     CLIENT SourceExt/ClientExtension.cpp
     CLIENT SourceExt/ClientAiBridge.cpp
-    BAKER SourceExt/AcmDecoder.h
-    BAKER SourceExt/AcmDecoder.cpp
     BAKER SourceExt/BakerExtension.cpp
     BAKER SourceExt/DialogBaker.h
     BAKER SourceExt/DialogBaker.cpp
-    TESTS SourceExt/TestAcmDecoder.cpp
     TESTS SourceExt/TestDialogs.cpp)
 
 RegisterEngineSources()

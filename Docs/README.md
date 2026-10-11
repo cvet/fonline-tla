@@ -7,8 +7,8 @@ Start with [../AGENTS.md](../AGENTS.md) for repository practices, then with the 
 
 ## Engine build configuration
 
-TLA enables `FO_DATA_SOURCE_DAT`, `FO_DATA_SOURCE_ZIP`, `FO_IMAGE_FRM` and `FO_IMAGE_RIX`
-in `CMakeLists.txt` for its authored Fallout archives and images. PNG, TGA and FOFRM
+TLA enables `FO_DATA_SOURCE_DAT`, `FO_DATA_SOURCE_ZIP`, `FO_IMAGE_FRM`, `FO_IMAGE_RIX` and
+`FO_AUDIO_ACM` in `CMakeLists.txt` for its authored Fallout archives, images and sounds. PNG, TGA and FOFRM
 importers are built in. `Server.DbStorage = Memory` needs no optional database provider.
 To select persistent storage, enable its positive `FO_DATABASE_JSON`, `FO_DATABASE_SQLITE`
 or `FO_DATABASE_MONGO` CMake option and reconfigure. Engine `2026.1.26-dev` requires new

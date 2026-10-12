@@ -1,11 +1,9 @@
 // GMTown — просмотр и вход в город с глобальной карты.
 // Обязанности: SERVER RPC сбора локаций/входов и переноса игрока; CLIENT RPC показа экрана города. Сторона: MIXED (SERVER+CLIENT).
-// Связи: Location, Entrance, Gui, Stdlib.
+// Связи: Location, GlobalmapGroup, Gui, Stdlib.
 namespace GMTown
 {
 
-// TODO: При движении в группе неизвестно, что будет, если не лидер группы посмотрит город.
-///@ RemoteCall Client ShowTownView(ident locId, int32 mapIndex)
 ///@ RemoteCall Client ShowGMTown(ident locId, hstring locPid, int32[] indexMaps)
 
 ///@ RemoteCall Server Rpc_TransferToMap(ident locId, int32 mapIndex)
@@ -14,12 +12,12 @@ namespace GMTown
 
 #if SERVER
 
-// Открываем экран города: берём ближайшую видимую локацию и шлём клиенту её входы (индексы карт по прототипам).
+// Открываем экран ближайшего видимого города с обычными серверными проверками разрешённых входов.
 [[ServerRemoteCall]]
 void Rpc_ShowGMTown(Player player)
 {
     Critter? cr = player.GetControlledCritter();
-    if (cr == null) {
+    if (cr == null || cr.GetMap() != null) {
         return;
     }
 
@@ -29,81 +27,21 @@ void Rpc_ShowGMTown(Player player)
         return;
     }
 
-    Location loc = locs[0];
-    hstring[] entraceMaps = loc.MapEntrances.clone();
-    hstring[] mapProtos = loc.MapProtos.clone();
-    int[] indexMaps = {};
-    for (int i = 0; i < entraceMaps.length(); i += 2) {
-        indexMaps.insertLast(mapProtos.find(entraceMaps[i]));
-    }
-
-    cr.PlayerClientCall.ShowGMTown(loc.Id, loc.ProtoId, indexMaps);
+    GlobalmapGroup::ProcessGlobalMapCommandImpl(player, GlobalmapGroup::GM_CMD_ENTRANCES, locs[0].Id, 0);
 }
 
-// Предпросмотр карты города: валидируем локацию/карту и наличие входа по прототипу карты.
+// Предпросмотр города проходит обычные серверные проверки; mapIndex — порядковый номер входа.
 [[ServerRemoteCall]]
 void Rpc_ShowTownView(Player player, ident locId, int mapIndex)
 {
-    Critter? cr = player.GetControlledCritter();
-    Location? loc = Game.GetLocation(locId);
-    if (cr == null || loc == null) {
-        return;
-    }
-
-    Map map = loc.GetMapByIndex(mapIndex);
-    hstring[] entraceMaps = loc.MapEntrances.clone();
-    int entNum = -1;
-    for (int i = 0; i < entraceMaps.length(); i += 2) {
-        if (entraceMaps[i] == map.ProtoId) {
-            entNum = i;
-            break;
-        }
-    }
-    if (entNum == -1) {
-        return;
-    }
-
-    // breadcrumb миграции: показ предпросмотра карты игроку (старый API uint16 hx/hy и ViewMap) — оставлено до домиграции просмотра карты.
-    // uint16 hx = 0, hy = 0;
-    // cr.PlayerClientCall.ShowTownView( locId, mapIndex );
-    // Entrance::MapGetEntryCoords( map, entraceMaps[entNum], 0, hx, hy  );
-    // cr.ViewMap( map, 40, map.Width / 2, map.Height / 2, 3 );
+    GlobalmapGroup::ProcessGlobalMapCommandImpl(player, GlobalmapGroup::GM_CMD_VIEW_MAP, locId, mapIndex);
 }
 
-// Перенос игрока на карту города: ищем гекс входа по прототипу карты, иначе берём свободный гекс у центра.
+// Вход в город проходит обычные проверки расстояния, группы, таймаута и разрешённого входа.
 [[ServerRemoteCall]]
 void Rpc_TransferToMap(Player player, ident locId, int mapIndex)
 {
-    Critter? cr = player.GetControlledCritter();
-    Location? loc = Game.GetLocation(locId);
-    if (cr == null || loc == null) {
-        return;
-    }
-
-    Map map = loc.GetMapByIndex(mapIndex);
-    // MapEntrances = arroyo_bridge 0 arroyo 0 arroyo_garden 0 arroyo_temple_entrance 0
-    // Прототип карты, затем гекс входа
-    hstring[] entraceMaps = loc.MapEntrances.clone();
-    int entNum = -1;
-    for (int i = 0; i < entraceMaps.length(); i += 2) {
-        if (entraceMaps[i] == map.ProtoId) {
-            entNum = i;
-            break;
-        }
-    }
-    if (entNum == -1) {
-        return;
-    }
-
-    mpos hex;
-    if (!Entrance::MapGetEntryCoords(map, entraceMaps[entNum + 1], 0, hex)) {
-        hex = mpos(map.Size.width / 2, map.Size.height / 2);
-        if (!Entrance::GetFreeHex(map, 3, hex)) {
-            return;
-        }
-    }
-
-    cr.TransferToMap(map, hex, HDIR_Random);
+    GlobalmapGroup::ProcessGlobalMapCommandImpl(player, GlobalmapGroup::GM_CMD_TOLOCAL, locId, mapIndex);
 }
 #endif
 
@@ -116,25 +54,6 @@ void ShowGMTown(ident locId, hstring locPid, int[] indexMaps)
     Gui::ShowScreen(GuiScreen::GmTown, dict<string, any> = {{"LocationId", locId}, {"LocationPid", locPid}, {"IndexMaps", Stdlib::IntArrToStr(indexMaps)}});
 }
 
-// Контекст текущего просмотра города на клиенте (заполняется сервером перед показом).
-ident CurrentLocationId;
-int CurrentEntrance;
-
-// Сохраняем контекст просмотра города и прячем текущий экран; сам экран города показывает движок.
-[[ClientRemoteCall]]
-void ShowTownView(ident locId, int entrance)
-{
-    Gui::HideScreen();
-
-    CurrentLocationId = locId;
-    CurrentEntrance = entrance;
-
-    // r17: движок сам показывает этот скрин при просмотре карты, но с пустым контекстом (без ид локации и номера энтайра)
-    // Скрин может быть показан позже скриптового вызова
-    // breadcrumb миграции: ручной показ TownView с контекстом — оставлено до домиграции просмотра карты.
-    // Gui::HideScreen( GuiScreen::TownView );
-    // Gui::ShowScreen( GuiScreen::TownView, dict<string, any> = {{"LocationId", locId}, {"LocationEntrance", entrance}} );
-}
 #endif
 
 }

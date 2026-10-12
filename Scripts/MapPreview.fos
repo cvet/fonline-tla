@@ -1,0 +1,156 @@
+// MapPreview — ограниченный просмотр городов и квестовых камер через штатный API движка.
+// SERVER: сеанс хранится на Player; локальный персонаж остаётся на месте и временно отвязывается.
+// CLIENT: экран просмотра с возвратом к персонажу и входом через проверенные городские входы.
+// Связи: GlobalmapGroup, GMTown, Gui, GuiScreensExt.
+namespace MapPreview
+{
+
+///@ Property Player Server ident MapPreviewCritterId Mutable
+///@ Property Player Server ident MapPreviewLocationId Mutable
+///@ Property Player Server int32 MapPreviewEntrance Mutable
+///@ Property Player Server uint32 MapPreviewSession Mutable
+///@ RemoteCall Server ReturnFromMapPreview()
+///@ RemoteCall Server EnterFromMapPreview()
+///@ RemoteCall Client ShowMapPreview(ident locationId, int32 entrance)
+
+#if SERVER
+
+[[ModuleInit]]
+void InitMapPreview()
+{
+    Game.OnMapCritterIn.Subscribe(OnMapCritterIn);
+}
+
+void ClearSession(Player player)
+{
+    player.MapPreviewCritterId = ZERO_IDENT;
+    player.MapPreviewLocationId = ZERO_IDENT;
+    player.MapPreviewEntrance = -1;
+}
+
+// Перенос группы или другой игровой перенос закрывает наблюдение до отправки новой карты.
+[[Event]]
+void OnMapCritterIn(Map map, Critter cr)
+{
+    Player? player = cr.GetPlayer();
+    if (player != null && player.MapPreviewCritterId != ZERO_IDENT) {
+        ClearSession(player);
+        player.ResetViewMap();
+    }
+}
+
+// Открываем наблюдение, не перемещая персонажа и не меняя его сохранённые свойства.
+void Show(Critter cr, Map map, mpos hex, int radius, ident locationId = ZERO_IDENT, int entrance = -1)
+{
+    Player? player = cr.GetPlayer();
+    if (player == null) {
+        return;
+    }
+
+    verify(hex.fitTo(map.Size) && radius > 0 && radius <= 32767, "Некорректная область просмотра карты");
+    player.MapPreviewCritterId = cr.Id;
+    player.MapPreviewLocationId = locationId;
+    player.MapPreviewEntrance = entrance;
+    player.MapPreviewSession = player.MapPreviewSession + 1;
+
+    try {
+        if (cr.GetMap() != null) {
+            player.SwitchCritter(null);
+        }
+        player.ViewMapArea(map, hex, radius);
+        player.ClientCall.ShowMapPreview(locationId, entrance);
+        Game.StartTimeEvent(Time::Seconds(1), Watch, any[] = {player.Id, player.MapPreviewSession});
+    }
+    catch {
+        string error = GetExceptionInfo();
+        Return(player);
+        throw(error);
+    }
+}
+
+// При уничтожении наблюдаемой карты движок снимает подписку; возвращаем игроку управление.
+[[TimeEvent]]
+void Watch(any[] values)
+{
+    Player? player = Game.GetPlayer(values[0]);
+    uint session = values[1];
+    if (player == null || player.MapPreviewCritterId == ZERO_IDENT || player.MapPreviewSession != session) {
+        return;
+    }
+    Critter? controlled = player.GetControlledCritter();
+    if (controlled != null && controlled.Id != player.MapPreviewCritterId) {
+        ClearSession(player);
+        return;
+    }
+    if (player.GetViewMapTarget() == null) {
+        Return(player);
+        return;
+    }
+    Game.StartTimeEvent(Time::Seconds(1), Watch, values);
+}
+
+// Движок снимает подписку наблюдения и восстанавливает обычное начальное состояние персонажа.
+void Return(Player player)
+{
+    ident critterId = player.MapPreviewCritterId;
+    if (critterId == ZERO_IDENT) {
+        return;
+    }
+
+    ClearSession(player);
+
+    Critter? controlled = player.GetControlledCritter();
+    if (controlled != null) {
+        if (controlled.Id != critterId) {
+            return;
+        }
+        player.ReturnFromViewMap();
+    }
+    else {
+        Critter? cr = Game.GetCritter(critterId);
+        verify(cr != null, "Персонаж сеанса просмотра отсутствует");
+        player.SwitchCritter(cr);
+    }
+}
+
+[[ServerRemoteCall]]
+void ReturnFromMapPreview(Player player)
+{
+    Return(player);
+}
+
+// Вход берётся из серверного сеанса и повторно проходит обычные проверки расстояния и доступа.
+[[ServerRemoteCall]]
+void EnterFromMapPreview(Player player)
+{
+    ident locationId = player.MapPreviewLocationId;
+    int entrance = player.MapPreviewEntrance;
+    if (player.MapPreviewCritterId == ZERO_IDENT || locationId == ZERO_IDENT) {
+        return;
+    }
+
+    Return(player);
+    GlobalmapGroup::ProcessGlobalMapCommandImpl(player, GlobalmapGroup::GM_CMD_TOLOCAL, locationId, entrance);
+}
+
+#endif
+
+#if CLIENT
+
+// Сообщение приходит после загрузки карты; движок не выбирает игровые GUI-экраны.
+[[ClientRemoteCall]]
+void ShowMapPreview(ident locationId, int entrance)
+{
+    ShowPreviewScreen(locationId, entrance);
+}
+
+void ShowPreviewScreen(ident locationId, int entrance)
+{
+    Gui::HideAllScreens();
+    Gui::Cursor = CursorType::Default;
+    Gui::ShowScreen(GuiScreen::TownView, dict<string, any> = {{"LocationId", locationId}, {"LocationEntrance", entrance}});
+}
+
+#endif
+
+}

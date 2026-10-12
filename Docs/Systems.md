@@ -46,6 +46,7 @@ The most useful thing to trace first, because six systems appear in it in order:
 | `GlobalMapLocations` | S/C | 220 | `ModuleInit`; known-location list per critter | — |
 | `Location` | S | 338 | `ModuleInit`; creation, garbage collection | — |
 | `Entrance` | S | 353 | `CritterTransferToMapEntry` | — |
+| `MapPreview` | S/C | 156 | `Show`; bounded city/camera view and return to the controlled critter | — |
 
 Random encounters are the heaviest system in the project and are almost entirely table data; see item 1 in
 [AuditPlan.md](AuditPlan.md).

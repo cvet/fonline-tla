@@ -1,10 +1,16 @@
 // MapperMain — главный скрипт редактора карт (маппера): точка входа и обработка событий редактирования.
 // Сторона MAPPER. Наполняет вкладки палитры предметов, тайлов и криттеров (InitializeTabs) и подписывается на события жизненного цикла и ввода: старт/финиш, отрисовка интерфейса, мышь/клавиатура, потеря фокуса, загрузка и сохранение карты.
 // Настраивает набор свойств в инспекторе под тип сущности (криттер/предмет) и содержит вспомогательные функции для пакетной обработки карт (ConvertMaps, MapTime, MapNoLogOut, MapScript).
+// Глобальный кэш держателей отметок сохраняет их время жизни между кадрами маппера.
 namespace MapperMain
 {
 
+///@ Property Game Client uint32 MapperTrackSprite1 Mutable
+///@ Property Game Client uint32 MapperTrackSprite2 Mutable
+
 #if MAPPER
+
+MapSpriteHolder[] TrackOverlaySprites = {};
 
 const int TabCustom0 = 0;
 const int TabCustom1 = 1;
@@ -34,6 +40,7 @@ void InitMapperMain()
     Game.OnStart.Subscribe(start);
     Game.OnFinish.Subscribe(finish);
     Game.OnRenderIface.Subscribe(RenderIface);
+    Game.OnRenderMap_BeforeSprites.Subscribe(RenderTrackOverlay);
     Game.OnMouseDown.Subscribe(MouseDown);
     Game.OnMouseUp.Subscribe(MouseUp);
     Game.OnMouseMove.Subscribe(MouseMove);
@@ -57,8 +64,7 @@ bool NewInstance(string commandLine)
 [[Event]]
 void start()
 {
-    // Game.BindFont(FontType::Big, "*Big");
-    Game.BindFont(FontType::Default, "*Default");
+    Game.BindFont(FontType::Default, "Fonts/Default.fofnt");
     InitializeTabs();
 }
 
@@ -1637,6 +1643,55 @@ void RenderIface()
     //
 }
 
+// Отметки Ctrl+B — спрайты карты; их масштаб и прокрутку обрабатывает движок.
+[[Event]]
+void RenderTrackOverlay(Map map, irect drawArea)
+{
+    mpos[] hexes = Game.GetMapperTrackOverlayHexes();
+    while (TrackOverlaySprites.length() > hexes.length()) {
+        TrackOverlaySprites[TrackOverlaySprites.length() - 1].StopDraw();
+        TrackOverlaySprites.removeLast();
+    }
+    if (hexes.isEmpty()) {
+        return;
+    }
+
+    int[] kinds = Game.GetMapperTrackOverlayKinds();
+    verify(hexes.length() == kinds.length(), "Mapper track overlay arrays differ in size");
+
+    if (Game.MapperTrackSprite1 == 0) {
+        Game.MapperTrackSprite1 = Game.LoadSprite(Settings.Geometry.MapDataPrefix + "track1.png");
+        verify(Game.MapperTrackSprite1 != 0, "Mapper track1 sprite is missing");
+    }
+    if (Game.MapperTrackSprite2 == 0) {
+        Game.MapperTrackSprite2 = Game.LoadSprite(Settings.Geometry.MapDataPrefix + "track2.png");
+        verify(Game.MapperTrackSprite2 != 0, "Mapper track2 sprite is missing");
+    }
+
+    isize size1 = Game.GetSpriteSize(Game.MapperTrackSprite1);
+    isize size2 = Game.GetSpriteSize(Game.MapperTrackSprite2);
+    for (int i = 0; i < hexes.length(); i++) {
+        uint spriteId = kinds[i] == 1 ? Game.MapperTrackSprite2 : Game.MapperTrackSprite1;
+        isize size = kinds[i] == 1 ? size2 : size1;
+        if (i == TrackOverlaySprites.length()) {
+            TrackOverlaySprites.insertLast(MapSpriteHolder());
+        }
+        MapSpriteHolder holder = TrackOverlaySprites[i];
+        if (holder.Hex != hexes[i] || holder.SprId != spriteId) {
+            holder.StopDraw();
+        }
+        if (!holder.Valid) {
+            holder.Hex = hexes[i];
+            holder.SprId = spriteId;
+            holder.Offset = ipos(0, size.height / 2);
+            holder.NoLight = true;
+            holder.DisableEgg = true;
+            holder.DrawOrder = DrawOrderType::Last;
+            map.DrawMapSprite(holder);
+        }
+    }
+}
+
 // Обработка мыши. Состояния кликов смотри в _client_defines.fos, Mouse click states.
 // Верните false, чтобы отключить события движка.
 [[Event]]
@@ -1721,6 +1776,10 @@ void InspectorProperties(Entity entity, int[] & properties)
             ItemProperty::Offset,
             ItemProperty::InitScript,
         });
+
+        if (item.AnimFrameCount > 0 && item.Type != ItemType::Door && item.Type != ItemType::Container) {
+            properties.insertLast(ItemProperty::FixedFrame);
+        }
 
         if (item.LightSource) {
             properties.insertLast(-1);

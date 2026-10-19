@@ -1,0 +1,210 @@
+// Say — ввод текста для текущей серверной реплики диалога.
+// Диалоги используют SayScript, отдельные окна — одноразовый callback Show.
+// Глобальный реестр хранит несериализуемые функции только до ответа/отмены/таймаута.
+namespace Say
+{
+
+const int MAX_SAY_TEXT_LENGTH = 100;
+
+///@ RemoteCall Client OpenSayRequest(uint64 requestId, TextPackKey title, TextPackKey input)
+///@ RemoteCall Server AnswerSayRequest(uint64 requestId, string text, bool cancelled)
+///@ RemoteCall Server HandleSay(string text, uint64 sayRevision)
+
+#if SERVER
+
+funcdef void SayHandler(Critter player, string text, any[] context);
+
+class Request
+{
+    uint64 Id = 0;
+    ident PlayerId;
+    ident CritterId;
+    ident MapId;
+    mpos Hex;
+    nanotime Expires;
+    SayHandler? Handler;
+    any[] Context;
+}
+
+Request[] Requests = {};
+uint64 NextRequestId = 0;
+
+[[ModuleInit]]
+void InitSay()
+{
+    Game.OnPlayerLogout.Subscribe(OnLogout);
+    Game.OnCritterSendInitialInfo.Subscribe(OnCancelForCritter);
+    Game.OnCritterFinish.Subscribe(OnCancelForCritter);
+    Game.OnCritterKnockout.Subscribe(OnCancelForCritter);
+    Game.OnCritterDead.Subscribe(OnDead);
+}
+
+void RemoveForPlayer(ident playerId)
+{
+    for (int i = Requests.length() - 1; i >= 0; i--) {
+        if (Requests[i].PlayerId == playerId) {
+            Requests.removeAt(i);
+        }
+    }
+}
+
+[[Event]]
+void OnLogout(Player player)
+{
+    RemoveForPlayer(player.Id);
+}
+
+[[Event]]
+void OnCancelForCritter(Critter cr)
+{
+    CancelForCritter(cr);
+}
+
+void CancelForCritter(Critter cr)
+{
+    for (int i = Requests.length() - 1; i >= 0; i--) {
+        if (Requests[i].CritterId == cr.Id) {
+            Requests.removeAt(i);
+        }
+    }
+}
+
+[[Event]]
+void OnDead(Critter cr, Critter killer)
+{
+    CancelForCritter(cr);
+}
+
+// Заголовок и начальный текст локализуются клиентом. Контекст остаётся на сервере.
+void Show(Critter cr, TextPackKey title, TextPackKey input, SayHandler handler, any[] context)
+{
+    Player? player = cr.GetPlayer();
+    if (player == null || !cr.IsAlive()) {
+        return;
+    }
+    Dialogs::CloseDialog(cr);
+    RemoveForPlayer(player.Id);
+    Request request = Request();
+    NextRequestId++;
+    request.Id = NextRequestId;
+    request.PlayerId = player.Id;
+    request.CritterId = cr.Id;
+    request.MapId = cr.MapId;
+    request.Hex = cr.Hex;
+    request.Expires = Game.FrameTime + Time::Seconds(120);
+    request.Handler = handler;
+    request.Context = context;
+    Requests.insertLast(request);
+    Game.StartTimeEvent(Time::Seconds(120), ExpireRequest, request.Id);
+    cr.PlayerClientCall.OpenSayRequest(request.Id, title, input);
+}
+
+[[TimeEvent]]
+void ExpireRequest(any value)
+{
+    uint64 requestId = value;
+    for (int i = Requests.length() - 1; i >= 0; i--) {
+        if (Requests[i].Id == requestId) {
+            Requests.removeAt(i);
+        }
+    }
+}
+
+// Получение и удаление единым шагом: чужой игрок не может погасить запрос владельца.
+Request? TakeRequest(ident playerId, uint64 requestId)
+{
+    for (int i = 0; i < Requests.length(); i++) {
+        Request request = Requests[i];
+        if (request.Id == requestId && request.PlayerId == playerId) {
+            Requests.removeAt(i);
+            return request;
+        }
+    }
+    return null;
+}
+
+[[ServerRemoteCall]]
+void AnswerSayRequest(Player player, uint64 requestId, string text, bool cancelled)
+{
+    Request? request = TakeRequest(player.Id, requestId);
+    if (request == null) {
+        return;
+    }
+    Critter? cr = player.GetControlledCritter();
+    if (cancelled || cr == null || cr.Id != request.CritterId || !cr.IsAlive() || cr.MapId != request.MapId || Game.FrameTime >= request.Expires ||
+        Game.GetDistance(cr.Hex, request.Hex) > Settings.Dialog.TalkDistance || text.isEmpty() || text.length() > MAX_SAY_TEXT_LENGTH) {
+        return;
+    }
+    SayHandler? handler = request.Handler;
+    if (handler != null) {
+        handler(cr, text, request.Context);
+    }
+}
+
+[[ServerRemoteCall]]
+void HandleSay(Player player, string text, uint64 sayRevision)
+{
+    if (text.isEmpty() || text.length() > MAX_SAY_TEXT_LENGTH) {
+        return;
+    }
+
+    Critter? cr = player.GetControlledCritter();
+    if (cr == null || !cr.HasDialogContext || !cr.DialogContext.Talking) {
+        return;
+    }
+
+    if (!cr.IsAlive() || cr.MapId != cr.DialogContext.MapId || Dialogs::IsDialogMustBeClosed(cr)) {
+        Dialogs::CloseDialog(cr);
+        return;
+    }
+
+    if (sayRevision != cr.DialogContext.SayRevision) {
+        return;
+    }
+
+    DialogPack? pack = Game.GetDialogPack(cr.DialogContext.DialogId);
+    if (pack == null) {
+        Dialogs::CloseDialog(cr);
+        return;
+    }
+
+    DialogSpeech speech = pack.GetSpeech(cr.DialogContext.CurSpeech);
+    if (speech.SayScriptFuncName == EMPTY_HSTRING) {
+        return;
+    }
+
+    Critter? talker = cr.DialogContext.TalkerId != ZERO_IDENT ? Game.GetCritter(cr.DialogContext.TalkerId) : null;
+    if (cr.DialogContext.TalkerId != ZERO_IDENT && talker == null) {
+        Dialogs::CloseDialog(cr);
+        return;
+    }
+
+    Game.RunSayScript(speech, cr, talker, text);
+}
+
+#endif
+
+#if CLIENT
+
+[[ClientRemoteCall]]
+void OpenSayRequest(uint64 requestId, TextPackKey title, TextPackKey input)
+{
+    Gui::HideScreen(GuiScreen::Say);
+    dict<string, any> params = {};
+    params["RequestId"] = requestId;
+    params["SayRevision"] = uint64(0);
+    params["Title"] = Game.GetText(title);
+    params["Input"] = input == TextPackKey() ? "" : Game.GetText(input);
+    Gui::ShowScreen(GuiScreen::Say, params);
+}
+
+void ProcessSay(string text, uint64 sayRevision)
+{
+    if (HasChosen && !text.isEmpty() && text.length() <= MAX_SAY_TEXT_LENGTH) {
+        CurPlayer.ServerCall.HandleSay(text, sayRevision);
+    }
+}
+
+#endif
+
+}

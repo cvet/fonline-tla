@@ -27,12 +27,13 @@
 //   "ClassFields":
 {
     {
-        // Окно вызвано из интерфейса диалога
-        bool FromDialog;
+        // Версия реплики, из которой открыто окно
+        uint64 SayRevision;
+        uint64 RequestId = 0;
+        string Title;
+        string InitialText;
         //Признак: не выводить введенный текст в лог
         bool DontShowMessage;
-        bool TalkerIsNpc;
-        ident TalkerId;
     }
 }
 //   "OnInit": null,
@@ -40,15 +41,33 @@
 {
     {
         {
+            RequestId = 0;
+            Title = ::MsgStr::GetGameText(::MsgStr::StrSayTitle);
+            InitialText = "";
+            if (params.exists("RequestId")) {
+                RequestId = params["RequestId"];
+                Title = params["Title"];
+                InitialText = params["Input"];
+            }
+            DontShowMessage = RequestId != 0;
+            SayRevision = 0;
             if (params.length() != 0) {
-                TalkerIsNpc = params["TalkerIsNpc"] == "1";
-                FromDialog = params["FromDialog"] == "true";
-                TalkerId = params["TalkerId"];
+                SayRevision = params["SayRevision"];
             }
         }
     }
 }
-//   "OnHide": null,
+//   "OnHide":
+{
+    {
+        {
+            if (RequestId != 0) {
+                CurPlayer.ServerCall.AnswerSayRequest(RequestId, "", true);
+                RequestId = 0;
+            }
+        }
+    }
+}
 //   "OnAppear": null,
 //   "OnDisappear": null,
 //   "OnDraw": null,
@@ -111,7 +130,14 @@
 //       "GlobalScope": null,
 //       "ClassFields": null,
 //       "OnInit": null,
-//       "OnShow": null,
+//       "OnShow":
+{
+    {
+        {
+            SetText(cast<Say>(::GuiScreensExt::NeedObject(Parent)).Title);
+        }
+    }
+}
 //       "OnHide": null,
 //       "OnAppear": null,
 //       "OnDisappear": null,
@@ -182,7 +208,7 @@
 {
     {
         {
-            SetText("");
+            SetText(cast<Say>(::GuiScreensExt::NeedObject(Parent)).InitialText);
         }
     }
 }
@@ -270,11 +296,13 @@
                 Gui::HideScreen();
                 return;
             }
-            if (Chosen.CanSendSay) {
-                CurPlayer.ServerCall.Rpc_ProcessSay(inputText,
-                                                    cast<Say>(::GuiScreensExt::NeedObject(Parent)).FromDialog,
-                                                    cast<Say>(::GuiScreensExt::NeedObject(Parent)).TalkerId,
-                                                    cast<Say>(::GuiScreensExt::NeedObject(Parent)).TalkerIsNpc);
+            Say screen = cast<Say>(::GuiScreensExt::NeedObject(Parent));
+            if (screen.RequestId != 0) {
+                CurPlayer.ServerCall.AnswerSayRequest(screen.RequestId, inputText, false);
+                screen.RequestId = 0;
+            }
+            else {
+                ::Say::ProcessSay(inputText, screen.SayRevision);
             }
             Gui::HideScreen();
         }

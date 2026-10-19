@@ -53,6 +53,8 @@ FO_SCRIPT_API nptr<DialogPack> Server_Game_GetDialogPack(ptr<ServerEngine> serve
 ///@ ExportMethod
 FO_SCRIPT_API string Server_Game_RunSpeechScript(ptr<ServerEngine> server, ptr<DialogSpeech> speech, ptr<Critter> cr, nptr<Critter> talker);
 ///@ ExportMethod
+FO_SCRIPT_API void Server_Game_RunSayScript(ptr<ServerEngine> server, ptr<DialogSpeech> speech, ptr<Critter> cr, nptr<Critter> talker, string_view text);
+///@ ExportMethod
 FO_SCRIPT_API bool Server_Game_DialogScriptDemand(ptr<ServerEngine> server, ptr<DialogAnswerReq> demand, ptr<Critter> master, nptr<Critter> slave);
 ///@ ExportMethod
 FO_SCRIPT_API int32_t Server_Game_DialogScriptResult(ptr<ServerEngine> server, ptr<DialogAnswerReq> result, ptr<Critter> master, nptr<Critter> slave);
@@ -230,6 +232,13 @@ nptr<DialogPack> FO_NAMESPACE Server_Game_GetDialogPack(ptr<ServerEngine> server
     }
 
     return pack;
+}
+
+void FO_NAMESPACE Server_Game_RunSayScript(ptr<ServerEngine> server, ptr<DialogSpeech> speech, ptr<Critter> cr, nptr<Critter> talker, string_view text)
+{
+    auto func = server->FindFunc<void, ptr<Critter>, nptr<Critter>, string>(speech->SayScriptFuncName);
+    FO_VERIFY_AND_THROW(func, "Dialog SayScript function not found", speech->SayScriptFuncName);
+    FO_VERIFY_AND_THROW(func.Call(cr, talker, string(text)), "Dialog SayScript failed", speech->SayScriptFuncName);
 }
 
 string FO_NAMESPACE Server_Game_RunSpeechScript(ptr<ServerEngine> server, ptr<DialogSpeech> speech, ptr<Critter> cr, nptr<Critter> talker)
@@ -415,8 +424,11 @@ void FO_NAMESPACE Server_Critter_ViewMap(ptr<Critter> self, ptr<Map> map, int32_
     player->Send_LoadMap(map);
     self->GetEngine()->MapMngr.ViewMap(player.as_ptr(), map);
 
-    auto out_buf = player->GetConnection()->WriteMsg(NetMessage::ViewMap);
-    out_buf->Write(hex);
+    {
+        // Finish the ViewMap message and release the output lock before sending the next message.
+        auto out_buf = player->GetConnection()->WriteMsg(NetMessage::ViewMap);
+        out_buf->Write(hex);
+    }
 
     player->Send_PlaceToGameComplete();
 }

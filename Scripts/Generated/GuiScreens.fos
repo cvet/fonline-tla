@@ -2500,12 +2500,13 @@ namespace Game
 
         void OnGlobalMouseDown(MouseButton button) override
         {
-            if (Settings.View.MapZoomEnabled && Settings.View.MapZoomInProgress) {
+            if (HasCurMap && Settings.View.MapZoomEnabled && Settings.View.MapZoomInProgress) {
+                // Считаем от цели, чтобы быстрые щелчки не терялись во время плавного изменения масштаба.
                 if (button == MouseButton::WheelUp) {
-                    CurMap.ChangeZoom(CurMap.SpritesZoom - 0.01);
+                    CurMap.ChangeZoom(Math::ClampF(CurMap.SpritesZoomTarget - 0.1f, Settings.View.SpritesZoomMin, Settings.View.SpritesZoomMax));
                 }
                 else if (button == MouseButton::WheelDown) {
-                    CurMap.ChangeZoom(CurMap.SpritesZoom + 0.01);
+                    CurMap.ChangeZoom(Math::ClampF(CurMap.SpritesZoomTarget + 0.1f, Settings.View.SpritesZoomMin, Settings.View.SpritesZoomMax));
                 }
                 else if (button == MouseButton::Middle) {
                     CurMap.ChangeZoom(1.0);
@@ -2842,7 +2843,7 @@ namespace Game
 
         void OnDraw() override
         {
-            bool combatActive = (Time::IsTimeoutActive(Chosen.TimeoutBattle));
+            bool combatActive = HasChosen && Time::IsTimeoutActive(Chosen.TimeoutBattle);
             if (combatActive != CombatActive) {
                 CombatActive = combatActive;
                 ::GuiScreensExt::NeedSprite(BackgroundImage).Play(false, !combatActive);
@@ -2966,7 +2967,7 @@ namespace Game
 
         void OnDraw() override
         {
-            GetChild(0).SetActive(::ChosenActions::IsBusy(Chosen));
+            GetChild(0).SetActive(HasChosen && ::ChosenActions::IsBusy(Chosen));
         }
     };
 
@@ -3977,12 +3978,17 @@ namespace GlobalMap
 
     class LocationPic : Gui::Panel
     {
-        ::GlobalMapLocations::LocationData Location;
+        ::GlobalMapLocations::LocationData? Location;
 
         void SetLocPosition(float zoom)
         {
-            int radius = int(Location.Radius * 2 * zoom);
-            SetPosition(int(Location.LocWx * zoom) - radius / 2, int(Location.LocWy * zoom) - radius / 2);
+            ::GlobalMapLocations::LocationData? loc = Location;
+            // У шаблона ячейки нет данных локации.
+            if (loc == null) {
+                return;
+            }
+            int radius = int(loc.Radius * 2 * zoom);
+            SetPosition(int(loc.LocWx * zoom) - radius / 2, int(loc.LocWy * zoom) - radius / 2);
             SetSize(radius, radius);
         }
 
@@ -3994,9 +4000,12 @@ namespace GlobalMap
 
         void OnShow(dict<string, any> params) override
         {
-            SetLocPosition(1.0f);
-            if (Location.Color != ucolor(0)) {
-                SetColor(Location.Color);
+            // При повторном показе карта может сохранить масштаб предыдущего просмотра.
+            auto globalMapObjects = cast<GMObjects>(::GuiScreensExt::NeedObject(::GuiScreensExt::NeedObject(Parent).Parent));
+            SetLocPosition(globalMapObjects.GlobalZoom);
+            ::GlobalMapLocations::LocationData? loc = Location;
+            if (loc != null && loc.Color != ucolor(0)) {
+                SetColor(loc.Color);
             }
             else {
                 SetColor(Color::Green);
@@ -4102,7 +4111,10 @@ namespace GlobalMap
 
             auto hoveredLocation = cast < ::GuiScreens::GlobalMap::LocationPic ? > (Gui::GetHoveredObject());
             if (hoveredLocation != null) {
-                text += Game.GetText(::MsgStr::LocNameKey(hoveredLocation.Location.LocPid)) + "\n";
+                ::GlobalMapLocations::LocationData? loc = hoveredLocation.Location;
+                if (loc != null) {
+                    text += Game.GetText(::MsgStr::LocNameKey(loc.LocPid)) + "\n";
+                }
             }
 
             auto gmBase = cast<GlobalMapBase>(::GuiScreensExt::NeedObject(::GuiScreensExt::NeedObject(Parent).Parent));
@@ -7005,7 +7017,6 @@ namespace Inventory
             SetPosition(155, 287);
             SetSize(90, 60);
             SetDraggable(true);
-            SetBackgroundImage("art/intrface/dummy.png", SpriteLayout::Zoom);
         }
 
         void OnLMousePressed() override
@@ -7023,7 +7034,7 @@ namespace Inventory
         void OnDrawItem(Item item, Gui::Object cell, int cellIndex) override
         {
             SetDraggable(true);
-            ::GuiScreensExt::NeedSprite(BackgroundImage).Load(item.PicInv);
+            SetBackgroundImage(item.PicInv, SpriteLayout::Zoom);
         }
     };
 
@@ -9234,6 +9245,8 @@ namespace Dialog
         string Text;
         string[] Answers = {};
         timespan TalkTime;
+        uint64 SayRevision;
+        bool CanSay;
         nanotime TalkStartTick;
 
         void SetDialogText(string msg)
@@ -9258,6 +9271,8 @@ namespace Dialog
             Text = params["Text"];
             Answers = SplitParams(params["Answers"]);
             TalkTime = params["TalkTime"];
+            SayRevision = params["SayRevision"];
+            CanSay = params["CanSay"];
             TalkStartTick = Game.FrameTime;
         }
 
@@ -9379,7 +9394,6 @@ namespace Dialog
         {
             Dialog dialog = cast<Dialog>(::GuiScreensExt::NeedScreen(Screen));
             string text = Game.EncodeUtf8(::MsgStr::TEXT_SYMBOL_DOT) + dialog.Answers[CellIndex];
-            Game.Log("dText " + CellIndex + " : " + dialog.Answers[CellIndex]);
             int lines = 0;
             isize box;
             Game.GetTextInfo(text, isize(Size.width, 1000), TextFormat(FontType(int(TextFont)), FontFlag(TextFlags), 0), box, lines);
@@ -9440,11 +9454,11 @@ namespace Dialog
 
         void OnLMouseClick() override
         {
+            if (!cast<Dialog>(::GuiScreensExt::NeedObject(Parent)).CanSay) {
+                return;
+            }
             dict<string, any> dict = {};
-            dict["TalkerIsNpc"] = cast<Dialog>(::GuiScreensExt::NeedObject(Parent)).TalkerIsNpc ? "1" : "0";
-            dict["TalkerId"] = "" + cast<Dialog>(::GuiScreensExt::NeedObject(Parent)).TalkerId;
-            dict["TalkStartTick"] = "" + cast<Dialog>(::GuiScreensExt::NeedObject(Parent)).TalkStartTick;
-            dict["FromDialog"] = true;
+            dict["SayRevision"] = cast<Dialog>(::GuiScreensExt::NeedObject(Parent)).SayRevision;
             Gui::ShowScreen(GuiScreen::Say, dict);
         }
     };
@@ -14555,12 +14569,13 @@ namespace Say
 {
     class Say : Gui::Screen
     {
-        // Окно вызвано из интерфейса диалога
-        bool FromDialog;
+        // Версия реплики, из которой открыто окно
+        uint64 SayRevision;
+        uint64 RequestId = 0;
+        string Title;
+        string InitialText;
         //Признак: не выводить введенный текст в лог
         bool DontShowMessage;
-        bool TalkerIsNpc;
-        ident TalkerId;
 
         void OnConstruct() override
         {
@@ -14572,10 +14587,26 @@ namespace Say
 
         void OnShow(dict<string, any> params) override
         {
+            RequestId = 0;
+            Title = ::MsgStr::GetGameText(::MsgStr::StrSayTitle);
+            InitialText = "";
+            if (params.exists("RequestId")) {
+                RequestId = params["RequestId"];
+                Title = params["Title"];
+                InitialText = params["Input"];
+            }
+            DontShowMessage = RequestId != 0;
+            SayRevision = 0;
             if (params.length() != 0) {
-                TalkerIsNpc = params["TalkerIsNpc"] == "1";
-                FromDialog = params["FromDialog"] == "true";
-                TalkerId = params["TalkerId"];
+                SayRevision = params["SayRevision"];
+            }
+        }
+
+        void OnHide() override
+        {
+            if (RequestId != 0) {
+                CurPlayer.ServerCall.AnswerSayRequest(RequestId, "", true);
+                RequestId = 0;
             }
         }
     };
@@ -14594,6 +14625,11 @@ namespace Say
         void OnRefreshText() override
         {
             SetText(::MsgStr::GetGameText(::MsgStr::StrSayTitle));
+        }
+
+        void OnShow(dict<string, any> params) override
+        {
+            SetText(cast<Say>(::GuiScreensExt::NeedObject(Parent)).Title);
         }
     };
 
@@ -14614,7 +14650,7 @@ namespace Say
 
         void OnShow(dict<string, any> params) override
         {
-            SetText("");
+            SetText(cast<Say>(::GuiScreensExt::NeedObject(Parent)).InitialText);
         }
     };
 
@@ -14638,11 +14674,13 @@ namespace Say
                 Gui::HideScreen();
                 return;
             }
-            if (Chosen.CanSendSay) {
-                CurPlayer.ServerCall.Rpc_ProcessSay(inputText,
-                                                    cast<Say>(::GuiScreensExt::NeedObject(Parent)).FromDialog,
-                                                    cast<Say>(::GuiScreensExt::NeedObject(Parent)).TalkerId,
-                                                    cast<Say>(::GuiScreensExt::NeedObject(Parent)).TalkerIsNpc);
+            Say screen = cast<Say>(::GuiScreensExt::NeedObject(Parent));
+            if (screen.RequestId != 0) {
+                CurPlayer.ServerCall.AnswerSayRequest(screen.RequestId, inputText, false);
+                screen.RequestId = 0;
+            }
+            else {
+                ::Say::ProcessSay(inputText, screen.SayRevision);
             }
             Gui::HideScreen();
         }
@@ -16419,12 +16457,6 @@ namespace SayExtended
         {
             string inputText = ::GuiScreensExt::NeedText(::GuiScreensExt::NeedScreen(Screen).FindText("MainSayText")).Text;
             auto screen = cast<SayExtended>(::GuiScreensExt::NeedObject(Parent));
-            if (screen.FromScenery) {
-                CurPlayer.ServerCall.ProcessSayExtendedFromScenery(inputText, screen.ProtoID, mpos(screen.HexX, screen.HexY));
-            }
-            else {
-                CurPlayer.ServerCall.Rpc_ProcessSayExtended(inputText);
-            }
             Gui::HideScreen();
         }
     };

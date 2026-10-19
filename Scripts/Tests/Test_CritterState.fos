@@ -15,6 +15,7 @@ void InitTestCritterState()
 void OnTestingInit()
 {
     Testing::RegisterTest("critter_state", "revive_restores_life", ReviveRestoresLife);
+    Testing::RegisterTest("critter_state", "death_stops_movement", DeathStopsMovement);
     Testing::RegisterTest("critter_state", "revive_is_idempotent", ReviveIsIdempotent);
     Testing::RegisterTest("critter_state", "wait_predicates_are_complementary", WaitPredicatesAreComplementary);
 }
@@ -86,6 +87,45 @@ void ReviveRestoresLife(Testing::TestContext ctx)
     }
 
     Testing::Expect(ctx, cr.CurrentHp >= 1, "У воскрешённого криттера положительное здоровье");
+}
+
+// Смерть прерывает активный маршрут, а воскрешение не возобновляет его.
+void DeathStopsMovement(Testing::TestContext ctx)
+{
+    Map map;
+    Critter? npc = SpawnAt(ctx, map);
+    if (npc == null) {
+        return;
+    }
+
+    Critter cr = npc;
+    mpos start = cr.Hex;
+    for (int dx = -5; dx <= 5; dx++) {
+        for (int dy = -5; dy <= 5; dy++) {
+            mpos target = mpos(start.x + dx, start.y + dy);
+            if (Game.GetDistance(start, target) < 3 || !map.IsHexMovable(target)) {
+                continue;
+            }
+            cr.MoveToHex(target, 0, 100, null);
+            if (cr.GetMovingState() == MovingState::InProgress) {
+                break;
+            }
+        }
+        if (cr.GetMovingState() == MovingState::InProgress) {
+            break;
+        }
+    }
+    if (!Testing::Expect(ctx, cr.GetMovingState() == MovingState::InProgress, "Маршрут должен начаться до смерти")) {
+        return;
+    }
+
+    CritterState::ToDead(cr, CritterActionAnim::DeadFront, null);
+    Testing::Expect(ctx, cr.IsDead(), "Движущийся криттер погибает");
+    Testing::Expect(ctx, cr.GetMovingState() == MovingState::Stopped, "Смерть немедленно отменяет движение");
+    Testing::Expect(ctx, cr.Hex == start, "Криттер останавливается на текущем гексе");
+    if (Testing::Expect(ctx, CritterState::ToAlive(cr), "Криттер может воскреснуть после остановки")) {
+        Testing::Expect(ctx, cr.GetMovingState() == MovingState::Stopped, "Воскрешение не возобновляет старый маршрут");
+    }
 }
 
 // Повторное воскрешение живого — не ошибка и ничего не меняет: пути смерти вызывают его защитно.

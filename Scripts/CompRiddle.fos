@@ -285,16 +285,11 @@ bool Use(Critter player, StaticItem scenery, Item? item, any skill)
         player.CompRiddleMapId = map.Id;
         player.CompRiddleHexX = scenery.Hex.x;
         player.CompRiddleHexY = scenery.Hex.y;
-        player.OnPlayerSaidTextFromScenery.Unsubscribe(AnswerTrySolveRiddle);
-        player.OnPlayerSaidTextFromScenery.Subscribe(AnswerTrySolveRiddle);
-        player.CanSendSay = true;
-        player.PlayerClientCall.ShowSayExtendedScreenFromScenery(STR_HEADER, STR_INPUTTEXT, scenery.ProtoId, scenery.Hex);
-        // Прежний способ показа экрана ввода (до миграции на ShowSayExtendedScreenFromScenery) - оставлено как breadcrumb.
-        /*
-           //player.ShowScreen( ShowScreenModes::Say, 0, "answer_TrySolve" );
-           player.SayMsg( Tla::SaySayTitle, TextPackName::Text, STR_HEADER );
-           player.Say( Tla::SaySayText, "????" );
-         */
+        Say::Show(player,
+                  TextPackKey(TextPackName::Text, "" + STR_HEADER),
+                  TextPackKey(TextPackName::Text, "" + STR_INPUTTEXT),
+                  AnswerTrySolveRiddle,
+                  {map.Id, scenery.ProtoId, scenery.Hex.x, scenery.Hex.y});
         return true;
     }
 
@@ -302,13 +297,19 @@ bool Use(Critter player, StaticItem scenery, Item? item, any skill)
 }
 
 // Ответ игрока на экране ввода: проверяем код, показываем подсказку, при успехе выдаём опыт и запускаем показ камеры.
-[[Event]]
-void AnswerTrySolveRiddle(Critter player, hstring sceneryPid, mpos hex, string text)
+void AnswerTrySolveRiddle(Critter player, string text, any[] context)
 {
-    player.OnPlayerSaidTextFromScenery.Unsubscribe(AnswerTrySolveRiddle);
-    player.CanSendSay = false;
-    ComputerRiddleInfo? info = GetRiddleInfo(player);
-    if (info != null) {
+    ident mapId = context[0];
+    hstring sceneryPid = context[1];
+    int x = context[2];
+    int y = context[3];
+    mpos hex = mpos(x, y);
+    Map? map = player.GetMap();
+    if (map == null || map.Id != mapId || Game.GetDistance(player.Hex, hex) > Settings.Dialog.TalkDistance || map.GetStaticItemOnHex(hex, sceneryPid) == null) {
+        return;
+    }
+    ComputerRiddleInfo? info = GetRiddleInfo(mapId, x, y);
+    if (info != null && info.TriesLeft > 0) {
         string code = "";
         bool solved = info.TrySolveRiddle(player, text, code);
         Messaging::Info(player, TextPackKey(TextPackName::Text, "" + (STR_ANSWER)), "|pcode:" + text + "|code:" + code);

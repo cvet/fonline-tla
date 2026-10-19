@@ -1,0 +1,69 @@
+// FixedItemFrame — выбор кадра предмета в клиенте и маппере, включая статические декорации.
+// Число кадров хранится в прототипе, номер выбранного кадра — в экземпляре карты.
+namespace FixedItemFrame
+{
+
+#if CLIENT || MAPPER
+
+[[ModuleInit]]
+void InitFixedItemFrame()
+{
+    Game.OnRenderMap_Rebuild.Subscribe(OnMapRebuild);
+    Game.AddPropertySetter(ItemProperty::FixedFrame, OnFixedFrameChanged);
+#if CLIENT
+    Game.OnItemMapIn.Subscribe(OnItemMapIn);
+#endif
+}
+
+// Перестроение охватывает и статические предметы, для которых нет OnItemMapIn.
+// В маппере оно также позволяет применить кадр после создания или замены спрайта.
+[[Event]]
+void OnMapRebuild(Map map)
+{
+    Item[] items = map.GetItems();
+    for (int i = 0; i < items.length(); i++) {
+        Apply(items[i]);
+    }
+}
+
+#if CLIENT
+[[Event]]
+void OnItemMapIn(Item item)
+{
+    Apply(item);
+}
+#endif
+
+[[PropertySetter]]
+void OnFixedFrameChanged(Item item)
+{
+    Apply(item);
+}
+
+void Apply(Item item)
+{
+    if (item.Type == ItemType::Door || item.Type == ItemType::Container || item.Ownership != ItemOwnership::MapHex) {
+        return;
+    }
+
+    if (item.FixedFrame > 0 && item.AnimFrameCount > 0) {
+        int frame = Math::Clamp(item.FixedFrame, 1, item.AnimFrameCount);
+        item.StopAnim();
+        item.SetAnimTime(item.AnimFrameCount > 1 ? float(frame - 1) / float(item.AnimFrameCount - 1) : 0.0f);
+        item.FixedFrameApplied = true;
+    }
+    else if (item.FixedFrameApplied) {
+        item.FixedFrameApplied = false;
+#if MAPPER
+        item.StopAnim();
+        item.SetAnimTime(0.0f);
+#endif
+#if CLIENT
+        item.PlayAnim(EMPTY_HSTRING, true, false);
+#endif
+    }
+}
+
+#endif
+
+}

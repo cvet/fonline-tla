@@ -80,8 +80,14 @@ Top-level keys: `schemaVersion`, `seq`, `clientIndex`, `connected`, `hasMap`, `h
 
 Consumers must branch on `connected`, `hasMap`, `hasChosen` instead of assuming a current player/map/chosen.
 
+QA map teleport makes the selected location persistent, including its maps and contents, so a private
+database restart can restore the controlled character's complete entity graph.
+
 - `chosen`: id, name, hexX/Y, level, currentHp, maxHp, experience, currentAp, actionPoints, isAlive,
-  inCombat (`TimeoutBattle` active), inSneakMode.
+  inCombat (`TimeoutBattle` active), inSneakMode, isMoving, walkSpeed, movingSpeed, movingEndX/Y.
+  Movement speed and endpoint come from the active engine movement context; without a context they
+  are `0` and `-1/-1`. These fields let GUI tests confirm a stopped character, a newly issued route
+  and the actual walk/run speed.
 - `mouse`: x, y and `cursor` — the current `CursorType` (`Default` 0 = action, `Move` 1, `UseItem` 2, `UseWeapon` 3,
   `UseSkill` 4, `Hand` 5); the right button cycles it in game.
 - `map`: id, protoId, width, height.

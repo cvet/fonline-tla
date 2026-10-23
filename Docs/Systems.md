@@ -60,7 +60,9 @@ Random encounters are the heaviest system in the project and are almost entirely
 | `CritterActions` | S | 1 054 | called by `ChosenActions`; `ProcessAp` | `Test_CritterActions` |
 | `CritterState` | S | 260 | `ModuleInit`; alive/knockout/dead transitions | — |
 | `NpcPlanes` | S | 1 461 | `ModuleInit`; `ProcessAi` on critter idle | `Test_NpcPlanes` |
-| `Animation` | C | 1 248 | `ModuleInit`; `ProcessTactics` | — |
+| `Animation` | C/M | 924 | `ModuleInit`; `ProcessTactics` | `Test_FalloutAnimation` (client QA) |
+| `FalloutAnimation` | S/C/M | 535 | `MapAnimation`; client/mapper `Resolve`, frame selection and splices | `Test_FalloutAnimation` (client QA) |
+| `CritterPresentation` | S/M | 67 | `InitPresentation`; condition/property setters, restored entities and mapper views | `Test_CritterPresentation` |
 
 `Combat` is the largest uncovered system and holds two of the project's longest functions — items 2 and 7
 in the plan point at the same module from different sides.

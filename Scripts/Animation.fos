@@ -1,8 +1,12 @@
-// Animation — выбор и подстановка анимаций криттеров (state/action), маппинг в Fallout-индексы, звук анимаций.
+// Animation — выбор и подстановка анимаций криттеров (state/action), tactics-спрайты и звук анимаций.
 // Ключевые обязанности: инициализация анимаций, генерация имён спрайтов для tactics-моделей, fallback/substitute цепочки, проигрывание SFX.
 // Сторона: CLIENT/MAPPER (звук — только CLIENT). Подписки через InitAnimation на Game.OnCritterAnimation*.
 namespace Animation
 {
+
+///@ Setting Common int32 Render.WalkAnimBaseSpeed
+///@ Setting Common int32 Render.RunAnimStartSpeed
+///@ Setting Common int32 Render.RunAnimBaseSpeed
 
 #if CLIENT || MAPPER
 
@@ -12,9 +16,8 @@ void InitAnimation()
 {
     Game.OnCritterAnimationInit.Subscribe(OnCritterAnimationInit);
     Game.OnCritterAnimationProcess.Subscribe(OnCritterAnimationProcess);
-    Game.OnCritterAnimationFrames.Subscribe(OnCritterAnimationFrames);
+    Game.OnCritterAnimationSprite.Subscribe(OnCritterAnimationSprite);
     Game.OnCritterAnimationSubstitute.Subscribe(OnCritterAnimationSubstitute);
-    Game.OnCritterAnimationFallout.Subscribe(OnCritterAnimationFallout);
 }
 
 // State-анимация по текущему оружию криттера: оружие даёт свою стойку, иначе — Unarmed.
@@ -46,7 +49,8 @@ CritterActionAnim GetIdleActionAnim(Critter cr)
 
 // Доинициализация анимаций криттера: если state/action не заданы — подставляем значения по контексту/состоянию.
 [[Event]]
-void OnCritterAnimationInit(Critter cr, CritterStateAnim& stateAnim, CritterActionAnim& actionAnim, AbstractItem? contextItem)
+void OnCritterAnimationInit(Critter cr, CritterStateAnim& stateAnim, CritterActionAnim& actionAnim, AbstractItem? contextItem,
+                           CritterAnimationContext context, int movingSpeed, CritterAnimationFlags& flags, float& normalizedTime, float& speed)
 {
     if (stateAnim == CritterStateAnim::None) {
         if (contextItem != null) {
@@ -57,8 +61,39 @@ void OnCritterAnimationInit(Critter cr, CritterStateAnim& stateAnim, CritterActi
         }
     }
 
-    if (actionAnim == CritterActionAnim::None) {
-        actionAnim = GetIdleActionAnim(cr);
+    SelectPlayback(cr.Condition, GetIdleActionAnim(cr), context, movingSpeed, actionAnim, flags, normalizedTime, speed);
+}
+
+// Игровые правила позы, движения и стоп-кадра; идентификаторы не несут смысла для движка.
+void SelectPlayback(CritterCondition condition, CritterActionAnim idleAction, CritterAnimationContext context, int movingSpeed, CritterActionAnim& actionAnim,
+                    CritterAnimationFlags& flags, float& normalizedTime, float& speed)
+{
+    if (context == CritterAnimationContext::Action) {
+        if (actionAnim == CritterActionAnim::None) {
+            actionAnim = idleAction;
+        }
+        return;
+    }
+    if (condition != CritterCondition::Alive) {
+        actionAnim = idleAction;
+        flags = CritterAnimationFlags::Freeze;
+        normalizedTime = condition == CritterCondition::Dead ? 1.0f : 0.0f;
+        return;
+    }
+    if (context == CritterAnimationContext::Moving || context == CritterAnimationContext::MovingBack) {
+        bool running = movingSpeed >= Settings.Render.RunAnimStartSpeed;
+        bool back = context == CritterAnimationContext::MovingBack;
+        actionAnim = running ? (back ? CritterActionAnim::RunBack : CritterActionAnim::Run) : (back ? CritterActionAnim::WalkBack : CritterActionAnim::Walk);
+        int baseSpeed = running ? Settings.Render.RunAnimBaseSpeed : Settings.Render.WalkAnimBaseSpeed;
+        verify(baseSpeed > 0 && movingSpeed > 0, "Некорректная скорость анимации движения");
+        speed = float(movingSpeed) / float(baseSpeed);
+        flags = CritterAnimationFlags::Movement;
+    }
+    else if (context == CritterAnimationContext::TurnLeft || context == CritterAnimationContext::TurnRight) {
+        actionAnim = context == CritterAnimationContext::TurnLeft ? CritterActionAnim::TurnLeft : CritterActionAnim::TurnRight;
+    }
+    else if (actionAnim == CritterActionAnim::None) {
+        actionAnim = idleAction;
     }
 }
 
@@ -73,16 +108,31 @@ void OnCritterAnimationProcess(Critter cr, CritterStateAnim stateAnim, CritterAc
 #endif
 }
 
-// Подбор файла спрайта по кадрам анимации: для tactics-моделей строим имя, иначе — пусто (рисует движок).
+// Для Fallout правила файлов и склейки принадлежат игре; tactics-модели используют свой подбор.
 [[Event]]
-void OnCritterAnimationFrames(hstring modelName, CritterStateAnim stateAnim, CritterActionAnim actionAnim, int& pass, uint& flags, int& ox, int& oy,
-                              string& animation)
+void OnCritterAnimationSprite(hstring modelName, CritterStateAnim stateAnim, CritterActionAnim actionAnim, uint& sprId)
 {
-    if (modelName == Tla::CRTYPE_TACTICS_RHUMANOID) {
-        animation = ProcessTactics(modelName.str, stateAnim, actionAnim, pass, flags, ox, oy);
+    if (modelName.str.substr(0, 13) == "art/critters/") {
+        sprId = FalloutAnimation::Resolve(modelName, stateAnim, actionAnim);
+        return;
     }
-    else {
-        animation = "";
+    if (modelName != Tla::CRTYPE_TACTICS_RHUMANOID) {
+        return;
+    }
+
+    int pass = 0;
+    while (true) {
+        int previousPass = pass;
+        uint flags = 0;
+        int ox = 0, oy = 0;
+        string resource = ProcessTactics(modelName.str, stateAnim, actionAnim, pass, flags, ox, oy);
+        if (resource.isEmpty()) {
+            return;
+        }
+        sprId = Game.LoadMapSprite(resource);
+        if (sprId != 0 || pass == previousPass) {
+            return;
+        }
     }
 }
 
@@ -90,7 +140,7 @@ void OnCritterAnimationFrames(hstring modelName, CritterStateAnim stateAnim, Cri
 // Имя криттера задаёт каталог и спец-обработку (турель/транспорт/фрик/мозг), цвет — постфиксы [n,R,G,B].
 string ProcessTactics(string crTypeName, int stateAnim, int actionAnim, int& pass, uint& flags, int& ox, int& oy)
 {
-    // Todo: Implement overlays
+    // TODO: реализовать оверлеи.
 
     // breadcrumb миграции: раньше имя типа получали через GetCritterTypeName(crType); теперь это ModelName
     // string@ crTypeName = GetCritterTypeName( crType );//теперь это ModelName
@@ -188,14 +238,14 @@ string ProcessTactics(string crTypeName, int stateAnim, int actionAnim, int& pas
 
     // Турель
     if (isTurret) {
-        // Todo:
+        // TODO: дополнить подбор.
         animName += "StandArmed.spr";
         return animName;
     }
 
     // Транспорт
     if (isVehicle) {
-        // Todo:
+        // TODO: дополнить подбор.
         animName += "Idle.spr";
         return animName;
     }
@@ -236,7 +286,7 @@ string ProcessTactics(string crTypeName, int stateAnim, int actionAnim, int& pas
 
         // Действие -> суффикс имени анимации
         switch (actionAnim) {
-        // Todo: Climb, Climbdown, Climbup
+        // TODO: подъём и спуск.
         case CritterActionAnim::Walk:
             animName += "Walk";
             break;
@@ -805,356 +855,6 @@ EventResult OnCritterAnimationSubstitute(hstring modelNameBase, CritterStateAnim
     return EventResult::ContinueChain;
 }
 
-// Преобразование общих state/action в Fallout-специфичные индексы (fStateAnim/fActionAnim и Ex-варианты).
-// Возвращает false, если действие не имеет Fallout-маппинга.
-bool OnCritterAnimationFalloutImpl(hstring modelName, CritterStateAnim stateAnim, CritterActionAnim actionAnim, int& fStateAnim, int& fActionAnim,
-                                   int& fStateAnimEx, int& fActionAnimEx, uint& flags)
-{
-    // По-прежнему интересуют только биты оружия
-    stateAnim = CritterStateAnim(stateAnim & AnimHelpers::STATE_ANIM_WEAPON_MASK);
-
-    // Оружие -> Fallout-индекс state
-    switch (stateAnim) {
-    case CritterStateAnim::Unarmed:
-        fStateAnim = FalloutAnims1::Unarmed;
-        break;
-    case CritterStateAnim::Knife:
-        fStateAnim = FalloutAnims1::Knife;
-        break;
-    case CritterStateAnim::Club:
-        fStateAnim = FalloutAnims1::Club;
-        break;
-    case CritterStateAnim::Hammer:
-        fStateAnim = FalloutAnims1::Hammer;
-        break;
-    case CritterStateAnim::Spear:
-        fStateAnim = FalloutAnims1::Spear;
-        break;
-    case CritterStateAnim::Pistol:
-        fStateAnim = FalloutAnims1::Pistol;
-        break;
-    case CritterStateAnim::SMG:
-        fStateAnim = FalloutAnims1::Uzi;
-        break;
-    case CritterStateAnim::Shootgun:
-        fStateAnim = FalloutAnims1::Shootgun;
-        break;
-    case CritterStateAnim::HeavyRifle:
-        fStateAnim = FalloutAnims1::Rifle;
-        break;
-    case CritterStateAnim::Minigun:
-        fStateAnim = FalloutAnims1::Minigun;
-        break;
-    case CritterStateAnim::RocketLauncher:
-        fStateAnim = FalloutAnims1::RocketLauncher;
-        break;
-    case CritterStateAnim::Flamer:
-        fStateAnim = FalloutAnims1::Rifle;
-        break;
-    case CritterStateAnim::Rifle:
-        fStateAnim = FalloutAnims1::Rifle;
-        break;
-    case CritterStateAnim::Sword:
-        fStateAnim = FalloutAnims1::Knife;
-        break;
-    case CritterStateAnim::LongSword:
-        fStateAnim = FalloutAnims1::Knife;
-        break;
-    case CritterStateAnim::Axe:
-        fStateAnim = FalloutAnims1::Club;
-        break;
-    case CritterStateAnim::Bow:
-        fStateAnim = FalloutAnims1::Unarmed;
-        break;
-    default:
-        fStateAnim = FalloutAnims1::Unarmed;
-        break;
-    }
-
-    // Действие -> Fallout-индекс action
-    switch (actionAnim) {
-    case CritterActionAnim::Idle:
-        fActionAnim = FalloutAnims2::Stay;
-        flags |= AnimHelpers::ANIM_FLAG_FIRST_FRAME;
-        break;
-    case CritterActionAnim::IdleStunned:
-        fActionAnim = FalloutAnims2::Stay;
-        flags |= AnimHelpers::ANIM_FLAG_FIRST_FRAME;
-        break;
-    case CritterActionAnim::Walk:
-        fActionAnim = FalloutAnims2::Walk;
-        break;
-    case CritterActionAnim::Limp:
-        fActionAnim = FalloutAnims2::Walk;
-        break;
-    case CritterActionAnim::Run:
-        fActionAnim = FalloutAnims2Unarmed::Run;
-        fStateAnim = FalloutAnims1::Unarmed;
-        break;
-    case CritterActionAnim::PanicRun:
-        fActionAnim = FalloutAnims2Unarmed::Run;
-        fStateAnim = FalloutAnims1::Unarmed;
-        break;
-    case CritterActionAnim::ShowWeapon:
-        fActionAnim = FalloutAnims2::Show;
-        break;
-    case CritterActionAnim::HideWeapon:
-        fActionAnim = FalloutAnims2::Hide;
-        break;
-    case CritterActionAnim::PrepareWeapon:
-        fActionAnim = FalloutAnims2::PrepareWeapon;
-        break;
-    case CritterActionAnim::TurnOffWeapon:
-        fActionAnim = FalloutAnims2::TurnoffWeapon;
-        break;
-    case CritterActionAnim::Fidget:
-        fActionAnim = FalloutAnims2::Stay;
-        break;
-    // нет Fallout-маппинга для Climbing — оставлено как breadcrumb до реализации
-    // case CritterActionAnim::Climbing:
-    // fActionAnim = ;
-    // break;
-    case CritterActionAnim::PickUp:
-        fActionAnim = 11;
-        fStateAnim = FalloutAnims1::Unarmed;
-        break;
-    case CritterActionAnim::Use:
-        fActionAnim = 12;
-        fStateAnim = FalloutAnims1::Unarmed;
-        break;
-    case CritterActionAnim::SwitchItems:
-        fActionAnim = FalloutAnims2Unarmed::Use;
-        fStateAnim = FalloutAnims1::Unarmed;
-        break;
-    case CritterActionAnim::Loot:
-        fActionAnim = FalloutAnims2Unarmed::Pickup;
-        fStateAnim = FalloutAnims1::Unarmed;
-        break;
-    case CritterActionAnim::Steal:
-        fActionAnim = FalloutAnims2Unarmed::Use;
-        fStateAnim = FalloutAnims1::Unarmed;
-        break;
-    case CritterActionAnim::Push:
-        fActionAnim = FalloutAnims2Unarmed::Punch;
-        fStateAnim = FalloutAnims1::Unarmed;
-        break;
-    case CritterActionAnim::IdleCombat:
-        fActionAnim = FalloutAnims2::Stay;
-        flags |= AnimHelpers::ANIM_FLAG_FIRST_FRAME;
-        break;
-    case CritterActionAnim::PunchRight:
-        fActionAnim = FalloutAnims2Unarmed::Punch;
-        fStateAnim = FalloutAnims1::Unarmed;
-        break;
-    case CritterActionAnim::KickHi:
-        fActionAnim = FalloutAnims2Unarmed::Kick;
-        fStateAnim = FalloutAnims1::Unarmed;
-        break;
-    case CritterActionAnim::Thrust1H:
-        fActionAnim = FalloutAnims2::Thrust;
-        break;
-    case CritterActionAnim::Thrust2H:
-        fActionAnim = FalloutAnims2::Thrust;
-        break;
-    case CritterActionAnim::Swing1H:
-        fActionAnim = FalloutAnims2::Swing;
-        break;
-    case CritterActionAnim::Swing2H:
-        fActionAnim = FalloutAnims2::Swing;
-        break;
-    case CritterActionAnim::Single:
-        fActionAnim = FalloutAnims2::Shoot;
-        break;
-    case CritterActionAnim::Burst:
-        fActionAnim = FalloutAnims2::Burst;
-        break;
-    case CritterActionAnim::Sweep:
-        fActionAnim = FalloutAnims2::Burst;
-        break;
-    case CritterActionAnim::Flame:
-        fActionAnim = FalloutAnims2::Flame;
-        break;
-    case CritterActionAnim::Butt:
-        fActionAnim = FalloutAnims2Unarmed::Punch;
-        fStateAnim = FalloutAnims1::Unarmed;
-        break;
-    case CritterActionAnim::Throw:
-        if (fStateAnim == FalloutAnims1::Unarmed) {
-            fActionAnim = FalloutAnims2Unarmed::ThrowEmpty;
-        }
-        else {
-            fActionAnim = FalloutAnims2::ThrowWeapon;
-        }
-
-        break;
-    case CritterActionAnim::DodgeFront:
-        if (fStateAnim == FalloutAnims1::Unarmed) {
-            fActionAnim = FalloutAnims2Unarmed::DodgeEmpty;
-        }
-        else {
-            fActionAnim = FalloutAnims2::DodgeWeapon;
-        }
-
-        break;
-    case CritterActionAnim::DodgeBack:
-        if (fStateAnim == FalloutAnims1::Unarmed) {
-            fActionAnim = FalloutAnims2Unarmed::DodgeEmpty;
-        }
-        else {
-            fActionAnim = FalloutAnims2::DodgeWeapon;
-        }
-
-        break;
-    case CritterActionAnim::DamageFront:
-        fActionAnim = FalloutAnims2::DamageFront;
-        break;
-    case CritterActionAnim::DamageBack:
-        fActionAnim = FalloutAnims2::DamageBack;
-        break;
-    case CritterActionAnim::DamageMulFront:
-        fActionAnim = FalloutAnims2::DamageFront;
-        break;
-    case CritterActionAnim::DamageMulBack:
-        fActionAnim = FalloutAnims2::DamageBack;
-        break;
-    case CritterActionAnim::KnockFront:
-        fActionAnim = FalloutAnims2Unarmed::KnockFront;
-        fStateAnim = FalloutAnims1::Dead;
-        break;
-    case CritterActionAnim::KnockBack:
-        fActionAnim = FalloutAnims2Unarmed::KnockBack;
-        fStateAnim = FalloutAnims1::Dead;
-        break;
-    case CritterActionAnim::StandupFront:
-        fActionAnim = FalloutAnims2Unarmed::StandupFront;
-        fStateAnim = FalloutAnims1::Knockout;
-        break;
-    case CritterActionAnim::StandupBack:
-        fActionAnim = FalloutAnims2Unarmed::StandupBack;
-        fStateAnim = FalloutAnims1::Knockout;
-        break;
-    case CritterActionAnim::DeadProneFront:
-        fActionAnim = FalloutAnims2Dead::DeadFront2;
-        fStateAnim = FalloutAnims1::Dead;
-        break;
-    case CritterActionAnim::DeadProneBack:
-        fActionAnim = FalloutAnims2Dead::DeadBack2;
-        fStateAnim = FalloutAnims1::Dead;
-        break;
-    case CritterActionAnim::DeadBloodySingle:
-        fActionAnim = FalloutAnims2Dead::DeadBloodySingle;
-        fStateAnim = FalloutAnims1::Dead;
-        break;
-    case CritterActionAnim::DeadBloodyBurst:
-        fActionAnim = FalloutAnims2Dead::DeadBloodyBurst;
-        fStateAnim = FalloutAnims1::Dead;
-        break;
-    case CritterActionAnim::DeadBurst:
-        fActionAnim = FalloutAnims2Dead::DeadBurst;
-        fStateAnim = FalloutAnims1::Dead;
-        break;
-    case CritterActionAnim::DeadPulse:
-        fActionAnim = FalloutAnims2Dead::DeadPulse;
-        fStateAnim = FalloutAnims1::Dead;
-        break;
-    case CritterActionAnim::DeadPulseDust:
-        fActionAnim = FalloutAnims2Dead::DeadPulseDust;
-        fStateAnim = FalloutAnims1::Dead;
-        break;
-    case CritterActionAnim::DeadLaser:
-        fActionAnim = FalloutAnims2Dead::DeadLaser;
-        fStateAnim = FalloutAnims1::Dead;
-        break;
-    case CritterActionAnim::DeadFused:
-        fActionAnim = FalloutAnims2Dead::DeadFused;
-        fStateAnim = FalloutAnims1::Dead;
-        break;
-    case CritterActionAnim::DeadExplode:
-        fActionAnim = FalloutAnims2Dead::DeadExplode;
-        fStateAnim = FalloutAnims1::Dead;
-        break;
-
-    case CritterActionAnim::IdleProneFront:
-        fActionAnim = FalloutAnims2Unarmed::KnockFront;
-        fStateAnim = FalloutAnims1::Dead;
-        flags |= AnimHelpers::ANIM_FLAG_LAST_FRAME;
-        break;
-    case CritterActionAnim::IdleProneBack:
-        fActionAnim = FalloutAnims2Unarmed::KnockBack;
-        fStateAnim = FalloutAnims1::Dead;
-        flags |= AnimHelpers::ANIM_FLAG_LAST_FRAME;
-        break;
-
-    case CritterActionAnim::DeadBurn:
-        fActionAnim = FalloutAnims2Dead::DeadBurn;
-        fStateAnim = FalloutAnims1::Dead;
-        break; // альтернатива: FalloutAnims2Dead::DeadBurn2
-    case CritterActionAnim::DeadBurnRun:
-        fActionAnim = FalloutAnims2Dead::DeadBurnRun;
-        fStateAnim = FalloutAnims1::Dead;
-        fActionAnimEx = FalloutAnims2Dead::DeadBurn;
-        fStateAnimEx = FalloutAnims1::Dead;
-        break;
-
-    case CritterActionAnim::DeadFront:
-        fStateAnim = FalloutAnims1::Dead;
-        fStateAnimEx = FalloutAnims1::Dead;
-        fActionAnim = FalloutAnims2Unarmed::KnockFront;
-        fActionAnimEx = FalloutAnims2Dead::DeadFront2;
-        break;
-    case CritterActionAnim::DeadBack:
-        fStateAnim = FalloutAnims1::Dead;
-        fStateAnimEx = FalloutAnims1::Dead;
-        fActionAnim = FalloutAnims2Unarmed::KnockBack;
-        fActionAnimEx = FalloutAnims2Dead::DeadBack2;
-        break;
-    case CritterActionAnim::NoRecoil:
-    case CritterActionAnim::Reload:
-    case CritterActionAnim::Repair:
-        fStateAnimEx = fStateAnim;
-        fActionAnim = FalloutAnims2::PrepareWeapon;
-        fActionAnimEx = FalloutAnims2::TurnoffWeapon;
-        break;
-
-    // Действия без Fallout-маппинга (попадают в default -> false); список оставлен как breadcrumb:
-    // CritterActionAnim::BeginCombat
-    // CritterActionAnim::EndCombat
-    // CritterActionAnim::PunchLeft
-    // CritterActionAnim::PunchCombo
-    // CritterActionAnim::KickLo
-    // CritterActionAnim::KickCombo
-    // CritterActionAnim::WalkDamageFront
-    // CritterActionAnim::WalkDamageBack
-    // CritterActionAnim::LimpDamageFront
-    // CritterActionAnim::LimpDamageBack
-    // CritterActionAnim::RunDamageFront
-    // CritterActionAnim::RunDamageBack
-    // CritterActionAnim::LaydownFront
-    // CritterActionAnim::LaydownBack
-    // CritterActionAnim::DamageProneFront
-    // CritterActionAnim::DamageProneBack
-    // CritterActionAnim::DamageMulProneFront
-    // CritterActionAnim::DamageMulProneBack
-    // CritterActionAnim::TwitchProneFront
-    // CritterActionAnim::TwitchProneBack
-    default:
-        return false;
-    }
-
-    return true;
-}
-
-// Событие движка для маппинга в Fallout-индексы: делегирует реализации и решает продолжать/останавливать цепочку.
-[[Event]]
-EventResult OnCritterAnimationFallout(hstring modelName, CritterStateAnim stateAnim, CritterActionAnim actionAnim, int& fStateAnim, int& fActionAnim,
-                                      int& fStateAnimEx, int& fActionAnimEx, uint& flags)
-{
-    return OnCritterAnimationFalloutImpl(modelName, stateAnim, actionAnim, fStateAnim, fActionAnim, fStateAnimEx, fActionAnimEx, flags) //
-             ?
-               EventResult::ContinueChain :
-               EventResult::StopChain;
-}
-
 #endif
 
 #if CLIENT
@@ -1178,7 +878,7 @@ void PlayAnimSound(hstring modelName, int gender, CritterStateAnim stateAnim, Cr
     // Переводим индексы в Fallout-специфичные (звук только для анимаций без флагов)
     int fStateAnim = 0, fActionAnim = 0, fStateAnimEx = 0, fActionAnimEx = 0;
     uint fFlags = 0;
-    if (!OnCritterAnimationFalloutImpl(modelName, stateAnim, actionAnim, fStateAnim, fActionAnim, fStateAnimEx, fActionAnimEx, fFlags) || fFlags != 0) {
+    if (!FalloutAnimation::MapAnimation(modelName, stateAnim, actionAnim, fStateAnim, fActionAnim, fStateAnimEx, fActionAnimEx, fFlags) || fFlags != 0) {
         return;
     }
 

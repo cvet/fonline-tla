@@ -1,0 +1,110 @@
+// Test_CritterPresentation — проверка правил TLA для обхода и плоской отрисовки персонажей.
+// Сторона: SERVER/MAPPER. Проверяет создание, восстановление политики и переходы состояний на настоящих криттерах.
+namespace Test_CritterPresentation
+{
+
+#if SERVER
+
+[[ModuleInit]]
+void InitTests()
+{
+    Game.OnTestingInit.Subscribe(RegisterTests);
+}
+
+[[Event]]
+void RegisterTests()
+{
+    Testing::RegisterTest("critter_presentation", "condition_transitions_and_restoration", ConditionTransitionsAndRestoration);
+}
+
+void ConditionTransitionsAndRestoration(Testing::TestContext ctx)
+{
+    Critter? cr = Test_ItemStacks::SpawnTestCritter(ctx);
+    if (cr == null) {
+        return;
+    }
+    if (!Testing::Expect(ctx, cr.PathfindingObstacle && !cr.DrawFlatten, "Живой криттер обходит персонажей и рисуется вертикально")) {
+        return;
+    }
+    cr.SetCondition(CritterCondition::Knockout, CritterActionAnim::None, null);
+    if (!Testing::Expect(ctx, cr.PathfindingObstacle && !cr.DrawFlatten, "Нокаут сохраняет препятствие для поиска пути")) {
+        return;
+    }
+    cr.SetCondition(CritterCondition::Dead, CritterActionAnim::None, null);
+    if (!Testing::Expect(ctx, !cr.PathfindingObstacle && cr.DrawFlatten, "Труп не требует обхода и рисуется плоско")) {
+        return;
+    }
+    cr.DeadDrawNoFlatten = true;
+    if (!Testing::Expect(ctx, !cr.DrawFlatten, "Игровой флаг отменяет плоскую отрисовку трупа")) {
+        return;
+    }
+    cr.PathfindingObstacle = true;
+    cr.DrawFlatten = true;
+    CritterPresentation::RestorePolicy(cr);
+    if (!Testing::Expect(ctx, !cr.PathfindingObstacle && !cr.DrawFlatten, "Восстановление применяет правила текущего состояния")) {
+        return;
+    }
+    cr.SetCondition(CritterCondition::Alive, CritterActionAnim::None, null);
+    if (!Testing::Expect(ctx, cr.PathfindingObstacle && !cr.DrawFlatten, "Оживление возвращает обычную политику")) {
+        return;
+    }
+    Testing::Pass(ctx);
+}
+
+#endif
+
+#if MAPPER
+
+[[ModuleInit]]
+void InitMapperTests()
+{
+    Game.OnStart.Subscribe(CheckMapperPolicy);
+}
+
+// Загружает существующую карту с трупами и проверяет редактирование состояния без записи файла.
+[[Event]]
+void CheckMapperPolicy()
+{
+    if (!Settings.AiControl.AllowQaCommands) {
+        return;
+    }
+    Map? map = Game.LoadMap("broken_caves2");
+    if (map == null) {
+        throw("Не удалось открыть карту для проверки политики маппера");
+    }
+    Critter[] critters = map.GetCritters();
+    Critter? corpse = null;
+    for (int i = 0; i < critters.length(); i++) {
+        Critter cr = critters[i];
+        bool dead = cr.Condition == CritterCondition::Dead;
+        verify(cr.PathfindingObstacle == !dead && cr.DrawFlatten == (dead && !cr.DeadDrawNoFlatten), "Маппер не применил политику загруженного криттера");
+        if (dead && !cr.DeadDrawNoFlatten) {
+            corpse = cr;
+        }
+    }
+    if (corpse == null) {
+        throw("На проверочной карте нет трупа без отмены плоской отрисовки");
+    }
+    Game.ShowMap(map);
+    verify(Game.SetEntityProperty(corpse, "Condition", "Alive"), "Маппер не принял изменение состояния");
+    verify(corpse.PathfindingObstacle && !corpse.DrawFlatten, "Редактирование состояния не обновило политику маппера");
+    verify(Game.SetEntityProperty(corpse, "Condition", "Dead"), "Маппер не принял возврат состояния смерти");
+    verify(!corpse.PathfindingObstacle && corpse.DrawFlatten, "Возврат смерти не восстановил плоскую отрисовку");
+    corpse.DeadDrawNoFlatten = true;
+    verify(!corpse.DrawFlatten, "Маппер игнорирует игровой флаг отрисовки трупа");
+    corpse.DeadDrawNoFlatten = false;
+    map.MoveScreenToHex(corpse.Hex, corpse.HexOffset, 0, true);
+    Game.OnLoop.Subscribe(SaveMapperEvidence);
+    Game.Log("Critter presentation QA: mapper corpse load and condition edits passed");
+}
+
+[[Event]]
+void SaveMapperEvidence()
+{
+    Game.OnLoop.Unsubscribe(SaveMapperEvidence);
+    Game.SaveMapperScreenshot(Settings.Common.UserWritablePath + "/mapper-corpse.png");
+}
+
+#endif
+
+}

@@ -64,8 +64,6 @@ FO_SCRIPT_API bool Server_Critter_IsFree(ptr<Critter> server);
 FO_SCRIPT_API bool Server_Critter_IsBusy(ptr<Critter> server);
 ///@ ExportMethod
 FO_SCRIPT_API void Server_Critter_Wait(ptr<Critter> server, int32_t ms);
-///@ ExportMethod
-FO_SCRIPT_API void Server_Critter_ViewMap(ptr<Critter> self, ptr<Map> map, int32_t look, mpos hex, mdir dir);
 FO_END_NAMESPACE
 
 void FO_NAMESPACE ServerInitHook(ptr<ServerEngine> server)
@@ -403,32 +401,4 @@ bool FO_NAMESPACE Server_Critter_IsBusy(ptr<Critter> server)
 void FO_NAMESPACE Server_Critter_Wait(ptr<Critter> server, int32_t ms)
 {
     ignore_unused(server, ms);
-}
-
-void FO_NAMESPACE Server_Critter_ViewMap(ptr<Critter> self, ptr<Map> map, int32_t look, mpos hex, mdir dir)
-{
-    ignore_unused(look, dir);
-
-    if (!map->GetSize().is_valid_pos(hex)) {
-        throw ScriptException("Invalid hexes args");
-    }
-    if (!self->GetControlledByPlayer()) {
-        return;
-    }
-
-    auto player = self->GetPlayer();
-    if (!player) {
-        return;
-    }
-
-    player->Send_LoadMap(map);
-    self->GetEngine()->MapMngr.ViewMap(player.as_ptr(), map);
-
-    {
-        // Finish the ViewMap message and release the output lock before sending the next message.
-        auto out_buf = player->GetConnection()->WriteMsg(NetMessage::ViewMap);
-        out_buf->Write(hex);
-    }
-
-    player->Send_PlaceToGameComplete();
 }

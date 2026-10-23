@@ -1,5 +1,6 @@
 // Test_DayColor — тесты кривой дневного тона (DayColor): тон на ключах кривой, интерполяция между ними, переход
-// через полночь и доля дневного света. Кривая — та же, что в TLA.fomain (View.GlobalDayColor / GlobalDayColorTime).
+// через полночь и доля дневного света. Проверяет также проектные defaults и приоритет кривой карты.
+// MAPPER: при включённых QA-командах проверяет передачу проектной кривой в отрисовку и сохраняет снимки.
 namespace Test_DayColor
 {
 
@@ -17,6 +18,9 @@ void OnTestingInit()
     Testing::RegisterTest("day_color", "keys_give_their_authored_color", KeysGiveTheirAuthoredColor);
     Testing::RegisterTest("day_color", "between_keys_the_color_is_interpolated", BetweenKeysTheColorIsInterpolated);
     Testing::RegisterTest("day_color", "night_wraps_through_midnight", NightWrapsThroughMidnight);
+    Testing::RegisterTest("day_color", "empty_map_uses_project_defaults", EmptyMapUsesProjectDefaults);
+    Testing::RegisterTest("day_color", "map_curve_has_priority", MapCurveHasPriority);
+    Testing::RegisterTest("day_color", "selected_defaults_are_independent", SelectedDefaultsAreIndependent);
 }
 
 int[] Times()
@@ -29,6 +33,65 @@ uint8[] Colors()
 {
     uint8[] colors = {18, 128, 103, 51, 18, 128, 95, 40, 53, 128, 86, 29};
     return colors;
+}
+
+bool ExpectCurve(Testing::TestContext ctx, int[] times, uint8[] colors, int[] expectedTimes, uint8[] expectedColors)
+{
+    if (!Testing::ExpectEq(ctx, times.length(), expectedTimes.length(), "Число ключей времени") ||
+        !Testing::ExpectEq(ctx, colors.length(), expectedColors.length(), "Число каналов цвета")) {
+        return false;
+    }
+
+    for (int i = 0; i < times.length(); i++) {
+        if (!Testing::ExpectEq(ctx, times[i], expectedTimes[i], "Ключ времени")) {
+            return false;
+        }
+    }
+
+    for (int i = 0; i < colors.length(); i++) {
+        if (!Testing::ExpectEq(ctx, int(colors[i]), int(expectedColors[i]), "Канал цвета")) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+void EmptyMapUsesProjectDefaults(Testing::TestContext ctx)
+{
+    if (!ExpectCurve(ctx, DayColor::ResolveTimes({}), DayColor::ResolveColors({}), Times(), Colors())) {
+        return;
+    }
+
+    Testing::Pass(ctx);
+}
+
+void MapCurveHasPriority(Testing::TestContext ctx)
+{
+    int[] times = {0, 300, 600, 900};
+    uint8[] colors = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12};
+
+    if (!ExpectCurve(ctx, DayColor::ResolveTimes(times), DayColor::ResolveColors(colors), times, colors) ||
+        !ExpectCurve(ctx, DayColor::ResolveTimes({}), DayColor::ResolveColors(colors), Times(), colors) ||
+        !ExpectCurve(ctx, DayColor::ResolveTimes(times), DayColor::ResolveColors({}), times, Colors())) {
+        return;
+    }
+
+    Testing::Pass(ctx);
+}
+
+void SelectedDefaultsAreIndependent(Testing::TestContext ctx)
+{
+    int[] times = DayColor::ResolveTimes({});
+    uint8[] colors = DayColor::ResolveColors({});
+    times[0] = 0;
+    colors[0] = 255;
+
+    if (!ExpectCurve(ctx, DayColor::ResolveTimes({}), DayColor::ResolveColors({}), Times(), Colors())) {
+        return;
+    }
+
+    Testing::Pass(ctx);
 }
 
 bool ExpectColor(Testing::TestContext ctx, ucolor actual, int r, int g, int b, string what)
@@ -88,6 +151,59 @@ void NightWrapsThroughMidnight(Testing::TestContext ctx)
     }
 
     Testing::Pass(ctx);
+}
+
+#endif
+
+#if MAPPER
+
+[[ModuleInit]]
+void InitMapperDayColorTest()
+{
+    if (!Settings.AiControl.AllowQaCommands) {
+        return;
+    }
+
+    Game.OnStart.Subscribe(PrepareMapperDefaultCurve);
+}
+
+[[Event]]
+void PrepareMapperDefaultCurve()
+{
+    verify(HasCurMap, "Для проверки дневного тона нужна загруженная карта");
+
+    Map map = CurMap;
+    map.DayColorTime = {};
+    map.DayColor = {};
+    map.FixedDayTime = 600;
+
+    Game.OnLoop.Subscribe(CheckMapperNoon);
+}
+
+[[Event]]
+void CheckMapperNoon()
+{
+    Game.OnLoop.Unsubscribe(CheckMapperNoon);
+
+    Map map = CurMap;
+    verify(map.MapDayColor == ucolor(128, 128, 128, 255), "Проектная кривая не дошла до отрисовки полдня");
+    verify(map.MapDayLightCapacity == 0, "Неверная доля дневного света в полдень");
+    Game.SaveMapperScreenshot(Settings.Common.UserWritablePath + "/day-color-noon.png");
+    map.FixedDayTime = 300;
+
+    Game.OnLoop.Subscribe(CheckMapperDawn);
+}
+
+[[Event]]
+void CheckMapperDawn()
+{
+    Game.OnLoop.Unsubscribe(CheckMapperDawn);
+
+    Map map = CurMap;
+    verify(map.MapDayColor == ucolor(18, 18, 53, 255), "Проектная кривая не дошла до отрисовки рассвета");
+    verify(map.MapDayLightCapacity == 92, "Неверная доля дневного света на рассвете");
+    Game.SaveMapperScreenshot(Settings.Common.UserWritablePath + "/day-color-dawn.png");
+    Game.Log("Day color QA: project defaults reached map renderer at noon and dawn");
 }
 
 #endif

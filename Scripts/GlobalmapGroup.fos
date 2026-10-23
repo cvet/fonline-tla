@@ -1,6 +1,7 @@
 // GlobalmapGroup — управление группами путешественников на глобальной карте: движение по миру, столкновения (энкаунтеры), вход в локации и командование группой.
 // SERVER: авторитетная логика перемещения и следования, приглашение/высадка спутников, обработка команд глобальной карты и генерация встреч (GlobalProcess, GroupMove, ProcessGlobalMapCommand).
 // CLIENT: локальное состояние движущейся группы для отрисовки маршрута на карте и отправка команд лидера на сервер через удалённые вызовы (RemoteCall).
+// Глобальное состояние хранит реестр серверных групп и единственную отображаемую группу клиента.
 namespace GlobalmapGroup
 {
 
@@ -1465,6 +1466,9 @@ bool CheckEntrance(Location loc, Critter[] arr, int entrance) // 5 hits
 
 void ProcessGlobalMapCommandImpl(Player player, int command, any param1, any param2)
 {
+    if (player.MapPreviewCritterId != ZERO_IDENT) {
+        MapPreview::Return(player);
+    }
     Critter? cl = player.GetControlledCritter();
     if (cl == null) {
         return;
@@ -1677,8 +1681,11 @@ void ProcessGlobalMapCommandImpl(Player player, int command, any param1, any par
         cl.PlayerClientCall.ShowGMTown(loc.Id, loc.ProtoId, allowedEntrances);
     } break;
     case GM_CMD_VIEW_MAP: {
+        if (cl.GetMap() != null) {
+            break;
+        }
         auto group = GetGlobalMapGroup(cl);
-        if (group.EncounterDescriptor > 0) {
+        if (group.EncounterDescriptor > 0 || group.IsMoving()) {
             break;
         }
 
@@ -1710,17 +1717,12 @@ void ProcessGlobalMapCommandImpl(Player player, int command, any param1, any par
             break;
         }
 
-        uint8 dir;
         mpos hex;
-        // if( !map->GetStartCoord( hx, hy, dir, loc->Proto->Entrance[ entrance ].second ) )
         if (!Entrance::GetEntryFreeHex(map, entry, hex)) {
             break;
         }
 
-        int look = 0; // 0? cr.LookDistance
-
-        cl.ViewMap(map, 0, hex, 0);
-        cl.PlayerClientCall.ShowTownView(locId, entrance);
+        MapPreview::Show(cl, map, hex, cl.LookDistance, locId, entrance);
 
     } break;
     default:

@@ -1,0 +1,67 @@
+// CritterPresentation — правила TLA для обхода и плоской отрисовки персонажей.
+// Сторона: SERVER/MAPPER. Без глобального состояния; применяет политику при создании, загрузке и изменении свойств.
+namespace CritterPresentation
+{
+
+///@ Property Critter Common bool DeadDrawNoFlatten Mutable PublicSync Persistent
+
+#if SERVER || MAPPER
+
+[[ModuleInit]]
+void InitPresentation()
+{
+#if SERVER
+    Game.OnCritterInit.Subscribe(OnCritterInit);
+#endif
+#if MAPPER
+    Game.OnEditMapLoad.Subscribe(OnEditMapLoad);
+    Game.OnCritterAnimationInit.Subscribe(OnMapperCritterAnimationInit);
+#endif
+    Game.AddPropertySetter(CritterProperty::Condition, OnConditionChanged);
+    Game.AddPropertySetter(CritterProperty::DeadDrawNoFlatten, OnConditionChanged);
+}
+
+#if SERVER
+[[Event]]
+void OnCritterInit(Critter cr, bool firstTime)
+{
+    RestorePolicy(cr);
+}
+#endif
+#if MAPPER
+[[Event]]
+void OnEditMapLoad(Map map)
+{
+    Critter[] critters = map.GetCritters();
+    for (int i = 0; i < critters.length(); i++) {
+        RestorePolicy(critters[i]);
+    }
+}
+
+// Инициализация вида охватывает и новых криттеров, добавленных после загрузки карты.
+[[Event]]
+void OnMapperCritterAnimationInit(Critter cr, CritterStateAnim& stateAnim, CritterActionAnim& actionAnim, AbstractItem? contextItem,
+                                  CritterAnimationContext context, int movingSpeed, CritterAnimationFlags& flags, float& normalizedTime, float& speed)
+{
+    RestorePolicy(cr);
+}
+#endif
+
+// Реактивный setter вызывается после записи значения, поэтому Condition уже содержит новое состояние.
+[[PropertySetter]]
+void OnConditionChanged(Critter cr)
+{
+    RestorePolicy(cr);
+}
+
+// Восстанавливает производные параметры, в том числе для сохранений до появления этих свойств движка.
+void RestorePolicy(Critter cr)
+{
+    bool dead = cr.Condition == CritterCondition::Dead;
+    cr.PathfindingObstacle = !dead;
+    cr.DrawFlatten = dead && !cr.DeadDrawNoFlatten;
+}
+
+#endif
+
+}

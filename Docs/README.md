@@ -17,6 +17,15 @@ See the Engine's [component selection](../Engine/Docs/en/how-to/build/project-co
 and [storage upgrade boundary](../Engine/Docs/en/explanation/persistence/index.md#storage-formats-and-upgrade-boundary).
 After an Engine update, rebuild and rebake matching client/server outputs before running them.
 
+Town and quest-camera previews use the Engine's `Player.ViewMapArea` through
+`Scripts/MapPreview.fos`, with an inclusive hex radius and live subject updates.
+Global-map previews keep the controlled critter attached; local quest cameras use
+`Player.SwitchCritter(null)` temporarily and restore the same critter without moving it.
+The TownView screen returns through `Player.ReturnFromViewMap` or `Player.SwitchCritter`;
+city entry repeats the normal server access checks. Preview state is runtime-only on
+`Player`, and disappearing target maps return the player automatically. Matching rebuilt
+client/server outputs and rebaked metadata/effects are required for network `0.0.76`.
+
 ## Orientation
 
 | Document | What it answers |
@@ -30,6 +39,7 @@ After an Engine update, rebuild and rebake matching client/server outputs before
 
 | Document | What it answers |
 | -------- | --------------- |
+| [EngineSettingsAudit.md](EngineSettingsAudit.md) | Complete native settings register, relevance evidence, and remaining ownership migrations. |
 | [AuditPlan.md](AuditPlan.md) | The ten findings of the 2026-09-02 audit: measurement, steps, status. The current work queue. |
 | [Refactoring.md](Refactoring.md) | Standing decisions and the open remainder of the Scripts refactoring rounds. |
 | [ReanimationPlan.md](ReanimationPlan.md) | The staged campaign to bring the whole game into working order: gates, workstreams, stages. |

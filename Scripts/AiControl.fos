@@ -10,6 +10,7 @@
 // базовые команды поверх реального API TLA. Системы, которых в TLA пока нет (roster, admin,
 // фракции, overwatch, глобальные интересы и т.п.), сознательно опущены и будут добавляться по мере
 // появления соответствующих систем.
+// Глобальное состояние хранит сессию клиентского моста, очередь событий и снимок наблюдения; это единый канал текущего клиента.
 
 namespace AiControl
 {
@@ -1747,10 +1748,17 @@ string ChosenJson()
     }
 
     Critter cr = Chosen;
+    bool isOnMap = cr.IsOnMap();
+    MovingContext? moving = isOnMap ? cr.GetMovingContext() : null;
     return Object({IdentMember("id", cr.Id),
                    StringMember("name", cr.Name),
                    IntMember("hexX", int(cr.Hex.x)),
                    IntMember("hexY", int(cr.Hex.y)),
+                   BoolMember("isMoving", isOnMap && cr.IsMoving()),
+                   IntMember("walkSpeed", cr.WalkSpeed),
+                   IntMember("movingSpeed", moving != null ? moving.GetSpeed() : 0),
+                   IntMember("movingEndX", moving != null ? int(moving.GetEndHex().x) : -1),
+                   IntMember("movingEndY", moving != null ? int(moving.GetEndHex().y) : -1),
                    IntMember("level", cr.Level),
                    IntMember("currentHp", cr.CurrentHp),
                    IntMember("maxHp", cr.MaxLife),
@@ -2271,6 +2279,10 @@ void AiControlQaTeleportMap(Player player, hstring locPid, hstring mapPid, mpos 
     if (targetMap == null) {
         Game.Log("AiControl QA teleport: map/location not found " + locPid + "/" + mapPid);
         return;
+    }
+    // QA-локация сохраняет карты и содержимое, чтобы повторный вход после перезапуска восстановил полный граф персонажа.
+    if (loc != null) {
+        loc.MakePersistent(true);
     }
     // hex (0,0) => используем стандартный вход карты "0" (валидный гекс входа).
     if (hex.x == 0 && hex.y == 0) {

@@ -1,0 +1,129 @@
+// Test_FalloutAnimation — клиентская проверка игровых FRM-последовательностей на настоящих ресурсах.
+// CLIENT: включается только для AiControl.AllowQaCommands; проверяет направления, стык, выбор кадра и однокадровые FRM.
+// Связи: FalloutAnimation, AnimHelpers; выполняется до входа тестового игрока.
+namespace Test_FalloutAnimation
+{
+
+#if CLIENT
+
+[[ModuleInit]]
+void InitTestFalloutAnimation()
+{
+    Game.OnStart.Subscribe(CheckSequences);
+    if (Settings.AiControl.AllowQaCommands) {
+        Game.OnRenderIface.Subscribe(CheckSingleFrameSequences);
+    }
+}
+
+// Однокадровые FRM должны пройти обычный резолвер предпросмотра, требующий SpriteSheet.
+[[Event]]
+void CheckSingleFrameSequences()
+{
+    Game.OnRenderIface.Unsubscribe(CheckSingleFrameSequences);
+    for (int i = 0; i < 2; i++) {
+        hstring model = (i == 0 ? "art/critters/madeggaa.frm" : "art/critters/mabos2aa.frm").hstr();
+        uint sprId = FalloutAnimation::Resolve(model, CritterStateAnim::Unarmed, CritterActionAnim::Fidget);
+        verify(sprId != 0 && Game.GetSpriteFrameCount(sprId) == 1 && Game.GetSpriteDirectionCount(sprId) == 1, "Однокадровая FRM-анимация потеряла кадр");
+        Game.FreeSprite(sprId);
+        Game.DrawCritter2d(model, CritterStateAnim::Unarmed, CritterActionAnim::Fidget, mdir(0), 0, 0, 1, 1, false, true, ucolor(255, 255, 255, 0));
+    }
+    Game.Log("Fallout animation QA: single-frame FRM previews passed");
+}
+
+[[Event]]
+void CheckSequences()
+{
+    if (!Settings.AiControl.AllowQaCommands) {
+        return;
+    }
+    CheckPlaybackPolicy();
+    hstring model = "art/critters/hmjmpsaa.frm".hstr();
+    uint first = FalloutAnimation::LoadRaw(model, FalloutAnims1::Dead, FalloutAnims2Unarmed::KnockFront);
+    uint second = FalloutAnimation::LoadRaw(model, FalloutAnims1::Dead, FalloutAnims2Dead::DeadFront2);
+    uint joined = FalloutAnimation::Resolve(model, CritterStateAnim::Unarmed, CritterActionAnim::DeadFront);
+    verify(first != 0 && second != 0 && joined != 0, "Для проверки смерти отсутствует FRM-анимация");
+    int firstCount = Game.GetSpriteFrameCount(first);
+    int secondCount = Game.GetSpriteFrameCount(second);
+    verify(Game.GetSpriteFrameCount(joined) == firstCount + secondCount, "Склейка потеряла кадры");
+    verify(Game.GetSpriteDuration(joined) == Game.GetSpriteDuration(first) + Game.GetSpriteDuration(second), "Склейка изменила длительность");
+    for (int d = 0; d < Game.GetSpriteDirectionCount(first); d++) {
+        mdir dir = mdir(hdir(d));
+        ipos expected = Game.GetSpriteFrameMotion(second, 0, dir) - FalloutAnimation::TotalMotion(first, dir);
+        verify(Game.GetSpriteFrameMotion(joined, firstCount, dir) == expected, "На стыке повторяется перенос по X/Y");
+    }
+    Game.FreeSprite(first);
+    Game.FreeSprite(second);
+    Game.FreeSprite(joined);
+
+    uint part = FalloutAnimation::LoadPart(model, FalloutAnims1::Dead, FalloutAnims2Unarmed::KnockFront);
+    uint pose = FalloutAnimation::Resolve(model, CritterStateAnim::Unarmed, CritterActionAnim::IdleProneFront);
+    verify(part != 0 && pose != 0 && Game.GetSpriteFrameCount(pose) == 1, "Поза должна содержать один кадр");
+    for (int d = 0; d < Game.GetSpriteDirectionCount(part); d++) {
+        mdir dir = mdir(hdir(d));
+        int last = Game.GetSpriteFrameCount(part) - 1;
+        verify(Game.GetSpriteFrameOffset(pose, 0, dir) == Game.GetSpriteFrameOffset(part, last, dir), "Поза потеряла опорное смещение");
+        verify(Game.GetSpriteFrameMotion(pose, 0, dir) == FalloutAnimation::TotalMotion(part, dir), "Поза потеряла накопленный перенос");
+    }
+    Game.FreeSprite(part);
+    Game.FreeSprite(pose);
+
+    uint prepare = FalloutAnimation::LoadPart(model, FalloutAnims1::Pistol, FalloutAnims2::PrepareWeapon);
+    uint lower = FalloutAnimation::LoadPart(model, FalloutAnims1::Pistol, FalloutAnims2::TurnoffWeapon);
+    uint reload = FalloutAnimation::Resolve(model, CritterStateAnim::Pistol, CritterActionAnim::Reload);
+    verify(prepare != 0 && lower != 0 && reload != 0, "Для проверки перезарядки отсутствует FRM-анимация");
+    verify(Game.GetSpriteFrameCount(reload) == Game.GetSpriteFrameCount(prepare) + Game.GetSpriteFrameCount(lower), "Перезарядка потеряла часть действия");
+    Game.FreeSprite(prepare);
+    Game.FreeSprite(lower);
+    Game.FreeSprite(reload);
+    Game.Log("Fallout animation QA: death splice, prone pose and reload passed for all directions");
+}
+
+// Чистый выбор проигрывания проверяется отдельно от наличия файлов FRM.
+void CheckPlaybackPolicy()
+{
+    for (int test = 0; test < 10; test++) {
+        CritterCondition condition = (test == 0 || test == 2) ? CritterCondition::Dead : test == 1 ? CritterCondition::Knockout : CritterCondition::Alive;
+        CritterAnimationContext context = test == 2              ? CritterAnimationContext::Action :
+                                          test == 3 || test == 4 ? CritterAnimationContext::MovingBack :
+                                          test == 5 || test == 8 ? CritterAnimationContext::Moving :
+                                          test == 6              ? CritterAnimationContext::TurnLeft :
+                                          test == 9              ? CritterAnimationContext::TurnRight :
+                                                                   CritterAnimationContext::Default;
+        CritterActionAnim action = test == 2 ? CritterActionAnim::DeadFront : CritterActionAnim::None;
+        CritterAnimationFlags flags = CritterAnimationFlags::None;
+        float normalizedTime = 0.0f;
+        float speed = 1.0f;
+        int movingSpeed = test == 4 || test == 8 ? Settings.Render.RunAnimStartSpeed : Settings.Render.WalkAnimBaseSpeed;
+        Animation::SelectPlayback(condition, CritterActionAnim::IdleProneFront, context, movingSpeed, action, flags, normalizedTime, speed);
+        if (test < 2) {
+            verify(flags == CritterAnimationFlags::Freeze && normalizedTime == (test == 0 ? 1.0f : 0.0f), "Смерть и нокаут потеряли стоп-кадр");
+        }
+        else if (test == 2) {
+            verify(action == CritterActionAnim::DeadFront && flags == CritterAnimationFlags::None, "Разовое действие смерти должно проигрываться");
+        }
+        else if (test < 5) {
+            verify(flags == CritterAnimationFlags::Movement && action == (test == 4 ? CritterActionAnim::RunBack : CritterActionAnim::WalkBack),
+                   "Неверный выбор движения назад");
+        }
+        else if (test == 5 || test == 8) {
+            verify(action == (test == 8 ? CritterActionAnim::Run : CritterActionAnim::Walk) && flags == CritterAnimationFlags::Movement,
+                   "Неверный выбор движения вперёд");
+        }
+        else if (test == 6 || test == 9) {
+            verify(action == (test == 9 ? CritterActionAnim::TurnRight : CritterActionAnim::TurnLeft), "Неверный выбор поворота");
+        }
+        else {
+            verify(action == CritterActionAnim::IdleProneFront && flags == CritterAnimationFlags::None, "Поза покоя не выбрана");
+        }
+        if (test == 3 || test == 5) {
+            verify(speed == 1.0f, "Базовая скорость ходьбы должна давать множитель 1");
+        }
+        else if (test == 4 || test == 8) {
+            verify(speed == float(Settings.Render.RunAnimStartSpeed) / float(Settings.Render.RunAnimBaseSpeed), "Скорость бега потеряла игровой множитель");
+        }
+    }
+}
+
+#endif
+
+}

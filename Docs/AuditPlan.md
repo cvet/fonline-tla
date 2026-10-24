@@ -2,7 +2,10 @@
 
 Working plan for the ten findings of the 2026-09-02 project audit. Each item states the measurement it
 rests on, the steps, and the condition that closes it. This file is a **plan**, not a journal: when an item
-is done its steps collapse to a one-line outcome. Session narrative belongs in `Docs/History/`.
+is done its steps collapse to a one-line outcome. Session narrative belongs in `Docs/History/`. Measurements and completed outcomes
+below are dated audit evidence, not current suite counts or fresh acceptance.
+Current commands/CI differences: [BuildAndLaunch](BuildAndLaunch.md); synchronization
+policy: [Scripts](Scripts.md#single-threaded-logic-and-lifetime).
 
 Order below is execution order, not severity. Items 3 and 8 come first because everything else is verified
 through the chain they define; item 9 comes next because it is what a newcomer reads; the heavy work
@@ -36,7 +39,7 @@ reassembled by hand every session.
 
 **Outcome.** `Verify :: All` chains bake → six target builds → engine unit tests → script harness →
 validators → formatters. Every step reuses an existing task except `Test :: Python Tools`, added because the
-156 tests under `Tools/` had none. Both are listed in the `AGENTS.md` task table.
+156 tests under `Tools/` had none. The current task route is in [BuildAndLaunch](BuildAndLaunch.md).
 
 ---
 

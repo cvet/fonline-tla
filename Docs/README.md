@@ -1,61 +1,58 @@
-# Documentation index
+# Project documentation index
 
-Game-side documentation for FOnline: The Life After. The engine keeps its own set under
-`Engine/Docs/`, indexed by `Engine/Docs/README.md`; nothing here duplicates it.
+Game-side documentation for FOnline: The Life After. Start with
+[AGENTS.md](../AGENTS.md) for agent authority and essential invariants or the root
+[README](../README.md) for human setup. The separately owned
+[Engine docs](../Engine/Docs/en/index.md) define reusable engine contracts.
 
-Start with [../AGENTS.md](../AGENTS.md) for repository practices, then with the map below.
+## Current task guides
 
-## Engine build configuration
+| Question | Read |
+| --- | --- |
+| Build, launch, tests, warnings, process cleanup, logs, CI or packages | [BuildAndLaunch](BuildAndLaunch.md) |
+| Script sides, dispatch, globals, state, stacking, sounds or day tint | [Scripts](Scripts.md) |
+| Russian script headers/comments, naming, formatting and safe refactoring | [ScriptStyle](ScriptStyle.md) |
+| Nullable handles, components, Chosen and native boundary validation | [Nullability](Nullability.md), [tool README](../Tools/NullableEstimate/README.md) |
+| Content inputs, localization, generated GUI or secure-channel config | [ContentWorkflow](ContentWorkflow.md) |
+| Native extension files, bindings and CMake roles | [NativeExtensions](NativeExtensions.md), then [Engine instructions](../Engine/AGENTS.md) |
+| Find a gameplay owner, caller or suite | [Systems](Systems.md) |
+| Critter animations, offsets, motion and project/native split | [Animation](Animation.md) |
+| AI-control/MCP launch, screenshots and quest tests | [AiControl](AiControl.md) |
+| Bridge wire schema, observation, actions and privileged QA commands | [AiControlProtocol](AiControlProtocol.md) |
+| Update instructions, audit docs/session evidence or reconcile an Engine bump | [DocumentationMaintenance](DocumentationMaintenance.md) |
+| Script-quality checks, heuristics and ratchet | [ScriptQuality tool README](../Tools/ScriptQuality/README.md) |
 
-TLA enables `FO_DATA_SOURCE_DAT`, `FO_DATA_SOURCE_ZIP`, `FO_IMAGE_FRM`, `FO_IMAGE_RIX` and
-`FO_AUDIO_ACM` in `CMakeLists.txt` for its authored Fallout archives, images and sounds. PNG, TGA and FOFRM
-importers are built in. `Server.DbStorage = Memory` needs no optional database provider.
-To select persistent storage, enable its positive `FO_DATABASE_JSON`, `FO_DATABASE_SQLITE`
-or `FO_DATABASE_MONGO` CMake option and reconfigure. Engine `2026.1.26-dev` requires new
-empty storage for JSON and SQLite; it does not convert their old formats.
-See the Engine's [component selection](../Engine/Docs/en/how-to/build/project-configuration.md#optional-native-components)
-and [storage upgrade boundary](../Engine/Docs/en/explanation/persistence/index.md#storage-formats-and-upgrade-boundary).
-After an Engine update, rebuild and rebake matching client/server outputs before running them.
+## Plans and dated references
 
-Town and quest-camera previews use the Engine's `Player.ViewMapArea` through
-`Scripts/MapPreview.fos`, with an inclusive hex radius and live subject updates.
-Global-map previews keep the controlled critter attached; local quest cameras use
-`Player.SwitchCritter(null)` temporarily and restore the same critter without moving it.
-The TownView screen returns through `Player.ReturnFromViewMap` or `Player.SwitchCritter`;
-city entry repeats the normal server access checks. Preview state is runtime-only on
-`Player`, and disappearing target maps return the player automatically. Matching rebuilt
-client/server outputs and rebaked metadata/effects are required for network `0.0.76`.
+Plans describe intended work and dated progress. Recheck implementation, current
+requirements and revision before treating an old status/count as accepted today.
 
-## Orientation
+| Document | Role and boundary |
+| --- | --- |
+| [AuditPlan](AuditPlan.md) | Ten findings measured in the 2026-09-02 audit, outcomes and remaining work. |
+| [Refactoring](Refactoring.md) | Historical rounds, standing project decisions and deferred items; current contracts live in the guides above. |
+| [ReanimationPlan](ReanimationPlan.md) | Current entry to the campaign proposal; distinguishes existing tools from proposed catalog/SOAK infrastructure. |
+| [EngineSettingsAudit](EngineSettingsAudit.md) | 2026-10-16 static register; source locations and acceptance are historical, not today's Engine API. |
+| [Project-owned engine policy plan](Plans/2026-10-14-project-owned-engine-policy.md) | Dated ownership extraction assignment. |
+| [Settings audit plan](Plans/2026-10-16-engine-settings-audit.md) | Dated source/consumer audit assignment. |
+| [Resource manager plan](Plans/2026-10-20-resource-manager.md) | Dated resource ownership/refactoring assignment. |
+| [Engine update/publication plan](Plans/2026-10-21-engine-update-publication.md) | Historical validation/publication packet; no current publication authority. |
+| [Sprite offsets plan](Plans/2026-10-22-sprite-frame-offsets.md) | Dated terminology and visual displacement contract work. |
 
-| Document | What it answers |
-| -------- | --------------- |
-| [Systems.md](Systems.md) | What the gameplay systems are, where they live, what they talk to, what covers them. Read before opening a `.fos`. |
-| [ScriptStyle.md](ScriptStyle.md) | How a `.fos` module is written: header block, comments, naming, structure. |
-| [Nullability.md](Nullability.md) | Nullable script values and native script-boundary pointer contracts. |
-| [Animation.md](Animation.md) | Critter animation: state and action anims, how the client plays them. |
-| [AiControl.md](AiControl.md) | The AI control bridge and its MCP adapter — driving a real client for tests and playtests. |
+## History and audit evidence
 
-## Plans and status
+| Document | What it preserves |
+| --- | --- |
+| [Refactoring journal](History/Refactoring-2026.md) | Dated R2/R3 batches, engine follow-ups and bug hunts; read through its section map. |
+| [AI-control runs/fixes](History/AiControl-2026.md) | Earlier runtime recipes/results and text-key fix narratives, separated from current procedure. |
+| [Original campaign proposal](History/ReanimationPlan-2026.md) | Complete original roadmap/protocols/matrices; old Sync/branch/gate assumptions are explicitly superseded. |
+| [2026-10-24 documentation audit](History/DocumentationAudit-2026-10-24.md) | Corpus/quality metrics, corrections, preservation and sanitized session findings for this refresh. |
 
-| Document | What it answers |
-| -------- | --------------- |
-| [EngineSettingsAudit.md](EngineSettingsAudit.md) | Complete native settings register, relevance evidence, and remaining ownership migrations. |
-| [AuditPlan.md](AuditPlan.md) | The ten findings of the 2026-09-02 audit: measurement, steps, status. The current work queue. |
-| [Refactoring.md](Refactoring.md) | Standing decisions and the open remainder of the Scripts refactoring rounds. |
-| [ReanimationPlan.md](ReanimationPlan.md) | The staged campaign to bring the whole game into working order: gates, workstreams, stages. |
+## Maintenance convention
 
-## History
-
-Session narrative is kept out of the plans so that a plan stays readable as a plan.
-
-| Document | What it holds |
-| -------- | ------------- |
-| [History/Refactoring-2026.md](History/Refactoring-2026.md) | Batch reports, engine-bump follow-ups and bug hunts from refactoring rounds R2 and R3. |
-
-## Conventions
-
-- Documentation here is written in English, like `AGENTS.md`. Script comments and module headers are
-  Russian — see [ScriptStyle.md](ScriptStyle.md).
-- A plan records decisions and what is still open. What happened in a session goes to `History/`.
-- When behaviour changes, the owning document changes in the same commit.
+Update the owning guide in the same working change as behavior. Keep task
+narrative and old pass counts out of current instructions. Continue existing
+document language: general project/agent pages are English, `ScriptStyle.md`
+and script comments/headers are Russian; contract identifiers remain English.
+Size review, source ownership, preservation and link checks are defined in
+[DocumentationMaintenance](DocumentationMaintenance.md).

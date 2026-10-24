@@ -1,10 +1,18 @@
 # Engine Update and Publication Preparation
 
+Historical task plan. Its revision numbers, check counts, publication steps and
+status describe that assignment only. Re-establish the current task's scope and
+authorization using [AGENTS.md](../../AGENTS.md) and
+[DocumentationMaintenance](../DocumentationMaintenance.md) before reuse.
+No fresh acceptance or Git/publication permission is implied.
+
 > **For agentic workers:** Use `executing-plans` for coordinator execution. Use the official shared MiMo launcher for bounded implementation or independent review; one worker at a time. Preserve the existing worktree and review every worker result before another handoff.
 
 **Goal:** Integrate the fetched Engine master and prepare the existing Engine and TLA fixes as a reviewed, verified publication unit.
 
-**Architecture:** Keep reusable capabilities in Engine and game policy in TLA scripts/content. Replay the existing local changes onto the fetched Engine tip, reconcile moved test ownership and documentation, and qualify the resulting source tree before publication decisions.
+**Architecture:** Keep reusable capabilities in Engine and game policy in TLA scripts/content.
+Replay the existing local changes onto the fetched Engine tip, reconcile moved test ownership and
+documentation, and qualify the resulting source tree before publication decisions.
 
 **Tech Stack:** C++20, AngelScript, Python 3, CMake/MSBuild, Git submodule.
 
@@ -43,7 +51,9 @@
 
 ## Task 2: Reconcile contracts, content and release materials
 
-**Files:** Engine `VERSION`, bilingual changelogs and owning guides, interface models, translation state and dispositions; affected TLA `Scripts/`, `SourceExt/`, `TLA.fomain`, build glue and authored content only when the inspected contract requires it.
+**Files:** Engine `VERSION`, bilingual changelogs and owning guides, interface models, translation
+state and dispositions; affected TLA `Scripts/`, `SourceExt/`, `TLA.fomain`, build glue and authored
+content only when the inspected contract requires it.
 
 - [x] Reconcile the current local Engine note with upstream history, draft `2026.1.58-dev` from the fetched 57-dev tip, and document every removed/replaced contract and deployment boundary.
 - [x] Regenerate source-owned documentation in dependency order; preserve history and bind dispositions to the exact fetched baseline.

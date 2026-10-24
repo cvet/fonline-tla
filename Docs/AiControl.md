@@ -1,16 +1,23 @@
 # AI Control Bridge (TLA)
 
 The AI control bridge lets an external tool (an MCP host / model) observe and control a real TLA
-client over a localhost TCP socket, without giving server/admin powers. One bridge connection controls
-one client; commands become ordinary client actions and are still validated server-side through the
-normal RPC flow (cooldowns, visibility, range, item ownership, dialog state).
+client over a localhost TCP socket. One bridge connection controls one client.
+Ordinary actions use server-validated gameplay RPCs (cooldowns, visibility, range,
+ownership and dialog state). Explicitly gated `qa_*` commands can directly mutate
+server state for fixtures; enable them only for isolated tests and distinguish
+injected setup from ordinary player acceptance.
 
-This is a **foundation port** adapted from the sibling project (`H:/lf-29`). The native bridge is shared
-verbatim; the script layer (`Scripts/AiControl.fos`) was rewritten against TLA's own client API. It covers
-observation, events, the core player-control commands, register/login, and dialog observation, all verified
-end-to-end against a running client. Higher-level features that depend on systems TLA does not yet expose
+The native bridge and script layer are maintained by TLA. The port originated in
+a sibling project; that origin does not prove continued byte identity or current
+runtime qualification. It covers observation, player-control commands, login and
+dialogs. Historical runs are separated below from current procedures. Higher-level features that depend on systems TLA does not yet expose
 the same way (roster, admin prep, factions, overwatch, global-map interests, the advisory/agent-runtime
 layer, content-specific playtest runners) are added incrementally — see the roadmap at the end.
+
+Reading routes: [launch](#running-it-locally), [validation](#validation),
+[MCP/screenshots](#mcp-adapter), [playtest runners](#playtest-runner),
+[protocol/command reference](AiControlProtocol.md),
+[historical verification](History/AiControl-2026.md).
 
 ## Architecture
 
@@ -26,7 +33,8 @@ Two layers:
 embedded-client index used for multi-client port spacing comes from `Game.GetEmbeddedClientIndex()`
 (`SourceExt/ClientExtension.cpp`).
 
-The server still validates every resulting gameplay request normally; the bridge is not a server-authority bypass.
+Normal gameplay requests remain server-validated. QA mutation endpoints have
+their own explicit test-only authority and do not establish normal prerequisites.
 
 ## Configuration
 
@@ -52,190 +60,27 @@ Keep the listener on loopback. It binds the local client as a remotely controlla
 
 ## Native bridge protocol
 
-`ClientAiBridge.cpp` listens for newline-delimited JSON-RPC-like messages. Request shape:
-
-```json
-{"jsonrpc":"2.0","id":1,"method":"observe","params":{}}
-```
-
-| Method | Params | Result |
-|--------|--------|--------|
-| `auth` | `{ "token": "..." }` | `{ "authorized": true/false }` |
-| `ping` | `{}` | `{ "ok": true }` |
-| `status` | `{}` | Queue sizes, host/port, observation sequence, last native error |
-| `observe` | `{}` | Latest structured observation snapshot |
-| `events` | `{ "afterSeq": 0, "limit": 100 }` | Client events after a sequence number |
-| `act` | command object | Enqueues a command for the next client loop |
-
-The bridge serves one connection at a time; the next adapter is accepted once the current one closes. A connection that fails (a read or write error, typically a client that went away before its response was written) is closed and reported as `lastError` in `status`, and the bridge keeps listening. A request whose handling throws is answered with error `-32603` instead. Only a failure to open the listener stops the bridge.
-
-If `AiControl.Token` is non-empty, call `auth` first on every connection. The MCP adapter does this
-automatically when `TLA_AI_TOKEN` / `--token` is supplied.
+Moved to [Native bridge protocol](AiControlProtocol.md#native-bridge-protocol).
 
 ## Observation (schemaVersion 1)
 
-Top-level keys: `schemaVersion`, `seq`, `clientIndex`, `connected`, `hasMap`, `hasChosen`, `account`,
-`screen`, `mouse`, `chosen`, `map`, `critters`, `mapItems`, `inventory`, `quests`, `dialog`,
-`availableActions`.
-
-Consumers must branch on `connected`, `hasMap`, `hasChosen` instead of assuming a current player/map/chosen.
-
-QA map teleport makes the selected location persistent, including its maps and contents, so a private
-database restart can restore the controlled character's complete entity graph.
-
-- `chosen`: id, name, hexX/Y, level, currentHp, maxHp, experience, currentAp, actionPoints, isAlive,
-  inCombat (`TimeoutBattle` active), inSneakMode, isMoving, walkSpeed, movingSpeed, movingEndX/Y.
-  Movement speed and endpoint come from the active engine movement context; without a context they
-  are `0` and `-1/-1`. These fields let GUI tests confirm a stopped character, a newly issued route
-  and the actual walk/run speed.
-- `mouse`: x, y and `cursor` — the current `CursorType` (`Default` 0 = action, `Move` 1, `UseItem` 2, `UseWeapon` 3,
-  `UseSkill` 4, `Hand` 5); the right button cycles it in game.
-- `map`: id, protoId, width, height.
-- `critters`: visible critters from `CurMap.GetCritters(CritterFindType::Any)` (chosen excluded): id,
-  protoId, name, hexX/Y, isAlive, inCombat, isNoTalk, effective talkDistance, dialogId. The
-  `protoId` + `dialogId` pair lets quest tools distinguish authored NPC roles that happen to share a dialog;
-  `isNoTalk` and `talkDistance` explain silent client/server talk precondition failures.
-- In QA-enabled runs, an ordinary `talk_to` attempt also emits `talk_diagnostic`: the server reports
-  life/control/no-talk/map/distance/mutual-visibility checks and whether the normal dialog context actually
-  started. This is observational only; it calls the same `StartDialog`/`Dialogs::RunDialog` path and does not
-  bypass distance, visibility, demands, or synchronization.
-- `mapItems`: visible map items tracked from `OnItemMapIn` / `OnItemMapOut`: id, protoId, hexX/Y, count,
-  stackability, ownership, cost/weight, use/pick-up capabilities, and `visualFeedback.timerCapable`.
-- `inventory`: `Chosen.GetItems()`: the same real item metadata plus slot. Both item arrays also expose the
-  TLA door/container contract (`hasDoor`, `hasContainer`, `hasLocker`, `canOpen`, `opened`, lock/jam/broken/
-  no-open state, and `isGag`). Runners must select candidates from these fields instead of guessing safety
-  from a proto name or accepting an unchecked explicit id.
-- `barter`: active barter snapshot with `traderId`, transfer `session`, server-synchronized pricing metadata
-  (`coefficient`, `masterTrader`, `playerOfferTotal`, `traderOfferTotal`), plus `playerInventory`,
-  `playerOffer`, `traderInventory`, and `traderOffer` item arrays (`id`, `protoId`, `count`);
-  `active=false` outside Barter.
-- `quests`: active quests of the chosen. TLA models quests as per-quest `uint8` critter properties in the
-  `Quests` group (value = stage, 0 = not started), not a `QuestProgress` array — so this lists the non-zero
-  quest properties as `{ name, value }`. (Resolved quest titles/objective text are a later addition.)
-- `screen`: active screen name, `modalActive` (`Gui::IsModalScreenActive()`), and the active-screen list.
-- `dialog`: `{ active, dialogId, talkerId, text, answers }`. Captured from `Dialogs.fos::ReceiveDialogContext`
-  (the data source, before the screen `params` dict is consumed by `Gui::ShowScreen`) via
-  `AiControl::SetDialogState` / `ClearDialogState`. Drive dialogs by answer index with `dialog_answer`.
-  `text`/`answers` carry the resolved speech/answer strings (see the dialog text-key fix note below).
-- `availableActions`: the list of supported command types (richer affordance hints are adapter-side).
+Moved to [Observation (schemaVersion 1)](AiControlProtocol.md#observation-schemaversion-1).
 
 ## Events
 
-Pushed for client lifecycle/world changes: `bridge_started` / `bridge_stopped`, `connecting` /
-`connecting_failed` / `connected` / `disconnected`, `login_success`, `info_message`, `input_lost`,
-`map_load` / `map_unload`, `critter_in` / `critter_out`, `item_map_in` / `item_map_out`,
-`item_inv_in` / `item_inv_out`, `receive_items`, `screen_change`, `console_message`, and the native
-`command_completed`. The native bridge also emits `runtime_exception` events when the engine log shows
-script exceptions, assertions, or fatal/error markers.
-
-The event buffer is in-memory only. Keep the latest `seq` from `events` and ask for events after it.
+Moved to [Events](AiControlProtocol.md#events).
 
 ## Commands
 
-Queued through `act`, consumed by the client loop, routed through normal player intent:
-
-| Type | Main params | Behavior |
-|------|-------------|----------|
-| `register` | optional `stringArg` (name) | Register a fresh character and enter the game through `PlayerRegistration` (default name `TestBot<clientIndex>`; builds a valid SPECIAL/skills/traits set). Drives the normal `Game.Connect` + `RegisterNewPlayer` path without `TryExit`. |
-| `login` | optional `stringArg` (name) | Log in an existing character through `LoginExistingPlayer`. |
-| `move_to_hex` | `x`, `y`, optional `intArg` (cut distance), `append` | `Tla::ChosenMove` |
-| `talk_to` | `targetId`, `append` | `Tla::ChosenTalkNpc` |
-| `loot_critter` | `targetId`, `append` | `Tla::ChosenPickCrit` |
-| `attack_entity` | `targetId`, `intArg` (mode) | `CurPlayer.ServerCall.Attack` |
-| `pick_item` | `itemId`, `append` | `Tla::ChosenPickItem` (proto/hex resolved from the item) |
-| `pick_hex` | `x`, `y`, `append` | Pick a visible map item at the hex |
-| `use_item` | `itemId`, optional exactly one `targetId`/`auxId`, optional `stringArg` (`timer:<seconds>`) | `Tla::ChosenUseItem` on self, one critter, or one item. Timer mode is self-only and accepts only the canonical range `timer:1` through `timer:599` (no sign, whitespace, leading zeroes, target, or trailing text). |
-| `use_skill` | `stringArg` (skill `CritterProperty` name, e.g. `SkillFirstAid`/`SkillLockpick`/`SkillRepair`), optional `targetId`/`itemId`/`x`/`y`; static scenery also requires `sceneryProtoId` | `CurPlayer.ServerCall.UseSkill`. With no target it applies to the chosen (self-heal etc.); scenery proto and hex are transported separately. |
-| `reload` | `itemId`, `auxId` (ammo) | `CurPlayer.ServerCall.ReloadWeapon` |
-| `unload` | `itemId` | `Tla::ChosenUnloadWeapon` |
-| `move_item` | `itemId`, `intArg` (slot) | `CurPlayer.ServerCall.MoveInvItem` |
-| `drop_item` | `itemId`, `intArg` (count) | `CurPlayer.ServerCall.DropInvItem` |
-| `operate_container` | `itemId`, `intArg` (bit0 take, bit1 all, `>>2` count) | `CurPlayer.ServerCall.OperateContainer` (loot/container grid: take items) |
-| `craft` | `intArg` (craft id) | `CurPlayer.ServerCall.Rpc_CraftItem(FixboyButton, id, 0)` — runs a FixBoy recipe (server checks skill/materials/tools, consumes resources, grants the item) |
-| `toggle_sneak` | `append` | `Tla::ChosenSneak` — **sneak is stubbed in TLA**, returns `sneak_not_implemented_in_game` |
-| `dialog_answer` | `intArg` (answer index; special links: `0xF1`=close, `0xF2`=barter) | `CurPlayer.ServerCall.SpeechAnswer` |
-| `close_dialog` | none | Semantically close the active dialog with `SpeechAnswer(0xF1)` |
-| `say` | `stringArg`, `intArg` (`SayType`) | `CurPlayer.ServerCall.ReceiveChosenSay` |
-| `barter_transfer` | `itemId`, `stringArg` source, positive `intArg` count | Move a stack between `player_inventory`/`player_offer` or `trader_inventory`/`trader_offer` in the active Barter UI |
-| `barter_offer` | none | Submit the assembled active barter offer through the normal client/server path |
-| `barter_return_dialog` | none | Return from active NPC barter to its dialog through the current validated transfer session |
-| `clear_actions` | none | Clear queued client actions |
-| `close_screen` / `show_screen` / `hide_screen` | `stringArg` (`GuiScreen` name) | GUI screen control |
-| `show_context_screen` | `stringArg` (`Aim`, `Use`, `Timer`, `Split`, or `SkillBox`), real item/target ids as required | Open a contextual screen with its normal `OnShow` parameter contract after validating the observed target, item ownership, stack, and timer/use capabilities. |
-| `ui_answer` | `intArg` (index) or `stringArg` (`answer_N`/`level_N`); `auxId` is the expected DialogBox session | Answer a semantic DialogBox/elevator prompt. DialogBox requires the session from the same observation and rejects a missing/stale session; elevator answers reject a DialogBox session. |
-| `save_screenshot` | `stringArg` (path) | `Game.SaveScreenshot` (framebuffer readback) |
-| `set_resolution` | `x`, `y` | `Game.SetResolution` |
-| `toggle_fullscreen` | none | `Game.ToggleFullscreen` |
-| `set_mouse_pos` | `screenX`, `screenY` | `Game.SetForcedMousePos` |
-| `mouse_click` | `screenX`, `screenY`, `intArg` (`MouseButton`) | `Game.SimulateMouseClick` |
-| `key_press` | `intArg` (`KeyCode`), `stringArg` | `Game.SimulateKeyboardPress` |
-| `mouse_down` / `mouse_up` | `screenX`, `screenY`, `intArg` (`MouseButton`) | `Game.SimulateMouseDown` / `Game.SimulateMouseUp`: hold a button across frames (the action-cursor menu opens on a held left button) |
-| `mouse_move` | `screenX`, `screenY` | `Game.SimulateMouseMove`: a relative move, as a drag while a button is held; a pinned `set_mouse_pos` stays pinned |
-| `key_down` / `key_up` | `intArg` (`KeyCode`), `stringArg` | `Input::KeyDown` / `Input::KeyUp`: hold a key (Shift shows the step count on the move cursor); the engine simulates key presses only as press-and-release |
-| `environment_query` | `intArg` (queryId), `screenX`/`screenY` (from-hex, `-1` = chosen), `x`/`y` (to-hex), `stringArg` (options) | Client geometry/path query; publishes an `environment_query_result` event by `queryId`. |
-
-Commands not yet supported in TLA return `unsupported:<type>` and `success=false`.
+Moved to [Commands](AiControlProtocol.md#commands).
 
 ### QA setup commands (test-only)
 
-Gated by `AiControl.AllowQaCommands = True` (off by default, checked on both client and server). They route
-through server RemoteCalls that move the player's controlled critter; they are a test-harness setup surface,
-not normal player abilities. Use them to reach content for mechanics/quest runs.
-
-| Type | Main params | Behavior |
-|------|-------------|----------|
-| `qa_teleport_hex` | `x`, `y` | Same-map reposition (`Critter.TransferToHex`); the engine snaps to the nearest movable hex. Useful to reach otherwise-blocked spots. |
-| `qa_teleport_map` | `stringArg` (`locationPid` or `locationPid/mapProto`), optional `x`/`y` | Teleport to a content map. The client validates both proto ids and sends them as separate known `hstring` values; the server resolves the requested map inside that location, creates a valid unloaded location when needed, and uses entry `"0"` when no hex is given. Unknown targets fail as `unknown_map_target` without a server exception. |
-| `qa_teleport_global` | none | `Critter.TransferToGlobal`. Note: a no-op from the `repl1` replication/limbo start map (it has no global coordinates); use `qa_teleport_map` to reach content. |
-| `qa_set_prop` | `stringArg` (CritterProperty name), `intArg` (value), optional `x` request id | Set an int CRITTER property (`cr.SetAsInt`) — reputation/loyalty values, a prior quest stage, `CurrentHp`, limb-damage flags, etc. A successful script-side write publishes `qa_prop_set` (`{prop, value, requestId}`); a missing/delayed matching event is retried by the caller. |
-| `qa_set_game_prop` | `stringArg` (GameProperty name), `intArg` (value) | Set an int GAME property (`Game.SetAsInt`) — world/quest flags that live on the game singleton, not the critter (e.g. `DenVirginIsAway`). Many dialog demands gate on these, so `qa_set_prop` alone can't satisfy them. |
-| `qa_give_item` | `stringArg` (item proto), `intArg` (count) | Give an item (`cr.AddItem`) — for quest items the giver doesn't hand out, or starting gear. |
-| `qa_get_prop` | `stringArg` (CritterProperty name), optional `intArg` request id | Authoritative SERVER-side read of an int critter property. The server reads `cr.GetAsInt` and calls the client back (`AiControlReceiveQaProp`), which publishes a `qa_prop_value` event (`{prop, value, requestId}`). Needed because ~1/3 of quest flags are `Server`-scope (not `OwnerSync`) and therefore never appear in the client observation's `quests` — the only way to verify them is this round-trip. |
-| `qa_get_text` | `stringArg` (dialog id), `intArg` (string number) | Resolve a numbered NPC floating-text via `MsgStr::DialogTextKey` and return it in the command message (`text=<…>`). Debug tool for the numbered-text fix below; empty means the string isn't authored for that dialog. |
-| `qa_get_text_pack` | `intArg` (numeric id) | Resolve a row from the baked general `Text` pack for the client's active language via `TextPackKey(TextPackName::Text, …)` and return it as `text=<…>`. This verifies the runtime localization surface rather than only the authored `.fotxt` file. |
-| `qa_format_tags` | `stringArg` (text with tags) | Run a raw string through `Game.FormatTags` (resolves `@text`/`@arg`/`@sex`/… client-side) and return the result (`result=<…>`). Used to verify the three-token `@text Dialogs <dialogName> <key>@` path end-to-end. |
-| `qa_show_dialog_box` | none | Request a real server-backed `AskFollowGlobalGroupRuler` DialogBox with two answers for semantic/session and screenshot tests. The typed MCP wrapper is `tla_qa_show_dialog_box`; `answer_1` is the safe no-op choice. |
-
-`qa_get_prop` is asynchronous: the value arrives as a `qa_prop_value` event, not in the command's own
-completion message. Snapshot the event cursor (max `seq`), send `qa_get_prop` with a non-zero request id, then
-poll `events` for the `qa_prop_value` whose `prop` and `requestId` both match. The correlation is required under
-load because a delayed response to an earlier read may arrive after the new cursor. `tla_quest_runner.py`'s
-`read_quest` does exactly this — it reads the client observation first (fast, for `OwnerSync` quests) and falls
-back to a correlated `qa_get_prop` when the property is absent client-side (`Server`-scope quests such as
-`KlamVaccination`).
-
-`qa_set_prop` has the same correlation requirement, with the request id transported in `x` because `intArg`
-already carries the property value. `tla_quest_runner.py` waits for a matching `qa_prop_set` event and resends
-the command when no matching acknowledgement arrives. The acknowledgement is sent only after `SetAsInt`.
-Entity locking remains an explicit `Game.Sync` cover in the `[[Async]]` script callback; no called engine
-function performs implicit synchronization.
-
-`qa_teleport_map` accepts `locationPid/mapProto` (e.g. `vault_city/vcity_courtyard`) to land on a specific
-sub-map of a multi-map location. The split is intentional: a synthetic combined `hstring` is not part of baked
-metadata and would be rejected by engine inbound validation. `qa_set_prop` / `qa_give_item` are the
-prerequisite-setup surface for quests gated by
-reputation, faction loyalty, prior quest state, or required items — set those up, then run the quest's normal
-dialog flow.
-
-`qa_teleport_map` is the practical way to put a test character on a real content map (e.g.
-`qa_teleport_map arroyo` lands on the `arroyo` village map with its real NPCs). A freshly created location instance is
-a sandbox copy of the proto's maps/NPCs — good for exercising map mechanics/dialogs, but not tied to the
-canonical world location's quest state.
+Moved to [QA setup commands (test-only)](AiControlProtocol.md#qa-setup-commands-test-only).
 
 ### Environment queries
 
-`environment_query` runs advisory geometry/path checks against the currently replicated map and publishes
-an `environment_query_result` event matched by `queryId`. Options are `"kind;name=value;..."`:
-
-- `path` — reachability from a hex (or the chosen) to a target hex: `reachable`, `pathLength`,
-  `directDistance`, `fromMovable`/`toMovable`, and `directions`/`pathHexes`. Use it to skip unreachable
-  targets before issuing `move_to_hex` / `talk_to` / `pick_item`.
-- `obstacles` — scan a radius (`radius=`, `maxResults=`) around a center hex and list non-movable /
-  non-shootable / occupied hexes.
-- `trace` — trace a line toward a target (`maxDistance=`, `angle=`) and report where it stops and whether it
-  reached the target.
-
-The adapter wraps these as `tla_env_path` / `tla_env_obstacles` / `tla_env_trace`.
+Moved to [Environment queries](AiControlProtocol.md#environment-queries).
 
 ## MCP adapter
 
@@ -465,275 +310,40 @@ character reports `already_satisfied=true` instead of wandering an obsolete dial
 
 ## Verified end-to-end (2026-07-11)
 
-- `register` / `login` drive the real TLA auth path; a character spawns and `observe` populates
-  `chosen` / `map` / `critters` / `mapItems` / `quests`.
-- `move_to_hex` moves the chosen to the exact target hex; `pick_item` / `talk_to` auto-walk to their target;
-  `say`, `attack_entity`, `dialog_answer` are accepted and processed; dialogs open and advance by answer index.
-- Dialog observation captures `dialogId` / `talkerId` / answer structure. A fresh `repl1` registration opened
-  the ordinary `repl_hubb_oper` dialog with readable speech and answer; an engine framebuffer capture also
-  confirmed the composed dialog window renders correctly. ContentQuality verifies every reachable speech and
-  answer in all 17 `repl_*.fodlg` files is present and non-empty in both languages (excluding invisible
-  pre-dialog routing node 1).
-- `environment_query path` correctly reports reachable vs unreachable target hexes (`reachable` /
-  `pathLength`); `obstacles` lists blocked hexes — used by the playtest runner to pick reachable targets.
-- `qa_teleport_hex` repositions on the current map; `qa_teleport_map arroyo` reaches the real `arroyo` village
-  map with its quest NPCs. Exact `vault_city/vcity_courtyard` targeting is verified through the split remote-call
-  contract; an unknown proto returns `unknown_map_target` without reaching server validation.
-- After the dialog text-key fix, a real quest dialog is read and navigated end-to-end: the agent walked the
-  Savinelli caravan-escort dialog on `arroyo_bridge` through 5 readable speeches, choosing meaningful answers.
-- A real quest is **accepted with an observable state change**: on the `arroyo` village map the agent talked
-  to Cassidy, asked for work, read the offer ("отнеси письмо в Город-Убежище для Синди"), answered "Да,
-  конечно", and `observation.quests` then shows `CritterProperty::ArroyoCassidyLetter = 1`, with the
-  `letter_to_sindy` item added to inventory. (Caravan-escort quests, by contrast, are correctly time-gated —
-  they only accept near departure.)
-- **A full quest cycle completes end-to-end** across two cities via teleport: after accepting the Cassidy
-  letter at Arroyo, the agent `qa_teleport_map vault_city/vcity_courtyard` reaches Cindy (`vc_cindy` at
-  hex `65,55`), reads her dialog ("От Кэссиди?! ... Давай его скорей сюда!"), answers "Вот оно, держи.", and
-  the quest advances to `CritterProperty::ArroyoCassidyLetter = 2` with the `letter_to_sindy` item consumed.
-  (The `CreateLocation` sandbox instance DOES spawn the map-placed quest NPCs; an earlier "missing Cindy"
-  reading was a wrong-hex lookup. After `qa_teleport_hex` on a large map, nudge a couple of hexes and
-  re-`observe` to let the client sync nearby critters.)
-- The whole cycle is reproducible through `tla_quest_runner.py --quest cassidy_letter --require-exercised`
-  (`ok: true`, `transitions_verified: 2`, `ArroyoCassidyLetter` 0 → 1 → 2). `qa_teleport_map` sets
-  `AutoGarbage=false` on the instances it creates
-  (and recreates a destroyed one) so a content location persists across runner stages/runs.
-- **A second full quest cycle** runs on a single giver: `tla_quest_runner.py --quest arroyo_mynoc_oil`
-  (`ok: true`, `ArroyoMynocOil` 0 → 1 → 2) — accept "Я принесу тебе смазку" (gated on `Intellect > 3`, set via
-  stage `setup`) then hand in the `oil_can` ("У меня есть маслёнка", item granted via `setup`). This exercises
-  the robust navigator (Mynoc's accept lives several topic-tree hops deep behind a first-meeting intro).
-- **A third and fourth full quest cycle** broaden the shapes and towns: `den_smitty_robot` (`DenSmittyFixit`
-  1 → 2 → 3 → 4 — accept at Smitty, repair his Mr. Handy at the workbench gated on `SkillRepair` + three
-  items, report back) and `klam_vaccination` (`KlamVaccination` 0 → 1 → 2 in Klamath — accept Hish's syringe
-  task, the three per-brahmin sub-task flags supplied via `setup`, then report). `KlamVaccination` is a
-  `Server`-scope flag (not `OwnerSync`), so it is verified through the `qa_get_prop` round-trip, not the client
-  observation.
-- The QA-setup commands are verified: `qa_set_prop Experience 5000` / `qa_set_prop ArroyoCassidyLetter 1`
-  change the observed property; `qa_give_item stimpak 3` / `qa_give_item letter_to_sindy` add the items;
-  `qa_get_prop KlamVaccination` reads back a `Server`-scope flag the observation can't see. These unblock and
-  verify quests with prerequisites: some givers gate their dialog on faction loyalty or a prior quest stage
-  (Arroyo's Todd needs `Dialog::CheckLoyality`), which a fresh QA character lacks — set the prerequisite first,
-  then run the quest.
-- **Fixed an event-buffer flood:** `OnInputLost` fired every frame while the client window was unfocused (the
-  normal state for an automated/headless client), pushing `input_lost` until it evicted real events
-  (`command_completed`, `qa_prop_value`, `qa_prop_set`) from the bounded event ring. It is now gated behind
-  `AiControl.CaptureRawInputEvents` (off by default), so automation runs see a clean event stream.
-- **Held input survives an unfocused client:** the same per-frame `OnInputLost` made `Input` release every
-  pressed button and key on the next frame, so a simulated hold (the action-cursor menu, a drag) could not be
-  driven. `Input` now resets once per focus loss (the first `OnInputLost` after input was live), and the bridge
-  exposes `mouse_down` / `mouse_up` / `mouse_move` and `key_down` / `key_up` to hold input across frames.
-- `smoke_ai_control_mcp.py` (static and live) and `tla_mechanics_playtest.py` pass.
+Moved to [Verified end-to-end (2026-07-11)](History/AiControl-2026.md#verified-end-to-end-2026-07-11).
 
 ### Dialog trace seeds (2026-08-08)
 
-`--trace-dialog` was verified against a fresh Russian client and the real `CassidyStage4` NPC on `arroyo`.
-The bounded replay handled the one-shot introduction, found the three-answer path through "work" and the letter
-offer, and emitted `Да, конечно.` as the rank-1 candidate for `ArroyoCassidyLetter` (`0 → 1`). The JSON report
-recorded 5 explored paths, 1 root rebase, no branch errors, the complete node path, and a confirmed restore to
-the original value 0.
-
-The same live workflow covers the real Arroyo Mynoc placement (`protoId=EnclaveGuard`,
-`dialogId=arroyo_mynoc`) with `IntellectBase=6` supplied through the acknowledged setup path. Quest-guided
-ordering found `Я заметил... Твоя броня, она несколько поржавела...` → `Я принесу тебе смазку...` in 2 explored
-paths and 13.7 seconds, observed `ArroyoMynocOil` 0 → 1, reported no branch errors, and confirmed restore to 0.
-
-The Den seed is now live-verified across all four authored stages. The real `HomesteaderMale` / `den_smitty`
-path accepted the job (`DenSmittyFixit` 0 → 1); `MrHandy` / `den_mr_handy` exposed the Repair-85 diagnosis
-(1 → 2) and accepted `pump_parts` + `oil_can` + `super_tool_kit` (2 → 3); Smitty then accepted the report
-(3 → 4). Every trace found a ranked candidate without branch errors and restored the original flag value 0.
-Reports are `Build/_artifacts/trace-dialog/smitty-{accept,examine,repair,report}-live.json`. This validates 3 of
-the 7 Stage-0 trace quests.
-
-The fourth seed uses the real Klamath `MasterTrader` / `klam_hish` at hex 82,132. With `IntellectBase=6`,
-bounded replay found the five-answer path from looking for work through the name joke and vaccination offer to
-`Хорошо, не волнуйся. Я не промахнусь.`, observed `KlamVaccination` 0 → 1 in 5 explored paths and 20.97 seconds,
-reported no branch errors, and restored 0. The report is
-`Build/_artifacts/trace-dialog/klam-hish-accept-live.json`.
-
-The three fresh Arroyo traces complete the Stage-0 criterion. The normal Todd talk path first reported
-`no_visible_start_speech` despite an alive, talk-enabled, adjacent and mutually visible NPC. The project dialog
-parser was retaining the `@` sigil and full `Content::*` qualifier in script arguments; normalizing those values
-restored the authored loyalty demand, after which `ArroyoProofOfDeath` advanced 0 → 1 without a mechanic bypass.
-Todd's follow-up offer advanced `ArroyoLetterToLinnett` 0 → 1 with `ArroyoProofOfDeath=3` as its authored
-prerequisite. Finally, stable-slot replay handled Mynoc's randomized `@@` wording and exposed an unconditional
-minimum-group guard that contradicted the solo stage-1 dialog branch. Restricting that guard to stage 2 produced
-the full 13-answer path and `ArroyoMynocDefence` 0 → 1. All three runs had no branch errors and restored 0; reports
-are `Build/_artifacts/trace-dialog/arroyo-{todd-proof,letter-linnett,mynoc-defence}-live.json`. Stage-0 trace
-coverage is **7/7**.
-
-The next Den trace corrected a stale diagnosis and completed `DenMomSlut` end to end. The parser already inferred
-`DenVirginIsAway` as a Game property; the hidden answer came from comparing integer property value `"0"` with
-textual any value `"false"`. Dialog property booleans are now normalized to `0`/`1`, restoring all 51 authored
-boolean demand/results. Live replay advanced 0 → 1 at Mom in 27 paths, 1 → 2 at Virginia in 2 paths (executing
-`DenVirgin::GoAway`), and 2 → 3 at Mom in 1 path. All runs restored the original flag and had no branch/log errors.
-Reports are `Build/_artifacts/trace-dialog/den-{mom-slut-accept,virginia-away,mom-slut-report}-live.json`.
+Moved to [Dialog trace seeds (2026-08-08)](History/AiControl-2026.md#dialog-trace-seeds-2026-08-08).
 
 ### Mechanics beyond dialog (verified 2026-06-21)
 
-A battery of non-dialog gameplay mechanics was driven end-to-end on a real client, each with an observable
-state change in `chosen` / `inventory` / `mapItems`:
-
-- **Skill use (self first-aid).** `qa_set_prop SkillFirstAid 200` → `qa_set_prop CurrentHp 6` →
-  `use_skill SkillFirstAid` (no target ⇒ applied to self); `chosen.currentHp` went 6 → 33.
-- **Item use / healing.** `qa_set_prop CurrentHp 5` → `qa_give_item stimpak` → `use_item <stimpak id>`;
-  `chosen.currentHp` went 5 → 18 (the stimpak healed the character).
-- **Combat / kill.** `qa_give_item super_sledge` → `move_item <weapon id>` to slot `CritterItemSlot::Main`
-  (= 1; `Inventory` 0, `Main` 1, `Secondary` 2, `Armor` 3) to equip it → locate a `mob_brahmin` (passive,
-  spawns on the Arroyo maps) → `attack_entity` (`mode` 0), re-issued each AP cycle while polling the target's
-  `isAlive`; the brahmin died and `chosen.experience` went 0 → 80. Boost damage first with
-  `qa_set_prop SkillMeleeWeapons 250` / `qa_set_prop StrengthBase 10`. Attack maps to
-  `CurPlayer.ServerCall.Attack(targetId, mode)`.
-- **Weapon reload.** `qa_give_item _10mm_pistol` + `qa_give_item _10mm_ap 30` → `move_item` the pistol to the
-  `Main` slot → `reload <pistol id>` (accepted).
-- **Equip / inventory move.** `move_item <id> <slot>` — verified round-tripping a `_10mm_pistol` through
-  `Main` (1) → `Secondary` (2) → `Inventory` (0) with the observed `inventory[].slot` matching each request.
-- **Drop.** `drop_item <id>` puts the item on the ground (it appears in `mapItems`). (Ground re-pickup was
-  timing-flaky in the batch.)
-- **Crafting (FixBoy).** `qa_set_prop SkillOutdoorsman 120` → `qa_give_item brahmin_skin 3` / `pocket_lint` /
-  `rope` / `knife` → `craft 1` (recipe id 1 = `leather_armor`); the armour appeared in `inventory` and the
-  resources were consumed (`brahmin_skin` 3 → 1). The server checks the recipe's skill/material/tool demands
-  and only crafts when they pass.
-- **Barter.** Teleport next to a merchant (Arroyo `arroyo_cassidy` at `(82,113)`), `talk_to`, then pick the
-  barter answer ("Может, поторгуем?"); `chosen`'s active `screen` becomes `GuiScreen::Barter`. The barter
-  answer is the engine `Answer Barter` link, which routes through `Barter::StartNpcBarter`.
-- **Loot / container grid.** Kill a critter, then `loot_critter <id>` opens `GuiScreen::PickUp` and
-  `operate_container` (`intArg=3` = take + all) pulls its inventory. Verified on a `mob_brahmin` corpse.
-- **Global-map travel does NOT work from a sandbox map (and corrupts transfer state).** `qa_teleport_global`
-  (`TransferToGlobal`) is a no-op from the `qa_teleport_map` sandbox instances (they carry no valid worldmap
-  position), and after calling it the character's hex transfers stop applying (a stuck transfer state) — a
-  fresh character recovers. Real global-map travel needs canonical world/town state, not a `CreateLocation`
-  sandbox; treat `qa_teleport_global` as unsupported there. Sleeping/rest is likewise not a general mechanic
-  in TLA (only mining has a `STR_NEED_REST` gate).
-- **Sneak is NOT implemented in TLA.** `toggle_sneak` never changes `chosen.inSneakMode`, because the game
-  itself stubs it: the `Tla::ChosenSneak` action body has its `Game.CustomCall(...)` commented out
-  (`ChosenActions.fos`) and the `UseSneak` RemoteCall is disabled (commented `///` not `///@`, body inside
-  `/* */`). The bridge now returns `sneak_not_implemented_in_game` instead of silently queuing a no-op — a
-  game-content gap, not a bridge defect.
+Moved to [Mechanics beyond dialog (verified 2026-06-21)](History/AiControl-2026.md#mechanics-beyond-dialog-verified-2026-06-21).
 
 ### Adding more quests (what still needs care)
 
-The upgraded navigator (auto-advance intros, strong exit-avoidance, seen-tracking across re-opens) handles
-both a simple giver (Cassidy) and a deep topic-tree giver (Mynoc). What remains per-quest is mostly *getting
-the right answers to appear*, via stage `setup` and the right client language:
-
-- **Localization.** The default client runs `Client.Language = engl`, so any NPC that *has* an English
-  translation shows English answers and the Russian `prefer` keywords never match. **Run the client with
-  `--Client.Language russ`** (the specs are written from the `.fodlg` `[Text russ]` source).
-- **Prerequisite demands.** A quest answer can be hidden behind a critter property (`Intellect`, `CurrentHp`
-  for Doc's `IsToHeal`), an inventory item (Mynoc's `oil_can`), or a GAME flag — supply them with stage
-  `setup` (`qa_set_prop` for critter props, `qa_set_game_prop` for game props, `qa_give_item` for items).
-- **Non-quest flags.** Some "quest-like" props are not in `CritterPropertyGroup::Quests`, so they never appear
-  in `observation.quests` (Arroyo `ArroyoDocHealing` is a `Server` flag, `Max = 2`). Pick targets that *are*
-  `Group = Quests` if you want to assert progress from the observation.
-- **Resolved parser migration defects.** Todd's `@!` loyalty argument had been hashed with the sigil after the
-  project dialog parser moved away from `ResolveGenericValue`; the parser now restores the legacy script-argument
-  spelling. Den Mom's hidden "Virginia" answer was not a Game/Player scope mismatch: the parser inferred the Game
-  owner correctly, but property boolean `false` remained text instead of integer `0`. Property booleans are now
-  normalized to their integer storage spelling, and both normal talk paths are live-green.
-
-The `QUESTS` dict ships three verified flows plus a `NOTE` documenting these knobs:
-
-- `cassidy_letter` — accept at Arroyo, deliver across town to Vault City (`ArroyoCassidyLetter` 0 → 1 → 2).
-- `arroyo_mynoc_oil` — accept + turn-in at one giver, gated by `Intellect` and an `oil_can` item
-  (`ArroyoMynocOil` 0 → 1 → 2).
-- `den_smitty_robot` — four stages in one town: accept at Smitty → examine the Mr. Handy robot (needs
-  `SkillRepair > 59`) → repair it (needs `pump_parts` + `oil_can` + `super_tool_kit`) → report back
-  (`DenSmittyFixit` 1 → 2 → 3 → 4). Shows a quest gated by both a skill and inventory items, all supplied via
-  stage `setup`.
-
-Adding a quest is: pick a `Group = Quests` target, give each stage its `setup`, and run once against a Russian
-client to confirm.
+Moved to [Adding more quests (what still needs care)](History/AiControl-2026.md#adding-more-quests-what-still-needs-care).
 
 ## Fixed: empty dialog text (key mismatch)
 
-Surfacing dialog `text`/`answers` via the bridge exposed a real game bug: all dialog speech/answer strings
-resolved empty. Root cause — a text-pack key mismatch between the baker and the runtime lookup. The
-`DialogBaker` stores each dialog text under a 4-part key `FromParts("Dialogs", <dialogName>, <textKey>, ...)`
-(it includes the dialog name), but `Dialogs.fos` looked it up with only the text key
-(`TextPackKey(TextPackName::Dialogs, "" + textId)`), so the keys never matched and `Game.GetText` returned
-empty for every dialog (a normal player saw the same).
-
-Fix (in `Scripts/Dialogs.fos`): build the lookup with the dialog id as the first key part —
-`TextPackKey(TextPackName::Dialogs, dialogId, textId)` in `ReceiveDialogContext` (screen text + answers) and
-the answerless `Say`/`Info` path. Verified: `arroyo_laumer` now reads its real Russian quest dialog and the
-agent navigates it answer-by-answer.
+Moved to [Fixed: empty dialog text (key mismatch)](History/AiControl-2026.md#fixed-empty-dialog-text-key-mismatch).
 
 ### Fixed: empty NPC floating text (numbered dialog strings)
 
-The same class of bug hit the **numbered** dialog strings — the lines NPCs say on their head in combat/ambient
-(`Messaging::Say`/`SayOnHead`/`Info`), keyed by `MsgStr::DialogTextId(dialogId, num)`. `DialogBaker` stores
-these under `[Dialogs, <dialogName>, <100000000 + num>]` (the authored key base `100000000` is shared by every
-dialog; the dialog name disambiguates), but the call sites looked them up as
-`TextPackKey(TextPackName::Dialogs, "" + MsgStr::DialogTextId(dialogId, num))`, which is wrong **twice**: it
-omits the dialog name, and `DialogTextId = dialogId.uhash + 12000 + num` no longer reproduces the baked key
-(the 64-bit `uhash` overflows to a garbage number). So all of these floating lines were empty.
-
-Fix: a single helper `MsgStr::DialogTextKey(dialogId, num)` →
-`TextPackKey(TextPackName::Dialogs, dialogId, "" + (100000000 + num))`, and the **101** call sites across 26
-files (`TextPackKey(TextPackName::Dialogs, "" + (MsgStr::DialogTextId(EXPR, N)))` → `DialogTextKey(EXPR, N)`)
-were migrated to it. Verified through the `qa_get_text` debug command (resolves `MsgStr::DialogTextKey` for a
-given dialog id + number): `klam_aldo` 1/2/3 ("Не могу к доске подобраться…", …), `all_poker` 0 ("Ваши карты:"),
-`bh_phil` 200 — all now return their real text.
+Moved to [Fixed: empty NPC floating text (numbered dialog strings)](History/AiControl-2026.md#fixed-empty-npc-floating-text-numbered-dialog-strings).
 
 ### Fixed: empty dialog text in `@text` format tags (poker / roulette / banker / NPC names)
 
-The other consumer of the numbered dialog strings is the `@text Dialogs <id>@` **format tag** — built
-server-side (poker card names, roulette, the replication-banker "spy" descriptors) and resolved client-side by
-`Game.FormatTags` so each player sees their own language. The tag carried a single id
-(`MsgStr::DialogTextId(...)`), so — like the `Say`/`Info` path — it omitted the dialog name and used the wrong
-number; all of it rendered empty. NPC names via `@text Dialogs <MsgStr::NpcNameDlgTextId(dlg)>@` were broken
-the same way (the name is stored under the string key `"Name"`).
-
-Fix, in two parts:
-- **Engine** (`SourceExt/ClientExtension.cpp::FormatTags`): the `@text` tag now also accepts a three-token form
-  `@text <pack> <subkey> <key>@` → `FromPack(pack, subkey, key)` (a second key). The two-token form is
-  unchanged, so every existing tag keeps its behaviour.
-- **Script**: two helpers — `MsgStr::DialogTextTag(dialogId, num)` → `@text Dialogs <dialogId> <100000000+num>@`
-  and `MsgStr::NpcNameTag(dialogId)` → `@text Dialogs <dialogId> Name@` — and **157** sites migrated to them
-  (146 numbered-text across `Dialog.fos`/`Poker.fos`/`Roulette.fos`, 11 NPC-name across 8 files).
-
-Verified end-to-end with the `qa_format_tags` debug command (runs a raw string through `Game.FormatTags`):
-`@text Dialogs klam_aldo 100000001@` → "Не могу к доске подобраться…", `@text Dialogs all_raider Name@` →
-"Рейдер", `@text Dialogs all_poker 100000000@` → "Ваши карты:", and the same tag embedded mid-sentence
-resolves in place. (Requires a native `TLA_Client` rebuild for the `FormatTags` change.)
+Moved to [Fixed: empty dialog text in `@text` format tags (poker / roulette / banker / NPC names)](History/AiControl-2026.md#fixed-empty-dialog-text-in-text-format-tags-poker--roulette--banker--npc-names).
 
 ### Fixed: empty proto-name `@text` tags (critter / item / location names)
 
-`@text Critters/Item/Locations <id>@` (NPC, item and location names in a handful of messages) were broken
-differently. The engine `ProtoTextBaker` stores a proto's localized `$Text <lang>` name under
-`[<pack>, <protoId>]` — i.e. the **proto id string itself is the key**, and the pack names are `Critters`,
-`Items` (plural!) and `Locations`. The call sites instead passed a number (`pid.uhash` via
-`NpcProtoNameTextId`/`ItemNameTextId`/`LocNameTextId`) and, for items, the wrong pack name `Item` (singular) —
-so all of it missed and rendered empty.
-
-Fix: helpers `MsgStr::NpcProtoNameTag(pid)` → `@text Critters <pid>@`, `MsgStr::ItemNameTag(item)` /
-`ProtoItemNameTag(pid)` → `@text Items <pid>@`, `MsgStr::LocNameTag(pid)` → `@text Locations <pid>@`, with the
-**15** sites (across `Behemoth`/`Caravan`/`FighterQuest`/`GameEventCaches`/`NcrPostman`/`Repairer`/`Resources`/
-`Traveller`) migrated to them. These are plain two-token tags (no engine change needed beyond the three-token
-support already added). Verified via `qa_format_tags`: `@text Critters Algernon@` → "Алжернон",
-`@text Items _10mm_ap@` → "10 мм ББ", `@text Locations klamath@` → "Кламат", and embedded in a sentence.
+Moved to [Fixed: empty proto-name `@text` tags (critter / item / location names)](History/AiControl-2026.md#fixed-empty-proto-name-text-tags-critter--item--location-names).
 
 ## Roadmap (next)
 
-- A content-driven quest runner on top of `qa_teleport_map` (accept → travel → turn in) covering more quests;
-  the Cassidy letter cycle above is the reference flow.
-- The proto-text long tail is **done** (full key scheme verified — name `[Pack, protoId]`, desc
-  `[Pack, protoId, "Desc"]`, numbered `[Pack, protoId, "<rawN>"]`). Item names/descriptions in look/examine
-  (`ItemNameKey`/`ItemInfoKey`, 9 sites in `ClientMain.fos`); all 16 worldmap/crafting GUI sites — location
-  name/desc/map/entrance/picture + crafting item names (`LocNameKey`/`LocInfoKey`/`LocPicKey`/`LocLabelPicKey`/
-  `LocMapNameKey`/`LocEntranceNameKey`/`LocEntrancePicx|yKey`/`ProtoItemNameKey`) edited in the `.fogui` source
-  and regenerated into `GuiScreens.fos`. The old single-key resolvers (`GetItemText`/`GetLocationText`/
-  `GetCritterText`/`HasLocationText`) are now unused and were removed. Also fixed the `AddDialogStr`/STR-const
-  system: the replication-bank terminal + roulette messages were empty because `AddDialogStr(int msg)` did a
-  single-key lookup of a `DialogTextId` number — the RemoteCall is now `AddDialogStr(hstring dialogId, int
-  strNum, …)` → `DialogTextKey`, the STR constants became plain string numbers, and `DialogBarman.fos`'s
-  malformed `text Dialogs/Locations` tags (missing the leading `@`) were corrected. Verified
-  (`@text Dialogs repl_terminal 100000000@` → "Ошибка. Пожалуйста обратитесь…"). The only `DialogTextId`
-  remnants left are vestigial (commented-out poker `// Todo: SayMsg` consts + one Caravan debug log).
-- Global-map observation + travel/enter — for canonical world state and travel-only mechanics (random
-  encounters, party travel). Quest accept/turn-in itself already works via `qa_teleport_map` (the sandbox
-  instance spawns the map-placed quest NPCs).
-- Resolved quest titles/objective text in `quests` (and faction, skills/abilities observation).
-- Richer screen/affordance surfaces beyond the current barter, container/item metadata, and nine-window
-  contextual GUI runner (registration customization and remaining mechanic-owned screens).
-- Content-driven playtest runners per quest/mechanic on top of `qa_teleport_map`; optionally adapt more of the
-  ported advisory/agent-runtime adapter layer.
+The earlier roadmap and its completed-work narrative are preserved in
+[the historical record](History/AiControl-2026.md#roadmap-next). Re-evaluate
+remaining world-map/quest observation, content playtests and UI affordances
+against current dispatch and fixtures before scheduling them. An old roadmap
+entry or historical pass is not proof that a feature is present or qualified.

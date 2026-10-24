@@ -1,22 +1,29 @@
 # Scripts Refactoring Plan
 
-This document is the plan and running status for the end-to-end refactor of the TLA AngelScript
+This document retains decisions and the dated progress of the refactoring rounds.
+Current script/runtime and verification contracts are in [Scripts](Scripts.md),
+[ScriptStyle](ScriptStyle.md) and [BuildAndLaunch](BuildAndLaunch.md). Historical
+counts, local `Build/_audit/` records and pending round checklists below are not
+a fresh qualification or a complete current backlog.
+
+The original scope was the plan and running status for the end-to-end refactor of the TLA AngelScript
 gameplay layer (`Scripts/*.fos`). The code is old, has been through many engine migrations, and is
 inhomogeneous (mixed idioms, dead/relic code, latent bugs). The goal is tidy, reliable, correct
 code: ordered modules, clearer naming and readability, fewer stray comments (more where they help),
 and bugs fixed with the original intent restored.
 
 Scope is `Scripts/*.fos` (≈262 editable files) plus the supporting validators under
-`Tools/ScriptQuality/`. `Scripts/Content.fos` and `Scripts/GuiScreens.fos` are generated — do not
+`Tools/ScriptQuality/`. `Scripts/Content.fos` and `Scripts/Generated/GuiScreens.fos` are generated — do not
 hand-edit (see [AGENTS.md](../AGENTS.md)).
 
 ## Principles and constraints
 
 - **lf-30 (`H:/lf-30`) is a STYLE/idiom reference, not a source of content or names.** TLA owns its
   serialized properties (e.g. `CurrentHp`/`MaxLife`); do not rename toward lf-30 equivalents.
-- **Committed content is English** (code, comments, docs), even though working discussion is in
-  Russian. Do not mass-translate existing Russian rationale comments; translate only when already
-  editing the surrounding line.
+- **Language:** working discussion is Russian; script comments and module headers are
+  Russian, including translation of existing English comments when a module is touched.
+  General project docs and native C++ remain English; existing Russian documentation
+  retains its language. Serialized metadata/identifiers stay English.
 - **Refactor carefully — no thoughtless bulk edits.** In particular, never bulk-delete commented-out
   code: some of it is a migration breadcrumb that may still need porting. Surface, don't delete.
 - **Server holds authoritative gameplay state.** Keep behavior-preserving changes behavior-preserving;
@@ -133,34 +140,34 @@ The active phases above are complete. What is intentionally not changed, and why
 
 ---
 
-# Round 2 (2026-06-20) — Polish, headers, comments, bug fixes, tests
+## Round 2 (2026-06-20) — Polish, headers, comments, bug fixes, tests
 
 Reopened by the owner after the Phase 0–4 close. New goal: bring every `Scripts/*.fos`
 module to a uniformly readable, well-documented, correct state. The detailed style rules
 live in [ScriptStyle.md](ScriptStyle.md); this section is the **plan and running status**.
 
-## Owner decisions (2026-06-20)
+### Owner decisions (2026-06-20)
 
 1. **Comment language = Russian, including translating existing English comments.** This
    reverses the prior English-only convention and the 2026-06-17 "don't touch comments"
-   feedback. `AGENTS.md` and memory are updated so future agents don't revert it.
+   feedback. The current rule is in `AGENTS.md` and `ScriptStyle.md`; private memory is not a repository dependency.
    Serialized names (`///@ Property/Enum/Setting/Event`, proto ids, text-pack keys) stay
    English.
 2. **File headers everywhere.** Every non-generated script gets a Russian header block
    above `namespace` describing its purpose and side (SERVER/CLIENT/MAPPER).
-3. **Aggressive behavior changes allowed.** Bug fixes and cross-file function relocation
-   are applied in-pass, verified by compile + bake + headless smoke. Gameplay/quest
-   changes that smoke can't catch are still applied but **flagged in the batch report**
-   (owner playtest). Serialized-contract changes still gate on `///@ MigrationRule` +
-   owner confirmation.
+3. **The historical round allowed verified bug fixes and cross-file relocation in-pass.**
+   This is not standing permission for arbitrary gameplay redesign in future tasks.
+   Preserve behavior unless fixing a demonstrated bug in the authorized scope; raise
+   unresolved balance/quest decisions and record player acceptance that smoke cannot prove.
+   Serialized-contract changes still require a migration decision and owner confirmation.
 
-## Scope
+### Scope
 
 269 `Scripts/*.fos` + 3 `Scripts/Json/*.fos`. Generated files excluded (`Content.fos`,
 `GuiScreens.fos`). Work proceeds in domain batches, low-coupling leaves first, core
 (`Tla`/`Main`/`Parameters`) last — same ordering principle as round 1.
 
-## Phases
+### Phases
 
 - **R2-0 — Inventory & criteria.** `ScriptStyle.md` (done). A read-only workflow builds a
   per-module map: purpose (→ header text), domain, size, formatting/naming/structure issues,
@@ -176,7 +183,7 @@ live in [ScriptStyle.md](ScriptStyle.md); this section is the **plan and running
 - **R2-3 — Tests.** Per the testing decision below. *(Status: initial harness and seven suites operational;
   expand coverage with each gameplay batch.)*
 
-## Testing strategy — decided (2026-06-20): B, lightweight harness
+### Testing strategy — decided (2026-06-20): B, lightweight harness
 
 Owner chose tier **B**. Port a compact `Testing.fos` from lf-7 down to TLA's systems
 (RegisterTest / Expect / Pass / Fail + fixtures: isolated location, spawn NPC/player/item,
@@ -197,7 +204,7 @@ For the record, the tiers considered:
 - **C. Full port** of the lf-7 framework (parallel suites, embedded-client warmup, etc.).
   High effort; overkill for current needs.
 
-## Verification & process
+### Verification & process
 
 Per ScriptStyle.md §9. Do not commit/stage/push (owner reviews). Surface contentious or
 gameplay-affecting changes in each batch report rather than applying silently.

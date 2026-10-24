@@ -7,8 +7,8 @@ Nullability checks and migration helpers for TLA scripts and native script bindi
 Run from the repository root:
 
 ```bash
-python Tools/NullableEstimate/test_validate_nullable.py
-python Tools/NullableEstimate/validate_nullable.py
+py -3 Tools/NullableEstimate/test_validate_nullable.py
+py -3 Tools/NullableEstimate/validate_nullable.py
 ```
 
 `validate_nullable.py` checks two contracts:
@@ -16,7 +16,9 @@ python Tools/NullableEstimate/validate_nullable.py
 - AngelScript `T?` placement plus `///@ Event` / `///@ RemoteCall` handler parity.
 - Native script handles: non-null is `ptr<T>`, nullable is `nptr<T>`, and bare `T*` is rejected in `///@ ExportMethod`/`FO_SCRIPT_API` signatures, members named by `///@ ExportRefType ... Export = ...`, and `FindFunc`/`CheckFunc` template arguments.
 
-The native scan is intentionally boundary-specific. It does not report ordinary internal raw pointers or `///@ EngineHook` declarations such as `SetupBakersHook`; those use different native contracts. Comments and string literals are ignored.
+The native scan is intentionally boundary-specific. It does not report ordinary internal raw
+pointers or `///@ EngineHook` declarations such as `SetupBakersHook`; those use different native
+contracts. Comments and string literals are ignored.
 
 `FO_NULLABLE` belonged to the former raw-pointer ABI and is now rejected. Choose `ptr<T>` or `nptr<T>` directly instead.
 
@@ -28,4 +30,3 @@ The native scan is intentionally boundary-specific. It does not report ordinary 
 - `apply_native_nullable.py`: legacy helper for pre-`ptr`/`nptr` engine revisions; it is not part of the current gate.
 
 The author owns nullable intent. These tools do not infer a native `ptr<T>` versus `nptr<T>` contract from function bodies.
-

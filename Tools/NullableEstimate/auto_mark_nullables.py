@@ -8,7 +8,7 @@ the type token in the function head.
 
 Idempotent: skips spots that already have `?` or legacy `[[Nullable]]`.
 
-This is an opinionated first pass. Per Nullability.md the curated final
+This is an opinionated first pass. Per Docs/Nullability.md the curated final
 state may remove markers where the convention says "caller must not pass
 null" — those edits are the author's, run after this pass.
 

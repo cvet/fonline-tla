@@ -154,7 +154,7 @@ namespace Reputation
 ## 6. Идиомы AngelScript (приводим к современным)
 
 - **Нет `#include`.** Кросс-модульные вызовы — `Namespace::Function()`.
-- **Nullable — по контракту `T?`** (см. [Nullability.md](../Nullability.md)). Результаты
+- **Nullable — по контракту `T?`** (см. [Nullability.md](Nullability.md)). Результаты
   `Game.GetCritter/GetItem/...`, словарных `get(...)` — в `T?`-локаль, потом сужаем
   (`if (x == null) return;`). Не сравниваем компонент-аксессор с `null` — проверяем
   `Has<Component>` (`item.HasRadio`, `cr.HasDialogContext`). `Game.Chosen` — гард

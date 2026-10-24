@@ -32,6 +32,7 @@ client/server outputs and rebaked metadata/effects are required for network `0.0
 | -------- | --------------- |
 | [Systems.md](Systems.md) | What the gameplay systems are, where they live, what they talk to, what covers them. Read before opening a `.fos`. |
 | [ScriptStyle.md](ScriptStyle.md) | How a `.fos` module is written: header block, comments, naming, structure. |
+| [Nullability.md](Nullability.md) | Nullable script values and native script-boundary pointer contracts. |
 | [Animation.md](Animation.md) | Critter animation: state and action anims, how the client plays them. |
 | [AiControl.md](AiControl.md) | The AI control bridge and its MCP adapter — driving a real client for tests and playtests. |
 

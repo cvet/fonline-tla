@@ -282,7 +282,6 @@ Debug launch configurations are in [.vscode/launch.json](.vscode/launch.json). T
 | [.vscode/tasks.json](.vscode/tasks.json) | Canonical local build/generate/format tasks. |
 | [.github/workflows/build.yml](.github/workflows/build.yml) | CI, package, and release workflow. |
 | [AGENTS.md](AGENTS.md) | Maintainer and AI-agent working rules. |
-| [CLAUDE.md](CLAUDE.md) | Pointer to `AGENTS.md`. |
 | [Binaries/](Binaries) | Generated binaries. |
 | [Baking/](Baking) | Generated baked output. |
 | [Cache/](Cache) | Generated bake cache. |
@@ -549,7 +548,6 @@ Project documents:
 
 - [AGENTS.md](AGENTS.md) - repository practices for maintainers and AI agents.
 - [README.md](README.md) - this project overview.
-- [CLAUDE.md](CLAUDE.md) - compatibility pointer to `AGENTS.md`.
 
 Engine documents:
 

@@ -1,6 +1,6 @@
 # FOnline: The Life After - Agent Instructions
 
-Project front door for AI maintainers working on **FOnline: The Life After** (TLA). Read this before changing anything. Keep this file as the single source for agent-facing repository practices; `CLAUDE.md` and `.github/copilot-instructions.md` intentionally point here.
+Project front door for AI maintainers working on **FOnline: The Life After** (TLA). Read this before changing anything. Keep this file as the single source for agent-facing repository practices; `.github/copilot-instructions.md` intentionally points here.
 
 ## What This Project Is
 
@@ -159,7 +159,7 @@ Native C++ conventions:
 - Event handlers return `void` for implicit continue or `EventResult` for explicit `ContinueChain` / `StopChain`.
 - Do not pass inputs by `const &`. Use plain `&` only for genuine out/inout value-type parameters.
 - Treat `?` as the source contract for nullable handles. If a dictionary lookup or engine call can return `null`, bind it to a nullable local (`T?`) before narrowing it.
-- The AngelScript compiler enforces nullability at compile time ("strong nullable"): it warns on redundant null comparisons, dereference of an un-narrowed `T?`, and a redundant `?` on a non-null initializer. Fix these — narrow `T?` locals with `if (x == null) return;` / `if (x != null)` / ternary / `&&`-`||` short-circuits, use `cast<T?>(x)` (not `cast<T>(x)`) when a downcast may fail and you test for `null`, and guard the throwing `Game.Chosen` accessor with `HasChosen` rather than `Chosen == null`. See [Nullability.md](Nullability.md) for the full rules.
+- The AngelScript compiler enforces nullability at compile time ("strong nullable"): it warns on redundant null comparisons, dereference of an un-narrowed `T?`, and a redundant `?` on a non-null initializer. Fix these — narrow `T?` locals with `if (x == null) return;` / `if (x != null)` / ternary / `&&`-`||` short-circuits, use `cast<T?>(x)` (not `cast<T>(x)`) when a downcast may fail and you test for `null`, and guard the throwing `Game.Chosen` accessor with `HasChosen` rather than `Chosen == null`. See [Nullability.md](Docs/Nullability.md) for the full rules.
 - Component properties are guarded by generated `Has<Component>` flags. Check `item.HasRadio`, `cr.HasDialogContext`, etc. before using the component accessor; do not compare the component accessor itself with `null`.
 - **Item stacking is the game's, not the engine's.** `ItemStacks::AddItem/CountItem/DestroyItem/MoveItem/SplitItem`
   own `Count`, merging and splitting; the engine's own item calls create or move one instance and merge nothing.
@@ -218,6 +218,7 @@ AngelScript embedded in screens lives in the `.fogui` JSON: `OnGlobalMouseDown`,
 
 ## Formatting And Generated Files
 
+- Maintained guides belong under `Docs/`; task reports and verification artifacts belong under ignored `Build/<task>/`, not the repository root.
 - Use `Format :: Scripts`, `Format :: Prototypes`, `Format :: Main Config`, or `Format :: All` before handing off when touched files need formatting.
 - `FormatSource.bat` is a smaller formatter path for `Scripts/`, `SourceExt/*`, and `Gui/*.fogui`.
 - `Tools/ScriptQuality/validate_scripts.py` is a quality *validator* (reports only; not a formatter) for `Scripts/*.fos`: banner tags, magic text-pack ids, hand-rolled-util calls, redundant bool returns, commented-out code, `namespace`==filename, `#if` balance, component `== null` probes, unsafe location access from `ItemTrigger` callbacks, and trailing blank lines. (The former `cyrillic-comment` check was retired 2026-06-20 — script comments are Russian now; see [Docs/ScriptStyle.md](Docs/ScriptStyle.md).) Run `Analyze :: Script Quality` for a summary; `--ratchet` fails only on new violations vs `Tools/ScriptQuality/baseline.json`; `--fix` applies the few safe autofixes. See `Tools/NullableEstimate/validate_nullable.py` for the complementary script `?` and native `ptr<T>`/`nptr<T>` ABI checks.

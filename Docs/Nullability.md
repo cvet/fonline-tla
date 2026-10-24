@@ -55,7 +55,7 @@ Not recognized: multi-condition conjunctions in a block head (`if (a != null && 
 
 **Reference casts.** `cast<T>(x)` is typed **non-nullable** `T@` (the "assume the cast succeeds" contract), so `cast<T>(x) != null` warns as redundant even though a failed downcast returns `null` at runtime. For the type-test idiom, spell the cast nullable: `cast<T?>(x) != null`, or `T? y = cast<T?>(x); if (y != null) { ... }`.
 
-**Formatting.** clang-format treats `?` as the conditional operator and mangles the nullable suffix (`Item? item` → `Item ? item`, `cast<Item?>(x)` → `cast < Item ? > (x)`, `T?[] a` even splits across lines). Always format via the project formatter — VS Code `Format :: *` tasks, [Tools/Formatter/format_project.py](Tools/Formatter/format_project.py), or [FormatSource.bat](FormatSource.bat) — which post-processes clang-format output to restore the suffix in both `.fos` and `.fogui`. Do **not** run `Tools/clang-format-20.exe` directly on these files; it re-mangles the suffix. The GUI generator ([Tools/InterfaceEditor/generate_gui_screens.py](Tools/InterfaceEditor/generate_gui_screens.py)) applies the same repair, so regenerated `Scripts/GuiScreens.fos` stays clean.
+**Formatting.** clang-format treats `?` as the conditional operator and mangles the nullable suffix (`Item? item` → `Item ? item`, `cast<Item?>(x)` → `cast < Item ? > (x)`, `T?[] a` even splits across lines). Always format via the project formatter — VS Code `Format :: *` tasks, [Tools/Formatter/format_project.py](../Tools/Formatter/format_project.py), or [FormatSource.bat](../FormatSource.bat) — which post-processes clang-format output to restore the suffix in both `.fos` and `.fogui`. Do **not** run `Tools/clang-format-20.exe` directly on these files; it re-mangles the suffix. The GUI generator ([Tools/InterfaceEditor/generate_gui_screens.py](../Tools/InterfaceEditor/generate_gui_screens.py)) applies the same repair, so regenerated `Scripts/Generated/GuiScreens.fos` stays clean.
 
 ### `///@ Event` and `///@ RemoteCall` declarations
 
@@ -102,11 +102,11 @@ FO_SCRIPT_API void Server_Player_SwitchCritter(ptr<Player> self, nptr<Critter> c
 auto callback = server->FindFunc<bool, ptr<Critter>, nptr<Item>>(funcName);
 ```
 
-Bare handle pointers (`T*`) no longer carry a nullable contract at this boundary. Codegen rejects them; use `ptr<T>` or `nptr<T>`, including inside handle containers such as `vector<ptr<Item>>`. Raw pointers can still be valid in internal C++, low-level/C ABIs, and non-script engine hooks. See [Engine/Docs/SmartPointers.md](Engine/Docs/SmartPointers.md) for the full native pointer vocabulary.
+Bare handle pointers (`T*`) no longer carry a nullable contract at this boundary. Codegen rejects them; use `ptr<T>` or `nptr<T>`, including inside handle containers such as `vector<ptr<Item>>`. Raw pointers can still be valid in internal C++, low-level/C ABIs, and non-script engine hooks. See [Engine native pointer contract](../Engine/Docs/en/contributing/coding-contracts/smart-pointers.md) for the full native pointer vocabulary.
 
 ## Runtime enforcement
 
-Runtime validation is plumbed through codegen-generated `MethodDesc::Call` lambdas, **not** the AS-to-native bridge. [Engine/BuildTools/codegen.py](Engine/BuildTools/codegen.py) emits per-method calls to `NativeDataProvider::CheckArgNotNull` / `CheckReturnNotNull` (defined in [Engine/Source/Common/ScriptSystem.h](Engine/Source/Common/ScriptSystem.h)) for non-null `ptr<T>` contracts right before/after the native invocation:
+Runtime validation is plumbed through codegen-generated `MethodDesc::Call` lambdas, **not** the AS-to-native bridge. [Engine/BuildTools/codegen.py](../Engine/BuildTools/codegen.py) emits per-method calls to `NativeDataProvider::CheckArgNotNull` / `CheckReturnNotNull` (defined in [Engine/Source/Common/ScriptSystem.h](../Engine/Source/Common/ScriptSystem.h)) for non-null `ptr<T>` contracts right before/after the native invocation:
 
 ```
 MethodDesc::Call(call)
@@ -124,9 +124,9 @@ Violation surface: `ScriptException` with the method name, parameter name and ty
 - an entity relative (`Abstract<Entity>`, `Proto<Entity>`, `Static<Entity>` — currently `AbstractItem`, `ProtoCritter`, `ProtoItem`, `ProtoLocation`, `ProtoMap`, `StaticItem`),
 - a `///@ ExportRefType` class (`MovingContext`, `MapSpriteHolder`, `SpritePattern`, `VideoPlayback`, `ScriptImGui`).
 
-On the C++ engine side the matching spellings are `ptr<Critter>` / `nptr<Critter>`, `ptr<CritterView>` / `nptr<CritterView>`, `ptr<Map>` / `nptr<Map>`, `ptr<ProtoItem>`, `ptr<StaticItem>`, `ptr<MovingContext>`, and so on. The membership test lives in `is_validated_pointer_meta_type(...)` in [Engine/BuildTools/codegen.py](Engine/BuildTools/codegen.py).
+On the C++ engine side the matching spellings are `ptr<Critter>` / `nptr<Critter>`, `ptr<CritterView>` / `nptr<CritterView>`, `ptr<Map>` / `nptr<Map>`, `ptr<ProtoItem>`, `ptr<StaticItem>`, `ptr<MovingContext>`, and so on. The membership test lives in `is_validated_pointer_meta_type(...)` in [Engine/BuildTools/codegen.py](../Engine/BuildTools/codegen.py).
 
-The project [validate_nullable.py](Tools/NullableEstimate/validate_nullable.py) gate rejects raw pointers in `ExportMethod`/`FO_SCRIPT_API`, exported `ExportRefType` members, and `FindFunc`/`CheckFunc` template arguments before baking reaches codegen. It deliberately ignores ordinary internal raw pointers and `SetupBakersHook`/other `///@ EngineHook` declarations.
+The project [validate_nullable.py](../Tools/NullableEstimate/validate_nullable.py) gate rejects raw pointers in `ExportMethod`/`FO_SCRIPT_API`, exported `ExportRefType` members, and `FindFunc`/`CheckFunc` template arguments before baking reaches codegen. It deliberately ignores ordinary internal raw pointers and `SetupBakersHook`/other `///@ EngineHook` declarations.
 
 **Out of scope (not implemented yet):** script-to-script call validation. AS does not natively call our bridge for direct script→script invocation; runtime enforcement there would require patching the AS interpreter (`asCContext::ExecuteNext`). In practice script-to-script null contracts are kept by:
 - the static analyzer (see [Tooling](#tooling))
@@ -141,11 +141,11 @@ The current engine enforces these contracts during normal runtime, not only duri
 - Worker-run callbacks that touch entities need sync coverage. Mark the callback `[[Async]]`, lock the relevant entities with `Sync::Lock...`, and remember that `Game.Sync(...)` replaces the held lock set.
 - Dialog metadata participates in baking. Special answer links used by `.fodlg` files need globally visible `///@ Enum DialogAnswerLink ...` declarations, otherwise the dialog baker cannot resolve them even if AngelScript compilation succeeds.
 - The client `Chosen` accessor (`Game.Chosen`) is **non-nullable and throws** when there is no chosen critter. Guard with `HasChosen` instead of a null-check: replace `if (Chosen == null) return;` with `if (!HasChosen) return;`, and place the `HasChosen` guard *before* any `Critter chosen = Chosen;` assignment (the assignment itself throws when absent). Fallible native lookups such as `Game.GetCritter`, `Game.GetItem`, `Critter.GetItem`, and `Map.GetCritterAtScreenPos` return `nptr<T>` and surface as `T?` in script; bind and narrow them accordingly.
-- GUI screen warnings surface in the generated [Scripts/GuiScreens.fos](Scripts/GuiScreens.fos), but the fix belongs in the owning [Gui/*.fogui](Gui/) embedded code (the `?` markers live there in `Type? name` form; clang-format renders them `Type ? name` in the generated output). Edit the `.fogui`, regenerate with `Generate :: GuiScreens.fos`, then recompile — regeneration is faithful, so a fix in the source reproduces exactly.
+- GUI screen warnings surface in the generated [Scripts/Generated/GuiScreens.fos](../Scripts/Generated/GuiScreens.fos), but the fix belongs in the owning [Gui/*.fogui](../Gui/) embedded code (the `?` markers live there in `Type? name` form; clang-format renders them `Type ? name` in the generated output). Edit the `.fogui`, regenerate with `Generate :: GuiScreens.fos`, then recompile — regeneration is faithful, so a fix in the source reproduces exactly.
 
 ## Tooling
 
-The active tools are documented in [Tools/NullableEstimate/README.md](Tools/NullableEstimate/README.md):
+The active tools are documented in [Tools/NullableEstimate/README.md](../Tools/NullableEstimate/README.md):
 
 | Tool | Purpose |
 |------|---------|
@@ -160,7 +160,7 @@ The validator deliberately does not infer whether an API should be nullable. Aut
 
 ## Workflows
 
-The VS Code `Analyze :: Nullable Placement` task runs `validate_nullable.py`; `Analyze :: Nullable All` combines it with the script analyzer and coverage report. CI in [.github/workflows/build.yml](.github/workflows/build.yml) runs the focused unit tests, the validator, and `apply_nullables.py --check`.
+The VS Code `Analyze :: Nullable Placement` task runs `validate_nullable.py`; `Analyze :: Nullable All` combines it with the script analyzer and coverage report. CI in [.github/workflows/build.yml](../.github/workflows/build.yml) runs the focused unit tests, the validator, and `apply_nullables.py --check`.
 
 Manual equivalents:
 
@@ -182,6 +182,6 @@ Choose the contract explicitly at the declaration:
 
 ## See also
 
-- [Scripts.md](Scripts.md) — overall AngelScript module organization and conventions.
-- [NativeExtensions.md](NativeExtensions.md) — `///@ ExportMethod` codegen pipeline and engine source layout.
-- [Testing.md](Testing.md) — running unit and gameplay tests that exercise the runtime check.
+- [ScriptStyle.md](ScriptStyle.md) — overall AngelScript module organization and conventions.
+- [AGENTS.md — Native Extensions](../AGENTS.md#native-extensions) — `///@ ExportMethod` codegen pipeline and engine source layout.
+- [AGENTS.md — Build And Verify](../AGENTS.md#build-and-verify) — running unit and gameplay tests that exercise the runtime check.

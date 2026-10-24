@@ -1,14 +1,27 @@
 # Engine settings ownership and relevance implementation plan
 
+Historical task plan. Its revision numbers, check counts, publication steps and
+status describe that assignment only. Re-establish the current task's scope and
+authorization using [AGENTS.md](../../AGENTS.md) and
+[DocumentationMaintenance](../DocumentationMaintenance.md) before reuse.
+No fresh acceptance or Git/publication permission is implied.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Remove the two project-owned day-curve settings from Engine and audit every remaining native setting for an actual owner and consumer.
 
-**Architecture:** TLA owns constant default time/color arrays in `DayColor.fos`. Its existing script evaluates them and submits colors through `Map.SetDayColors`; the generic runtime `Map.GlobalDayColor` property remains. Project settings currently accept scalar base types, so the migration does not add array-valued project settings. The audit distinguishes active runtime/build settings, conditionally active features, public script inputs and settings without a verified consumer.
+**Architecture:** TLA owns constant default time/color arrays in `DayColor.fos`. Its existing script
+evaluates them and submits colors through `Map.SetDayColors`; the generic runtime
+`Map.GlobalDayColor` property remains. Project settings currently accept scalar base types, so the
+migration does not add array-valued project settings. The audit distinguishes active runtime/build
+settings, conditionally active features, public script inputs and settings without a verified
+consumer.
 
 **Tech Stack:** C++, AngelScript, Python tools, CMake, official MiMo CLI.
 
-**Spec:** Current user request to remove `GlobalDayColorTime` / `GlobalDayColor` from Engine and audit all other settings; prior instruction to keep game policy in the project. The request authorizes implementation, not speculative deletion of unrelated settings.
+**Spec:** Current user request to remove `GlobalDayColorTime` / `GlobalDayColor` from Engine and
+audit all other settings; prior instruction to keep game policy in the project. The request
+authorizes implementation, not speculative deletion of unrelated settings.
 
 ## Global constraints
 
@@ -38,7 +51,9 @@
 
 ## Task 2: Native contract removal and neutral coverage
 
-**Files:** Engine `Source/Common/Settings.inc`, `Source/Tests/Test_Settings.cpp`, `Source/Tests/Test_ScriptBuiltins.cpp`, `Source/Tests/Test_ManagedScriptBaker.cpp`, three affected example configs; owning EN/RU migration/changelog and generated contract artifacts.
+**Files:** Engine `Source/Common/Settings.inc`, `Source/Tests/Test_Settings.cpp`,
+`Source/Tests/Test_ScriptBuiltins.cpp`, `Source/Tests/Test_ManagedScriptBaker.cpp`, three affected
+example configs; owning EN/RU migration/changelog and generated contract artifacts.
 
 - [x] Remove native settings and example entries. Preserve array-binding coverage with neutral/test-owned inputs.
 - [x] Regenerate owning API/reference metadata, translations and dispositions; record removal in the current uncommitted release.
@@ -54,4 +69,9 @@
 - [x] Run `Verify :: All`, affected visible client/mapper tint checks, and final source/reference audit. Report any failed gate without masking it.
 - [x] Save MiMo retrospective reports outside the repository and summarize final changes, audit findings and verification.
 
-Final acceptance: Verify :: All passed (588 native cases, 110 script cases, 156 Python tests / 82 subtests); 19 focused docs tests and 412-page Engine docs validation passed. Native API and contract checks passed. Actual Mapper fallback noon/dawn and normal client registration/render passed with clean diagnostics and preserved caches. Independent audit original report accepted 5/5; the cancelled invalid-design attempt remains recorded separately. Managed-specific tests remain not_run in the disabled TLA backend. No commits/staging/push.
+Final acceptance: Verify :: All passed (588 native cases, 110 script cases, 156 Python tests / 82
+subtests); 19 focused docs tests and 412-page Engine docs validation passed. Native API and contract
+checks passed. Actual Mapper fallback noon/dawn and normal client registration/render passed with
+clean diagnostics and preserved caches. Independent audit original report accepted 5/5; the
+cancelled invalid-design attempt remains recorded separately. Managed-specific tests remain not_run
+in the disabled TLA backend. No commits/staging/push.

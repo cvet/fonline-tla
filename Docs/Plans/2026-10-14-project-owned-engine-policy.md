@@ -1,10 +1,19 @@
 # Project-owned animation and content policy implementation plan
 
+Historical task plan. Its revision numbers, check counts, publication steps and
+status describe that assignment only. Re-establish the current task's scope and
+authorization using [AGENTS.md](../../AGENTS.md) and
+[DocumentationMaintenance](../DocumentationMaintenance.md) before reuse.
+No fresh acceptance or Git/publication permission is implied.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Remove the game-specific animation choices, historical game contracts, themed assets, authored day palette, and condition-dependent path/render policy identified in the audit from the reusable Engine, preserving TLA behavior.
 
-**Architecture:** Engine consumes explicit playback parameters, opaque project animation identifiers, generic path obstacles, and generic flat rendering. TLA scripts and configuration own the actual animation names, walk/run thresholds, death/knockout frames, obstacle lifecycle, colors, and assets. Format importers and generic RPG entity lifecycle remain engine-owned.
+**Architecture:** Engine consumes explicit playback parameters, opaque project animation
+identifiers, generic path obstacles, and generic flat rendering. TLA scripts and configuration own
+the actual animation names, walk/run thresholds, death/knockout frames, obstacle lifecycle, colors,
+and assets. Format importers and generic RPG entity lifecycle remain engine-owned.
 
 **Tech Stack:** C++ engine, AngelScript game, Python build/documentation tools, CMake.
 
@@ -28,7 +37,10 @@
 
 ## Task 1: Project animation identifiers and playback selection
 
-**Files:** Engine `Common.h`, `Settings.inc`, `Client.h`, `CritterHexView.*`, `ModelInstance.*`, `ModelInfoBaker.cpp`, `Mapper.cpp`, `AnimationViewer.cpp`; relevant engine tests; TLA `Scripts/Animation.fos`, `Scripts/GameEnums.fos`, `Scripts/Tests/Test_FalloutAnimation.fos`, `TLA.fomain`.
+**Files:** Engine `Common.h`, `Settings.inc`, `Client.h`, `CritterHexView.*`, `ModelInstance.*`,
+`ModelInfoBaker.cpp`, `Mapper.cpp`, `AnimationViewer.cpp`; relevant engine tests; TLA
+`Scripts/Animation.fos`, `Scripts/GameEnums.fos`, `Scripts/Tests/Test_FalloutAnimation.fos`,
+`TLA.fomain`.
 
 **Interfaces and decisions:**
 - Native `CritterStateAnim` and `CritterActionAnim` retain only `None=0`; all removed values are project metadata in `GameEnums.fos` with their current numbers.
@@ -47,7 +59,9 @@
 
 ## Task 2: Project-owned path and flat-render decisions
 
-**Files:** Engine `EntityProperties.h`, `Server/Map.*`, `Server/MapManager.cpp`, `Client/MapView.cpp`, `Client/MapSprite.h`, relevant path/client tests; TLA `Scripts/CritterState.fos` or a focused `Scripts/CritterPresentation.fos` and script tests.
+**Files:** Engine `EntityProperties.h`, `Server/Map.*`, `Server/MapManager.cpp`,
+`Client/MapView.cpp`, `Client/MapSprite.h`, relevant path/client tests; TLA
+`Scripts/CritterState.fos` or a focused `Scripts/CritterPresentation.fos` and script tests.
 
 **Interfaces and decisions:**
 - Add generic mutable persistent PublicSync critter bool `PathfindingObstacle`, default false. Server path classification tests this property rather than `IsDead()`; rename `HasLivingCritter` to `HasPathfindingObstacle`.
@@ -99,4 +113,3 @@
 - Resource distribution correction: the existing `FOnline` pack now copies its font descriptions through `RawCopy`; identical font/ICO duplicates were removed, and `Resources/TLA.png` supplies the configured Android icon. BakeResources, current client/mapper builds and an actual Mapper smoke passed without warnings; old copies were removed from baked Core. Main-config formatting changed zero files.
 - Native spacing correction after owner review: separated control-flow blocks and semantic stages in 11 source files. Comparing against the pre-correction snapshot confirmed that no nonempty source line changed. The Engine rules now explicitly require manual spacing review independently of formatter/diff checks. Functional suites were not repeated for these blank-line-only edits.
 - No staging, commits or pushes were performed; implementation is reviewable in the dirty worktrees.
-

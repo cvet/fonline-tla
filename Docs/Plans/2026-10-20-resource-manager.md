@@ -1,14 +1,28 @@
 # Resource loading ownership implementation plan
 
+Historical task plan. Its revision numbers, check counts, publication steps and
+status describe that assignment only. Re-establish the current task's scope and
+authorization using [AGENTS.md](../../AGENTS.md) and
+[DocumentationMaintenance](../DocumentationMaintenance.md) before reuse.
+No fresh acceptance or Git/publication permission is implied.
+
 > **For agentic workers:** Use superpowers:executing-plans task-by-task; bounded mechanical consumer migration uses the official MiMo launcher. Keep steps checked as verification completes.
 
 **Goal:** Give ResourceManager ownership of sprite loading, factories, caches and invalidation; keep SpriteManager responsible for rendering and updating sprite instances.
 
-**Architecture:** ResourceManager is constructed after SpriteManager and before its resource consumers, owns factories/templates, and exposes loading services. A generic begin-scene observer preserves factory-update ordering without a SpriteManager dependency on ResourceManager. CritterFramesCache owns script-resolved directional sequences; Mapper owns mutable critter preview models. FileSystem continues to own mounted sources. Shared model/particle texture caching is a separate subsequent change, not part of this approved first step.
+**Architecture:** ResourceManager is constructed after SpriteManager and before its resource
+consumers, owns factories/templates, and exposes loading services. A generic begin-scene observer
+preserves factory-update ordering without a SpriteManager dependency on ResourceManager.
+CritterFramesCache owns script-resolved directional sequences; Mapper owns mutable critter preview
+models. FileSystem continues to own mounted sources. Shared model/particle texture caching is a
+separate subsequent change, not part of this approved first step.
 
 **Tech Stack:** C++, CMake, native Catch tests, existing TLA verification and renderer smoke runners.
 
-**Spec:** The user's approval of the preceding architecture proposal: move sprite loading/cache/factory code from SpriteManager into ResourceManager, preserve independent animation instances, separate critter cache and editor previews. Existing uncommitted migration is the starting implementation.
+**Spec:** The user's approval of the preceding architecture proposal: move sprite
+loading/cache/factory code from SpriteManager into ResourceManager, preserve independent animation
+instances, separate critter cache and editor previews. Existing uncommitted migration is the
+starting implementation.
 
 ## Global constraints
 
@@ -33,7 +47,11 @@
 
 **Files:** ResourceManager.*, SpriteManager.*, DefaultSprites.*, new CritterFramesCache.*, EngineSources.cmake, Test_SpriteSheet.cpp; factory/Font owner declarations.
 
-**Interfaces:** ResourceManager(FileSystem*, SpriteManager*) through engine ptr aliases; same LoadSprite overloads, LoadSpriteAsQuad, registration/access, retry/invalidate/cache cleanup methods moved from SpriteManager. LoadDefaultSprites(const RenderSettings&) initializes existing configured defaults. CritterFramesCache(AnimationResolver*) retains GetCritterAnimFrames/CleanupCritterFrames. SpriteManager has a generic GetOnBeginScene observer.
+**Interfaces:** ResourceManager(FileSystem*, SpriteManager*) through engine ptr aliases; same
+LoadSprite overloads, LoadSpriteAsQuad, registration/access, retry/invalidate/cache cleanup methods
+moved from SpriteManager. LoadDefaultSprites(const RenderSettings&) initializes existing configured
+defaults. CritterFramesCache(AnimationResolver*) retains GetCritterAnimFrames/CleanupCritterFrames.
+SpriteManager has a generic GetOnBeginScene observer.
 
 - [x] Add a compiling native ownership-boundary assertion which rejects the old SpriteManager loading surface; run it and observe semantic RED.
 - [x] Move factory registry, resource caches, loading/invalidation methods and low-memory subscription into ResourceManager. Preserve begin-scene factory update through a generic observer and explicit unsubscription.

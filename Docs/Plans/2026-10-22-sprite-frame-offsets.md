@@ -1,5 +1,11 @@
 # Sprite Offset and Frame Motion Terminology
 
+Historical task plan. Its revision numbers, check counts, publication steps and
+status describe that assignment only. Re-establish the current task's scope and
+authorization using [AGENTS.md](../../AGENTS.md) and
+[DocumentationMaintenance](../DocumentationMaintenance.md) before reuse.
+No fresh acceptance or Git/publication permission is implied.
+
 The owner's final terminology is explicit: offset is the ordinary sprite offset
 to its root; motion is a per-frame delta of visual displacement. CritterHexView
 derives cumulative displacement and compensation against logical hex movement.

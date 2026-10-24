@@ -3,6 +3,28 @@
 Session-by-session record of the Scripts refactoring rounds, split out of `Docs/Refactoring.md` so that the
 plan there stays a plan. Sections are in the order they were written, which is not date order.
 
+Historical record: APIs, paths, Sync/Async recipes and counts below belong to
+the dated runs, not current instructions. Use [Scripts](../Scripts.md) and
+[BuildAndLaunch](../BuildAndLaunch.md) for today's workflow. Keep the original
+chronology/evidence; read only the relevant dated section.
+
+Reading routes:
+
+- [R2-2 progress — header coverage complete + verified bug batch (2026-07-03)](#r2-2-progress--header-coverage-complete--verified-bug-batch-2026-07-03)
+- [R2-3 harness and barter/GUI regression batch (2026-07-11)](#r2-3-harness-and-bartergui-regression-batch-2026-07-11)
+- [R2-3 contextual GUI/container mechanics batch (2026-07-12)](#r2-3-contextual-guicontainer-mechanics-batch-2026-07-12)
+- [R2-3 trigger synchronization and prompt-safety follow-up (2026-07-13)](#r2-3-trigger-synchronization-and-prompt-safety-follow-up-2026-07-13)
+- [Latest Engine compatibility bump (2026-07-13)](#latest-engine-compatibility-bump-2026-07-13)
+- [Latest Engine updater cutover follow-up (2026-07-15)](#latest-engine-updater-cutover-follow-up-2026-07-15)
+- [Latest Engine EntitySync-refactor bump (2026-07-25)](#latest-engine-entitysync-refactor-bump-2026-07-25)
+- [Latest Engine draw-tuning follow-up (2026-07-24)](#latest-engine-draw-tuning-follow-up-2026-07-24)
+- [Latest Engine nested-sections/Effekseer bump (2026-07-24)](#latest-engine-nested-sectionseffekseer-bump-2026-07-24)
+- [Latest Engine sprite/3D/baker bump (2026-07-22)](#latest-engine-sprite3dbaker-bump-2026-07-22)
+- [Latest Engine handle-only Destroy bump (2026-07-19)](#latest-engine-handle-only-destroy-bump-2026-07-19)
+- [Latest Engine server follow-up (2026-07-18)](#latest-engine-server-follow-up-2026-07-18)
+- [Registration transaction follow-up (2026-07-18)](#registration-transaction-follow-up-2026-07-18)
+- [R3 adversarial bug hunt over under-audited giants (2026-07-19)](#r3-adversarial-bug-hunt-over-under-audited-giants-2026-07-19)
+
 ---
 
 ## R2-2 progress — header coverage complete + verified bug batch (2026-07-03)

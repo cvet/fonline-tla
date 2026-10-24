@@ -1,7 +1,7 @@
 # Game Systems
 
 The map of TLA's own gameplay code — what the systems are, where they live, what they talk to, and what
-covers them. The engine's equivalent is `Engine/Docs/Architecture.md`; this file is the layer above it.
+covers them. The engine's equivalent is [its source tree](../Engine/Docs/en/contributing/source-tree/index.md); this file is the layer above it.
 
 Read this before opening a `.fos`. Every module also carries a Russian header block describing itself, so
 this map deliberately does not repeat those: it gives the shape, and the headers give the detail.
@@ -10,14 +10,14 @@ this map deliberately does not repeat those: it gives the shape, and the headers
 
 - **No includes.** Baking sees every `.fos`; cross-module calls are `Namespace::Function()`. A file's
   namespace always equals its filename. Hand-written gameplay code is at the top of `Scripts/`;
-  `Generated/`, `Tests/` and `Json/` are separate, and every directory is listed in `TLA.fomain`.
+  `Core/`, `Generated/`, `Tests/` and `Json/` are separate, and every directory is listed in `TLA.fomain`.
 - **Three dispatchers, many subsystems.** `Main` (server), `ClientMain` (client) and `MapperMain` (mapper)
   subscribe to engine events in `ModuleInit` and delegate. Almost nothing else subscribes to world events
   directly; a subsystem exposes functions and its own narrow events instead.
 - **The server is authoritative.** The client queues intent and renders; every state change that matters is
   a `[[ServerRemoteCall]]` landing in a server module.
 - **One thread.** Since `Server.SingleThreadedLogic` was turned on, game logic runs on a single worker and
-  scripts take no entity cover. See the constraint note in [../AGENTS.md](../AGENTS.md).
+  scripts take no entity cover. See [the script contract](Scripts.md#single-threaded-logic-and-lifetime).
 
 ## The path of one player action
 
@@ -35,7 +35,10 @@ The most useful thing to trace first, because six systems appear in it in order:
 
 ## Systems
 
-`S` = server, `C` = client, `M` = mapper. "Covered" names the harness suite, when one exists.
+`S` = server, `C` = client, `M` = mapper. "Covered" names an existing harness suite,
+not proof of its current pass or completeness. Line/content counts below are the
+2026-09-02 routing snapshot, with later module additions; they are not live metrics.
+Read the named implementation and tests before making coverage claims.
 
 ### World, travel and locations
 
@@ -120,7 +123,7 @@ demand/result handlers that content calls by name. Content lives in `Dialogs/*.f
 | Critters | `Critters/*.focr` | 531 | |
 | Maps | `Maps/*.fomap` | 275 | |
 | Texts | `Texts/*.{russ,engl}.fotxt` | 6 packs | parity guarded by `Tools/ContentQuality` |
-| GUI | `Gui/*.fogui` | 32 screens | generates `Scripts/GuiScreens.fos` |
+| GUI | `Gui/*.fogui` | 32 screens | generates `Scripts/Generated/GuiScreens.fos` |
 
 Location and quest scripts follow the same prefixes as the dialogs — `MapModoc.fos`, `NcrPoliceman.fos`,
 `KlamCowboy.fos` — 91 modules in all. They are content, not systems: each one drives one place.
@@ -132,4 +135,5 @@ Location and quest scripts follow the same prefixes as the dialogs — `MapModoc
 - Adding to a place: find the location module by prefix, and its dialogs by the same prefix.
 - Adding an NPC behaviour: `NpcPlanes`, then the pattern modules (`Pattern*`).
 - Adding a check or effect callable from a dialog: `Dialog`, which is the authored handler library.
-- Verifying anything: the `Verify :: All` task; see the table in [../AGENTS.md](../AGENTS.md).
+- Verification: [BuildAndLaunch](BuildAndLaunch.md#select-verification-by-the-change)
+  selects focused checks or `Verify :: All` for broad integration.

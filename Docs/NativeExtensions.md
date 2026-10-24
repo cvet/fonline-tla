@@ -44,13 +44,18 @@ copy of a database.
 
 ## Binding and review
 
+Write `FO_VERIFY_*` and assertion conditions as if the checks could be compiled
+out: execute required script callbacks, mutations, I/O and out-parameter calls
+first, bind their results to named locals, then verify them. These macros remain
+active in release builds; actions must stay visible outside the checks.
+
 `///@ EngineHook` names/signatures come from Engine codegen. `///@ ExportMethod`
 binds methods: the receiver is the first argument, and `Server_`/`Client_`/`Common_`
 mapping determines the script name (for example `Server_Game_LoadImage` → server
 `Game.LoadImage`). Use `FO_SCRIPT_API` on exported hooks/methods and exact current
 handle types. Script-facing borrows use `ptr<T>`/`nptr<T>`, not a bare entity `T*`;
 ordinary internal or foreign-ABI pointers have their owning contract. Project
-validation: [Nullability](../Nullability.md).
+validation: [Nullability](Nullability.md).
 
 Match adjacent naming, member order and grouping before adding a pattern. Keep
 constructors/destructors before ordinary methods, separate semantic stages and

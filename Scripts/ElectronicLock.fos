@@ -1,6 +1,6 @@
 // ElectronicLock — электронный кодовый замок предметов.
-// Обязанности: генерация кода доступа, перехват скилла вскрытия, запрос кода через экран SayExtended, проверка кода и открытие двери/контейнера с авто-закрытием.
-// Сторона: SERVER. Связи: SayExtended, Lockers, Messaging, Item::AutoCloseDoor.
+// Обязанности: генерация кода доступа, перехват скилла вскрытия, запрос кода через экран Say, проверка кода и открытие двери/контейнера с авто-закрытием.
+// Сторона: SERVER. Связи: Say, Lockers, Messaging, Item::AutoCloseDoor.
 namespace ElectronicLock
 {
 
@@ -48,7 +48,7 @@ void LockedInit(Item item, bool firstTime)
 }
 
 // Перехват скилла вскрытия на запертом замке: если контейнер/дверь ещё не открыты — вместо
-// обычного вскрытия запрашиваем код доступа через экран SayExtended
+// обычного вскрытия запрашиваем код доступа через экран Say
 [[Event]]
 EventResult LockedSkill(Item item, Critter cr, CritterProperty skill)
 {
@@ -57,23 +57,7 @@ EventResult LockedSkill(Item item, Critter cr, CritterProperty skill)
             return EventResult::StopChain;
         }
 
-        // Маска кода из "?" по длине настоящего кода (показывает игроку, сколько символов вводить)
-        string code = "";
-        int codeLength = item.ELockCode.length();
-        for (int i = 0; i < codeLength; i++) {
-            code += "?";
-        }
-
-        // Запоминаем, какой замок открывает криттер, чтобы сверить ответ в LockedSkillAnswer
-        cr.LastElectronicLocked = item.Id;
-        // breadcrumb миграции: прежний путь через ShowScreen/SayMsg до перехода на SayExtended; не удалять до домиграции
-        /*
-           //player.ShowScreen( ShowScreenModes::Say, 0, "LockedSkillAnswer" );
-           player.SayMsg( Tla::SaySayTitle, TextPackName::Text, STR_HEADER );
-           player.Say( Tla::SaySayText, code );
-         */
-
-        SayExtended::ShowScreenEx(cr, STR_HEADER);
+        Say::Show(cr, TextPackKey(TextPackName::Text, "" + STR_HEADER), TextPackKey(), LockedSkillAnswer, {item.Id});
         CritterState::Wait(cr, 1000);
 
         return EventResult::StopChain;
@@ -84,14 +68,13 @@ EventResult LockedSkill(Item item, Critter cr, CritterProperty skill)
 
 // Обработчик введённого игроком кода: при совпадении открывает замок и при необходимости
 // планирует авто-закрытие; иначе сообщает об ошибке
-void LockedSkillAnswer(Critter player, int answerI, string answerS)
+void LockedSkillAnswer(Critter player, string answerS, any[] context)
 {
-    if (player.LastElectronicLocked == ZERO_IDENT) {
-        return;
-    }
-
-    Item? item = Game.GetItem(player.LastElectronicLocked);
-    if (item == null || item.ELockCode.length() == 0 || (item.Type != ItemType::Container && item.Type != ItemType::Door)) {
+    ident itemId = context[0];
+    Item? item = Game.GetItem(itemId);
+    if (item == null || item.Ownership != ItemOwnership::MapHex || item.MapId != player.MapId ||
+        Game.GetDistance(player.Hex, item.Hex) > Settings.Dialog.TalkDistance || item.ELockCode.length() == 0 ||
+        (item.Type != ItemType::Container && item.Type != ItemType::Door)) {
         return;
     }
 
@@ -100,6 +83,7 @@ void LockedSkillAnswer(Critter player, int answerI, string answerS)
         Messaging::Info(player, TextPackKey(TextPackName::Text, "" + (STR_OPEN)));
         Lockers::SwitchLocker(item, true);
         Lockers::ShowContainer(player, null, item, TransferTypes::HexContUp);
+
         if (item.ELockCloseAtSeconds > 0) {
             // отложенный вызов сохраняется в сейве (SavedDeferredCall) — закроется даже после рестарта
             Game.StartTimeEvent(Time::Seconds(item.ELockCloseAtSeconds), Item::AutoCloseDoor, item.Id);

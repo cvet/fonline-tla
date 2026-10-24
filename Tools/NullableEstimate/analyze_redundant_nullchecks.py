@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Read-only analysis: classify `?`-marked params by body shape and flag
 patterns where the null check / `?` marker is redundant per the
-Nullability.md convention.
+Docs/Nullability.md convention.
 
 Categories produced per function/param:
 - TWO_BRANCH: body uses `if (param != null) { useA } [else { useB }]` or

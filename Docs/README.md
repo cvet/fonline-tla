@@ -12,7 +12,7 @@ Game-side documentation for FOnline: The Life After. Start with
 | Build, launch, tests, warnings, process cleanup, logs, CI or packages | [BuildAndLaunch](BuildAndLaunch.md) |
 | Script sides, dispatch, globals, state, stacking, sounds or day tint | [Scripts](Scripts.md) |
 | Russian script headers/comments, naming, formatting and safe refactoring | [ScriptStyle](ScriptStyle.md) |
-| Nullable handles, components, Chosen and native boundary validation | [Nullability](../Nullability.md), [tool README](../Tools/NullableEstimate/README.md) |
+| Nullable handles, components, Chosen and native boundary validation | [Nullability](Nullability.md), [tool README](../Tools/NullableEstimate/README.md) |
 | Content inputs, localization, generated GUI or secure-channel config | [ContentWorkflow](ContentWorkflow.md) |
 | Native extension files, bindings and CMake roles | [NativeExtensions](NativeExtensions.md), then [Engine instructions](../Engine/AGENTS.md) |
 | Find a gameplay owner, caller or suite | [Systems](Systems.md) |

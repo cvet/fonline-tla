@@ -2,9 +2,9 @@
 
 This page owns the project's AngelScript spelling and validator workflow. The
 reusable compiler/runtime and native pointer contracts are documented in
-[Engine nullability](Engine/Docs/en/contributing/coding-contracts/nullability.md)
-and [smart pointers](Engine/Docs/en/contributing/coding-contracts/smart-pointers.md).
-Read [Scripts](Docs/Scripts.md) for TLA side, state and lifetime policy.
+[Engine nullability](../Engine/Docs/en/contributing/coding-contracts/nullability.md)
+and [smart pointers](../Engine/Docs/en/contributing/coding-contracts/smart-pointers.md).
+Read [Scripts](Scripts.md) for TLA side, state and lifetime policy.
 
 ## Choose the contract at the source
 
@@ -79,7 +79,7 @@ Codegen inserts `NativeDataProvider::CheckArgNotNull` / `CheckReturnNotNull` at
 current AS runtime also checks null assignments into non-null script handle
 slots (`asBC_RefCpyChk`); the old claim that script-to-script null enforcement
 was unimplemented is obsolete. Runtime violations are distinct from compiler
-warnings. The [Engine guide](Engine/Docs/en/contributing/coding-contracts/nullability.md#runtime-enforcement)
+warnings. The [Engine guide](../Engine/Docs/en/contributing/coding-contracts/nullability.md#runtime-enforcement)
 owns validated meta-types, assignment/call boundaries, arrays and exact exception
 behavior; do not infer per-element array guarantees from scalar checks.
 
@@ -90,7 +90,7 @@ destroy entities; follow the actual owner/lifetime boundary.
 ## Formatting and generated GUI
 
 Use `Format :: Scripts` or
-[format_project.py](Tools/Formatter/format_project.py), never raw clang-format
+[format_project.py](../Tools/Formatter/format_project.py), never raw clang-format
 on `.fos`/`.fogui`: the wrapper repairs nullable suffixes that clang-format treats
 as ternary operators (`T ?`, split casts and arrays). It preserves the detected
 line-ending style and normalizes EOF to one terminator. Existing script CRLF
@@ -98,7 +98,7 @@ must be preserved when manually rewriting a source file.
 
 GUI warnings name `Scripts/Generated/GuiScreens.fos`, but the fix belongs in its
 owning `.fogui` embedded code or generator. Follow
-[ContentWorkflow](Docs/ContentWorkflow.md#gui-generation), including its paired
+[ContentWorkflow](ContentWorkflow.md#gui-generation), including its paired
 source/output exception; do not prescribe regeneration for every small code fix
 or patch only generated output. Dialog special answers additionally require
 globally visible `DialogAnswerLink` metadata; this is a bake contract, not a
@@ -106,7 +106,7 @@ nullable check.
 
 ## Tooling and verification
 
-The active tool owner is [NullableEstimate](Tools/NullableEstimate/README.md).
+The active tool owner is [NullableEstimate](../Tools/NullableEstimate/README.md).
 From the repository root (use verified `python3` on non-Windows hosts):
 
 ```sh
@@ -130,4 +130,4 @@ All` adds marker analysis, focused tests and coverage. CI's `validate` job runs
 the focused tests, validator and marker check. The legacy
 `apply_native_nullable.py` is only for pre-`ptr`/`nptr` revisions, outside the
 current gate. Compile every affected side and run the relevant behavior as in
-[BuildAndLaunch](Docs/BuildAndLaunch.md); static spelling alone is not runtime proof.
+[BuildAndLaunch](BuildAndLaunch.md); static spelling alone is not runtime proof.

@@ -155,7 +155,16 @@ The workflow collects baked output and binaries into `TLA-Dev`, `TLA-Test` and
 in order before extraction. On Linux/macOS use `cat TLA-Server.zip.part* >
 TLA-Server.zip`; on Windows use `copy /b` with the explicitly ordered part list.
 
-On a push to `master`, the release job validates `VERSION` as `X.Y.Z`, rejects an
-existing `vX.Y.Z` tag and publishes. Other runs perform a dry-run preflight with
-asset sizes/hashes and no tag/release creation. Use the version generator and
-inspect its result; preparing a package or version does not authorize publication.
+Releases are published only by a manual run. In GitHub, open **Actions** > **build** >
+**Run workflow**, select `master`, and run it. The workflow must be present on the
+repository's default branch before the **Run workflow** control is available; the
+selected ref supplies the revision that runs. Automatic `push` and `pull_request`
+runs execute all checks, platform builds and packaging, and upload their CI
+artifacts. Only the release job is skipped; publishing a GitHub release is manual.
+
+A manual run on `master` validates `VERSION` as `X.Y.Z`, rejects an existing
+`vX.Y.Z` tag, and publishes only after all checks pass, including the quality gates.
+Manual runs on other refs build and package but perform the existing dry-run
+preflight: an existing tag is reported without publishing, asset sizes/hashes are
+recorded and no tag or release is created. Use the version generator and inspect
+its result; preparing a package or version does not authorize publication.

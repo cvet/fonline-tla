@@ -922,7 +922,7 @@ The standing gates (G1–G9) remain green at all times throughout — that is th
   pending); **subsumed** by Track D here.
 - [Docs/ScriptStyle.md](../ScriptStyle.md) — headers, Russian comments, structure, idioms, formatting.
 - [Docs/AiControl.md](../AiControl.md) — AI control bridge protocol, commands, observation, verified quests.
-- [Docs/Nullability.md / Nullability.md](../../Nullability.md) — script `T?` and native `ptr<T>`/`nptr<T>` strong-nullable rules.
+- [Docs/Nullability.md / Nullability.md](../Nullability.md) — script `T?` and native `ptr<T>`/`nptr<T>` strong-nullable rules.
 - `Tools/AiControlMcp/` — bridge MCP adapter, `tla_quest_runner.py`, `tla_mechanics_playtest.py`,
   `smoke_ai_control_mcp.py` (+ planned `tla_batch_quest_runner.py`, `aggregate_quest_results.py`).
 - `Tools/ScriptQuality/` — `validate_scripts.py`, `baseline.json` (`--ratchet`/`--fix`), `render_audit.py`.

@@ -3,7 +3,7 @@
 TLA remains **AngelScript**. `CMakeLists.txt` enables `FO_ANGELSCRIPT_SCRIPTING` and
 disables Managed scripting. The required `ManagedScript.*` config placeholders
 do not authorize a C# migration. Use [Systems](Systems.md) to find a domain,
-[ScriptStyle](ScriptStyle.md) for Russian source style and [Nullability](../Nullability.md)
+[ScriptStyle](ScriptStyle.md) for Russian source style and [Nullability](Nullability.md)
 for project boundary checks. The reusable compiler/attribute baseline belongs to
 [Engine's AngelScript guide](../Engine/Docs/en/how-to/scripting/style-and-refactoring.md).
 
@@ -100,7 +100,7 @@ rebaked metadata/effects; do not carry an old fixed protocol number as policy.
 
 Use `T?` for legitimately absent values and narrow locally; use generated
 `Has<Component>` flags before component access and `HasChosen` before `Game.Chosen`.
-The complete project spelling/validator workflow is [Nullability](../Nullability.md).
+The complete project spelling/validator workflow is [Nullability](Nullability.md).
 
 Script symbols can be consumed by dialogs, maps, item/critter prototypes, GUI and
 text packs. Search those consumers before changing public names or behavior.

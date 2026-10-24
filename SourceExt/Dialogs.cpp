@@ -611,12 +611,12 @@ auto DialogManager::ParseDialog(string_view pack_name, string_view data) const -
             continue;
         }
 
-        if (strvex(command).compare_ignore_case("Script")) {
+        if (strvex(command).compare_ignore_case("Script") || strvex(command).compare_ignore_case("SayScript")) {
             if (!current_speech) {
-                throw DialogParseException("Dialog syntax: Script outside speech", pack_name);
+                throw DialogParseException("Dialog syntax: script binding outside speech", pack_name, command);
             }
             if (current_answer) {
-                throw DialogParseException("Dialog syntax: Script must be placed before Answer commands", pack_name);
+                throw DialogParseException("Dialog syntax: script binding must be placed before Answer commands", pack_name, command);
             }
 
             vector<string> args;
@@ -627,10 +627,18 @@ auto DialogManager::ParseDialog(string_view pack_name, string_view data) const -
             }
 
             if (args.size() != 1) {
-                throw DialogParseException("Dialog syntax: invalid Script command", pack_name);
+                throw DialogParseException("Dialog syntax: invalid script binding", pack_name, command);
             }
 
-            current_speech->DlgScriptFuncName = _meta->Hashes.to_hashed_string(args[0]);
+            if (strvex(command).compare_ignore_case("SayScript")) {
+                if (current_speech->SayScriptFuncName) {
+                    throw DialogParseException("Dialog syntax: duplicate SayScript command", pack_name);
+                }
+                current_speech->SayScriptFuncName = _meta->Hashes.to_hashed_string(args[0]);
+            }
+            else {
+                current_speech->DlgScriptFuncName = _meta->Hashes.to_hashed_string(args[0]);
+            }
             continue;
         }
 

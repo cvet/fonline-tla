@@ -1,7 +1,7 @@
 // ReplicationTerminal — серверная логика терминала «репликации»: перевод и снятие внутриигровых денег (ReplicationMoney) через диалог repl_terminal.
 // Сторона SERVER (весь модуль под #if SERVER). Ветки диалога: выбор получателя по имени, перевод реальных крышек
 //  bottle_caps на лицевой счёт, перевод виртуального баланса между игроками и снятие крышек со счёта.
-// Ввод суммы/имени ловится подпиской Game.OnPlayerSaidText (InitReplicationTerminal); тексты берутся из пака диалога через ReplMsg(); вход — статик-предмет Terminal (ItemStatic).
+// Ввод суммы/имени обрабатывается через SayScript текущей реплики; тексты берутся из пака диалога через ReplMsg(); вход — статик-предмет Terminal (ItemStatic).
 namespace ReplicationTerminal
 {
 
@@ -40,60 +40,41 @@ const int DialogTransferVirtual = 4;
 const int DialogTakeMoney = 5;
 const int DialogSetTargetName = 7;
 
-/// Event PlayerSaidText(Critter critter, string text, bool fromDialog)
-[[ModuleInit]]
-void InitReplicationTerminal()
+// Обработчики SayScript вызываются только для текущей реплики на сервере.
+void HandleTransferReal(Critter player, Critter? talker, string text)
 {
-    Game.OnPlayerSaidText.Subscribe(OnPlayerSaidText);
+    TransferMoney(player, text, true);
 }
 
-[[Event]]
-void OnPlayerSaidText(Critter? critter, string text, bool fromDialog, ident talkerId, bool isNpc)
+void HandleTransferVirtual(Critter player, Critter? talker, string text)
 {
-    if (critter != null && fromDialog && !text.isEmpty() && talkerId.value == Content::Dialog::repl_terminal.hash) {
-        switch (critter.TerminalDialogId) {
-        case DialogTransferReal: {
-            TransferMoney(critter, text, true);
-            break;
-        }
-        case DialogTransferVirtual: {
-            TransferMoney(critter, text, false);
-            break;
-        }
-        case DialogTakeMoney: {
-            TakeMoney(critter, text);
-            break;
-        }
-        case DialogSetTargetName: {
-            Player? player = PlayerRegistration::GetPlayerByName(text);
-            Critter? playerCritter = null;
-            if (player != null) {
-                playerCritter = player.GetControlledCritter();
-            }
+    TransferMoney(player, text, false);
+}
 
-            // player.GetControlledCritter() == null - игрок оффлайн, свойства недоступны для изменения. В т.ч баланс лицевого счета.
-            if (playerCritter == null) {
-                critter.TerminalPlayerId = ZERO_IDENT;
-                {
-                    Messaging::Info(critter, ReplMsg(STR_PLAYER_NOT_FOUND));
-                    critter.PlayerClientCall.AddDialogStr(Content::Dialog::repl_terminal, STR_PLAYER_NOT_FOUND, "", false);
-                    return;
-                }
-            }
+void HandleTakeMoney(Critter player, Critter? talker, string text)
+{
+    TakeMoney(player, text);
+}
 
-            critter.TerminalPlayerId = playerCritter.Id;
-            Game.Log("SET CR! player.TerminalPlayerId = " + critter.TerminalPlayerId + "; player.Id =" + critter.Id);
-            critter.PlayerClientCall.ForceDialogResult(ZERO_IDENT, Content::Dialog::repl_terminal, isNpc, 1, true);
-            break;
-        }
-        }
+void HandleTargetName(Critter critter, Critter? talker, string text)
+{
+    Player? player = PlayerRegistration::GetPlayerByName(text);
+    Critter? playerCritter = player != null ? player.GetControlledCritter() : null;
+    if (playerCritter == null) {
+        critter.TerminalPlayerId = ZERO_IDENT;
+        Messaging::Info(critter, ReplMsg(STR_PLAYER_NOT_FOUND));
+        critter.PlayerClientCall.AddDialogStr(Content::Dialog::repl_terminal, STR_PLAYER_NOT_FOUND, "", false);
+        return;
     }
+
+    critter.TerminalPlayerId = playerCritter.Id;
+    Dialogs::ForceDialogResult(critter, ZERO_IDENT, Content::Dialog::repl_terminal, false, 1, true);
 }
 
 [[ItemStatic]]
 bool Terminal(Critter player, StaticItem terminal, Item? item, any skill)
 {
-    if (player.ControlledByPlayer && skill == CritterProperty::SpecialSkillPickOnGround && item == null) {
+    if (player.ControlledByPlayer && skill == int(CritterProperty::SpecialSkillPickOnGround) && item == null) {
         Dialogs::RunDialog(player, Content::Dialog::repl_terminal, false);
     }
 
@@ -112,7 +93,6 @@ void Reset(Critter player, Critter terminal, string& textArgs)
     player.TerminalDialogId = DialogNone; // Сброс
     Game.Log("reset called");
     player.TerminalPlayerId = ZERO_IDENT;
-    player.CanSendSay = false;
 
     // Ранняя выборка по пустым textArgs отключена — оставлено ориентиром прежнего поведения загрузки диалога.
     //if (textArgs.isEmpty()) {
@@ -143,7 +123,6 @@ int ChoosePlayerResult(Critter player, Critter terminal)
 int ChoosePlayer(Critter player, Critter terminal, string& playerName)
 {
     player.TerminalDialogId = DialogSetTargetName;
-    player.CanSendSay = true;
 
     if (player.TerminalPlayerId != ZERO_IDENT) {
         // Если получатель известен, открыть окно ввода суммы
@@ -160,19 +139,16 @@ int ChoosePlayer(Critter player, Critter terminal, string& playerName)
 void TransferReal(Critter player, Critter terminal, string& moneyCount)
 {
     player.TerminalDialogId = DialogTransferReal;
-    player.CanSendSay = true;
 }
 
 void TransferVirtual(Critter player, Critter terminal, string& moneyCount)
 {
     player.TerminalDialogId = DialogTransferVirtual;
-    player.CanSendSay = true;
 }
 
 void TakeMoney(Critter player, Critter terminal, string& moneyCount)
 {
     player.TerminalDialogId = DialogTakeMoney;
-    player.CanSendSay = true;
 }
 
 void TakeMoney(Critter player, string moneyCount)

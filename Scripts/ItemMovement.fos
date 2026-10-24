@@ -89,58 +89,63 @@ EventResult OnCritterCheckMoveItem(Critter cr, Item item, CritterItemSlot toSlot
 
 #if SERVER
 
+// Пересчитывает модель и бонус по фактически надетой броне, включая её изъятие и возрождение.
+void RefreshArmorAppearance(Critter cr)
+{
+    Item? item = cr.GetItem(ItemProperty::CritterSlot, CritterItemSlot::Armor);
+
+    // Базовая модель «голого» персонажа по полу
+    bool isMale = cr.Gender == GenderType::Male;
+    hstring crModel = cr.ModelNameBase;
+
+    if (crModel == EMPTY_HSTRING) {
+        crModel = isMale ? Tla::CRTYPE_DEFAULT_M : Tla::CRTYPE_DEFAULT_F;
+    }
+
+    if (item != null) {
+        string name = isMale ? item.Armor_CrTypeMale : item.Armor_CrTypeFemale;
+        crModel = (name + "aa.frm").hstr();
+    }
+
+    // Длинноволосый мужской персонаж: подменяем модели брони на варианты под эту причёску
+    if (cr.ModelNameBase == Tla::CRTYPE_LHD_JUMPSUIT && isMale) {
+        crModel = Tla::CRTYPE_LHD_JUMPSUIT;
+
+        if (item != null) {
+            crModel = (item.Armor_CrTypeMale + "aa.frm").hstr();
+
+            if (crModel == Tla::CRTYPE_DW_LEATHER_ARMOR_M) {
+                crModel = Tla::CRTYPE_LHD_LEATHER_ARMOR;
+            }
+            else if (crModel == Tla::CRTYPE_DW_LEATHER_JACKET_M) {
+                crModel = Tla::CRTYPE_LHD_LEATHER_JACKET;
+            }
+            else if (crModel == Tla::CRTYPE_DW_METAL_ARMOR_M) {
+                crModel = Tla::CRTYPE_LHD_METAL_ARMOR;
+            }
+        }
+    }
+
+    if (cr.ModelName != crModel) {
+        verify(crModel != EMPTY_HSTRING, "Assertion failed");
+        cr.ModelName = crModel;
+    }
+
+    // Модификатор от брони: активен только пока броня надета
+    cr.CurrentArmorPerk = item != null ? item.Armor_Perk : 0;
+}
+
 // Реакция на состоявшийся перенос предмета: подбор модели криттера под броню, авто-снаряжение оружия и рассылка событий.
 [[Event]]
 void OnCritterItemMoved(Critter cr, Item item, CritterItemSlot fromSlot)
 {
-    if (item.Ownership == ItemOwnership::Nowhere) {
-        // Предмет уничтожается — обрабатывать нечего
-        return;
+    if (item.Type == ItemType::Armor && (fromSlot == CritterItemSlot::Armor || item.CritterSlot == CritterItemSlot::Armor)) {
+        RefreshArmorAppearance(cr);
     }
 
-    CritterItemSlot toSlot = item.CritterSlot;
-
-    // Смена брони (надели или сняли) — пересчитываем визуальную модель криттера
-    if (item.Type == ItemType::Armor && (fromSlot == CritterItemSlot::Armor || toSlot == CritterItemSlot::Armor)) {
-        // Базовая модель «голого» персонажа по полу
-        bool isMale = cr.Gender == GenderType::Male;
-        hstring crModel = cr.ModelNameBase;
-
-        if (crModel == EMPTY_HSTRING) {
-            crModel = isMale ? Tla::CRTYPE_DEFAULT_M : Tla::CRTYPE_DEFAULT_F;
-        }
-
-        if (toSlot == CritterItemSlot::Armor) {
-            string name = isMale ? item.Armor_CrTypeMale : item.Armor_CrTypeFemale;
-            crModel = (name + "aa.frm").hstr();
-        }
-
-        // Длинноволосый мужской персонаж: подменяем модели брони на варианты под эту причёску
-        if (cr.ModelNameBase == Tla::CRTYPE_LHD_JUMPSUIT && isMale) {
-            crModel = Tla::CRTYPE_LHD_JUMPSUIT;
-
-            if (toSlot == CritterItemSlot::Armor) {
-                crModel = (item.Armor_CrTypeMale + "aa.frm").hstr();
-
-                if (crModel == Tla::CRTYPE_DW_LEATHER_ARMOR_M) {
-                    crModel = Tla::CRTYPE_LHD_LEATHER_ARMOR;
-                }
-                else if (crModel == Tla::CRTYPE_DW_LEATHER_JACKET_M) {
-                    crModel = Tla::CRTYPE_LHD_LEATHER_JACKET;
-                }
-                else if (crModel == Tla::CRTYPE_DW_METAL_ARMOR_M) {
-                    crModel = Tla::CRTYPE_LHD_METAL_ARMOR;
-                }
-            }
-        }
-
-        if (cr.ModelName != crModel) {
-            verify(crModel != EMPTY_HSTRING, "Assertion failed");
-            cr.ModelName = crModel;
-        }
-
-        // Модификатор от брони: активен только пока броня надета
-        cr.CurrentArmorPerk = toSlot == CritterItemSlot::Armor ? item.Armor_Perk : 0;
+    if (item.Ownership == ItemOwnership::Nowhere) {
+        // Предмет уже изъят у владельца; модель снятой брони пересчитана выше
+        return;
     }
 
     // Оружие подняли с земли (извне): автоматически снаряжаем боезапасом по умолчанию

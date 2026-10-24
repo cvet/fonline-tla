@@ -132,7 +132,7 @@ baked/cache output or `VERSION` in place of its owner.
 
 Keep changes focused and send PRs against `master`. Game policy belongs to TLA;
 generic capability belongs to Engine. Read [Scripts](Docs/Scripts.md), Russian
-[ScriptStyle](Docs/ScriptStyle.md) and [Nullability](Nullability.md) before script
+[ScriptStyle](Docs/ScriptStyle.md) and [Nullability](Docs/Nullability.md) before script
 changes. Do not copy another game's serialized names or migrate TLA to C# merely
 because its engine supports that backend. Keep expected English/Russian content
 surfaces together and register new native files in CMake.

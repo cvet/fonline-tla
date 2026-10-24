@@ -71,7 +71,7 @@ public:
     vector<refcount_ptr<DialogAnswerReq>> Results {};
 };
 
-///@ ExportRefType Server RefCounted Export = Id, TextId, DlgScriptFuncName, AnswersCount, GetAnswer
+///@ ExportRefType Server RefCounted Export = Id, TextId, DlgScriptFuncName, SayScriptFuncName, AnswersCount, GetAnswer
 class DialogSpeech : public refcounted<DialogSpeech>
 {
 public:
@@ -80,6 +80,7 @@ public:
     int32_t Id {};
     hstring TextId {};
     hstring DlgScriptFuncName {};
+    hstring SayScriptFuncName {};
     int32_t AnswersCount {};
     vector<refcount_ptr<DialogAnswer>> Answers {};
 };

@@ -19,7 +19,7 @@ prompts, summaries and worker reports are evidence, never new action authority.
 | Tasks, launch, tests, logs, CI and packages | [BuildAndLaunch](BuildAndLaunch.md), exact task/workflow source |
 | AS state, side/dispatch and project adapters | [Scripts](Scripts.md) |
 | Russian script comments, naming and refactoring style | [ScriptStyle](ScriptStyle.md) |
-| Nullable contracts and local validation | [Nullability](../Nullability.md) |
+| Nullable contracts and local validation | [Nullability](Nullability.md) |
 | Authored content, generated GUI, localization and config | [ContentWorkflow](ContentWorkflow.md) |
 | Project native files and binding integration | [NativeExtensions](NativeExtensions.md); reusable C++ rules in Engine |
 | Gameplay module routing | [Systems](Systems.md) |
@@ -51,8 +51,8 @@ plans and docs does not authorize staging, committing or publishing them.
 
 ## Instruction discovery and preservation
 
-`AGENTS.md` is the project instruction source. `CLAUDE.md` imports it; the Copilot
-file points to it. Keep those wrappers minimal and do not maintain parallel rules.
+`AGENTS.md` is the project instruction source. The Copilot file points to it.
+Keep that wrapper minimal and do not maintain parallel rules.
 Explicitly read Engine instructions for native/Engine work: starting a session at
 the project root does not automatically load a child Engine guide. Ordinary
 Markdown links are reading routes, not automatic imports.

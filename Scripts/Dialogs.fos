@@ -29,14 +29,17 @@ namespace Dialogs
 ///@ Property Critter Server nanotime DialogContext.StartTime Mutable
 ///@ Property Critter Server timespan DialogContext.Duration Mutable
 ///@ Property Critter Server string DialogContext.TextArgs Mutable
+///@ Property Critter Server uint64 DialogContext.SayRevision Mutable
 
 ///@ Event Server Game OnCritterTalk(Critter cr)
 
 ///@ Enum DialogAnswerLink Barter = -2
 ///@ Enum DialogAnswerLink Attack = -3
 
+///@ RemoteCall Client AddDialogStr(hstring dialogId, int32 strNum, string textArgs, bool append)
+
 ///@ RemoteCall Server SpeechAnswer(int32 answerIndex)
-///@ RemoteCall Client ReceiveDialogContext(hstring dialogId, ident talkerId, hstring textId, hstring[] answerTextIds, string textArgs, timespan duration)
+///@ RemoteCall Client ReceiveDialogContext(hstring dialogId, ident talkerId, hstring textId, hstring[] answerTextIds, string textArgs, timespan duration, uint64 sayRevision, bool canSay)
 
 // Подписки на серверные события жизненного цикла криттера: при выходе из строя
 // (нокаут/смерть/выход из игры) активный диалог нужно корректно закрыть.
@@ -52,6 +55,34 @@ void InitDialogs()
 }
 
 #if SERVER
+
+// Выбрать ответ активного диалога от имени игрока. result — индекс видимого
+// ответа с нуля, а не id реплики. refresh повторно отправляет текущий контекст.
+// Собеседник и пакет проверяются до выполнения результатов выбранного ответа.
+void ForceDialogResult(Critter player, ident talkerId, hstring dialogId, bool isNpc, int result, bool refresh)
+{
+    if (!player.HasDialogContext || !player.DialogContext.Talking) {
+        return;
+    }
+
+    if (player.DialogContext.DialogId != dialogId ||
+        (isNpc ? player.DialogContext.TalkerId != talkerId || talkerId == ZERO_IDENT : player.DialogContext.TalkerId != ZERO_IDENT)) {
+        return;
+    }
+
+    if (Dialogs::IsDialogMustBeClosed(player)) {
+        Dialogs::CloseDialog(player);
+        return;
+    }
+
+    if (refresh || result == 0xF0) {
+        Dialogs::SendDialogContext(player);
+    }
+
+    if (result != 0xF0) {
+        Dialogs::ProcessSpeechAnswer(player, result);
+    }
+}
 
 // Запуск диалога с конкретным собеседником: берём его DialogId и проверяем,
 // что разговор сейчас вообще возможен (живы, рядом, видят друг друга).
@@ -88,12 +119,12 @@ void RunDialog(Critter cr, hstring dialogId, Critter? talker, bool ignoreDistanc
         throw("Dialog pack not found", cr, dialogId);
     }
 
+    Say::CancelForCritter(cr);
     CloseDialog(cr);
 
     if (cr.IsMoving()) {
         cr.StopMoving();
     }
-
     // Определяем первый диалог
     const int initSpeechIndex = 0;
     int[] answerIndices = GetSpeechAnswers(cr, talker, dialogPack, initSpeechIndex, findFirst : true);
@@ -148,6 +179,7 @@ void RunDialog(Critter cr, hstring dialogId, Critter? talker, bool ignoreDistanc
     cr.DialogContext.Duration = Time::Milliseconds(Settings.Dialog.TalkMaxTime);
     cr.DialogContext.PrevSpeech = -1;
     cr.DialogContext.CurSpeech = firstSpeechIndex;
+    cr.DialogContext.SayRevision = cr.DialogContext.SayRevision + 1;
     cr.DialogContext.SpeechAnswers = firstAnswerIndices;
     cr.DialogContext.TextArgs = textArgs;
 
@@ -166,6 +198,16 @@ void SpeechAnswer(Player player, int answerIndex)
 
     if (cr == null || !cr.HasDialogContext || !cr.DialogContext.Talking) {
         throw("SpeechAnswer - Critter is not talking", player);
+    }
+
+    ProcessSpeechAnswer(cr, answerIndex);
+}
+
+// Общий серверный путь для ответа из интерфейса и выбора ответа игровым скриптом.
+void ProcessSpeechAnswer(Critter cr, int answerIndex)
+{
+    if (!cr.HasDialogContext || !cr.DialogContext.Talking) {
+        return;
     }
 
     Critter? talker = Game.GetCritter(cr.DialogContext.TalkerId);
@@ -279,9 +321,22 @@ void SpeechAnswer(Player player, int answerIndex)
         return;
     }
 
+    // Финальная реплика без доступных ответов завершает разговор и звучит над NPC.
+    if (nextAnswerIndices.isEmpty()) {
+        CloseDialog(cr);
+        if (talker != null) {
+            Messaging::Say(talker, TextPackKey(TextPackName::Dialogs, dialogId, nextSpeech.TextId), textArgs);
+        }
+        else {
+            Messaging::Info(cr, TextPackKey(TextPackName::Dialogs, dialogId, nextSpeech.TextId), textArgs);
+        }
+        return;
+    }
+
     cr.DialogContext.StartTime = Game.FrameTime;
     cr.DialogContext.PrevSpeech = cr.DialogContext.CurSpeech;
     cr.DialogContext.CurSpeech = nextSpeechIndex;
+    cr.DialogContext.SayRevision = cr.DialogContext.SayRevision + 1;
     cr.DialogContext.SpeechAnswers = nextAnswerIndices;
     cr.DialogContext.TextArgs = textArgs;
 
@@ -296,6 +351,7 @@ void CloseDialog(Critter cr)
         cr.StopTimeEvent(ProcessDialog);
         cr.DialogContext.DialogId = EMPTY_HSTRING;
         cr.DialogContext.Talking = false;
+        cr.DialogContext.SayRevision = cr.DialogContext.SayRevision + 1;
         SendDialogContext(cr);
     }
 }
@@ -401,13 +457,12 @@ bool IsCrittersCanTalk(Critter cr, Critter talker)
     return true;
 }
 
-// Переподключение/реинициализация клиента: если разговор активен, переотправляем
-// текущий контекст, чтобы клиент восстановил экран Dialog.
+// Переподключение завершает прежний разговор и отзывает ввод из старого окна Say.
 [[Event]]
 void OnCritterSendInitialInfo(Critter cr)
 {
     if (cr.HasDialogContext && cr.DialogContext.Talking) {
-        SendDialogContext(cr);
+        CloseDialog(cr);
     }
 }
 
@@ -459,10 +514,17 @@ void SendDialogContext(Critter cr)
         string textArgs = cr.DialogContext.TextArgs;
         timespan duration = Time::Milliseconds(Settings.Dialog.TalkMaxTime) - (Game.FrameTime - cr.DialogContext.StartTime);
 
-        cr.PlayerClientCall.ReceiveDialogContext(dialogId, talkerId, textId, answerTextIds, textArgs, duration);
+        cr.PlayerClientCall.ReceiveDialogContext(dialogId,
+                                                 talkerId,
+                                                 textId,
+                                                 answerTextIds,
+                                                 textArgs,
+                                                 duration,
+                                                 cr.DialogContext.SayRevision,
+                                                 dialogSpeech.SayScriptFuncName != EMPTY_HSTRING);
     }
     else {
-        cr.PlayerClientCall.ReceiveDialogContext(EMPTY_HSTRING, ZERO_IDENT, EMPTY_HSTRING, {}, "", timespan());
+        cr.PlayerClientCall.ReceiveDialogContext(EMPTY_HSTRING, ZERO_IDENT, EMPTY_HSTRING, {}, "", timespan(), 0, false);
     }
 }
 
@@ -906,11 +968,49 @@ int FindSpeech(DialogPack dialogPack, int speechId)
 
 #if CLIENT
 
+[[ClientRemoteCall]]
+void AddDialogStr(hstring dialogId, int strNum, string textArgs, bool append)
+{
+    auto screen = Gui::GetActiveScreen(GuiScreen::Dialog);
+    if (screen != null) {
+        auto dialog = cast<GuiScreens::Dialog::Dialog>(screen);
+        string text = Game.GetText(MsgStr::DialogTextKey(dialogId, strNum));
+
+        auto panel = screen.FindPanel("SpeechPanel");
+        if (panel == null) {
+            return;
+        }
+
+        auto textbox = panel.FindText("SpeechText");
+        if (textbox == null) {
+            return;
+        }
+
+        text = append ? dialog.Text + "##" + text : text + "##" + dialog.Text;
+        text = Game.FormatTags(text, textArgs);
+
+        int lines = 0;
+        isize box;
+        Game.GetTextInfo(text, isize(textbox.Size.width, 1000), TextFormat(FontType(int(textbox.TextFont)), FontFlag(textbox.TextFlags), 0), box, lines);
+
+        Gui::Object? parent = textbox.Parent;
+        if (parent == null) {
+            return;
+        }
+
+        textbox.SetSize(parent.Size.width, Math::Max(box.height, parent.Size.height));
+        textbox.SetText(text);
+    }
+}
+
 // Приём контекста диалога с сервера: разворачиваем тексты из текст-пака, подставляем
 // теги и показываем экран Dialog. Пустой dialogId означает «диалог закрыт» — прячем экран.
 [[ClientRemoteCall]]
-void ReceiveDialogContext(hstring dialogId, ident talkerId, hstring textId, hstring[] answerTextIds, string textArgs, timespan duration)
+void ReceiveDialogContext(hstring dialogId, ident talkerId, hstring textId, hstring[] answerTextIds, string textArgs, timespan duration, uint64 sayRevision,
+                          bool canSay)
 {
+    Gui::HideScreen(GuiScreen::Say);
+
     if (dialogId != EMPTY_HSTRING) {
         string text = Game.GetText(TextPackKey(TextPackName::Dialogs, dialogId, textId));
         Critter? talker = talkerId != ZERO_IDENT ? Game.GetCritter(talkerId) : null;
@@ -936,6 +1036,8 @@ void ReceiveDialogContext(hstring dialogId, ident talkerId, hstring textId, hstr
         params["Text"] = text;
         params["Answers"] = answersOneLine;
         params["TalkTime"] = duration;
+        params["SayRevision"] = sayRevision;
+        params["CanSay"] = canSay;
 
         Gui::ShowScreen(GuiScreen::Dialog, params);
     }

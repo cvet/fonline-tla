@@ -62,7 +62,7 @@ silently dropped or copied into a second conflicting guide.
 | --- | --- |
 | Project layout, backend, sides, state, module lifecycle and globals | [Scripts](../Scripts.md), [Systems](../Systems.md), [ScriptStyle](../ScriptStyle.md) |
 | Stacking, sounds, day tint, options and their regression routes | [Scripts adapters](../Scripts.md#project-adapters-that-must-not-be-bypassed) |
-| Nullable locals/casts/components/Chosen and handler parity | [Nullability](../../Nullability.md) |
+| Nullable locals/casts/components/Chosen and handler parity | [Nullability](../Nullability.md) |
 | Build/task chain, startup, logs, CI and warnings | [BuildAndLaunch](../BuildAndLaunch.md) |
 | Engine update integration and old/new revision comparison | [DocumentationMaintenance](../DocumentationMaintenance.md#engine-submodule-updates) |
 | Native source roles, annotations, pointers, invariants, profiling and EOF | [NativeExtensions](../NativeExtensions.md), explicit Engine reading route |

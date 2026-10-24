@@ -53,6 +53,8 @@ FO_SCRIPT_API nptr<DialogPack> Server_Game_GetDialogPack(ptr<ServerEngine> serve
 ///@ ExportMethod
 FO_SCRIPT_API string Server_Game_RunSpeechScript(ptr<ServerEngine> server, ptr<DialogSpeech> speech, ptr<Critter> cr, nptr<Critter> talker);
 ///@ ExportMethod
+FO_SCRIPT_API void Server_Game_RunSayScript(ptr<ServerEngine> server, ptr<DialogSpeech> speech, ptr<Critter> cr, nptr<Critter> talker, string_view text);
+///@ ExportMethod
 FO_SCRIPT_API bool Server_Game_DialogScriptDemand(ptr<ServerEngine> server, ptr<DialogAnswerReq> demand, ptr<Critter> master, nptr<Critter> slave);
 ///@ ExportMethod
 FO_SCRIPT_API int32_t Server_Game_DialogScriptResult(ptr<ServerEngine> server, ptr<DialogAnswerReq> result, ptr<Critter> master, nptr<Critter> slave);
@@ -228,6 +230,15 @@ nptr<DialogPack> FO_NAMESPACE Server_Game_GetDialogPack(ptr<ServerEngine> server
     }
 
     return pack;
+}
+
+void FO_NAMESPACE Server_Game_RunSayScript(ptr<ServerEngine> server, ptr<DialogSpeech> speech, ptr<Critter> cr, nptr<Critter> talker, string_view text)
+{
+    auto func = server->FindFunc<void, ptr<Critter>, nptr<Critter>, string>(speech->SayScriptFuncName);
+    FO_VERIFY_AND_THROW(func, "Dialog SayScript function not found", speech->SayScriptFuncName);
+
+    bool success = func.Call(cr, talker, string(text));
+    FO_VERIFY_AND_THROW(success, "Dialog SayScript failed", speech->SayScriptFuncName);
 }
 
 string FO_NAMESPACE Server_Game_RunSpeechScript(ptr<ServerEngine> server, ptr<DialogSpeech> speech, ptr<Critter> cr, nptr<Critter> talker)

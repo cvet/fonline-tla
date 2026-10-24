@@ -2,8 +2,8 @@
 
 Read this project guide fully, then the task's owning documents. Human entry:
 [README.md](README.md); full index: [Docs/README.md](Docs/README.md).
-`CLAUDE.md` and `.github/copilot-instructions.md` point here; do not maintain
-competing instruction bodies.
+`.github/copilot-instructions.md` points here; do not maintain competing
+instruction bodies.
 
 ## Start and authority
 
@@ -25,6 +25,7 @@ competing instruction bodies.
 5. Put private task logs, screenshots, scripts, dumps, drafts and worker inputs in ignored
    `Workspace/<task-id>/`. Standard tool outputs keep their owning paths; permanent
    delegation history follows the governing launcher procedure.
+   Maintained guides belong under `Docs/`; keep task reports out of the repository root.
 
 - No `git add`, commit, push, merge, destructive Git operation, publication or
   deployment without explicit action authority. Prepare reviewable local edits;
@@ -77,7 +78,7 @@ competing instruction bodies.
   global lifetime in one module-header line. Do not sweep the list incidentally.
 - Use `T?` for real absence, narrow locals, guard components with `Has<Component>`
   and `Game.Chosen` with `HasChosen`. Keep Event/RemoteCall nullable parity.
-  [Nullability.md](Nullability.md) owns examples and checks.
+  [Nullability.md](Docs/Nullability.md) owns examples and checks.
 - Count-aware item operations go through `ItemStacks::`; Engine item calls do not
   stack. Sound names go through `Sounds::Play`; client/mapper day tint through
   `DayColor` and `Map.SetDayColors`. See [project adapters](Docs/Scripts.md#project-adapters-that-must-not-be-bypassed).
@@ -123,7 +124,7 @@ Verify a real Python 3 interpreter and use UTF-8 for Cyrillic.
 | Task | Required project owner |
 | --- | --- |
 | Build/launch/tests/logs/CI/packages | [BuildAndLaunch](Docs/BuildAndLaunch.md) |
-| Script state/dispatch/adapters | [Scripts](Docs/Scripts.md), [ScriptStyle](Docs/ScriptStyle.md), [Nullability](Nullability.md) |
+| Script state/dispatch/adapters | [Scripts](Docs/Scripts.md), [ScriptStyle](Docs/ScriptStyle.md), [Nullability](Docs/Nullability.md) |
 | Find gameplay or content consumers | [Systems](Docs/Systems.md), then the actual module/assets |
 | GUI/content/localization/config | [ContentWorkflow](Docs/ContentWorkflow.md) |
 | Animation/frame offsets | [Animation](Docs/Animation.md) |

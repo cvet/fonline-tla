@@ -1,15 +1,45 @@
 // FixedItemFrame — выбор кадра предмета в клиенте и маппере, включая статические декорации.
-// Число кадров хранится в прототипе, номер выбранного кадра — в экземпляре карты.
+// Число кадров берётся из ресурса анимации, номер выбранного кадра — из экземпляра карты.
 namespace FixedItemFrame
 {
 
 #if CLIENT || MAPPER
+
+// Временный handle освобождается и при исключении проверки формата спрайта.
+class AnimationResource
+{
+    uint Id = 0;
+
+    AnimationResource(hstring picture)
+    {
+        Id = Game.LoadMapSprite(picture);
+        verify(Id != 0, "Не удалось загрузить анимацию предмета", picture);
+    }
+
+    ~AnimationResource()
+    {
+        if (!IsGameDestroying && Id != 0) {
+            Game.FreeSprite(Id);
+        }
+    }
+}
+
+int GetFrameCount(hstring picture)
+{
+    if (picture == EMPTY_HSTRING) {
+        return 0;
+    }
+
+    AnimationResource resource = AnimationResource(picture);
+    return Game.GetSpriteFrameCount(resource.Id);
+}
 
 [[ModuleInit]]
 void InitFixedItemFrame()
 {
     Game.OnRenderMap_Rebuild.Subscribe(OnMapRebuild);
     Game.AddPropertySetter(ItemProperty::FixedFrame, OnFixedFrameChanged);
+
 #if CLIENT
     Game.OnItemMapIn.Subscribe(OnItemMapIn);
 #endif
@@ -21,17 +51,20 @@ void InitFixedItemFrame()
 void OnMapRebuild(Map map)
 {
     Item[] items = map.GetItems();
+
     for (int i = 0; i < items.length(); i++) {
         Apply(items[i]);
     }
 }
 
 #if CLIENT
+
 [[Event]]
 void OnItemMapIn(Item item)
 {
     Apply(item);
 }
+
 #endif
 
 [[PropertySetter]]
@@ -46,18 +79,23 @@ void Apply(Item item)
         return;
     }
 
-    if (item.FixedFrame > 0 && item.AnimFrameCount > 0) {
-        int frame = Math::Clamp(item.FixedFrame, 1, item.AnimFrameCount);
+    if (item.FixedFrame > 0) {
+        int frameCount = GetFrameCount(item.PicMap);
+        verify(frameCount > 0, "Фиксированный кадр требует анимацию предмета", item.ProtoId);
+
+        int frame = Math::Clamp(item.FixedFrame, 1, frameCount);
         item.StopAnim();
-        item.SetAnimTime(item.AnimFrameCount > 1 ? float(frame - 1) / float(item.AnimFrameCount - 1) : 0.0f);
+        item.SetAnimTime(frameCount > 1 ? float(frame - 1) / float(frameCount - 1) : 0.0f);
         item.FixedFrameApplied = true;
     }
     else if (item.FixedFrameApplied) {
         item.FixedFrameApplied = false;
+
 #if MAPPER
         item.StopAnim();
         item.SetAnimTime(0.0f);
 #endif
+
 #if CLIENT
         item.PlayAnim(EMPTY_HSTRING, true, false);
 #endif

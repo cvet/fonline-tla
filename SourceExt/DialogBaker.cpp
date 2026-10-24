@@ -92,6 +92,7 @@ void DialogBaker::BakeFiles(const FileCollection& files, string_view target_path
                 logging::write("Dialog {} speech {} invalid SayScript function {} (expected void(Critter, Critter?, string))", dlg_pack->PackId, speech->Id, speech->SayScriptFuncName);
                 errors++;
             }
+
             if (speech->DlgScriptFuncName) {
                 if (!server_engine.CheckFunc<void, ptr<CritterTag>, nptr<CritterTag>, string&>(speech->DlgScriptFuncName) && //
                     !server_engine.CheckFunc<int32_t, ptr<CritterTag>, nptr<CritterTag>, string&>(speech->DlgScriptFuncName)) {

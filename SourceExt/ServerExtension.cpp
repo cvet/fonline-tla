@@ -236,7 +236,9 @@ void FO_NAMESPACE Server_Game_RunSayScript(ptr<ServerEngine> server, ptr<DialogS
 {
     auto func = server->FindFunc<void, ptr<Critter>, nptr<Critter>, string>(speech->SayScriptFuncName);
     FO_VERIFY_AND_THROW(func, "Dialog SayScript function not found", speech->SayScriptFuncName);
-    FO_VERIFY_AND_THROW(func.Call(cr, talker, string(text)), "Dialog SayScript failed", speech->SayScriptFuncName);
+
+    bool success = func.Call(cr, talker, string(text));
+    FO_VERIFY_AND_THROW(success, "Dialog SayScript failed", speech->SayScriptFuncName);
 }
 
 string FO_NAMESPACE Server_Game_RunSpeechScript(ptr<ServerEngine> server, ptr<DialogSpeech> speech, ptr<Critter> cr, nptr<Critter> talker)

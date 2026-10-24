@@ -1,5 +1,17 @@
 # Animation and Frame Offsets
 
+## Fixed item frames
+
+`Item.FixedFrame` is the map-authored, persistent frame selection: `0` keeps ordinary
+playback and `1..N` selects a stopped frame, clamped to the loaded resource's frame
+count. `Scripts/FixedItemFrame.fos` queries `Game.GetSpriteFrameCount` using the
+item's current `PicMap`; prototypes do not duplicate that derived count. Temporary
+sprite handles are released after the query. The client resumes normal playback
+when the selection is cleared; Mapper returns to its deterministic first frame.
+Doors and containers retain their own animation behavior.
+
+## Critter animation ownership
+
 TLA owns Fallout filenames, weapon/death anchors, first/last poses and paired actions in
 `Scripts/FalloutAnimation.fos`. `Scripts/Animation.fos` resolves a ready sprite through
 `Game.OnCritterAnimationSprite`; the Engine caches the result and renders it.

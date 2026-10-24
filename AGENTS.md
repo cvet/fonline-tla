@@ -126,6 +126,7 @@ Native C++ conventions:
 - Use `FO_SCRIPT_API` on exported methods/hooks.
 - Profiling zones follow the engine's placement rules (`Engine/Docs/Debugging.md`, "Placing zones"): `FO_TRACE_ZONE(<Category>)` opens a `.cpp` function that frames a tick, does a unit of real work (baking, parsing, a network request), can block, or is rare but expensive; accessors, small helpers, per-element code, `FO_SCRIPT_API` exports (their generated bindings are zoned) and tests take none. Stack traces are built without any per-function macro, so the former `FO_STACK_TRACE_ENTRY()` / `FO_NO_STACK_TRACE_ENTRY()` are gone.
 - Prefer `FO_RUNTIME_ASSERT` / `FO_RUNTIME_ASSERT_STR` for invariants over silent fallbacks.
+- Write `FO_VERIFY_*` and assertion conditions as if the checks could be compiled out: keep required side effects outside them. Execute script callbacks, mutations, I/O and out-parameter calls first, save the result in a named local, then verify it. These macros remain active in release builds; see the [Engine invariant contract](Engine/Docs/en/contributing/coding-contracts/exception-safety.md).
 - Use fixed-width engine aliases (`int32_t`, `uint32_t`, `float32_t`, `size_t`, etc.) where the surrounding code does.
 - Use `numeric_cast` for numeric conversions when narrowing/widening matters.
 - Use pointers for `Entity`-derived objects unless the existing API requires references.

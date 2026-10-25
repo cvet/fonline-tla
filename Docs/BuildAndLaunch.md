@@ -76,6 +76,12 @@ quality gates, native tests, script compilation, baking, platform builds, packag
 and release. It is **not** the same chain: the script gameplay harness is not wired
 into CI. Local success does not prove a remote CI run succeeded.
 
+The native CI job uses the project's pinned Engine to build TLA's own test
+configuration: `Engine/BuildTools/build.sh linux unit-tests Release`, then
+`cmake --build Workspace/build-linux-unit-tests-Release --config Release --target RunUnitTests --parallel 2`.
+This includes the project icon and registered native dialog tests; Engine's
+standalone validation scaffold is a separate Engine-maintainer route.
+
 ## Local runtime and tests
 
 The base config uses localhost, port `4008`, English client text and **Memory**

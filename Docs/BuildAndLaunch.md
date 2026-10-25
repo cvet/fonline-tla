@@ -29,8 +29,16 @@ Android NDK; their conditions and environment variables are in the preset file.
 baked data is in `Baking/`, cache in `Cache/`. These are outputs, as are package
 trees such as `TLA-Dev/`, not canonical authored inputs.
 
+FOnline Tools runs the workspace's VS Code tasks. Every direct bake, script
+compile and native build task first runs `Configure :: Auto` from the workspace
+root (`cmake --preset auto`). Prepare and launch tasks inherit that prerequisite,
+so they also work before the first configuration or after removing `Build/Auto`.
+Configuration errors stop the dependent task. Direct terminal commands still
+require the explicit configure step shown above.
+
 | VS Code task | Purpose |
 | --- | --- |
+| `Configure :: Auto` | Configure `Build/Auto` with the `auto` preset; prerequisite of all CMake build tasks. |
 | `Bake Resources` / `Force Bake Resources` | Incremental bake / deliberately ignore incremental state. See [content workflow](ContentWorkflow.md). |
 | `Compile AngelScript` | Fast script syntax/API check; CMake target `CompileAngelScript`. |
 | `Build :: TLA_*` | Build the named target: Server, ServerHeadless, Client, Mapper, Baker, ASCompiler or UnitTests. Verify the task exists; a CMake target need not have a VS Code task. |

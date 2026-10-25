@@ -55,6 +55,14 @@ event or explicit destroy can invalidate an entity. Read the actual dispatcher,
 callers and ownership boundary when retaining entities across callbacks or waits;
 do not add blanket destroyed/null guards that hide a violated invariant.
 
+Time events remain registered through final callback completion, including a
+client callback suspended by `Yield`. Repeat delays start after that completion.
+`CountTimeEvent(callbackOrId)` includes executing records; retain that default
+for singleton guards, active-status checks and cancellation. Use the optional
+`true` argument only when intentionally counting pending records while allowing
+one independently queued one-shot alongside the executing callback. See the
+[Engine timer contract](../Engine/Docs/en/how-to/scripting/lifecycle-and-concurrency.md).
+
 ## Mutable state and settings
 
 When touching a namespace in `AngelScript.MutableGlobalsAllowedNamespaces`, either

@@ -1,4 +1,4 @@
-// Test_Worldmap — регрессии серверной загрузки изображения рельефа глобальной карты.
+// Test_Worldmap — регрессии серверной глобальной карты: изображение рельефа и генерация встреч.
 namespace Test_Worldmap
 {
 
@@ -14,6 +14,8 @@ void InitTestWorldmap()
 void OnTestingInit()
 {
     Testing::RegisterTest("worldmap", "relief_image_full_size", ReliefImageFullSize);
+    Testing::RegisterTest("worldmap", "encounter_npc_before_player", EncounterNpcBeforePlayer);
+    Testing::RegisterTest("worldmap", "encounter_empty_raiders_row", EncounterEmptyRaidersRow);
 }
 
 // Рельеф (relief_tla.png, 1400x1500) грузится в WorldmapInit на инициализации модулей и читается
@@ -33,6 +35,231 @@ void ReliefImageFullSize(Testing::TestContext ctx)
     // Значение младших бит по контракту GetGlobalMapRelief (0 — вода).
     int relief = Worldmap::GetGlobalMapRelief(reliefWidth - 1, reliefHeight - 1);
     Testing::Expect(ctx, relief >= 0 && relief <= 0xF, "Рельеф должен укладываться в младшие 4 бита");
+}
+
+// Лидер создаётся на отдельной домашней карте: обычное приглашение переносит его позже,
+// а сам GenerateEncounter не должен этого делать.
+Critter? CreateFixtureLeader(Testing::TestContext ctx, Map homeMap)
+{
+    mpos spawn;
+    if (!Testing::Expect(ctx, Test_NpcPlanes::FindMovableHex(homeMap, spawn), "На домашней карте должен найтись проходимый гекс")) {
+        return null;
+    }
+
+    return Testing::SpawnTestNpc(ctx, homeMap, Content::Critter::Brahmin, spawn);
+}
+
+// Запускает настоящий генератор и в любом исходе регистрирует созданную им локацию:
+// CleanupTest обязан уничтожить её даже после исключения.
+Map? GenerateFixtureEncounter(Testing::TestContext ctx, Worldmap::CFoundedEncounter fe, Critter leader)
+{
+    Critter[] group = {leader};
+    Map? result = null;
+    try {
+        result = Worldmap::GenerateEncounter(fe, group);
+    }
+    catch {
+        Testing::Fail(ctx, "Ошибка генератора: " + GetExceptionInfo());
+    }
+
+    if (fe.LocationId != ZERO_IDENT) {
+        ctx.TrackedLocations.insertLast(fe.LocationId);
+    }
+
+    return result;
+}
+
+bool ExpectGeneratedEncounter(Testing::TestContext ctx, Worldmap::CFoundedEncounter fe, Map map)
+{
+    if (!Testing::Expect(ctx, fe.IsGenerated, "Генерация должна завершиться")) {
+        return false;
+    }
+
+    if (!Testing::Expect(ctx, fe.LocationId != ZERO_IDENT, "Генерация должна создать локацию встречи")) {
+        return false;
+    }
+
+    Location? location = Game.GetLocation(fe.LocationId);
+    if (location == null) {
+        Testing::Fail(ctx, "Локация встречи не найдена по fe.LocationId");
+        return false;
+    }
+
+    if (!Testing::Expect(ctx, location.IsEncounter, "Созданная локация должна быть помечена как IsEncounter")) {
+        return false;
+    }
+
+    if (!Testing::Expect(ctx, map.GetLocation().Id == fe.LocationId, "Возвращённая карта должна принадлежать локации fe.LocationId")) {
+        return false;
+    }
+
+    return Testing::Expect(ctx, location.GetMapByIndex(0).Id == map.Id, "Первая карта локации должна быть возвращённой картой");
+}
+
+int CountNpcsByProto(Critter[] npcs, hstring protoId)
+{
+    int count = 0;
+    for (int i = 0; i < npcs.length(); i++) {
+        if (npcs[i].ProtoId == protoId) {
+            count++;
+        }
+    }
+
+    return count;
+}
+
+Critter? FindNpcByProto(Critter[] npcs, hstring protoId)
+{
+    for (int i = 0; i < npcs.length(); i++) {
+        if (npcs[i].ProtoId == protoId) {
+            return npcs[i];
+        }
+    }
+
+    return null;
+}
+
+// Реальная карта e_desert12 содержит трёх авторских Brahmin, поэтому проверяем точный
+// состав: три брамина плюс по одной крысе каждого прототипа, а не просто непустой список.
+bool ExpectEncounterRats(Testing::TestContext ctx, Critter[] npcs)
+{
+    if (!Testing::ExpectEq(ctx, CountNpcsByProto(npcs, Content::Critter::Brahmin), 3, "На карте должны остаться три авторских Brahmin")) {
+        return false;
+    }
+
+    if (!Testing::ExpectEq(ctx, CountNpcsByProto(npcs, Content::Critter::RegularRat), 1, "Генератор должен создать одного RegularRat")) {
+        return false;
+    }
+
+    if (!Testing::ExpectEq(ctx, CountNpcsByProto(npcs, Content::Critter::RegularPigRat), 1, "Генератор должен создать одного RegularPigRat")) {
+        return false;
+    }
+
+    return Testing::ExpectEq(ctx, int(npcs.length()), 5, "Кроме трёх Brahmin и двух крыс на карте не должно быть других NPC");
+}
+
+// GetPlanes с инициализированным массивом-приёмником: ищем план атаки именно на переданного лидера.
+bool HasAttackPlaneTarget(Critter npc, ident targetId)
+{
+    NpcPlanes::NpcPlane[] planes = {};
+    int count = NpcPlanes::GetPlanes(npc, planes);
+    for (int i = 0; i < count; i++) {
+        NpcPlanes::NpcPlane plane = planes[i];
+        if (plane.Type == NpcPlanes::AI_PLANE_ATTACK && plane.Attack_TargId == targetId) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+// Историческая регрессия: до исправления вложенный массив Critter[][] для группы NPC не создавался, и встреча,
+// где NPC идут раньше группы игрока, падала по null при заполнении списка созданных NPC. Реальная группа
+// GROUP_ARRO_Rats даёт по одной RegularRat и RegularPigRat поверх трёх Brahmin карты.
+void EncounterNpcBeforePlayer(Testing::TestContext ctx)
+{
+    Location? home = Testing::CreateTestLocation(ctx, Content::Location::desert_12);
+    if (home == null) {
+        Testing::Fail(ctx, "Не создана домашняя локация фикстуры");
+        return;
+    }
+
+    Map homeMap = home.GetMapByIndex(0);
+    Critter? leader = CreateFixtureLeader(ctx, homeMap);
+    if (leader == null) {
+        Testing::Fail(ctx, "Не создан лидер фикстуры");
+        return;
+    }
+
+    Worldmap::CEncounter encounter = Worldmap::CEncounter();
+    encounter.LocationPid(Content::Location::desert_12);
+    encounter.AddGroup(Worldmap::GROUP_ARRO_Rats, 1, 1);
+    encounter.AddGroup(Worldmap::GROUP_Player, 0, 0);
+    encounter.Fighting(0, 1);
+
+    Worldmap::CFoundedEncounter fe = Worldmap::CFoundedEncounter();
+    fe.Encounter = encounter;
+    fe.PositionX = 500;
+    fe.PositionY = 500;
+
+    Map? result = GenerateFixtureEncounter(ctx, fe, leader);
+    if (result == null) {
+        Testing::Fail(ctx, "Генерация встречи не вернула карту");
+        return;
+    }
+
+    if (!ExpectGeneratedEncounter(ctx, fe, result)) {
+        return;
+    }
+
+    Critter[] npcs = result.GetCritters(CritterFindType::Npc);
+    if (!ExpectEncounterRats(ctx, npcs)) {
+        return;
+    }
+
+    Critter? rat = FindNpcByProto(npcs, Content::Critter::RegularRat);
+    if (rat == null) {
+        Testing::Fail(ctx, "Среди NPC не найден RegularRat");
+        return;
+    }
+
+    Critter? pigRat = FindNpcByProto(npcs, Content::Critter::RegularPigRat);
+    if (pigRat == null) {
+        Testing::Fail(ctx, "Среди NPC не найден RegularPigRat");
+        return;
+    }
+
+    Testing::Expect(ctx, HasAttackPlaneTarget(rat, leader.Id), "RegularRat должен атаковать переданного лидера");
+    Testing::Expect(ctx, HasAttackPlaneTarget(pigRat, leader.Id), "RegularPigRat должен атаковать переданного лидера");
+    Testing::Expect(ctx, leader.MapId == homeMap.Id, "Лидер должен остаться на домашней карте, а не попасть во встречу");
+}
+
+// GROUP_Raiders инициализируется WorldmapInit без объектов. Игрок идёт первым, затем пустая
+// строка рейдеров, затем заполненная крысами; действие связывает пустую и заполненную строки.
+// Так тест падает и при неинициализации строки игрока, и при инициализации только заполненных строк.
+void EncounterEmptyRaidersRow(Testing::TestContext ctx)
+{
+    Location? home = Testing::CreateTestLocation(ctx, Content::Location::desert_12);
+    if (home == null) {
+        Testing::Fail(ctx, "Не создана домашняя локация фикстуры");
+        return;
+    }
+
+    Map homeMap = home.GetMapByIndex(0);
+    Critter? leader = CreateFixtureLeader(ctx, homeMap);
+    if (leader == null) {
+        Testing::Fail(ctx, "Не создан лидер фикстуры");
+        return;
+    }
+
+    Worldmap::CEncounter encounter = Worldmap::CEncounter();
+    encounter.LocationPid(Content::Location::desert_12);
+    encounter.AddGroup(Worldmap::GROUP_Player, 0, 0);
+    encounter.AddGroup(Worldmap::GROUP_Raiders, 0, 0);
+    encounter.AddGroup(Worldmap::GROUP_ARRO_Rats, 1, 1);
+    encounter.Fighting(1, 2);
+
+    Worldmap::CFoundedEncounter fe = Worldmap::CFoundedEncounter();
+    fe.Encounter = encounter;
+    fe.PositionX = 500;
+    fe.PositionY = 500;
+
+    Map? result = GenerateFixtureEncounter(ctx, fe, leader);
+    if (result == null) {
+        Testing::Fail(ctx, "Генерация встречи не вернула карту");
+        return;
+    }
+
+    if (!ExpectGeneratedEncounter(ctx, fe, result)) {
+        return;
+    }
+
+    Critter[] npcs = result.GetCritters(CritterFindType::Npc);
+    if (!ExpectEncounterRats(ctx, npcs)) {
+        return;
+    }
+
+    Testing::Expect(ctx, leader.MapId == homeMap.Id, "Лидер должен остаться на домашней карте, а не попасть во встречу");
 }
 
 #endif

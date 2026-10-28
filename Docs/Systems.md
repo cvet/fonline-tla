@@ -54,6 +54,12 @@ Read the named implementation and tests before making coverage claims.
 Random encounters are the heaviest system in the project and are almost entirely table data; see item 1 in
 [AuditPlan.md](AuditPlan.md).
 
+`Worldmap::GenerateEncounter` initializes every per-group critter list before population
+or inter-group actions, including empty NPC groups. `Test_Worldmap` exercises the real
+`desert_12` fixture with NPC/player ordering and an empty NPC group. Assertions distinguish
+generated actors from map-authored NPCs; generated locations use the harness cleanup tracker
+even when generation throws.
+
 ### Combat and critter rules
 
 | Module | Side | Lines | Entry point | Covered |

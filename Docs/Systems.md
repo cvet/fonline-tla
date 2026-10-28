@@ -9,13 +9,15 @@ this map deliberately does not repeat those: it gives the shape, and the headers
 ## How the code is wired
 
 - **No includes.** Baking sees every `.fos`; cross-module calls are `Namespace::Function()`. A file's
-  namespace always equals its filename. Hand-written gameplay code is at the top of `Scripts/`;
+  namespace matches its filename, apart from documented exceptions such as `ColorExt` → `Color`.
+  Hand-written gameplay code is at the top of `Scripts/`;
   `Core/`, `Generated/`, `Tests/` and `Json/` are separate, and every directory is listed in `TLA.fomain`.
 - **Three dispatchers, many subsystems.** `Main` (server), `ClientMain` (client) and `MapperMain` (mapper)
-  subscribe to engine events in `ModuleInit` and delegate. Almost nothing else subscribes to world events
-  directly; a subsystem exposes functions and its own narrow events instead.
+  subscribe to engine events in `ModuleInit` and delegate. Subsystems also register
+  their own lifecycle/event handlers; trace their `ModuleInit` registrations.
 - **The server is authoritative.** The client queues intent and renders; every state change that matters is
-  a `[[ServerRemoteCall]]` landing in a server module.
+  server-side; client intents arrive through `[[ServerRemoteCall]]`, while
+  server events and time events also mutate authoritative state.
 - **One thread.** Since `Server.SingleThreadedLogic` was turned on, game logic runs on a single worker and
   scripts take no entity cover. See [the script contract](Scripts.md#single-threaded-logic-and-lifetime).
 
@@ -39,6 +41,23 @@ The most useful thing to trace first, because six systems appear in it in order:
 not proof of its current pass or completeness. Line/content counts below are the
 2026-09-02 routing snapshot, with later module additions; they are not live metrics.
 Read the named implementation and tests before making coverage claims.
+
+Deep-dive guides originated at `e2b5b90b0` on 2026-10-24 and were corrected in
+the [2026-10-28 review](Plans/2026-10-28-documentation-review.md). They expand
+the rows below into contracts, formulas and state machines, with static/runtime
+limits and known implementation discrepancies stated explicitly:
+
+| Domain | Deep dive |
+| --- | --- |
+| Attacks, AP, hit/damage/criticals, critter conditions | [Combat](Combat.md) |
+| SPECIAL, skills, perks, experience/levels | [Character](Character.md) |
+| Item protos, stacks, slots, containers, deterioration | [Items](Items.md) |
+| Barter, caps, traders, FixBoy crafting, repair services | [Economy](Economy.md) |
+| Locations, entrances, global-map groups, encounters, cars | [World](World.md) |
+| Registration/login, death, replication, Purgatory | [PlayerLifecycle](PlayerLifecycle.md) |
+| NPC planes, AI packets, patterns, guards, mercs | [NpcAI](NpcAI.md) |
+| Dialog runtime and `.fodlg` format | [Dialogs](Dialogs.md) |
+| Quest architecture and quest cards | [Quests](Quests.md) |
 
 ### World, travel and locations
 
@@ -64,7 +83,7 @@ even when generation throws.
 
 | Module | Side | Lines | Entry point | Covered |
 | ------ | ---- | ----: | ----------- | ------- |
-| `Combat` | S | 3 217 | `CombatAttack`, `ApplyDamage` | — |
+| `Combat` | S | 3 217 | `CombatAttack`, `ApplyDamage` | `Test_Combat` (formula subset) |
 | `Parameters` | S/C | 1 626 | `ModuleInit` registers property getters/setters | `Test_Parameters` |
 | `CritterActions` | S | 1 054 | called by `ChosenActions`; `ProcessAp` | `Test_CritterActions` |
 | `CritterState` | S | 260 | `ModuleInit`; alive/knockout/dead transitions | — |
@@ -73,8 +92,9 @@ even when generation throws.
 | `FalloutAnimation` | S/C/M | 535 | `MapAnimation`; client/mapper `Resolve`, frame selection and splices | `Test_FalloutAnimation` (client QA) |
 | `CritterPresentation` | S/M | 67 | `InitPresentation`; condition/property setters, restored entities and mapper views | `Test_CritterPresentation` |
 
-`Combat` is the largest uncovered system and holds two of the project's longest functions — items 2 and 7
-in the plan point at the same module from different sides.
+The 2026-09-02 audit identified `Combat` as uncovered. A focused formula suite
+now exists; full attack/critical/animation behavior still needs broader tests
+and player checks. Items 2 and 7 in the historical plan discuss that module.
 
 ### Player intent and lifecycle
 
@@ -136,10 +156,12 @@ Location and quest scripts follow the same prefixes as the dialogs — `MapModoc
 
 ## Where to start reading
 
-- Changing a rule (damage, skills, AP): `Parameters` first, then `Combat` or `CritterActions`.
+- Changing a rule (damage, skills, AP): `Parameters` first, then `Combat` or `CritterActions`; contracts and formulas in [Combat](Combat.md) and [Character](Character.md).
 - Changing what a player can do: `ChosenActions` on both sides, then `CritterActions`.
-- Adding to a place: find the location module by prefix, and its dialogs by the same prefix.
-- Adding an NPC behaviour: `NpcPlanes`, then the pattern modules (`Pattern*`).
-- Adding a check or effect callable from a dialog: `Dialog`, which is the authored handler library.
+- Adding to a place: find the location module by prefix, and its dialogs by the same prefix; quest wiring in [Quests](Quests.md).
+- Adding an NPC behaviour: `NpcPlanes`, then the pattern modules (`Pattern*`); the plane model in [NpcAI](NpcAI.md).
+- Adding a check or effect callable from a dialog: `Dialog`, which is the authored handler library; format and runtime in [Dialogs](Dialogs.md).
+- Items, inventory, crafting or trade changes: [Items](Items.md) and [Economy](Economy.md) first.
+- Death, respawn, or account flow: [PlayerLifecycle](PlayerLifecycle.md).
 - Verification: [BuildAndLaunch](BuildAndLaunch.md#select-verification-by-the-change)
   selects focused checks or `Verify :: All` for broad integration.

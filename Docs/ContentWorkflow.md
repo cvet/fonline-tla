@@ -113,6 +113,31 @@ Check content consumers before changing symbols. Dialog special answers require
 an explicit migration decision. Property relocation needs a force bake and
 matching client/server metadata even when the stored name is unchanged.
 
+## Content format quick reference
+
+Representative contracts; system-specific behavior lives in the deep-dive
+guides ([Items](Items.md), [Dialogs](Dialogs.md), [World](World.md),
+[Quests](Quests.md), [Combat](Combat.md)).
+
+| Kind | File | Shape |
+| --- | --- | --- |
+| Item proto | `Items/*.foitem` | `[ProtoItem]`, `$Name` = proto id (→ `Content::Item::<name>`), `$Parent` lists inherited protos, `$Text russ/engl [Desc]` embeds names; plain `Key = Value` property lines. Families: root gameplay protos, `Static/` scenery/walls, `Custom/` project system protos (`default_weapon`, `Trigger`, `ExitGrid`…), `Explode/`, `Flying/` effect protos. |
+| Critter proto | `Critters/*.focr` | `[ProtoCritter]` with `$Parent`; `*Base` stats, `AiId` (Fallout 2 AI packet index), `BagId` (random loot bag), `TeamId`, skills, `KillExperience`. Current quest-NPC dialog bindings primarily live on map instances or in scripts; this is content placement, not a prohibition on proto property values. |
+| Map | `Maps/*.fomap` | `[ProtoMap]` header (`Size`, `DayColor` curve, `Music`, `AmbientSound`) + repeated `[$Name/Critter]`/item instance blocks: `$Id`, `$Proto`, and instance overrides (`Hex`, `Dir`, `DialogId`, `BagId`, `TeamId`, `InitScript`, `Val0..3`). `DialogId` here is the primary quest-NPC binding. |
+| Location proto | `Maps/*.foloc` | `[ProtoLocation]` with `MapEntrances` map/entry pairs, `MapProtos`/`Automaps` map-name lists, `Radius`, and `$Text` entries (name/description plus numeric keys for global-map music/ambient per map). |
+| Dialog | `Dialogs/*.fodlg` | Speech/answer graph with `Demand`/`Result` lines + `[Text russ]`/`[Text engl]` blocks; baked twice (client text pack + server `DialogPack`). Format: [Dialogs](Dialogs.md). |
+| Text pack | `Texts/*.fotxt` | `{key}{num}{text}` entries; the Quest pack keys progress text by `{CritterProperty::X}{value}` + `QName`/`QDesc` (see [Quests](Quests.md)); msg ids are consumed via `MsgStr` constants. |
+| Generated ids | `Scripts/Content.fos` | Declarations of every content id (`Content::Item/Critter/Map/Location/Dialog::*`); regenerate by baking — never hand-edit. |
+
+`Weight` is grams by convention, `Volume` abstract container units;
+`Deterioration` is hundredths of a percent (see [Items](Items.md)). Proto
+inheritance recursively resolves the loaded catalog; parents need not precede
+children in a file. Parent-list order determines overrides; repeated paths
+depend on `Baking.AllowRepeatedProtoParents`, while cycles are rejected.
+Validators: `Tools/ContentQuality`
+guards text-pack parity; the property registrar rejects malformed `///@`
+declarations at bake time.
+
 ## Configuration and secure channel
 
 `TLA.fomain` owns runtime defaults, bake settings and named subconfigs. Preserve

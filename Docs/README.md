@@ -19,6 +19,15 @@ Game-side documentation for FOnline: The Life After. Start with
 | Critter animations, offsets, motion and project/native split | [Animation](Animation.md) |
 | AI-control/MCP launch, screenshots and quest tests | [AiControl](AiControl.md) |
 | Bridge wire schema, observation, actions and privileged QA commands | [AiControlProtocol](AiControlProtocol.md) |
+| Combat pipeline, AP, hit chance, damage, criticals, conditions | [Combat](Combat.md) |
+| SPECIAL, skills, perks, derived stats, experience/levels | [Character](Character.md) |
+| Item protos, stacking, equipment, containers, deterioration/repair | [Items](Items.md) |
+| Barter, currency, traders, FixBoy crafting, repair services | [Economy](Economy.md) |
+| Locations, map entrances, global-map groups, encounters, vehicles | [World](World.md) |
+| Registration/login, death, replication, Purgatory | [PlayerLifecycle](PlayerLifecycle.md) |
+| NPC planes, AI packets, behavior patterns, guards, mercs | [NpcAI](NpcAI.md) |
+| Dialog runtime, `.fodlg` format, baking and handler library | [Dialogs](Dialogs.md) |
+| Quest architecture, quest cards, unreachable content | [Quests](Quests.md) |
 | Update instructions, audit docs/session evidence or reconcile an Engine bump | [DocumentationMaintenance](DocumentationMaintenance.md) |
 | Script-quality checks, heuristics and ratchet | [ScriptQuality tool README](../Tools/ScriptQuality/README.md) |
 
@@ -38,6 +47,9 @@ requirements and revision before treating an old status/count as accepted today.
 | [Resource manager plan](Plans/2026-10-20-resource-manager.md) | Dated resource ownership/refactoring assignment. |
 | [Engine update/publication plan](Plans/2026-10-21-engine-update-publication.md) | Historical validation/publication packet; no current publication authority. |
 | [Sprite offsets plan](Plans/2026-10-22-sprite-frame-offsets.md) | Dated terminology and visual displacement contract work. |
+| [Gameplay systems documentation plan](Plans/2026-10-24-gameplay-systems-docs.md) | Dated assignment for the Combat/Character/Items/Economy/World/PlayerLifecycle/NpcAI/Dialogs/Quests deep-dive guides. |
+| [Documentation follow-up plan](Plans/2026-10-27-documentation-followup.md) | Dated tooling/content-audit/quest-map follow-up; carries the D-1..D-7 owner decision table. |
+| [Documentation review](Plans/2026-10-28-documentation-review.md) | Source-backed corrections, tool regressions, open gameplay discrepancies and upstream reconciliation for the new guides. |
 
 ## History and audit evidence
 

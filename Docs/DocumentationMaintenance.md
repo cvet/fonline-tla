@@ -163,10 +163,14 @@ safety backups until the result is verified.
 ## Final review
 
 Run the smallest checks that prove the actual change. For docs-only work: inspect
-every changed claim against source; audit the full manifest's local links/anchors,
-UTF-8, fences, headings and size exceptions; compare removed clauses/extractions;
-run `git diff --check`; inspect status and index in both repositories. Do not run
-the mutating `Verify :: All` solely to validate Markdown.
+every changed claim against source; use
+[DocsCheck](../Tools/DocsCheck/README.md) (`Check :: Docs Links`) for UTF-8,
+ATX headings, fenced blocks and supported inline links/anchors. Review its
+documented syntax limits, reference links, readability and size exceptions
+separately; compare
+removed clauses/extractions; run `git diff --check`; inspect status and index in
+both repositories. Do not run the mutating `Verify :: All` solely to validate
+Markdown.
 
 Reports state changed owners, actual commands/results, unresolved findings and
 qualification limits. A large coupled review is grouped by function with separate

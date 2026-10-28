@@ -27,6 +27,8 @@ Game-side documentation for FOnline: The Life After. Start with
 | Registration/login, death, replication, Purgatory | [PlayerLifecycle](PlayerLifecycle.md) |
 | NPC planes, AI packets, behavior patterns, guards, mercs | [NpcAI](NpcAI.md) |
 | Dialog runtime, `.fodlg` format, baking and handler library | [Dialogs](Dialogs.md) |
+| Dialog/standalone text input and server-forced answer selection | [DialogSay](DialogSay.md) |
+| Console command access and authoring | [ConsoleCommands](ConsoleCommands.md) |
 | Quest architecture, quest cards, unreachable content | [Quests](Quests.md) |
 | Update instructions, audit docs/session evidence or reconcile an Engine bump | [DocumentationMaintenance](DocumentationMaintenance.md) |
 | Script-quality checks, heuristics and ratchet | [ScriptQuality tool README](../Tools/ScriptQuality/README.md) |

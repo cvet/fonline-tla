@@ -3,8 +3,8 @@
 Account registration and login, character creation, death, replication
 (respawn), the replicator services, and Purgatory. Combat's death/knockout
 transitions are [Combat](Combat.md); registration GUI screens are
-[ContentWorkflow](ContentWorkflow.md) territory. Verified against revision
-`e2b5b90b0` (static analysis).
+[ContentWorkflow](ContentWorkflow.md) territory. Source baseline: project
+`a213c7abe`, Engine `28c84c5d9d`; static review on 2026-10-29.
 
 ## Registration and login
 
@@ -39,7 +39,7 @@ Entry module: [Scripts/PlayerRegistration.fos](../Scripts/PlayerRegistration.fos
   timeouts are engine settings (`ServerNetwork.LoginTimeout`, 0 in dev
   subconfigs).
 
-## Init — `Main::CritterInit` (`Scripts/Main.fos:902`)
+## Init — `Main::CritterInit` (`Scripts/Main.fos`)
 
 First-time player setup: ≤2 traits, gender clamp, age 14–80 (default 25),
 SPECIAL clamps and budget re-check (a mismatched sum resets to all 5s),
@@ -53,7 +53,7 @@ trader's free set (below). Non-first-time inits apply migrations (e.g.
 regeneration and replication driver — see [Combat](Combat.md#action-points))
 starts here.
 
-## Death — `Main::CritterDead` (`Scripts/Main.fos:1160`)
+## Death — `Main::CritterDead` (`Scripts/Main.fos`)
 
 1. Hand slots are moved into inventory so the corpse is fully lootable.
 2. Inventory + hand items are **dropped on the ground** only when the death
@@ -103,7 +103,8 @@ the player is offline too).
    otherwise clear the custom map/entry. With `HellMapPid=repl1`, even the
    normal replicator may count as hell: infer charges from the source-map
    predicate rather than a universal "first free respawn" sequence.
-6. **Revival**: `CritterState::ToAlive`, full HP/AP, limb/eye damage
+6. **Revival**: refresh the actual worn-armor appearance, then
+   `CritterState::ToAlive`, full HP/AP, limb/eye damage
    cleared, poison/radiation cleared, drug effects cleared **except in
    hell** (players stay drugged there), all timeouts zeroed except karma
    voting.

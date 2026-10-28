@@ -3,8 +3,8 @@
 Barter pricing, the caps currency, NPC traders, the FixBoy crafting system,
 skill and paid repair. Items/stacking contracts are [Items](Items.md);
 replication money is covered with the death flow in
-[PlayerLifecycle](PlayerLifecycle.md). Verified against revision `e2b5b90b0`
-(static analysis).
+[PlayerLifecycle](PlayerLifecycle.md). Source baseline: project `a213c7abe`,
+Engine `28c84c5d9d`; static review on 2026-10-29.
 
 ## Barter — [Scripts/Barter.fos](../Scripts/Barter.fos)
 
@@ -13,7 +13,7 @@ Barter is a guarded container session, not a transfer type (see
 from simply "taking" NPC goods.
 
 - **Coefficient**: `k = Clamp(npcSkillBarter − playerSkillBarter, 5, 95)`
-  (`Barter.fos:16-19`); the NPC's skill comes from `Parameters`
+  (`Barter.fos`); the NPC's skill comes from `Parameters`
   (`BarterCoefficient` = `SkillBarter`). No karma/reputation input anywhere
   in the chain.
 - **Prices**: player sells at `cost·(100−k)/100`, buys at
@@ -24,7 +24,7 @@ from simply "taking" NPC goods.
   refuses `IsNoBarter` NPCs, sends the trader's inventory, and sets
   `TransferType = CritBarter` with a fresh `TransferSession`. The client
   mirrors pricing for display only.
-- **`ProcessBarterNpcOffer`** (server RPC via `Scripts/ClientItems.fos:621`)
+- **`ProcessBarterNpcOffer`** (server RPC via `Scripts/ClientItems.fos`)
   re-validates everything: session identity, list shape (≤ 512, no duplicate
   ids), both alive, same map, within `Dialog.TalkDistance`, then recomputes
   `k` server-side and both totals from real inventory (`OnItemCheckMove`
@@ -78,7 +78,7 @@ missing-field default is 0 (it explicitly supplies this value, bypassing
 the constructor's 50 default). `Player.FixBoyDefaultExperience` in [TLA.fomain](../TLA.fomain) is a
 legacy declaration with **no consumer**.
 
-`Rpc_CraftItem` (`[[ServerRemoteCall]]`, `FixBoy.fos:803`) is the only entry:
+`Rpc_CraftItem` (`[[ServerRemoteCall]]`, `FixBoy.fos`) is the only entry:
 state `FixboyList` builds the visible list (view-gated; each entry carries a
 craftability flag), the detail view, or executes `CraftedItem` at
 `FixboyButton`. `CraftedItem` checks `CheckOnCraft` and resources/tools on

@@ -4,9 +4,8 @@ Deep dive into TLA's real-time combat: the attack pipeline, action points,
 hit chance, damage/armor/criticals and critter condition transitions. The
 routing overview is [Systems](Systems.md); the single-threaded/server-authority
 contract is [Scripts](Scripts.md). Animation of combat results on the client is
-covered by [Animation](Animation.md). Everything here was verified against the
-sources at revision `e2b5b90b0` (static analysis; see the verification notes at
-the end).
+covered by [Animation](Animation.md). Source baseline: project `a213c7abe`,
+Engine `28c84c5d9d`; static review on 2026-10-29 (verification limits below).
 
 ## Modules and ownership
 
@@ -29,9 +28,9 @@ the end).
    The attack action checks AP locally for UX only, then sends
    `CurPlayer.ServerCall.Attack(targetId, mode)`.
 2. **RPC arrival.** `ChosenActions::Attack` (`[[ServerRemoteCall]]`,
-   `Scripts/ChosenActions.fos:1318`) resolves `player.GetControlledCritter()`
+   `Scripts/ChosenActions.fos`) resolves `player.GetControlledCritter()`
    and calls `CritterActions::Attack(cr, targetId, mode)`.
-3. **Validation** (`CritterActions::Attack`, `Scripts/CritterActions.fos:811`):
+3. **Validation** (`CritterActions::Attack`, `Scripts/CritterActions.fos`):
    aim byte range (client-supplied `aim` outside `LocationNone..LocationUncalled`
    used to give free aimed shots and read foreign critical-table rows — now an
    exception), active item is a weapon, two-handed vs. damaged arms, use slot
@@ -48,17 +47,17 @@ the end).
 6. **Reporting.** Effects are appended per-critter into a binary search tree
    of `CombatRes` nodes (`Combat::AddEff`) and flushed once per attack with
    `Combat::FlushResults` → each player's `PlayerClientCall.CombatResult(...)`
-   (client handler `ClientMain::CombatResult`, `Scripts/ClientMain.fos:481`).
+   (client handler `ClientMain::CombatResult`, `Scripts/ClientMain.fos`).
    Observers are chosen as `target.GetCritters(WhoSeeMe, Players)` — the set
    of players who can *see* each affected critter.
 
 ## Action points
 
-- Storage is `int32 CurrentAp` (`Scripts/CritterProps.fos:653`, `NoSync`) in
-  hundredths: `Tla::AP_DIVIDER = 100` (`Scripts/Tla.fos:442`). Max is
+- Storage is `int32 CurrentAp` (`Scripts/CritterProps.fos`, `NoSync`) in
+  hundredths: `Tla::AP_DIVIDER = 100` (`Scripts/Tla.fos`). Max is
   `ActionPoints * 100` where `ActionPoints` is a virtual property computed by
   `Parameters::CritterGetActionPoints`.
-- **Spending** (`CritterActions::ProcessAp`, `Scripts/CritterActions.fos:74`):
+- **Spending** (`CritterActions::ProcessAp`, `Scripts/CritterActions.fos`):
   if not enough AP, the critter is *put on wait* until regeneration would
   cover the deficit (`Wait(apRegeneration / ActionPoints * missingAp)`) and
   the action returns false — it is not queued. On success the server computes
@@ -72,10 +71,10 @@ the end).
   adds `maxAp * delta.ms / apRegeneration`, clamped to max.
   `apRegeneration` is the critter's `ApRegenerationTime` or the default
   `Combat.ApRegeneration` (7000 ms) when zero. The client runs the same
-  formula in `ChosenProcess` (`Scripts/ChosenActions.fos:108`) as a
+  formula in `ChosenProcess` (`Scripts/ChosenActions.fos`) as a
   prediction. `CurrentAp` is `NoSync`; do not assume automatic reconciliation
   of this property. Server-side `ProcessAp` remains the action authority.
-- **AP cost** (`Parameters::GetItemUseApCost`, `Scripts/Parameters.fos:1441`):
+- **AP cost** (`Parameters::GetItemUseApCost`, `Scripts/Parameters.fos`):
 
 ```text
 use == USE_USE        -> Movement.RtApCostUseItem (3)
@@ -188,7 +187,7 @@ smoke/mustard/rocket/emp), then damages every non-dead critter in radius
 
 ## Damage: `ApplyDamage`
 
-Order of operations (`Scripts/Combat.fos:1569`):
+Order of operations (`Scripts/Combat.fos`):
 
 1. Guards: dead target or missing map returns; PvP blocks (`IsNoPvp` on either
    player, or a NoPvp player hit by an ownerless mine); sneak modes dropped;
@@ -233,7 +232,8 @@ Order of operations (`Scripts/Combat.fos:1569`):
 
 - **Death** (`CritterState::ToDead`): lowers positive HP to 0, preserves
   negative HP, applies the supplied animation and fires `Game.OnCritterDead`,
-  `cr.OnDead`, and `killer.OnKill`. `ApplyDamage` chooses the death animation
+  `cr.OnDead`, and `killer.OnKill`. It calls `StopMoving` before those events.
+  `ApplyDamage` chooses the death animation
   by damage type/flags and handles the combat rewards. The killer receives
   `target.KillExperience`, kill counters per body type, and scores
   (`Scores::AddScore`, e.g. `Killer`/`Maniac`). Player death/respawn flow

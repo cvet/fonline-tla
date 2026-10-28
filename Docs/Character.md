@@ -4,10 +4,11 @@ SPECIAL, traits, skills, perks, derived combat stats, experience and level
 progression. Property *declaration* lives in
 [Scripts/CritterProps.fos](../Scripts/CritterProps.fos); every derived value
 is a **virtual property** whose getter is registered by
-`Parameters::InitParameters` (`Scripts/Parameters.fos:22-67`) through
+`Parameters::InitParameters` (`Scripts/Parameters.fos`) through
 `Game.SetPropertyGetter` — reading `cr.MaxLife` (or combat code reading
 `cr.DamageResistance[dt]`) always evaluates the formulas below on both
-sides. Verified against revision `e2b5b90b0` (static analysis).
+sides. Source baseline: project `a213c7abe`, Engine `28c84c5d9d`;
+static review on 2026-10-29.
 
 ## Base vs virtual
 
@@ -20,7 +21,7 @@ and drug effects (`Drugs::GetDrugEffect` reads the critter's
 `DrugEffects` dict property; stages/addictions are server time events in
 [Scripts/Drugs.fos](../Scripts/Drugs.fos)).
 
-## SPECIAL getters (`Scripts/Parameters.fos:984-1121`)
+## SPECIAL getters (`Scripts/Parameters.fos`)
 
 | Stat | Extra modifiers beyond Base + drugs |
 | --- | --- |
@@ -37,27 +38,27 @@ game clock, including minutes at the 06:00/18:00 boundaries.
 
 | Property | Formula (`Parameters.fos`) |
 | --- | --- |
-| `MaxLife` | `MaxLifeBase + ST_base + EN_base*2` + drugs, clamp 1..9999 (`:1142`) |
-| `ActionPoints` | `ActionPointsBase + AG_impl/2` + drugs, clamp 1..9999 (`:1150`); stored `CurrentAp` uses hundredths, see [Combat](Combat.md#action-points) |
-| `ArmorClass` | `ArmorClassBase + AG_impl` + drugs + worn armor `Armor_AC·(100−wear%)/100`, clamp 0..90 (`:1234`) |
-| `DamageResistance[type]` | `<type>ResistanceBase` + armor `Armor_DR<type>·(100−wear%)/100`; poison += EN·5, radiation += EN·2; armor perk radiation bonuses (+20..+75); drugs; clamp 0..90 (EMP 0..999) (`:1246`) |
-| `DamageThreshold[type]` | physical-type base + worn armor `Armor_DT<type>`, then per-type drug effects; poison/radiation start at 0, without the DR getter's EN/radiation-perk additions; clamp 0..999 (`:1322`) |
-| `CarryWeight` | `max(CarryWeightBase,0)` + drugs + `ConvertGrams(25 + ST_impl·(25 − 10·SmallFrame))`, clamp 0..2000000000; pounds convert at 453 grams (`:1163`) |
-| `MeleeDamage` | `MeleeDamageBase + (ST_impl > 6 ? ST_impl−5 : 1)` + drugs, clamp 1..9999 (`:1186`) |
-| `Sequence` | `SequenceBase + PE_impl·2` + drugs, clamp 0..9999 (`:1178`) |
-| `HealingRate` | `HealingRateBase + max(1, EN_impl/3)` + drugs, clamp 0..9999 (`:1195`) |
-| `CriticalChance` | `CriticalChanceBase + LK_impl` + drugs, clamp 0..100 (`:1204`) |
-| `MaxCritical` | `MaxCriticalBase` + drugs, clamp −100..100 (`:1212`) |
-| `IsOverweight` | `ItemsWeight > CarryWeight` (`:1158`) |
+| `MaxLife` | `MaxLifeBase + ST_base + EN_base*2` + drugs, clamp 1..9999 |
+| `ActionPoints` | `ActionPointsBase + AG_impl/2` + drugs, clamp 1..9999; stored `CurrentAp` uses hundredths, see [Combat](Combat.md#action-points) |
+| `ArmorClass` | `ArmorClassBase + AG_impl` + drugs + worn armor `Armor_AC·(100−wear%)/100`, clamp 0..90 |
+| `DamageResistance[type]` | `<type>ResistanceBase` + armor `Armor_DR<type>·(100−wear%)/100`; poison += EN·5, radiation += EN·2; armor perk radiation bonuses (+20..+75); drugs; clamp 0..90 (EMP 0..999) |
+| `DamageThreshold[type]` | physical-type base + worn armor `Armor_DT<type>`, then per-type drug effects; poison/radiation start at 0, without the DR getter's EN/radiation-perk additions; clamp 0..999 |
+| `CarryWeight` | `max(CarryWeightBase,0)` + drugs + `ConvertGrams(25 + ST_impl·(25 − 10·SmallFrame))`, clamp 0..2000000000; pounds convert at 453 grams |
+| `MeleeDamage` | `MeleeDamageBase + (ST_impl > 6 ? ST_impl−5 : 1)` + drugs, clamp 1..9999 |
+| `Sequence` | `SequenceBase + PE_impl·2` + drugs, clamp 0..9999 |
+| `HealingRate` | `HealingRateBase + max(1, EN_impl/3)` + drugs, clamp 0..9999 |
+| `CriticalChance` | `CriticalChanceBase + LK_impl` + drugs, clamp 0..100 |
+| `MaxCritical` | `MaxCriticalBase` + drugs, clamp −100..100 |
+| `IsOverweight` | `ItemsWeight > CarryWeight` |
 
 Armor contributions scale down with wear (`GetDeteriorationProc`,
-`Parameters.fos:1219`) — a worn-out armor protects less; the default
+`Parameters.fos`) — a worn-out armor protects less; the default
 protos (`default_armor`/`default_weapon`, `Items/Custom/`) are fallback
 values, not physical slot items. DR/DT armor contributions require an
 actual worn `Item`. Poison/radiation *damage* effects are separate systems
 (`Poison.fos`, `Radiation.fos`); resistances above feed their checks.
 
-## Character generation — `Parameters::CritterGenerate` (`:323-484`)
+## Character generation — `Parameters::CritterGenerate`
 
 Runs on both sides from registration input (7 SPECIAL, 3 tag slots, up to
 2 traits, age, gender). Shared base calculations feed creation, while the
@@ -89,31 +90,31 @@ client-side only
 
 ## Experience and levels
 
-- `CritterSetExperience` (server setter, `Parameters.fos:158`): at the
+- `CritterSetExperience` (server setter, `Parameters.fos`): at the
   level cap without `LevelCapAddExperience` the gain is discarded;
   otherwise Swift Learner adds `5%·rank`, then the level check runs as a
   time event.
-- `UpdateExperienceLevel` (`:179`): while `Experience ≥ NextLevelNeedExp`
+- `UpdateExperienceLevel`: while `Experience ≥ NextLevelNeedExp`
   and below `Player.LevelCap` (666): `Level += 1`; skill points
   `5 + 2·IN_base` (+5 Skilled trait, +2·Educated rank, cap 99); HP growth
   `MaxLifeBase += 2 + EN_base/2 + 4·Lifegiver` only up to
   `Player.MaxLifeLevelSoftCap` (36); a perk slot every 3rd level (4 with
   Skilled).
 - `NextLevelNeedExp = NumericalNumber(level)·1000` — the classic triangular
-  sequence (level 2 at 1000, 3 at 3000, 4 at 6000, …; `Tla.fos:459`).
-- Skill spending `ProcessSkillsUp` (server RPC, `:88`): the skill id is
+  sequence (level 2 at 1000, 3 at 3000, 4 at 6000, …; `Tla.fos`).
+- Skill spending `ProcessSkillsUp` (server RPC, the same module): the skill id is
   validated against `CritterPropertyGroup::Skills` (untrusted input), each
   point costs 1 while skill ≤ 100 (`SkillModAdd2`), then 2..6 points per
   +1 by tier (`SkillModAdd2..6` = 100/125/150/175/200), tag skills get +2
   per spend, everything capped by `Player.SkillMaxValue` (300).
-- Perk spending `ProcessPerkUp` (`:141`): requires an `UnspentPerks` slot
+- Perk spending `ProcessPerkUp`: requires an `UnspentPerks` slot
   and `Perks::PerkCheck` — a large per-perk switch of rank/level/base-stat/
   skill requirements with mutual exclusions (Slayer/Sniper/Terminator;
-  `Scripts/Perks.fos:10`). Taking a perk routes through the
+  `Scripts/Perks.fos`). Taking a perk routes through the
   `CritterSetPerks` setter → `Perks::PerkUp`, which applies server-side
   stat/skill modifiers; most combat perks are flags consumed by
   [Combat](Combat.md). Client UX: level-up sound + Character tab marker
-  (`CritterSetLevel`, `:293`). `CritterSetUnspentPerks` contains an auto-open
+  (`CritterSetLevel`, the same module). `CritterSetUnspentPerks` contains an auto-open
   handler but is not registered in `InitParameters`; its existence alone
   does not prove the screen opens on property changes. The actual
   `Gui/Character.fogui` open handler opens Perk when slots are available.

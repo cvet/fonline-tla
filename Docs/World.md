@@ -3,8 +3,8 @@
 Locations, map entrances and transfers, global-map groups, the worldmap
 encounter engine, and vehicles. Map/city preview screens are covered by
 [Systems](Systems.md); location protos and map files as content are
-[ContentWorkflow](ContentWorkflow.md). Verified against revision `e2b5b90b0`
-(static analysis).
+[ContentWorkflow](ContentWorkflow.md). Source baseline: project `a213c7abe`,
+Engine `28c84c5d9d`; static review on 2026-10-29.
 
 ## Locations — [Scripts/Location.fos](../Scripts/Location.fos)
 
@@ -16,7 +16,7 @@ every map passes `CheckMapForGarbage` are destroyed. Players, NPCs marked
 `IsGeck`, NPC GECK-item carriers and NPCs satisfying
 `!IsNoHome && HomeMapId != map.Id` prevent collection. An NPC at its home
 map does not by itself prevent collection. The check for a GECK *item on the map*
-is a commented-out breadcrumb pending `Item::IsGeck` work. Personal
+is commented out and does not participate in the live predicate. Personal
 (quest/event) locations set `AutoGarbage/Hidden` explicitly. The player's
 known-location list (`KnownLocations` → `KnownLocProtoId` on change) is what
 the global-map UI offers; [Scripts/GlobalMapLocations.fos](../Scripts/GlobalMapLocations.fos)
@@ -78,7 +78,7 @@ The largest content system (~11.5k lines, almost entirely data). Structure:
 - `WorldmapInit` (server start) builds all tables/zones via `SetZone`/
   `AddEncounter` — the bulk of the file. Special one-shot encounters are
   gated by per-critter `SpecialEncounter*` counters (declared as quest-like
-  `Max = 1..3` properties, `Worldmap.fos:17-43`).
+  `Max = 1..3` properties, `Worldmap.fos`).
 - **Flow**: `GlobalProcess` periodically calls `Worldmap::FindEncounter`,
   which rolls the zone's daypart chance and picks a passing encounter.
   `CreateFoundedEncounter` records an ungenerated descriptor
@@ -87,7 +87,7 @@ The largest content system (~11.5k lines, almost entirely data). Structure:
   location/formations lazily through `GenerateEncounter` and returns the
   map/entry. Outdoorsman and movement type (including water/flying) affect
   whether the invitation asks for a choice or forces entry. Car-owner
-  replication reuses the same entry (`Replication.fos:256`), as do caravans
+  replication reuses the same entry (`Replication.fos`), as do caravans
   and slaver hunts. `Worldmap::TestEncounter` is a QA hook to force an
   encounter by its StrNum.
 
@@ -121,7 +121,10 @@ unreachable. Reactivation requires a separate gameplay task.
 ## Verification
 
 Static source trace at the revision above; `Scripts/Tests/Test_Worldmap.fos`
-is the regression owner for the encounter data plumbing. Travel changes
+is the regression owner for relief loading and real encounter generation,
+including NPC/player ordering and empty NPC groups on the `desert_12` fixture.
+These cases are existing upstream coverage, not tests executed by this static
+documentation review. Travel changes
 need a real global-map round trip (solo + group + car) and an encounter
 accept/decline in a client; zone/table edits are pure data — re-run the
 suite and one forced encounter (`TestEncounter` under the QA hook rules in

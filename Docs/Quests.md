@@ -3,8 +3,9 @@
 How TLA quests are actually implemented: state representation, executors,
 progress display, and a per-quest technical card format. Read
 [Dialogs](Dialogs.md) for the dialog runtime that executes most quest
-transitions. Verified against sources at revision `e2b5b90b0` (static
-analysis); the verification boundary is restated at the end.
+transitions. Source baseline: project `a213c7abe`, Engine `28c84c5d9d`;
+static review on 2026-10-29. Static binding discovery does not prove a
+playable quest or a working UI lookup.
 
 ## Architecture
 
@@ -26,7 +27,7 @@ quest is a contract between four pieces:
    - `Max = N` — a real value limit enforced by the property registrar.
    - `Quest = N` — **documentation-only**: the Engine property parser accepts
      and skips it (`Engine/Source/Common/Properties.cpp`, `Quest` tag branch);
-     nothing consumes it at runtime. Note `TLA.fomain:44` still lists a
+     nothing consumes it at runtime. Note `TLA.fomain` still lists a
      `QuestRuntime` namespace in `AngelScript.MutableGlobalsAllowedNamespaces`
      that no longer exists anywhere in the tree.
 2. **Executors**: dialog answers (`Result Property Player X = N`, `Result Item
@@ -42,7 +43,7 @@ quest is a contract between four pieces:
    properties and known pack gaps; it does not prove that every reachable
    state is translated or displayed correctly.
 4. **Display**: on every quest-property change the client property setter
-   `Parameters::CritterSetPropertyQuests` (`Scripts/Parameters.fos:282`) looks
+   `Parameters::CritterSetPropertyQuests` (`Scripts/Parameters.fos`) looks
    up the two-token Quest pack key and shows the progress message. The PipBoy
    quest list (code in `Gui/PipBoy.fogui`, generated into
    `Scripts/Generated/GuiScreens.fos`) attempts to group non-zero properties
@@ -85,8 +86,8 @@ and representative quests.
 
 ## Card: `KlamBobWater` — "Get distilled water for Whiskey Bob" (bound content)
 
-- **Identity**: property `KlamBobWater` (`CritterProps.fos:401`, `Quest = 3201`,
-  `Max = 3`, uint8). Texts: `Texts/Quest.engl.fotxt:30-35` (QName `Klamath`).
+- **Identity**: property `KlamBobWater` (`CritterProps.fos`, `Quest = 3201`,
+  `Max = 3`, uint8). Texts: `Texts/Quest.engl.fotxt` (QName `Klamath`).
 - **Files**: `Dialogs/klam_bob.fodlg` (Whiskey Bob, giver/completion),
   `Dialogs/vc_melinda.fodlg` and `Dialogs/vc_garry.fodlg` (Vault City,
   pointer + supplier). No dedicated script module; all transitions are dialog
@@ -106,9 +107,9 @@ and representative quests.
 | State | Event (dialog node) | Conditions | Actions | New state |
 | --- | --- | --- | --- | --- |
 | 0 or 1 | Bob `Speech 19 → Answer Exit` | `KlamBobWater < 2`; normal route reaches 18/19 via Bob's no-stock DenJaneVodka branch | `KlamBobWater = 1` | 1 |
-| 1 | Melinda `Speech 2 → Answer 3` (`vc_melinda.fodlg:10`) | `== 1` | — (points to Garry) | 1 |
-| 1 | Garry `Speech 4 → Answer 5` (`vc_garry.fodlg:19-22`) | `bottle_caps > 199` | `bottle_caps -= 200`; `bottle_full += 20`; `KlamBobWater = 2` | 2 |
-| 2 | Bob hub `Speech 6 → Answer 20` (`klam_bob.fodlg:54-62`) or `Speech 17 → Answer 20` (`:112-120`) | `== 2` and `bottle_full > 19` | `bottle_full -= 20`; `bottle_caps += 400`; **NPC** `booze += 200`, `bottle_caps -= 400`; `Experience += 1500` (hub) or `+300` (side node); `KlamBobWater = 3` | 3 |
+| 1 | Melinda `Speech 2 → Answer 3` (`vc_melinda.fodlg`) | `== 1` | — (points to Garry) | 1 |
+| 1 | Garry `Speech 4 → Answer 5` (`vc_garry.fodlg`) | `bottle_caps > 199` | `bottle_caps -= 200`; `bottle_full += 20`; `KlamBobWater = 2` | 2 |
+| 2 | Bob hub `Speech 6 → Answer 20` (`klam_bob.fodlg`) or `Speech 17 → Answer 20` | `== 2` and `bottle_full > 19` | `bottle_full -= 20`; `bottle_caps += 400`; **NPC** `booze += 200`, `bottle_caps -= 400`; `Experience += 1500` (hub) or `+300` (side node); `KlamBobWater = 3` | 3 |
 | 3 | No further `KlamBobWater` write in these dialogs | — | — (terminal quest state; no dedicated `== 3` greeting) | 3 |
 
   Note the source choice matters: both completion nodes exist and the hub one

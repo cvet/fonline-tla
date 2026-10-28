@@ -3,8 +3,8 @@
 The dialog system: the `.fodlg` authoring format, the server runtime that
 checks demands and applies results, the native baker, and the authored
 handler library. Quest state transitions ride on this system — see
-[Quests](Quests.md). Routing overview: [Systems](Systems.md). Verified
-against revision `e2b5b90b0` (static analysis).
+[Quests](Quests.md). Routing overview: [Systems](Systems.md). Source baseline:
+project `a213c7abe`, Engine `28c84c5d9d`; static review on 2026-10-29.
 
 ## Shape
 
@@ -14,8 +14,8 @@ against revision `e2b5b90b0` (static analysis).
 | [Scripts/Dialogs.fos](../Scripts/Dialogs.fos) | Server runtime: `RunDialog`, `SpeechAnswer` RPC, `CloseDialog`, demand/result evaluation (`CheckAnswerDemands`, `UseAnswerResults`), dialog context component; client context receiver. |
 | [Scripts/Dialog.fos](../Scripts/Dialog.fos) | Authored handler library: `[[DialogDemand]]`/`[[DialogResult]]` functions dialogs call by name. |
 | `SourceExt/Dialogs.cpp/.h`, `SourceExt/DialogBaker.cpp` | Project native: `.fodlg` parser and baker ([NativeExtensions](NativeExtensions.md)). |
-| `SourceExt/ServerExtension.cpp:233-345` | Native bridge: `Game.RunSpeechScript`, `Game.DialogScriptDemand`, `Game.DialogScriptResult` — find AS functions by name and verify their attributes. |
-| `SourceExt/TestDialogs.cpp` | Native unit tests for dialog value normalization (`@token`, `Content::*`, boolean `0/1` spelling). |
+| `SourceExt/ServerExtension.cpp` | Native bridge: `Game.RunSpeechScript`, `Game.DialogScriptDemand`, `Game.DialogScriptResult` — find AS functions by name and verify their attributes. |
+| `SourceExt/TestDialogs.cpp` | Native tests for value normalization and independent `SayScript` parsing/rejection. |
 | [Scripts/NpcDialog.fos](../Scripts/NpcDialog.fos) | Separate system: autonomous NPC-to-NPC barks (table-driven phrases + scene triggers), not player dialogs. |
 | `Gui/Dialog.fogui` | Client dialog screen (modal talk UI). |
 
@@ -34,6 +34,7 @@ Free-form notes.
 [Dialog]
 Speech <id>                      # node; Speech 1 routes to the first matching answer
   Script Ns::Func                # optional speech script: fills TextArgs
+  SayScript Ns::HandleText       # optional text-input handler, before any Answer
   Answer <link> # comment        # next Speech id, or Exit / Exit* variants
     Demand Property Player KlamBobWater == 2
     Demand Item Player bottle_full > 19
@@ -56,11 +57,11 @@ Speech <id>                      # node; Speech 1 routes to the first matching a
 ```
 
 - **Answer labels**: `Answer 18` links to `Speech 18`; `Exit` closes (the
-  parser canonicalizes `Exit`/`Exit*` spellings, `SourceExt/Dialogs.cpp:96`);
+  parser canonicalizes `Exit`/`Exit*` spellings, `SourceExt/Dialogs.cpp`);
   `*` suffixes on any label only disambiguate multiple answers with the same
   target within one speech. The special links `Barter` (-2) and `Attack` (-3)
   come from the `///@ Enum DialogAnswerLink` metadata in
-  `Scripts/Dialogs.fos:35-36` and must stay globally visible for the baker.
+  `Scripts/Dialogs.fos` and must stay globally visible for the baker.
 - **Demands**: conditions normally form an AND sequence, with explicit OR
   markers handled by the runtime. `Property Player|Npc <prop> <op> <value>`
   compares a property by index (`< > = ! } {` and accepted spellings in the parser);
@@ -91,25 +92,28 @@ Speech <id>                      # node; Speech 1 routes to the first matching a
 ## Runtime flow (server)
 
 1. **Entry points**: the ordinary path is the action-cursor talk action
-   (`Scripts/DropMenuHandler.fos:319` → `Dialogs::RunDialog`). Scripted
-   entries: doors (`Scripts/Item.fos:123` `DoorAutoDialog`), bases
-   (`Scripts/Base.fos:256`), events (`GameEventRacing`, `DenGhost`), item use
-   (`Scripts/ClientItems.fos:615`), energy barriers, etc.
-2. **`RunDialog(cr, talker, ignoreDistance)`** (`Scripts/Dialogs.fos:58`):
-   the talker must have a `DialogId` and both must pass `IsCrittersCanTalk`
+   (`Scripts/DropMenuHandler.fos` → `Dialogs::RunDialog`). Scripted
+   entries: doors (`Scripts/Item.fos` `DoorAutoDialog`), bases
+   (`Scripts/Base.fos`), events (`GameEventRacing`, `DenGhost`), item use
+   (`Scripts/ClientItems.fos`), energy barriers, etc.
+2. **`RunDialog(cr, talker, ignoreDistance)`** (`Scripts/Dialogs.fos`):
+   in the NPC overload, the talker must have a `DialogId` and both pass `IsCrittersCanTalk`
    (alive, same map, distance ≤ `TalkDistance`/`Dialog.TalkDistance` = 3).
-   Speech 1 is a *router*: its first demand-passing answer's results run, and
+   The dialog-id overload permits a null talker for scenery/script dialogs.
+   The first pack speech (conventionally Speech 1) is a *router*: its first
+   demand-passing answer's results run, and
    its link selects the actual first visible speech (the classic
    "Преддиалоговые установки" pattern). A speech with no visible answers is
-   spoken over the NPC's head (`Messaging::Say`) instead of opening the UI.
+   spoken over the NPC's head (`Messaging::Say`), or shown as info for a
+   scenery dialog, instead of opening the UI; this also applies to later speeches.
 3. **Context**: talking state lives in the `DialogContext` critter component
    (dialog id, talker, current/previous speech, visible answer indices,
-   deadline, TextArgs). A 1-second repeating time event (`ProcessDialog`)
+   deadline, TextArgs and `SayRevision`). A 1-second repeating time event (`ProcessDialog`)
    closes the dialog when the critter moves, the `Dialog.TalkMaxTime`
    (100 s) elapses, or the talker breaks distance rules (unless
    `ignoreDistance`).
 4. **Answer selection** (`SpeechAnswer` `[[ServerRemoteCall]]`,
-   `Scripts/Dialogs.fos:162`): the client sends an *index* into the visible
+   `Scripts/Dialogs.fos`): the client sends an *index* into the visible
    answer list. The server closes on close/barter pseudo-indices, re-evaluates
    demands of the current speech's answers with `recheck = true`, skipping
    `NoRecheck` demands (anti-cheat;
@@ -121,15 +125,24 @@ Speech <id>                      # node; Speech 1 routes to the first matching a
 5. **Lifecycle safety**: `InitDialogs` subscribes to knockout/dead/finish and
    closes the dialog. The answer path checks `Talking` and `DialogId` after
    callbacks; do not generalize that to detecting every same-pack speech switch.
-6. **Client**: `ReceiveDialogContext` (`Scripts/Dialogs.fos:912`) formats the
+6. **Client**: `ReceiveDialogContext` (`Scripts/Dialogs.fos`) formats the
    speech and answers with `Game.FormatTags` and shows `Gui/Dialog.fogui`
    (the AiControl bridge also snapshots the state for automation).
+
+`SayScript` is separate from the entry `Script`: it receives submitted text
+as `void(Critter player, Critter? talker, string text)`. The baker checks
+that signature. The context carries a revision and `canSay`; `Say` resolves
+the active server-side binding rather than accepting a client-selected handler.
+Speech changes, closure and reconnect invalidate old input. Full text-input,
+standalone callback and server `ForceDialogResult` contracts belong to
+[DialogSay](DialogSay.md); the latter selects a displayed answer index, not
+a speech id.
 
 ## Script handler contract
 
 `Demand Script Ns::Func` and `Result Script Ns::Func` resolve functions by
 name at call time; the native bridge requires the `DialogDemand`/
-`DialogResult` attribute (`SourceExt/ServerExtension.cpp:264,295`) —
+`DialogResult` attribute (`SourceExt/ServerExtension.cpp,295`) —
 `AngelScript.ExtraDirectCallBlockingAttributes` additionally forbids calling
 them directly from scripts. Signatures (master = Player/Npc per the demand's
 `Who`, slave = the other side):
@@ -171,5 +184,6 @@ chance rolls (`ChanceOneFromTwo/Three/Five`), loyalty/click-counter checks,
    found" exception source.
 4. Verify through the normal talk path in a client; `Dialog.TalkDistance`/
    `TalkMaxTime` from [TLA.fomain](../TLA.fomain) frame the interaction.
-   `SourceExt/TestDialogs.cpp` covers only native value normalization, not
-   content.
+   `SourceExt/TestDialogs.cpp` covers native normalization and `SayScript`
+   parsing; `Scripts/Tests/Test_Say.fos` covers callback ownership and
+   cancellation. Neither proves every authored conversation or translation.

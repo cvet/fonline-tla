@@ -4,14 +4,15 @@ The plane-based NPC behavior system: the plane queue, the global decision
 layer, Fallout 2 AI packets, behavior patterns, guards, mercs and pets.
 Combat execution used by planes is [Combat](Combat.md); planes call
 `CritterActions::Attack/PickItem/MoveInvItem` like any other client.
-Verified against revision `e2b5b90b0` (static analysis).
+Source baseline: project `a213c7abe`, Engine `28c84c5d9d`;
+static review on 2026-10-29.
 
 ## The plane model — [Scripts/NpcPlanes.fos](../Scripts/NpcPlanes.fos)
 
 Every non-player critter runs a 1-second repeating time event (first fire
 randomized) → `ProcessAi`. Its behavior is a priority queue of **planes**,
 held in the script-side pool `dict<ident, NpcPlane[]> AllNpcPlanes`
-(`NpcPlanes.fos:670`) — planes are *not* persisted and are dropped when the
+(`NpcPlanes.fos`) — planes are *not* persisted and are dropped when the
 NPC leaves a map (`OnMapCritterOut` → `DropPlanes`). A declared
 `Critter.Planes` property is a migration breadcrumb, not the live pool.
 
@@ -36,7 +37,7 @@ inserts sorted by priority and fires `OnNpcPlaneBegin` — `StopChain` vetoes
 (the plane is discarded). `NextPlane(reason)` fires `OnNpcPlaneEnd`;
 `ContinueChain` removes the plane, `StopChain` **re-queues** it behind equal
 priorities (a handler veto keeps the plane alive). The `REASON_*` vocabulary
-(`NpcPlanes.fos:38-65`) is the API between the engine-side execution and the
+(`NpcPlanes.fos`) is the API between the engine-side execution and the
 decision layer: begin `GO_HOME/FOUND_IN_ENEMY_STACK/FROM_DIALOG/FROM_SCRIPT/
 RUN_AWAY`, end `SUCCESS/HEX_BUSY/DEADLOCK/TRACE_FAIL/...`, run
 `ATTACK_WEAPON/ATTACK_DISTANTION/ATTACK_USE_AIM`.

@@ -37,12 +37,13 @@ and hashes are retained under ignored `Workspace/documentation-review-20261028/`
   delegate a coherent bounded implementation if one remains after diagnosis.
 - [x] Run the documentation checker/self-tests, Python tool tests and byte-stable
   quest regeneration; inspect formatting and the complete staged diff.
-- [ ] Commit the reviewed package, then rebase onto fresh `origin/master`;
+- [x] Commit the reviewed package, then rebase onto fresh `origin/master`;
   preserve safety refs and resolve conflicts by source ownership.
-- [ ] Align clean Engine `master` with the resulting project pin, recheck incoming
+- [x] Align clean Engine `master` with the resulting project pin, recheck incoming
   contract changes, rerun affected checks and commit reconciliation if needed.
-- [ ] Record actual results, remaining findings and qualification boundaries;
-  verify clean trees, ancestry and exact root/Engine gitlink alignment.
+- [x] Record actual results, remaining findings and qualification boundaries;
+  verify ancestry and exact root/Engine gitlink alignment.
+- [x] Commit the reconciliation and confirm clean final project/Engine trees.
 
 ## Decisions and verification
 
@@ -124,4 +125,40 @@ documenting them is not permission to implement them.
 | Drug stages update the addiction array, while legacy flags still have dialog consumers | `Drugs`, `CritterProps`, `klam_jura`; no assumption that the flags mirror live stages. |
 | Caravan/event/safe-zone startup calls are commented out; group-size config has no traced consumer | `Main`, `Caravan`, `GameEvent`, `NoPvpMaps`, `GlobalmapGroup`; references/settings alone do not prove activation. |
 
-Final verification and rebase reconciliation remain in progress.
+## Rebase and final qualification — 2026-10-29
+
+The reviewed package was committed as `a7fb926ce`, preserved by
+`safety/docs-review-20261028-reviewed`, then rebased without conflicts onto
+`a213c7abe0013e0b1d82c7e8aae78d8b24805199`. Its replayed commit is `514f87f8d`.
+Engine `master` fast-forwarded from `57424cb5d2` to the project's committed pin
+`28c84c5d9d21f5a33b2122977314383842dfe414`; no separate Engine commit/bump was made.
+
+Reconciliation covers `SayScript`/`SayRevision` and server answer selection,
+public equipment data, actual worn-armor refresh/removal/replication, fixed item
+frames, stopping movement before death events and the new Worldmap regression
+owners. Source revision markers now identify the integrated baseline; obsolete
+line offsets were replaced by owning paths/symbols. The docs index routes to
+DialogSay and ConsoleCommands. Incoming plan/test/history changes were preserved.
+
+Actual post-rebase checks:
+
+- `py -3 -X utf8 -m pytest Tools -q`: **192 passed / 89 subtests passed**.
+- `check_docs.py --selftest`: OK; supported corpus audit: **56 pages / 0 findings**.
+- Both quest generators execute and independently regenerate the same three
+  files byte-for-byte (165 properties, 1684 answer rows, 159 chains, 48 multi-family
+  properties); created temporary roots are removed.
+- Raw UTF-8/inventory and size review pass. Largest new guide is 19,583 bytes;
+  startup/index/overview thresholds hold. The three existing oversized reference/
+  history records retain their dated scope and section maps.
+- Frozen English identity baseline bytes are unchanged. Git checkout's EOL
+  conversion was reconciled with owned output contracts; no tool content diff
+  remains after rebase. Root/Engine whitespace checks and unmerged-path checks pass.
+
+This task changes documentation and Python verification tooling, not gameplay,
+content or native implementation. No new native build, bake, script-harness run,
+GUI/runtime, performance, persistence, platform or CI acceptance is claimed.
+Upstream's recorded integration/runtime results remain historical evidence.
+The reconciliation commit was followed by clean project/Engine status checks,
+project divergence **ahead 2 / behind 0**, no unmerged paths and exact committed
+gitlink/Engine-HEAD equality. Both remain on `master`; commits are local.
+Private evidence and safety references are retained.

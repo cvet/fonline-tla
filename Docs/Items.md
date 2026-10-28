@@ -3,8 +3,8 @@
 Item prototypes, the stacking adapter, equipment slots, containers, item
 movement, and deterioration/repair. Combat consumption of these contracts is
 [Combat](Combat.md); the workflow rules for authored inputs are
-[ContentWorkflow](ContentWorkflow.md). Verified against revision `e2b5b90b0`
-(static analysis).
+[ContentWorkflow](ContentWorkflow.md). Source baseline: project `a213c7abe`,
+Engine `28c84c5d9d`; static review on 2026-10-29.
 
 ## The stacking adapter — [Scripts/ItemStacks.fos](../Scripts/ItemStacks.fos)
 
@@ -15,9 +15,9 @@ property; new items default to 1 in `OnItemInit`, which runs at
 
 | Rule | Detail |
 | --- | --- |
-| On a critter | Stackable units of one proto merge into one stack — the first item of that proto in any slot (`FindStack(Critter, pid)` at `ItemStacks.fos:35`). Non-stackable items stay separate. |
-| In a container | Stackable units merge per *stack section* (`FindStack(Item, pid, stackId)` at `:42`); an empty section matches any. `Tla::RootContainerStack()` (`any()`) is the root section used by containers. |
-| On a map hex | Stacks never merge: a stackable proto becomes exactly one instance carrying the full count; non-stackable become up to `Critter.MaxAddUnstackableItems` (10) instances (`AddItem(Map, ...)` at `:144`). |
+| On a critter | Stackable units of one proto merge into one stack — the first item of that proto in any slot (`FindStack(Critter, pid)` at `ItemStacks.fos`). Non-stackable items stay separate. |
+| In a container | Stackable units merge per *stack section* (`FindStack(Item, pid, stackId)` in this module); an empty section matches any. `Tla::RootContainerStack()` (`any()`) is the root section used by containers. |
+| On a map hex | Stacks never merge: a stackable proto becomes exactly one instance carrying the full count; non-stackable become up to `Critter.MaxAddUnstackableItems` (10) instances (`AddItem(Map, ...)` in this module). |
 
 API (server): `AddItem` (critter/container/hex targets, optional initial
 property dict), `CountItem`, `DestroyItem` (whole/partial by count/by pid),
@@ -27,7 +27,7 @@ an existing stack or move a `SplitItem` piece), `SplitItem` (stackable only,
 source destroyed if emptied). Return values differ by overload: critter adds
 return the last created instance, hex adds the first — both are placement
 facts, not identity guarantees. The client has its own `CountItem` duplicate
-and a local-only `CloneItem` for offer previews (`Scripts/ItemStacks.fos:307-329`).
+and a local-only `CloneItem` for offer previews (`Scripts/ItemStacks.fos`).
 
 Bypassing the adapter with `Critter.AddItem`/`Map.AddItem`/count-taking
 destroys is a contract violation — see
@@ -37,27 +37,29 @@ owner: `Scripts/Tests/Test_ItemStacks.fos`.
 ## Equipment slots
 
 `CritterItemSlot` is engine `Inventory = 0`, `Main = 1`, `Outside = 255`,
-extended by `Scripts/GameEnums.fos:420-421` with `Secondary = 2`,
+extended by `Scripts/GameEnums.fos` with `Secondary = 2`,
 `Armor = 3`. [TLA.fomain](../TLA.fomain) `Critter.CritterSlot*` vectors index
-by slot value: all four slots enabled; `SendData = True False True True`
-(the **Main hand item is not synced as data** — clients see it through
-actions/hand protos); `MultiItem = True False False False` (only Inventory
-holds several items).
+by slot value: all four slots enabled; `SendData = False True True True`
+(Main, Secondary and Armor allow public item data; Inventory does not).
+`Item::CanSendItem(as_public)` applies this vector only to public sends, so
+it does not suppress the owner's inventory data. `MultiItem = True False
+False False` means only Inventory holds several items.
 
-`CritterItem::GetActive(cr, slot)` (`Scripts/CritterItem.fos:9-26`) never
+`CritterItem::GetActive(cr, slot)` (`Scripts/CritterItem.fos`) never
 returns null for combat-relevant slots: an empty Armor slot yields the
 `default_armor` proto, empty weapon slots the `default_weapon` proto
 (`Items/Custom/`, marked "used in engine"). This is why combat code can call
 `WeaponHelpers` on an unarmed critter.
 
 Slot-move rules (`ItemMovement::OnCritterCheckMoveItem`,
-`Scripts/ItemMovement.fos:41-88`): dropping is always allowed; **Main** weapon
+`Scripts/ItemMovement.fos`): dropping is always allowed; **Main** weapon
 must match the critter model's `Weapon_StateAnim` capability; **Armor** only
 accepts `ItemType::Armor` from Inventory and never when `IsNoArmor`; custom
-slots above Armor only accept an item already in that slot. Equipping armor
-recomputes the critter model (`Armor_CrTypeMale/Female` + `aa.frm`, with the
-long-haired male jumpsuit special case) and sets `CurrentArmorPerk`
-(`ItemMovement.fos:94-143`). Ground pickup fills a weapon only when
+slots above Armor only accept an item already in that slot.
+`ItemMovement::RefreshArmorAppearance` derives the model and `CurrentArmorPerk`
+from the item actually in Armor (including removal/destruction and replication),
+using `Armor_CrTypeMale/Female` + `aa.frm` and the long-haired male special case.
+Ground pickup fills a weapon only when
 `Weapon_MaxAmmoCount > 0 && AmmoCount == 0`; a configured `AmmoPid`
 is retained, with `Weapon_DefaultAmmoPid` used only when the pid is empty.
 The free swap is Main↔Secondary
@@ -67,11 +69,11 @@ The free swap is Main↔Secondary
 ## Containers and transfers
 
 Container capacity is `Container_Volume` in the same abstract units as item
-`Volume`; `CritterActions::CanPutItemsInContainer` (`Scripts/CritterActions.fos:439`)
+`Volume`; `CritterActions::CanPutItemsInContainer` (`Scripts/CritterActions.fos`)
 sums existing root-section stacks plus the moving batch in saturation-safe
 int64 math. Cycles are prevented (`WouldCreateContainerCycle`, depth 256).
 The unified server operation is `CritterActions::OperateContainer`
-(`Scripts/CritterActions.fos:494`), driven by the critter's active
+(`Scripts/CritterActions.fos`), driven by the critter's active
 `TransferType`/`TransferContainerId`/`TransferSession`; it re-validates
 container existence, openness (`Container_Changeble`/`Opened`), distance
 (including multihex), visibility (`IsNoLoot`/`IsNoSteal` filtering), weight
@@ -118,6 +120,11 @@ with the skill timeout (`GameTime::RepairTimeout`) and a cost refresh.
 
 ## Item scripts and spawning
 
+- `FixedFrame` is a project `PublicSync Persistent` item property, applied by
+  `FixedItemFrame` on the client/mapper for map items other than doors and
+  containers. Positive values clamp to 1..the loaded animation's frame count;
+  0 releases the fixed pose (client resumes playback, mapper returns to frame 0).
+  Frame count comes from the resource, not an authored `AnimFrameCount` override.
 - Dynamic items get behavior by `SetupScript(...)` init functions:
   doors (`Item.fos`: auto-close from `Val3` seconds, dialog doors running
   `Dialogs::RunDialog`), holodisks (copy `Val0` to `HolodiskNum` then detach

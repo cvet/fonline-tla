@@ -92,7 +92,8 @@ destroy entities; follow the actual owner/lifetime boundary.
 Use `Format :: Scripts` or
 [format_project.py](../Tools/Formatter/format_project.py), never raw clang-format
 on `.fos`/`.fogui`: the wrapper repairs nullable suffixes that clang-format treats
-as ternary operators (`T ?`, split casts and arrays). It preserves the detected
+as ternary operators (`T ?`, split casts and arrays), including nullable returns
+with namespace-qualified parameter types or enum defaults. It preserves the detected
 line-ending style and normalizes EOF to one terminator. Existing script CRLF
 must be preserved when manually rewriting a source file.
 

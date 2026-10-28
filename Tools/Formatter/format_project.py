@@ -53,10 +53,10 @@ NULLABLE_DECL_RE = re.compile(
 
 # Nullable return type on a method signature alone on its line, e.g.
 # `    Item ? GetTargetItem()`. Anchored to the line and terminated by the
-# closing `)` (no `:`/`;` in the parameter list), which a mid-line ternary
+# closing `)` (no lone `:` or `;` in parameters; `::` qualifies types), which a mid-line ternary
 # never is.
 NULLABLE_RETURN_RE = re.compile(
-    r'(?m)^( *)([A-Z][\w:]*(?:\[\])?) +\? +([A-Za-z_]\w*)\(([^:;]*)\)( *)(?=\r?$)'
+    r'(?m)^( *)([A-Z][\w:]*(?:\[\])?) +\? +([A-Za-z_]\w*)\(((?:[^:;]|::)*)\)( *)(?=\r?$)'
 )
 
 # Same nullable return type, but clang-format also broke the line after the `?`

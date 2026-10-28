@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
-SUPPORTED_PROTO_EXTENSIONS = {'fopro', 'foloc', 'fomap', 'focr', 'foitem'}
+SUPPORTED_PROTO_EXTENSIONS = {'fopro', 'foloc', 'fomap', 'focr', 'foitem', 'foinfo'}
 UTF8_BOM = b'\xef\xbb\xbf'
 SECTION_ENTITY_MAP = {
     'ProtoItem': 'Item',

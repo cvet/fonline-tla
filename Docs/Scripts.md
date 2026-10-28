@@ -63,6 +63,17 @@ for singleton guards, active-status checks and cancellation. Use the optional
 one independently queued one-shot alongside the executing callback. See the
 [Engine timer contract](../Engine/Docs/en/how-to/scripting/lifecycle-and-concurrency.md).
 
+## World clock
+
+`MapTime` derives calendar fields from elapsed synchronized milliseconds, scaled
+by `WorldTime.Multiplier`, from October 30 of `WorldTime.StartYear`. Fresh-world
+initialization in `Main.GenerateWorld` converts its authored initial date to that
+elapsed domain before setting the clock. `PackSynchronizedTime` maps a date into
+the Engine's current synchronized domain; it does not perform this project epoch
+and multiplier conversion. Do not multiply that system-date offset as world age.
+Existing stored clocks are not reset by fresh-world initialization; upgrading an
+old persistent world needs its own clock/data migration qualification.
+
 ## Mutable state and settings
 
 When touching a namespace in `AngelScript.MutableGlobalsAllowedNamespaces`, either

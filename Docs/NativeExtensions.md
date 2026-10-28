@@ -17,6 +17,11 @@ TLA keeps project policy here; a Markdown link is not automatic instruction load
 | `Dialogs.*` | Dialog parsing/runtime representation shared by game roles. |
 | `TestDialogs.cpp` | Native dialog regressions in the project UnitTests target. |
 
+Custom dialog bakers use `BakingContext` accessors and call `CheckOutput` for every
+output they own, including unchanged incremental outputs. The call registers
+resource-usage/report ownership even when no incremental checker is installed;
+reading or invoking an old checker callback directly bypasses that contract.
+
 The exact list is [AddEngineSources](../CMakeLists.txt), with `COMMON`, `SERVER`,
 `CLIENT`, `BAKER` and `TESTS` roles. Adding/removing a native source requires
 updating its registration. `SourceExt/ContentMigration.cpp` and

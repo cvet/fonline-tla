@@ -34,7 +34,7 @@ void DialogBaker::BakeFiles(const FileCollection& files, string_view target_path
             if (strex(file_header.GetPath()).get_file_extension() != "fodlg") {
                 continue;
             }
-            if (_context->BakeChecker && !_context->BakeChecker(file_header.GetPath(), file_header.GetWriteTime())) {
+            if (!_context->CheckOutput(file_header.GetPath(), file_header.GetWriteTime())) {
                 continue;
             }
 
@@ -51,7 +51,7 @@ void DialogBaker::BakeFiles(const FileCollection& files, string_view target_path
         if (!file) {
             return;
         }
-        if (_context->BakeChecker && !_context->BakeChecker(target_path, file.GetWriteTime())) {
+        if (!_context->CheckOutput(target_path, file.GetWriteTime())) {
             return;
         }
 
@@ -63,11 +63,11 @@ void DialogBaker::BakeFiles(const FileCollection& files, string_view target_path
     }
 
     // Load dialogs
-    auto server_engine = BakerServerEngine(*_context->BakedFiles);
+    auto server_engine = BakerServerEngine(*_context->GetBakedFiles());
     server_engine.MapEngineType<CritterTag>(server_engine.GetBaseType("Critter"));
     server_engine.MapScriptTypes(&server_engine);
 #if FO_ANGELSCRIPT_SCRIPTING
-    InitAngelScriptScripting(&server_engine, *_context->Settings, *_context->BakedFiles);
+    InitAngelScriptScripting(&server_engine, *_context->GetSettings(), *_context->GetBakedFiles());
 #endif
     const auto dialog_mngr = DialogManager(server_engine);
 
@@ -200,8 +200,8 @@ void DialogTextBaker::BakeFiles(const FileCollection& files, string_view target_
     bool something_changed = false;
 
     if (!filtered_files.empty()) {
-        for (const auto& lang_name : _context->Settings->Baking.BakeLanguages) {
-            if (!_context->BakeChecker || _context->BakeChecker(strex("{}.Dialogs.{}.fotxt-bin", _context->PackName, lang_name), max_write_time)) {
+        for (const auto& lang_name : _context->GetSettings()->Baking.BakeLanguages) {
+            if (_context->CheckOutput(strex("{}.Dialogs.{}.fotxt-bin", _context->GetPackName(), lang_name), max_write_time)) {
                 something_changed = true;
             }
         }
@@ -212,7 +212,7 @@ void DialogTextBaker::BakeFiles(const FileCollection& files, string_view target_
     }
 
     // Load dialogs
-    auto server_engine = BakerServerEngine(*_context->BakedFiles);
+    auto server_engine = BakerServerEngine(*_context->GetBakedFiles());
     const auto dialog_mngr = DialogManager(server_engine);
 
     size_t errors = 0;
@@ -236,7 +236,7 @@ void DialogTextBaker::BakeFiles(const FileCollection& files, string_view target_
         for (auto& dlg_pack_text : dlg_pack->Texts) {
             const string lang_pack = dlg_pack_text.first;
 
-            if (std::ranges::find_if(_context->Settings->Baking.BakeLanguages, [&](auto&& l) { return l == lang_pack; }) == _context->Settings->Baking.BakeLanguages.end()) {
+            if (std::ranges::find_if(_context->GetSettings()->Baking.BakeLanguages, [&](auto&& l) { return l == lang_pack; }) == _context->GetSettings()->Baking.BakeLanguages.end()) {
                 logging::write(logging::type::warning, "Dialog {} contains unsupported language {}", dlg_pack->PackId, lang_pack);
                 continue;
             }
@@ -264,7 +264,7 @@ void DialogTextBaker::BakeFiles(const FileCollection& files, string_view target_
 
     // A bake language entry may carry a fallback declaration ("ru18:russ"), so both the ordering and the pack
     // fixup go through the parsed config instead of the raw setting strings
-    BakeLanguageConfig bake_languages = TextPack::ParseBakeLanguages(_context->Settings->Baking.BakeLanguages);
+    BakeLanguageConfig bake_languages = TextPack::ParseBakeLanguages(_context->GetSettings()->Baking.BakeLanguages);
 
     std::ranges::stable_sort(lang_packs, [&](const auto& l, const auto& r) {
         const auto li = std::ranges::find(bake_languages.Languages, l.first);
@@ -287,6 +287,6 @@ void DialogTextBaker::BakeFiles(const FileCollection& files, string_view target_
         }
 
         auto text_pack_data = text_packs.at("Dialogs").GetBinaryData();
-        _context->WriteData(strex("{}.Dialogs.{}.fotxt-bin", _context->PackName, lang_name), text_pack_data);
+        _context->WriteData(strex("{}.Dialogs.{}.fotxt-bin", _context->GetPackName(), lang_name), text_pack_data);
     }
 }

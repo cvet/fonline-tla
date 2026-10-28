@@ -7,7 +7,8 @@ prove correct gameplay. Locate the owner through [Systems](Systems.md).
 ## Authored inputs and outputs
 
 Authored inputs are `Scripts/**/*.fos`, `Critters/*.focr`, `Items/*.foitem` and
-`.fopro`, `Maps/*.fomap` and `.foloc`, `Dialogs/*.fodlg`, `Gui/*.fogui`,
+`.fopro`, authored `FixedType` data in `.foinfo`, `Maps/*.fomap` and `.foloc`,
+`Dialogs/*.fodlg`, `Gui/*.fogui`,
 `Texts/*.fotxt`, `Resources/*`, and `TLA.fomain`. Script directories are explicitly
 listed in both `Metadata` and `Scripts` packs; discovery is not recursive.
 
@@ -36,6 +37,33 @@ text, GUI, resources or config. Use `Force Bake Resources` after Engine updates,
 property declaration/layout moves or evidence of stale incremental output. Preserve
 the failure and prove its cause rather than repeatedly forcing an unexplained bake.
 Format authored inputs with the relevant `Format :: *` task before final checks.
+
+### Image descriptors and packaging roots
+
+Authored `.fofrm` files use PascalCase `Key = Value`: `Frame` for one reference,
+continued `Frames` for an ordered list, and `Offset = X Y` for placement. Direction
+zero is the unnamed section; use positive `Fps` (default 10). Do not reintroduce
+legacy `frm_N`, `count`, `offs_x`/`offs_y` or `[dir_0]`. The complete grammar and
+dependency rules belong to the [Engine image guide](../Engine/Docs/en/how-to/content/image-format.md).
+Refer to the public wrapper when a FOFRM consumes a source image.
+
+TLA sets `Baking.FilterResources = False`, matching the Engine default. Packaging
+includes every current baked output of each target-eligible pack, including art,
+sound, music, video and common/server data selected by dynamic runtime names.
+No project resource-root catalog is required. Pack roles and target-specific
+suffix exclusions still apply; a client package does not gain server-only data.
+
+The Baker still publishes `Baking/Resources.usage.json`, bound to matching
+build/config markers. With filtering disabled it lists all available outputs
+registered by the current bake; packaging consumes that list rather than stale
+or unrelated files left on disk. Rebuild/rebake after changing the setting.
+`True` opts into typed-root/dependency selection described in the
+[Engine baking guide](../Engine/Docs/en/explanation/content-pipeline/baking.md#resource-usage-manifest).
+TLA does not use that mode. Test an actual package separately when claiming
+packaged-runtime support.
+
+Authored `FixedType` instances use `.foinfo`; keep that extension in
+`Baking.ProtoFileExtensions` so the prototype baker reads their typed rows.
 
 ## GUI generation
 

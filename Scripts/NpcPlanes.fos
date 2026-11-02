@@ -1,12 +1,13 @@
 // NpcPlanes — серверная система AI-планов NPC: приоритетная очередь поведенческих задач (misc/attack/walk/pick; патруль и курьер — в разработке).
 // Периодический тайм-эвент OnCritterIdle вызывает ProcessAi: берёт текущий план, двигает NPC по путям с трассировкой, атакует/подбирает предметы/выполняет скрипт и переключает планы по приоритету.
 // Планы хранятся в persistent-свойстве Critter.Planes; порождает события OnNpcPlaneBegin/End/Run. Опирается на EnemyStack, CritterState, Messaging, Dialogs, LineTracer. Только сторона SERVER.
+// Глобальные AllNpcPlanes и LastPlaneId живут всё время работы сервера: рабочие очереди планов по id NPC и сквозной счётчик id планов.
 namespace NpcPlanes
 {
 
 #if SERVER
 
-// TODO:: void FOServer::ProcessAI( Npc* npc ) from ServerNpc.cpp engine 1519
+// TODO: перенос void FOServer::ProcessAI(Npc* npc) из ServerNpc.cpp движка (строка 1519)
 
 ///@ Property Critter Server int32[] Planes Mutable Persistent
 
@@ -131,7 +132,7 @@ int ProcessAi(Critter npc)
         return 5000;
     }
 
-    // Get map
+    // Карта NPC
     Map? map = Game.GetMap(npc.MapId);
     if (map == null) {
         return 5000;
@@ -345,7 +346,7 @@ int ProcessAi(Critter npc)
 
                     hstring unarmedPid = hstring(r2);
                     ProtoItem unarmed = Game.CheckProtoItem(unarmedPid) ? Game.GetProtoItem(unarmedPid) : Game.GetProtoItem(Content::Item::default_weapon);
-                    if (!unarmed.Weapon_IsUnarmed) {
+                    if (!unarmed.HasWeapon || !unarmed.Weapon.IsUnarmed) {
                         unarmed = Game.GetProtoItem(Content::Item::default_weapon);
                     }
 
@@ -354,7 +355,7 @@ int ProcessAi(Critter npc)
 
                 use = r1;
 
-                if (weap == null || weap.Type != ItemType::Weapon || weap.Weapon_ActiveUses <= use) {
+                if (weap == null || !weap.HasWeapon || weap.Weapon.ActiveUses <= use) {
                     Game.Log("REASON_ATTACK_WEAPON fail");
                     break;
                 }
@@ -388,26 +389,26 @@ int ProcessAi(Critter npc)
 
                 // Зарядить оружие
                 if (realWeapon != null) {
-                    if (!npc.IsUnlimitedAmmo && realWeapon.Weapon_MaxAmmoCount > 0 && realWeapon.AmmoCount == 0) {
+                    if (!npc.IsUnlimitedAmmo && realWeapon.Weapon.MaxAmmoCount > 0 && realWeapon.AmmoCount == 0) {
                         Item? ammo = FindAmmoForWeapon(npc, realWeapon);
                         if (ammo == null) {
                             if (realWeapon.AmmoPid == EMPTY_HSTRING) {
-                                realWeapon.AmmoPid = realWeapon.Weapon_DefaultAmmoPid;
+                                realWeapon.AmmoPid = realWeapon.Weapon.DefaultAmmoPid;
                             }
 
-                            realWeapon.AmmoCount = realWeapon.Weapon_MaxAmmoCount;
+                            realWeapon.AmmoCount = realWeapon.Weapon.MaxAmmoCount;
                         }
                         else {
                             CritterActions::ReloadWeapon(npc, realWeapon.Id, ammo.Id);
                             break;
                         }
                     }
-                    else if (npc.IsUnlimitedAmmo && realWeapon.Weapon_MaxAmmoCount > 0) {
+                    else if (npc.IsUnlimitedAmmo && realWeapon.Weapon.MaxAmmoCount > 0) {
                         if (realWeapon.AmmoPid == EMPTY_HSTRING) {
-                            realWeapon.AmmoPid = realWeapon.Weapon_DefaultAmmoPid;
+                            realWeapon.AmmoPid = realWeapon.Weapon.DefaultAmmoPid;
                         }
 
-                        realWeapon.AmmoCount = realWeapon.Weapon_MaxAmmoCount;
+                        realWeapon.AmmoCount = realWeapon.Weapon.MaxAmmoCount;
                     }
                 }
 
@@ -537,7 +538,7 @@ int ProcessAi(Critter npc)
                     return r2;
                 }
 
-                if (r0 != int(use) && weap.Weapon_ActiveUses > int(r0)) {
+                if (r0 != int(use) && weap.Weapon.ActiveUses > int(r0)) {
                     use = r0;
                 }
 
@@ -617,7 +618,7 @@ int ProcessAi(Critter npc)
             bool is_run = plane.Pick_IsRun;
 
             Item? item = map.GetItemOnHex(hex, pid);
-            if (item == null || (item.Type == ItemType::Door && (to_open ? item.Opened : !item.Opened))) {
+            if (item == null || (item.HasDoor && (to_open ? item.Opened : !item.Opened))) {
                 NextPlane(npc, REASON_SUCCESS);
                 break;
             }
@@ -1439,15 +1440,15 @@ Item? FindAmmoForWeapon(Critter npc, AbstractItem weapon)
         }
     }
 
-    ammo = npc.GetItem(weapon.Weapon_DefaultAmmoPid);
+    ammo = npc.GetItem(weapon.Weapon.DefaultAmmoPid);
     if (ammo != null) {
         return ammo;
     }
 
-    auto otherAmmo = npc.GetItems(ItemProperty::Type, ItemType::Ammo);
+    auto otherAmmo = npc.GetItems(ItemProperty::Ammo, 1);
     for (int i = 0; i < otherAmmo.length(); i++) {
         Item other = otherAmmo[i];
-        if (other.Ammo_Caliber == weapon.Weapon_Caliber) {
+        if (other.Ammo.Caliber == weapon.Weapon.Caliber) {
             return other;
         }
     }

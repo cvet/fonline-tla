@@ -105,8 +105,7 @@ EventResult NpcPlaneEnd(Critter npc, int planeId, int reason, Critter? someCr, I
     }
     else if (reason == NpcPlanes::REASON_GAG_ITEM) {
         if (someItem != null) {
-            if (someItem.Type == ItemType::Door && !someItem.Opened && AiSettings::AiCanOpenDoors(npc.AiId) &&
-                Lockers::IsKeyAvailable(npc, someItem.LockerId)) {
+            if (someItem.HasDoor && !someItem.Opened && AiSettings::AiCanOpenDoors(npc.AiId) && Lockers::IsKeyAvailable(npc, someItem.LockerId)) {
                 NpcPlanes::NpcPlane child = NpcPlanes::CreatePlane();
                 child.Type = NpcPlanes::AI_PLANE_PICK;
                 child.Priority = 0;
@@ -118,7 +117,7 @@ EventResult NpcPlaneEnd(Critter npc, int planeId, int reason, Critter? someCr, I
                 plane.SetChild(child);
                 return EventResult::StopChain; // отменяем удаление плана
             }
-            else if (someItem.Type != ItemType::Door) {
+            else if (!someItem.HasDoor) {
                 NpcPlanes::NpcPlane child = NpcPlanes::CreatePlane();
                 child.Type = NpcPlanes::AI_PLANE_PICK;
                 child.Priority = 0;
@@ -162,7 +161,7 @@ EventResult NpcPlaneEnd(Critter npc, int planeId, int reason, Critter? someCr, I
     }
     else if (reason == NpcPlanes::REASON_NO_UNARMED) {
         // чиним первое сломанное оружие
-        Item[] items = npc.GetItems(ItemProperty::Type, ItemType::Weapon);
+        Item[] items = npc.GetItems(ItemProperty::Weapon, 1);
         for (int i = 0; i < items.length(); i++) {
             Item item = items[i];
             if (item.IsBroken) {
@@ -316,7 +315,7 @@ EventResult NpcPlaneRun(Critter npc, int planeId, int reason, any& r0, any& r1, 
         }
 
         // собираем всё оружие и отсеиваем непригодное для боя (помечая null)
-        Item[] allWeapons = npc.GetItems(ItemProperty::Type, ItemType::Weapon);
+        Item[] allWeapons = npc.GetItems(ItemProperty::Weapon, 1);
         for (int i = 0; i < allWeapons.length(); i++) {
             if (not CheckBattleWeapon(npc, allWeapons[i])) {
                 allWeapons[i] = null;
@@ -366,7 +365,7 @@ EventResult NpcPlaneRun(Critter npc, int planeId, int reason, any& r0, any& r1, 
         int use = WeaponHelpers::WeaponModeUse(weapon.Mode);
         ProtoItem? ammo = null;
         Item? handItem = Tla::GetCritterHandItem(npc);
-        if (handItem != null && handItem.AmmoPid != EMPTY_HSTRING && weapon.Weapon_MaxAmmoCount > 0 && weapon.Weapon_Caliber != 0) {
+        if (handItem != null && handItem.AmmoPid != EMPTY_HSTRING && weapon.Weapon.MaxAmmoCount > 0 && weapon.Weapon.Caliber != 0) {
             ammo = Game.GetProtoItem(handItem.AmmoPid);
         }
 
@@ -387,18 +386,18 @@ EventResult NpcPlaneRun(Critter npc, int planeId, int reason, any& r0, any& r1, 
         // оружие ближнего боя:
         CritterProperty skill = WeaponHelpers::WeaponSkill(weapon, use);
         if (skill == CritterProperty::SkillUnarmed || skill == CritterProperty::SkillMeleeWeapons) {
-            int base = npc.GetAsInt(skill) - Math::Max(0, target.ArmorClass + (ammo != null ? ammo.Ammo_AcMod : 0)) + (target.IsKnockout() ? 40 : 0) -
+            int base = npc.GetAsInt(skill) - Math::Max(0, target.ArmorClass + (ammo != null ? ammo.Ammo.AcMod : 0)) + (target.IsKnockout() ? 40 : 0) -
                        (npc.IsDamagedEye ? 25 : 0);
 
-            if (!weapon.Weapon_IsUnarmed) {
-                base += (weapon.Weapon_Perk == ItemPerks::Accurate ? 20 : 0);
+            if (!weapon.Weapon.IsUnarmed) {
+                base += (weapon.Weapon.Perk == ItemPerks::Accurate ? 20 : 0);
                 int strength = npc.Strength + (npc.PerkWeaponHandling != 0 ? 3 : 0);
-                if (strength < weapon.Weapon_MinStrength) {
-                    base -= 20 * (weapon.Weapon_MinStrength - strength);
+                if (strength < weapon.Weapon.MinStrength) {
+                    base -= 20 * (weapon.Weapon.MinStrength - strength);
                 }
 
                 if (npc.IsTraitOneHander) {
-                    base += (weapon.Weapon_IsTwoHanded ? -40 : 20);
+                    base += (weapon.Weapon.IsTwoHanded ? -40 : 20);
                 }
             }
 
@@ -439,7 +438,7 @@ EventResult NpcPlaneRun(Critter npc, int planeId, int reason, any& r0, any& r1, 
                 }
             }
 
-            if ((weapon.Weapon_Perk == ItemPerks::ScopeRange) && (r1 < 8)) {
+            if ((weapon.Weapon.Perk == ItemPerks::ScopeRange) && (r1 < 8)) {
                 r1 = 8;
             }
 
@@ -450,23 +449,23 @@ EventResult NpcPlaneRun(Critter npc, int planeId, int reason, any& r0, any& r1, 
                 return EventResult::ContinueChain;
             }
 
-            int base = npc.GetAsInt(skill) - Math::Max(0, target.ArmorClass + (ammo != null ? ammo.Ammo_AcMod : 0)) + (target.IsKnockout() ? 40 : 0) -
-                       (npc.IsDamagedEye ? 25 : 0) + (weapon.Weapon_Perk == ItemPerks::Accurate ? 20 : 0);
+            int base = npc.GetAsInt(skill) - Math::Max(0, target.ArmorClass + (ammo != null ? ammo.Ammo.AcMod : 0)) + (target.IsKnockout() ? 40 : 0) -
+                       (npc.IsDamagedEye ? 25 : 0) + (weapon.Weapon.Perk == ItemPerks::Accurate ? 20 : 0);
 
             int strength = npc.Strength + (npc.PerkWeaponHandling != 0 ? 3 : 0);
-            if (strength < weapon.Weapon_MinStrength) {
-                base -= 20 * (weapon.Weapon_MinStrength - strength);
+            if (strength < weapon.Weapon.MinStrength) {
+                base -= 20 * (weapon.Weapon.MinStrength - strength);
             }
 
             if (npc.IsTraitOneHander) {
-                base += (weapon.Weapon_IsTwoHanded ? -40 : 20);
+                base += (weapon.Weapon.IsTwoHanded ? -40 : 20);
             }
 
             int ai_min = AiSettings::AiMinToHit(npc.AiId);
             int perception = npc.Perception;
             int sharpshooter = 8 * npc.PerkSharpshooter;
 
-            int mod = (weapon.Weapon_Perk == ItemPerks::ScopeRange ? 5 : (weapon.Weapon_Perk == ItemPerks::LongRange ? 4 : 2));
+            int mod = (weapon.Weapon.Perk == ItemPerks::ScopeRange ? 5 : (weapon.Weapon.Perk == ItemPerks::LongRange ? 4 : 2));
 
             if (base + 8 * perception + sharpshooter < 95) {
                 if (base + 8 * perception + sharpshooter < ai_min) {
@@ -506,7 +505,7 @@ EventResult NpcPlaneRun(Critter npc, int planeId, int reason, any& r0, any& r1, 
             }
 
             if (!npc.IsNoAim) {
-                if (weapon.Weapon_Aim_0) {
+                if (weapon.Weapon.Aim_0) {
                     int reduction = (int(r0) * 3 * npc.Intellect) / 100;
                     reduction = Math::Min(15, reduction);
                     r0 = int(r0) - reduction;
@@ -618,7 +617,7 @@ bool CogitateFiring(Critter cr, ident targetId, int& mode, int& aim)
         return true;
     }
 
-    if (weapon.Type != ItemType::Weapon) {
+    if (!weapon.HasWeapon) {
         return false;
     }
 
@@ -627,8 +626,8 @@ bool CogitateFiring(Critter cr, ident targetId, int& mode, int& aim)
         protoAmmo = Game.GetProtoItem(weapon.AmmoPid);
     }
 
-    if (weapon.Weapon_Skill_0 == CritterProperty::SkillUnarmed ||
-        weapon.Weapon_Skill_0 == CritterProperty::SkillMeleeWeapons) // считаем все режимы ближнего боя
+    if (weapon.Weapon.Skill_0 == CritterProperty::SkillUnarmed ||
+        weapon.Weapon.Skill_0 == CritterProperty::SkillMeleeWeapons) // считаем все режимы ближнего боя
     {
         mode = 0;
         if (!cr.IsNoAim) {
@@ -644,13 +643,13 @@ bool CogitateFiring(Critter cr, ident targetId, int& mode, int& aim)
     {
         // отладочные Messaging::Say оставлены как breadcrumb для трассировки выбора режима стрельбы
         bool forceBurst = false;
-        if (weapon.Weapon_Round_0 > 1) {
+        if (weapon.Weapon.Round_0 > 1) {
             // Messaging::Say(cr, "Burst is the only mode");
             forceBurst = true;
             mode = 0;
         }
         else {
-            if (weapon.Weapon_DmgType_1 == DamageTypes::None) {
+            if (weapon.Weapon.DmgType_1 == DamageTypes::None) {
                 // Messaging::Say(cr, "Single shot is the only mode");
                 mode = 0;
             }
@@ -956,11 +955,11 @@ void SkillToBegin(CritterProperty[] skills, CritterProperty skill)
 // двуручное при целых руках, и есть боеприпасы (или они не нужны/бесконечны).
 bool CheckBattleWeapon(Critter npc, Item weapon)
 {
-    if (weapon.Type != ItemType::Weapon) {
+    if (!weapon.HasWeapon) {
         return false;
     }
 
-    if (not CritterAnims::IsCritterStateAnim(npc, weapon.Weapon_StateAnim)) {
+    if (not CritterAnims::IsCritterStateAnim(npc, weapon.Weapon.StateAnim)) {
         return false;
     }
 
@@ -968,11 +967,11 @@ bool CheckBattleWeapon(Critter npc, Item weapon)
         return false;
     }
 
-    if (weapon.Weapon_IsTwoHanded && (npc.IsDamagedLeftArm || npc.IsDamagedRightArm)) {
+    if (weapon.Weapon.IsTwoHanded && (npc.IsDamagedLeftArm || npc.IsDamagedRightArm)) {
         return false;
     }
 
-    if (!npc.IsUnlimitedAmmo && weapon.Weapon_MaxAmmoCount > 0 && weapon.AmmoCount == 0 && !IsAmmoForWeapon(npc, weapon)) {
+    if (!npc.IsUnlimitedAmmo && weapon.Weapon.MaxAmmoCount > 0 && weapon.AmmoCount == 0 && !IsAmmoForWeapon(npc, weapon)) {
         return false;
     }
 
@@ -987,13 +986,13 @@ bool IsAmmoForWeapon(Critter npc, Item weapon)
         return true;
     }
 
-    if (ItemStacks::CountItem(npc, weapon.Weapon_DefaultAmmoPid) > 0) {
+    if (ItemStacks::CountItem(npc, weapon.Weapon.DefaultAmmoPid) > 0) {
         return true;
     }
 
-    Item[] ammo = npc.GetItems(ItemProperty::Type, ItemType::Ammo);
+    Item[] ammo = npc.GetItems(ItemProperty::Ammo, 1);
     for (int i = 0; i < ammo.length(); i++) {
-        if (ammo[i].Ammo_Caliber == weapon.Weapon_Caliber) {
+        if (ammo[i].Ammo.Caliber == weapon.Weapon.Caliber) {
             return true;
         }
     }

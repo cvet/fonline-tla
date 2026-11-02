@@ -438,7 +438,7 @@ void SendContainerSnapshot(Critter cr, TransferTypes transferType, Item? itemCon
 // предметов и добавляемой операции. Все промежуточные суммы ограничены capacity.
 bool CanPutItemsInContainer(Item container, Item[] movingItems, bool all, int itemCount)
 {
-    int64 capacity = container.Container_Volume;
+    int64 capacity = container.Container.Volume;
     int64 volume = 0;
     int64 nextVolume = 0;
     Item[] containedItems = container.GetItems(Tla::RootContainerStack());
@@ -465,7 +465,7 @@ bool CanPutItemsInContainer(Item container, Item[] movingItems, bool all, int it
 // цепочка родителей также считается небезопасной и не расширяется новым перемещением.
 bool WouldCreateContainerCycle(Item movingItem, Item targetContainer)
 {
-    if (movingItem.Type != ItemType::Container) {
+    if (!movingItem.HasContainer) {
         return false;
     }
 
@@ -520,7 +520,7 @@ void OperateContainer(Critter cr, bool take, bool all, ident itemId, int itemCou
     if (transferType == TransferTypes::HexContUp || transferType == TransferTypes::HexContDown || transferType == TransferTypes::SelfCont ||
         transferType == TransferTypes::FarCont) {
         itemCont = transferType == TransferTypes::SelfCont ? cr.GetItem(cr.TransferContainerId) : Game.GetItem(cr.TransferContainerId);
-        if (itemCont == null || itemCont.Type != ItemType::Container || !IsContainerAccessOpen(itemCont.Container_Changeble, itemCont.Opened)) {
+        if (itemCont == null || !itemCont.HasContainer || !IsContainerAccessOpen(itemCont.Container.Changeble, itemCont.Opened)) {
             CloseContainerTransfer(cr);
             return;
         }
@@ -744,15 +744,15 @@ void ReloadWeapon(Critter cr, ident weaponId, ident ammoId)
         throw("Unable to find weapon", cr, weaponId);
     }
 
-    if (weapon.Type != ItemType::Weapon) {
+    if (!weapon.HasWeapon) {
         throw("Invalid type of weapon", cr, weapon);
     }
 
-    if (weapon.Weapon_Caliber == 0) {
+    if (weapon.Weapon.Caliber == 0) {
         throw("Weapon doesn't have caliber", cr, weapon);
     }
 
-    if (weapon.Weapon_MaxAmmoCount == 0) {
+    if (weapon.Weapon.MaxAmmoCount == 0) {
         throw("Weapon doesn't have ammo holder", cr, weapon);
     }
 
@@ -768,7 +768,12 @@ void ReloadWeapon(Critter cr, ident weaponId, ident ammoId)
         throw("Ammo not found", cr, weapon, ammoId);
     }
 
-    if (ammo != null && weapon.AmmoPid == ammo.ProtoId && weapon.AmmoCount >= weapon.Weapon_MaxAmmoCount) {
+    // Заряжать можно только предмет с компонентом Ammo: иначе AmmoPid оружия назовёт не патроны
+    if (ammo != null && !ammo.HasAmmo) {
+        throw("Ammo item isn't ammo", cr, weapon, ammo);
+    }
+
+    if (ammo != null && weapon.AmmoPid == ammo.ProtoId && weapon.AmmoCount >= weapon.Weapon.MaxAmmoCount) {
         throw("Weapon is full", cr, weapon, ammo);
     }
 
@@ -790,7 +795,7 @@ void ReloadWeapon(Critter cr, ident weaponId, ident ammoId)
 
     // Загрузка нового боезапаса
     if (ammo != null) {
-        int count = Math::Min(ammo.Count, weapon.Weapon_MaxAmmoCount - weapon.AmmoCount);
+        int count = Math::Min(ammo.Count, weapon.Weapon.MaxAmmoCount - weapon.AmmoCount);
         weapon.AmmoCount += count;
         weapon.AmmoPid = ammo.ProtoId;
 
@@ -823,11 +828,11 @@ void Attack(Critter cr, ident targetId, int mode)
     }
 
     AbstractItem weapon = CritterItem::GetActive(cr);
-    if (weapon.Type != ItemType::Weapon) {
+    if (!weapon.HasWeapon) {
         throw("Critter item is not weapon", cr, weapon);
     }
 
-    if (weapon.Weapon_IsTwoHanded && (cr.IsDamagedLeftArm || cr.IsDamagedRightArm)) {
+    if (weapon.Weapon.IsTwoHanded && (cr.IsDamagedLeftArm || cr.IsDamagedRightArm)) {
         throw("Critter is damaged arm for two handed weapon", cr, weapon);
     }
 
@@ -835,7 +840,7 @@ void Attack(Critter cr, ident targetId, int mode)
         throw("Critter is damaged two arms for armed attack", cr, weapon);
     }
 
-    if (weapon.Weapon_ActiveUses <= use) {
+    if (weapon.Weapon.ActiveUses <= use) {
         throw("Weapon use is not allowed", cr, weapon, use);
     }
 
@@ -901,19 +906,19 @@ void Attack(Critter cr, ident targetId, int mode)
     // Патрон: берём заряженный, иначе дефолтный из прото оружия
     ProtoItem? ammo = null;
 
-    if (weapon.Weapon_Caliber != 0 && weapon.Weapon_MaxAmmoCount > 0) {
+    if (weapon.Weapon.Caliber != 0 && weapon.Weapon.MaxAmmoCount > 0) {
         if (Game.CheckProtoItem(weapon.AmmoPid)) {
             ammo = Game.GetProtoItem(weapon.AmmoPid);
         }
-        else if (Game.CheckProtoItem(weapon.Weapon_DefaultAmmoPid)) {
-            ammo = Game.GetProtoItem(weapon.Weapon_DefaultAmmoPid);
+        else if (Game.CheckProtoItem(weapon.Weapon.DefaultAmmoPid)) {
+            ammo = Game.GetProtoItem(weapon.Weapon.DefaultAmmoPid);
         }
 
         if (ammo == null) {
             throw("Weapon ammo not found", cr, weapon);
         }
 
-        if (ammo.Type != ItemType::Ammo) {
+        if (!ammo.HasAmmo) {
             throw("Weapon ammo item isn't have ammo type", cr, weapon, ammo);
         }
 

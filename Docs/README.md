@@ -52,6 +52,7 @@ requirements and revision before treating an old status/count as accepted today.
 | [Gameplay systems documentation plan](Plans/2026-10-24-gameplay-systems-docs.md) | Dated assignment for the Combat/Character/Items/Economy/World/PlayerLifecycle/NpcAI/Dialogs/Quests deep-dive guides. |
 | [Documentation follow-up plan](Plans/2026-10-27-documentation-followup.md) | Dated tooling/content-audit/quest-map follow-up; carries the D-1..D-7 owner decision table. |
 | [Documentation review](Plans/2026-10-28-documentation-review.md) | Source-backed corrections, tool regressions, open gameplay discrepancies and upstream reconciliation for the new guides. |
+| [Item type components plan](Plans/2026-10-31-item-type-components.md) | Migration from `ItemType`/`<Kind>_<Field>` to property components: decisions D1–D14, task ledger and remaining acceptance. |
 
 ## History and audit evidence
 

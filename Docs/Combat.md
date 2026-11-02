@@ -112,14 +112,14 @@ baseToHit = weapon skill value
           - 25 if attacker IsDamagedEye
           + 13 if PerkVampireAccuracy and night        (quest perk)
           + 20 one-hander with one-handed weapon / -40 two-handed (not unarmed)
-          - 20 per point of Strength shortfall below Weapon_MinStrength
+          - 20 per point of Strength shortfall below Weapon.MinStrength
             (Weapon Handling perk adds +3 ST; unarmed attacks skip ST/OneHander)
           + 20 if weapon perk Accurate
 
 toHit = baseToHit
       - GetHitAim(aim)            ranged; -half of it for HtH attacks
       - distance penalty (ranged only, see below)
-      - max(0, target.ArmorClass + ammo.Ammo_AcMod)
+      - max(0, target.ArmorClass + ammo.Ammo.AcMod)
       + 40 if target knocked out
       + 15 if target Multihex > 0
       - 10 per blocking critter on the line, ranged only
@@ -153,7 +153,7 @@ degrade to head. A burst (`rounds > 1`) always attacks unaimed.
   (`-margin/10 >= Random(1,100)`; the Jinxed traits add a coin-flip chance).
   Severity `Random(1,100) - 5*(Luck-5)` is converted to tier 0..4
   (thresholds 20/50/75/95) before indexing
-  `CriticalFailureTable[5 * Weapon_CriticalFailture + tier]`; flags `0` cancel
+  `CriticalFailureTable[5 * Weapon.CriticalFailture + tier]`; flags `0` cancel
   the critical. `MF_HIT_RANDOMLY` re-targets via `ChooseRandomTarget`: start
   at a random index in the in-radius non-dead list and take the first candidate
   with a clear wall trace, excluding attacker and original target. Otherwise
@@ -164,7 +164,7 @@ degrade to head. A burst (`rounds > 1`) always attacks unaimed.
 - **Hit**: `isCritical = Random(1,100) <= CriticalChance + margin/10 + HitAim(aim)`;
   guaranteed for HtH with the Slayer perk; Sniper perk rerolls crit on guns via
   `Random(1,10) <= Luck`; unarmed crit chance comes from the proto's
-  `Weapon_UnarmedCriticalBonus`.
+  `Weapon.UnarmedCriticalBonus`.
 
 ## Attack execution per weapon class
 
@@ -210,7 +210,7 @@ Order of operations (`Scripts/Combat.fos`):
 3. Armor: `ApplyArmorModifiers(bypassArmor, penetrate, finesse, DRMod, DT, DR)`
    — armor-piercing crits (`HF_BYPASS_ARMOR`, not EMP) divide both DT and DR
    by 5 and disable the Finesse malus inside that branch; the Penetrate weapon
-   perk divides DT by 5; Finesse adds +30 DR; ammo `Ammo_DrMod` adds; final DR
+   perk divides DT by 5; Finesse adds +30 DR; ammo `Ammo.DrMod` adds; final DR
    clamped 0..100. Sources: `target.DamageResistance[type]` and
    `DamageThreshold[type]` (virtual properties from `Parameters`).
 4. Per-hit damage (`ReduceDamage`, integer operations in this order): scale
@@ -218,8 +218,8 @@ Order of operations (`Scripts/Combat.fos`):
    `dmg -= dmg * DR / 100`, finally clamp to at least 0. DR uses the
    post-DT value; for roll 100, multiplier/divisor 2/2, DT 10 and DR 50,
    the result is 45. `dmgMul` starts at 2 (the "/2" of the Fallout formula), is
-   multiplied by the critical-table multiplier and `Ammo_DmgMult`;
-   `dmgDiv = 2 * Ammo_DmgDiv`. HtH adds `MeleeDamage` to `DmgMax`; guns add
+   multiplied by the critical-table multiplier and `Ammo.DmgMult`;
+   `dmgDiv = 2 * Ammo.DmgDiv`. HtH adds `MeleeDamage` to `DmgMax`; guns add
    `PerkBonusRangedDamage * 2` as bonus damage. After summing all rounds,
    LivingAnatomy adds 5 once (non-robot/alien) and Pyromaniac adds 5 once
    for fire damage; these are not per-round bonuses reduced by armor.
@@ -262,7 +262,7 @@ Sneak mode is dropped for attacker and target; `TimeoutBattle` is (re)armed as
 Ammo is consumed unless `IsUnlimitedAmmo`; a deteriorable weapon loses
 `(MaxSkillValue - skillValue)/3` condition (`Repair::DeteriorateItem`), the
 target's armor `((100-DR)*rounds + totalDmg)/3`; single-use weapons
-(`Weapon_Remove`) are consumed; only non-grenade throwing weapons are placed
+(`Weapon.Remove_0..2`) are consumed; only non-grenade throwing weapons are placed
 on the impact hex through `ItemStacks::AddItem`. Toxic/Radioactive attackers and specific body types
 (radscorpion, floater, wasp, alien, centaur) apply poison/radiation resisted
 by `Random(2,11) > Luck`. NPC combat barks go through
@@ -290,7 +290,10 @@ setting directly, and saved critters keep `CurrentHp/KnockoutAp/Timeouts`.
 - New weapon behavior belongs in the branch table of `CombatAttack` keyed by
   weapon subtype/proto ids (see `isFlamethrower`/`isRocket` pid checks against
   `Content::Item::*`); damage typing comes from the item proto's
-  `Weapon_DmgType_0..2` and other properties read through `WeaponHelpers`.
+  `Weapon.DmgType_0..2` and other `Weapon` component fields read through
+  `WeaponHelpers`. Its per-use getters require the component; the
+  `IsWeapon{Primary,Secondary,Third}Available` predicates return false for an
+  item without it, because the active hand item can be any item.
 - New on-hit conditions: the `HF_*`/`MF_*` flag vocabulary in `Scripts/Flags.fos`
   plus the critical tables. Keep table row layout (7 ints per row) intact —
   it is the Fallout 2 layout and `ApplyDamage` indexes it arithmetically.

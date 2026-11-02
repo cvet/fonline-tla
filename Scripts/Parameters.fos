@@ -2,6 +2,7 @@
 // Регистрирует геттеры/сеттеры свойств (MaxLife, ActionPoints, ArmorClass, сопротивления, вес, урон и т.п.),
 // обрабатывает создание персонажа, прокачку навыков/перков/опыта и уровней, оружие в руках и режимы атаки,
 // стоимость очков действия и дальность атаки, дальность обзора. Сторона SERVER и CLIENT; опирается на Perks, CritterTypes, Settings.
+// Глобальный UnarmedWeapons живёт всё время работы: это неизменяемый порядок перебора безоружных приёмов на сервере и клиенте.
 namespace Parameters
 {
 
@@ -655,11 +656,11 @@ bool VerifyUnarmedItem(Critter cr, hstring pid)
     }
 
     ProtoItem proto = Game.GetProtoItem(pid);
-    if (cr.Strength < proto.Weapon_MinStrength || cr.Agility < proto.Weapon_UnarmedMinAgility) {
+    if (cr.Strength < proto.Weapon.MinStrength || cr.Agility < proto.Weapon.UnarmedMinAgility) {
         return false;
     }
 
-    if (cr.Level < proto.Weapon_UnarmedMinLevel || cr.SkillUnarmed < proto.Weapon_UnarmedMinUnarmed) {
+    if (cr.Level < proto.Weapon.UnarmedMinLevel || cr.SkillUnarmed < proto.Weapon.UnarmedMinUnarmed) {
         return false;
     }
 
@@ -755,7 +756,7 @@ void UseMainItem()
     if (use == WeaponHelpers::USE_RELOAD) {
         ChosenActions::SetChosenActions({Tla::ChosenUseItem, itemId, 0, ClientDefines::TARGET_SELF_ITEM, 0, WeaponHelpers::USE_RELOAD, 0});
     }
-    else if (use < WeaponHelpers::MAX_USES && item.Type == ItemType::Weapon) {
+    else if (use < WeaponHelpers::MAX_USES && item.HasWeapon) {
         Gui::Cursor = CursorType::UseWeapon;
     }
     else if (use == WeaponHelpers::USE_USE && item.IsCanUseOnSmth) {
@@ -787,7 +788,7 @@ void SwitchMainItemMode(bool next)
         SwitchUnarmedWeapon(chosen, next);
     }
     else {
-        if (item.Type != ItemType::Weapon) {
+        if (!item.HasWeapon) {
             if (item.IsCanUseOnSmth && item.IsCanUse) {
                 SetWeaponMode(item, WeaponHelpers::USE_USE);
             }
@@ -851,7 +852,7 @@ void SwitchMainItemMode(bool next)
 
                     continue;
                 case WeaponHelpers::USE_RELOAD:
-                    if (item.Weapon_MaxAmmoCount > 0) {
+                    if (item.Weapon.MaxAmmoCount > 0) {
                         break;
                     }
 
@@ -887,7 +888,7 @@ void SetWeaponMode(AbstractItem cItem, int mode)
     int use = WeaponHelpers::WeaponModeUse(mode);
     int aim = WeaponHelpers::WeaponModeAim(mode);
 
-    if (item.Type != ItemType::Weapon) {
+    if (!item.HasWeapon) {
         if (use == WeaponHelpers::USE_USE && !item.IsCanUse && !item.IsCanUseOnSmth) {
             use = WeaponHelpers::USE_NONE;
         }
@@ -926,7 +927,7 @@ void SetWeaponMode(AbstractItem cItem, int mode)
             break;
         case WeaponHelpers::USE_RELOAD:
             aim = 0;
-            if (item.Weapon_MaxAmmoCount > 0) {
+            if (item.Weapon.MaxAmmoCount > 0) {
                 break;
             }
 
@@ -1236,8 +1237,8 @@ int CritterGetArmorClass(Critter cr)
     int val = cr.ArmorClassBase + CritterGetAgilityImpl(cr);
     val += Drugs::GetDrugEffect(cr, CritterProperty::ArmorClassBase);
     AbstractItem armor = CritterItem::GetActive(cr, CritterItemSlot::Armor);
-    if (armor.Type == ItemType::Armor) {
-        val += armor.Armor_AC * (100 - GetDeteriorationProc(armor)) / 100;
+    if (armor.HasArmor) {
+        val += armor.Armor.AC * (100 - GetDeteriorationProc(armor)) / 100;
     }
 
     return Math::Clamp(val, 0, 90);
@@ -1245,25 +1246,33 @@ int CritterGetArmorClass(Critter cr)
 
 int[] CritterGetDamageResistanceImpl(Critter cr)
 {
-    AbstractItem armor = CritterItem::GetActive(cr, CritterItemSlot::Armor);
-    int dp = 0;
-    Item? realArmor = cast<Item?>(armor);
-    if (realArmor != null && armor.Type == ItemType::Armor) {
-        dp = 100 - GetDeteriorationProc(armor);
-    }
-
     int[] result = {
         0,
-        cr.NormalResistanceBase + armor.Armor_DRNormal * dp / 100,
-        cr.LaserResistanceBase + armor.Armor_DRLaser * dp / 100,
-        cr.FireResistanceBase + armor.Armor_DRFire * dp / 100,
-        cr.PlasmaResistanceBase + armor.Armor_DRPlasma * dp / 100,
-        cr.ElectricityResistanceBase + armor.Armor_DRElectr * dp / 100,
-        cr.EmpResistanceBase + armor.Armor_DREmp * dp / 100,
-        cr.ExplodeResistanceBase + armor.Armor_DRExplode * dp / 100,
+        cr.NormalResistanceBase,
+        cr.LaserResistanceBase,
+        cr.FireResistanceBase,
+        cr.PlasmaResistanceBase,
+        cr.ElectricityResistanceBase,
+        cr.EmpResistanceBase,
+        cr.ExplodeResistanceBase,
         cr.PoisonResistanceBase + CritterGetEnduranceImpl(cr) * 5,
         cr.RadiationResistanceBase + CritterGetEnduranceImpl(cr) * 2,
     };
+
+    // Вклад брони — только у надетого предмета с компонентом Armor: вклад прототипа default_armor пустого слота
+    // не учитывается, а предмет другого вида (попадает в слот обменом через ChangeItemSlot) вклада не даёт
+    AbstractItem armor = CritterItem::GetActive(cr, CritterItemSlot::Armor);
+    Item? realArmor = cast<Item?>(armor);
+    if (realArmor != null && armor.HasArmor) {
+        int dp = 100 - GetDeteriorationProc(armor);
+        result[DamageTypes::Normal] += armor.Armor.DRNormal * dp / 100;
+        result[DamageTypes::Laser] += armor.Armor.DRLaser * dp / 100;
+        result[DamageTypes::Fire] += armor.Armor.DRFire * dp / 100;
+        result[DamageTypes::Plasma] += armor.Armor.DRPlasma * dp / 100;
+        result[DamageTypes::Electricity] += armor.Armor.DRElectr * dp / 100;
+        result[DamageTypes::Emp] += armor.Armor.DREmp * dp / 100;
+        result[DamageTypes::Explode] += armor.Armor.DRExplode * dp / 100;
+    }
 
     // Перк брони
     int armorPerk = cr.CurrentArmorPerk;
@@ -1321,25 +1330,33 @@ int CritterGetRadiationResistance(Critter cr)
 [[PropertyGetter]]
 int[] CritterGetDamageThreshold(Critter cr)
 {
-    AbstractItem armor = CritterItem::GetActive(cr, CritterItemSlot::Armor);
-    int dp = 0;
-    Item? realArmor = cast<Item?>(armor);
-    if (realArmor != null && armor.Type == ItemType::Armor) {
-        dp = 100 - GetDeteriorationProc(armor);
-    }
-
     int[] result = {
         0,
-        cr.NormalThresholdBase + armor.Armor_DTNormal * dp / 100,
-        cr.LaserThresholdBase + armor.Armor_DTLaser * dp / 100,
-        cr.FireThresholdBase + armor.Armor_DTFire * dp / 100,
-        cr.PlasmaThresholdBase + armor.Armor_DTPlasma * dp / 100,
-        cr.ElectricityThresholdBase + armor.Armor_DTElectr * dp / 100,
-        cr.EmpThresholdBase + armor.Armor_DTEmp * dp / 100,
-        cr.ExplodeThresholdBase + armor.Armor_DTExplode * dp / 100,
+        cr.NormalThresholdBase,
+        cr.LaserThresholdBase,
+        cr.FireThresholdBase,
+        cr.PlasmaThresholdBase,
+        cr.ElectricityThresholdBase,
+        cr.EmpThresholdBase,
+        cr.ExplodeThresholdBase,
         0,
         0,
     };
+
+    // Вклад брони — только у надетого предмета с компонентом Armor: вклад прототипа default_armor пустого слота
+    // не учитывается, а предмет другого вида (попадает в слот обменом через ChangeItemSlot) вклада не даёт
+    AbstractItem armor = CritterItem::GetActive(cr, CritterItemSlot::Armor);
+    Item? realArmor = cast<Item?>(armor);
+    if (realArmor != null && armor.HasArmor) {
+        int dp = 100 - GetDeteriorationProc(armor);
+        result[DamageTypes::Normal] += armor.Armor.DTNormal * dp / 100;
+        result[DamageTypes::Laser] += armor.Armor.DTLaser * dp / 100;
+        result[DamageTypes::Fire] += armor.Armor.DTFire * dp / 100;
+        result[DamageTypes::Plasma] += armor.Armor.DTPlasma * dp / 100;
+        result[DamageTypes::Electricity] += armor.Armor.DTElectr * dp / 100;
+        result[DamageTypes::Emp] += armor.Armor.DTEmp * dp / 100;
+        result[DamageTypes::Explode] += armor.Armor.DTExplode * dp / 100;
+    }
 
     // Эффекты от препаратов
     for (int i = 0; i < CritterPropertyGroup::ThresholdsBase.length(); i++) {
@@ -1405,7 +1422,7 @@ int GetCritterLookDistance(Critter cr)
 bool WeaponIsHtHAttack(AbstractItem item, int mode)
 {
     int use = mode & 0xF;
-    if (item.Type != ItemType::Weapon || item.Weapon_ActiveUses <= use) {
+    if (!item.HasWeapon || item.Weapon.ActiveUses <= use) {
         return false;
     }
 
@@ -1416,7 +1433,7 @@ bool WeaponIsHtHAttack(AbstractItem item, int mode)
 bool WeaponIsGunAttack(AbstractItem item, int mode)
 {
     int use = mode & 0xF;
-    if (item.Type != ItemType::Weapon || item.Weapon_ActiveUses <= use) {
+    if (!item.HasWeapon || item.Weapon.ActiveUses <= use) {
         return false;
     }
 
@@ -1427,7 +1444,7 @@ bool WeaponIsGunAttack(AbstractItem item, int mode)
 bool WeaponIsRangedAttack(AbstractItem item, int mode)
 {
     int use = mode & 0xF;
-    if (item.Type != ItemType::Weapon || item.Weapon_ActiveUses <= use) {
+    if (!item.HasWeapon || item.Weapon.ActiveUses <= use) {
         return false;
     }
 
@@ -1454,11 +1471,11 @@ int GetItemUseApCost(Critter cr, AbstractItem? item, int mode)
     else if (use == WeaponHelpers::USE_RELOAD) {
         apCost = Settings.Movement.RtApCostReloadWeapon;
 
-        if (item.Type == ItemType::Weapon && item.Weapon_Perk == ItemPerks::FastReload) {
+        if (item.HasWeapon && item.Weapon.Perk == ItemPerks::FastReload) {
             apCost--;
         }
     }
-    else if (use >= WeaponHelpers::USE_PRIMARY && use <= WeaponHelpers::USE_THIRD && item.Type == ItemType::Weapon) {
+    else if (use >= WeaponHelpers::USE_PRIMARY && use <= WeaponHelpers::USE_THIRD && item.HasWeapon) {
         bool hthAttack = WeaponIsHtHAttack(item, use);
         bool rangedAttack = WeaponIsRangedAttack(item, use);
         apCost = WeaponHelpers::WeaponApCost(item, use);
@@ -1497,7 +1514,7 @@ int GetItemAttackDistance(Critter cr, AbstractItem? item, int mode)
         return 0;
     }
 
-    if (item.Type != ItemType::Weapon) {
+    if (!item.HasWeapon) {
         return 0;
     }
 

@@ -1,12 +1,24 @@
 // Animation — выбор и подстановка анимаций криттеров (state/action), tactics-спрайты и звук анимаций.
 // Ключевые обязанности: инициализация анимаций, генерация имён спрайтов для tactics-моделей, fallback/substitute цепочки, проигрывание SFX.
-// Сторона: CLIENT/MAPPER (звук — только CLIENT). Подписки через InitAnimation на Game.OnCritterAnimation*.
+// Сторона: CLIENT/MAPPER (звук — только CLIENT); GetStateAnim общая. Подписки через InitAnimation на Game.OnCritterAnimation*.
 namespace Animation
 {
 
 ///@ Setting Common int32 Render.WalkAnimBaseSpeed
 ///@ Setting Common int32 Render.RunAnimStartSpeed
 ///@ Setting Common int32 Render.RunAnimBaseSpeed
+
+// State-анимация по текущему оружию криттера: оружие даёт свою стойку, иначе — Unarmed
+// (в руке может быть любой предмет). Общая функция: её вызывает и серверный сьют item_components.
+CritterStateAnim GetStateAnim(Critter cr)
+{
+    if (cr.Condition == CritterCondition::Alive) {
+        AbstractItem activeItem = CritterItem::GetActive(cr);
+        return activeItem.HasWeapon ? activeItem.Weapon.StateAnim : CritterStateAnim::Unarmed;
+    }
+
+    return CritterStateAnim::Unarmed;
+}
 
 #if CLIENT || MAPPER
 
@@ -18,17 +30,6 @@ void InitAnimation()
     Game.OnCritterAnimationProcess.Subscribe(OnCritterAnimationProcess);
     Game.OnCritterAnimationSprite.Subscribe(OnCritterAnimationSprite);
     Game.OnCritterAnimationSubstitute.Subscribe(OnCritterAnimationSubstitute);
-}
-
-// State-анимация по текущему оружию криттера: оружие даёт свою стойку, иначе — Unarmed.
-CritterStateAnim GetStateAnim(Critter cr)
-{
-    if (cr.Condition == CritterCondition::Alive) {
-        AbstractItem activeItem = CritterItem::GetActive(cr);
-        return activeItem.Type == ItemType::Weapon ? activeItem.Weapon_StateAnim : CritterStateAnim::Unarmed;
-    }
-
-    return CritterStateAnim::Unarmed;
 }
 
 // Idle-анимация в зависимости от состояния криттера (живой / нокаут / мёртвый), с фолбэком по умолчанию.
@@ -54,7 +55,7 @@ void OnCritterAnimationInit(Critter cr, CritterStateAnim& stateAnim, CritterActi
 {
     if (stateAnim == CritterStateAnim::None) {
         if (contextItem != null) {
-            stateAnim = contextItem.Type == ItemType::Weapon ? contextItem.Weapon_StateAnim : CritterStateAnim::Unarmed;
+            stateAnim = contextItem.HasWeapon ? contextItem.Weapon.StateAnim : CritterStateAnim::Unarmed;
         }
         else {
             stateAnim = GetStateAnim(cr);

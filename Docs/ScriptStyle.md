@@ -160,6 +160,19 @@ namespace Reputation
   (`if (x == null) return;`). Не сравниваем компонент-аксессор с `null` — проверяем
   `Has<Component>` (`item.HasRadio`, `cr.HasDialogContext`). `Game.Chosen` — гард
   `HasChosen`, не `== null`.
+- **Способности — компонентами свойств**, а не енумом типа и не плоскими префиксами:
+  маркер `///@ Property <Entity> <Common|Server> bool <Comp> Component` и поля
+  `<Comp>.<Field>`. Присутствие — `item.HasWeapon`, данные — `item.Weapon.MaxAmmoCount`,
+  выборка — `GetItems(ItemProperty::Weapon, 1)` (другие примеры
+  компонентов — `Radio`, `DialogContext`). Виды предметов — тоже компоненты (Armor,
+  Drug, Weapon, Ammo, Key, Container, Door, Grid, Car, Locker, Lockpick); прежний енум
+  вида, свойство `Item.Type` и плоские `<Kind>_<Field>`-свойства удалены, их имена
+  остались только правилами в `Scripts/Migration.fos` и повторно не используются.
+  Категории без своего компонента — предикаты `ItemKinds::IsPortableGoods`, `IsMisc`,
+  `IsSceneryObject`, `IsGenericScenery`; енумов вида и проверок диапазонов вида не
+  заводим (ScriptQuality `legacy-item-kind`). Без компонента `item.Weapon` бросает
+  исключение: гард `Has<Comp>` ставим только там, куда законно приходят другие
+  предметы. [Контракт](Scripts.md#property-components).
 - **Компилятор строго проверяет nullability** (warnings = errors): убираем избыточные
   `== null`, сужаем `T?` перед разыменованием, `cast<T?>(x)` когда даункаст может не удаться.
 - **Native/engine вместо самописного:** массивы — `.find/.insertLast/.exists` (не

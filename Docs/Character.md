@@ -40,9 +40,9 @@ game clock, including minutes at the 06:00/18:00 boundaries.
 | --- | --- |
 | `MaxLife` | `MaxLifeBase + ST_base + EN_base*2` + drugs, clamp 1..9999 |
 | `ActionPoints` | `ActionPointsBase + AG_impl/2` + drugs, clamp 1..9999; stored `CurrentAp` uses hundredths, see [Combat](Combat.md#action-points) |
-| `ArmorClass` | `ArmorClassBase + AG_impl` + drugs + worn armor `Armor_AC·(100−wear%)/100`, clamp 0..90 |
-| `DamageResistance[type]` | `<type>ResistanceBase` + armor `Armor_DR<type>·(100−wear%)/100`; poison += EN·5, radiation += EN·2; armor perk radiation bonuses (+20..+75); drugs; clamp 0..90 (EMP 0..999) |
-| `DamageThreshold[type]` | physical-type base + worn armor `Armor_DT<type>`, then per-type drug effects; poison/radiation start at 0, without the DR getter's EN/radiation-perk additions; clamp 0..999 |
+| `ArmorClass` | `ArmorClassBase + AG_impl` + drugs + worn armor `Armor.AC·(100−wear%)/100` (only an item with the `Armor` component counts), clamp 0..90 |
+| `DamageResistance[type]` | `<type>ResistanceBase` + worn armor `Armor.DR<type>·(100−wear%)/100` (a real item with the `Armor` component; the empty-slot `default_armor` proto and a non-armor item swapped into the slot add nothing); poison += EN·5, radiation += EN·2; armor perk radiation bonuses (+20..+75); drugs; clamp 0..90 (EMP 0..999) |
+| `DamageThreshold[type]` | physical-type base + worn armor `Armor.DT<type>·(100−wear%)/100` (same rule as DR), then per-type drug effects; poison/radiation start at 0, without the DR getter's EN/radiation-perk additions; clamp 0..999 |
 | `CarryWeight` | `max(CarryWeightBase,0)` + drugs + `ConvertGrams(25 + ST_impl·(25 − 10·SmallFrame))`, clamp 0..2000000000; pounds convert at 453 grams |
 | `MeleeDamage` | `MeleeDamageBase + (ST_impl > 6 ? ST_impl−5 : 1)` + drugs, clamp 1..9999 |
 | `Sequence` | `SequenceBase + PE_impl·2` + drugs, clamp 0..9999 |

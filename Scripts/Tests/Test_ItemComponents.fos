@@ -1,0 +1,612 @@
+// Test_ItemComponents — тесты компонентов свойств предмета, заменивших прежний енум вида предмета и плоские свойства <Вид>_<Поле>.
+// SERVER: сьют item_components проверяет маркеры на прототипах, перенос подтипов, переопределения экземпляров на картах,
+// пути брони и активного предмета, куда законно попадают предметы без компонентов Armor и Weapon,
+// и категории ItemKinds, которые заменили диапазоны прежнего енума.
+namespace Test_ItemComponents
+{
+
+#if SERVER
+
+[[ModuleInit]]
+void InitTestItemComponents()
+{
+    Game.OnTestingInit.Subscribe(OnTestingInit);
+}
+
+[[Event]]
+void OnTestingInit()
+{
+    Testing::RegisterTest("item_components", "grid_marker", GridMarker);
+    Testing::RegisterTest("item_components", "grid_subtypes", GridSubtypes);
+    Testing::RegisterTest("item_components", "grid_map_overrides", GridMapOverrides);
+    Testing::RegisterTest("item_components", "locker_family_markers", LockerFamilyMarkers);
+    Testing::RegisterTest("item_components", "car_component", CarComponent);
+    Testing::RegisterTest("item_components", "armor_ammo_drug_components", ArmorAmmoDrugComponents);
+    Testing::RegisterTest("item_components", "non_armor_paths", NonArmorPaths);
+    Testing::RegisterTest("item_components", "reload_rejects_non_ammo", ReloadRejectsNonAmmo);
+    Testing::RegisterTest("item_components", "weapon_component", WeaponComponent);
+    Testing::RegisterTest("item_components", "non_weapon_active_item_paths", NonWeaponActiveItemPaths);
+    Testing::RegisterTest("item_components", "item_kinds_partition", ItemKindsPartition);
+    Testing::RegisterTest("item_components", "respawn_validity", RespawnValidity);
+}
+
+// Маркер Grid стоит на собственных прототипах переходов; предметы других видов его не получают
+void GridMarker(Testing::TestContext ctx)
+{
+    if (!Testing::Expect(ctx, Game.GetProtoItem(Content::Item::Entrance).HasGrid, "Entrance должен иметь компонент Grid")) {
+        return;
+    }
+
+    if (!Testing::Expect(ctx, Game.GetProtoItem(Content::Item::ExitGrid).HasGrid, "ExitGrid должен иметь компонент Grid")) {
+        return;
+    }
+
+    if (!Testing::Expect(ctx, Game.GetProtoItem(Content::Item::grid_2068).HasGrid, "Лестница grid_2068 должна иметь компонент Grid")) {
+        return;
+    }
+
+    if (!Testing::Expect(ctx, !Game.GetProtoItem(Content::Item::_10mm_pistol).HasGrid, "Оружие не должно иметь компонент Grid")) {
+        return;
+    }
+
+    Testing::Expect(ctx, !Game.GetProtoItem(Content::Item::wall_5001).HasGrid, "Стена не должна иметь компонент Grid");
+}
+
+// Старый плоский подтип перехода переиспользовал значения прежнего енума вида предмета; после переноса подтип читается из GridType
+void GridSubtypes(Testing::TestContext ctx)
+{
+    if (!ExpectGridType(ctx, Content::Item::grid_2068, GridType::Stairs, "grid_2068 — лестница")) {
+        return;
+    }
+
+    if (!ExpectGridType(ctx, Content::Item::grid_2139, GridType::LadderBottom, "grid_2139 — низ приставной лестницы")) {
+        return;
+    }
+
+    if (!ExpectGridType(ctx, Content::Item::grid_2977, GridType::LadderTop, "grid_2977 — верх приставной лестницы")) {
+        return;
+    }
+
+    if (!ExpectGridType(ctx, Content::Item::grid_3655, GridType::Elevator, "grid_3655 — лифт")) {
+        return;
+    }
+
+    ExpectGridType(ctx, Content::Item::Entrance, GridType::None, "Entrance — без подтипа");
+}
+
+// Переопределения экземпляров на карте (Grid.ToMap, Grid.ToMapEntry) переживают перенос ключей:
+// выходы Арройо ведут на свои карты, а входы находятся по имени
+void GridMapOverrides(Testing::TestContext ctx)
+{
+    Location? loc = Testing::CreateTestLocation(ctx, Content::Location::arroyo);
+    if (loc == null) {
+        Testing::Fail(ctx, "Тестовая локация Арройо должна создаваться");
+        return;
+    }
+
+    Map? map = loc.GetMap(Content::Map::arroyo);
+    if (map == null) {
+        Testing::Fail(ctx, "В локации должна быть карта arroyo");
+        return;
+    }
+
+    StaticItem[] grids = map.GetStaticItems(ItemProperty::Grid, 1);
+    int exitCount = 0;
+    bool hasGardenExit = false;
+    for (int i = 0; i < grids.length(); i++) {
+        hstring toMap = grids[i].Grid.ToMap;
+        if (toMap != EMPTY_HSTRING) {
+            exitCount++;
+        }
+
+        if (toMap == Content::Map::arroyo_garden) {
+            hasGardenExit = true;
+        }
+    }
+
+    if (!Testing::ExpectEq(ctx, exitCount, 16, "Число переходов карты arroyo с назначением")) {
+        return;
+    }
+
+    if (!Testing::Expect(ctx, hasGardenExit, "Один из переходов должен вести на arroyo_garden")) {
+        return;
+    }
+
+    if (!Testing::ExpectEq(ctx, Entrance::MapGetAllEntries(map).length(), 7, "Число входов карты arroyo")) {
+        return;
+    }
+
+    mpos hex;
+    Testing::Expect(ctx, Entrance::MapGetEntryCoords(map, "51".hstr(), 0, hex), "Вход 51 должен находиться по имени");
+}
+
+// Маркеры семейства замков: контейнеры и двери несут Locker, ключ — только Key; поля читаются через компоненты
+void LockerFamilyMarkers(Testing::TestContext ctx)
+{
+    ProtoItem chest = Game.GetProtoItem(Content::Item::chest);
+    if (!Testing::Expect(ctx, chest.HasContainer && chest.HasLocker && !chest.HasDoor, "Сундук: компоненты Container и Locker, без Door")) {
+        return;
+    }
+
+    if (!Testing::ExpectEq(ctx, chest.Container.Volume, 250, "Вместимость сундука")) {
+        return;
+    }
+
+    if (!Testing::Expect(ctx, chest.Container.Changeble, "Сундук открывается и закрывается")) {
+        return;
+    }
+
+    ProtoItem door = Game.GetProtoItem(Content::Item::door_2002);
+    if (!Testing::Expect(ctx, door.HasDoor && door.HasLocker, "Дверь door_2002: компоненты Door и Locker")) {
+        return;
+    }
+
+    ProtoItem key = Game.GetProtoItem(Content::Item::blue_pass_key);
+    if (!Testing::Expect(ctx, key.HasKey && !key.HasLocker, "Пропуск blue_pass_key: компонент Key, без Locker")) {
+        return;
+    }
+
+    ProtoItem grave = Game.GetProtoItem(Content::Item::gravesite_1);
+    if (!Testing::Expect(ctx, grave.HasLocker && grave.Locker.NoOpen, "Могила gravesite_1 не открывается (Locker.NoOpen)")) {
+        return;
+    }
+
+    ProtoItem bones = Game.GetProtoItem(Content::Item::alien_forward);
+    if (!Testing::Expect(ctx,
+                         bones.HasContainer && bones.Container.MagicHandsGrnd && bones.Container.CannotPickUp,
+                         "Кости alien_forward: Container.MagicHandsGrnd и Container.CannotPickUp")) {
+        return;
+    }
+
+    ProtoItem pistol = Game.GetProtoItem(Content::Item::_10mm_pistol);
+    Testing::Expect(ctx, !pistol.HasContainer && !pistol.HasDoor && !pistol.HasLocker && !pistol.HasKey, "Оружие не имеет компонентов семейства замков");
+}
+
+// Компонент Car: параметры транспорта читаются из полей Car.*; оружие и прочие предметы его не имеют
+void CarComponent(Testing::TestContext ctx)
+{
+    ProtoItem hummer = Game.GetProtoItem(Content::Item::hummer);
+    if (!Testing::Expect(ctx, hummer.HasCar, "Хаммер hummer должен иметь компонент Car")) {
+        return;
+    }
+
+    if (!Testing::ExpectEq(ctx, hummer.Car.TankVolume, 12000, "Объём бака хаммера")) {
+        return;
+    }
+
+    if (!Testing::ExpectEq(ctx, hummer.Car.MaxDeterioration, 50000, "Предел износа хаммера")) {
+        return;
+    }
+
+    if (!Testing::ExpectEq(ctx, hummer.Car.Speed, 80, "Скорость хаммера")) {
+        return;
+    }
+
+    ProtoItem bike = Game.GetProtoItem(Content::Item::bike);
+    if (!Testing::Expect(ctx, bike.HasCar, "Мотоцикл bike должен иметь компонент Car")) {
+        return;
+    }
+
+    if (!Testing::ExpectEq(ctx, bike.Car.Speed, 120, "Скорость мотоцикла")) {
+        return;
+    }
+
+    Testing::Expect(ctx, !Game.GetProtoItem(Content::Item::_10mm_pistol).HasCar, "Оружие не должно иметь компонент Car");
+}
+
+// Компоненты Armor, Ammo и Drug: поля брони и патронов читаются через компоненты; прочие предметы их не имеют
+void ArmorAmmoDrugComponents(Testing::TestContext ctx)
+{
+    ProtoItem combatArmor = Game.GetProtoItem(Content::Item::combat_armor);
+    if (!Testing::Expect(ctx, combatArmor.HasArmor && !combatArmor.HasAmmo && !combatArmor.HasDrug, "Боевая броня combat_armor: только компонент Armor")) {
+        return;
+    }
+
+    if (!Testing::ExpectEq(ctx, combatArmor.Armor.AC, 20, "Класс брони боевой брони")) {
+        return;
+    }
+
+    if (!Testing::ExpectEq(ctx, combatArmor.Armor.DRNormal, 40, "Сопротивление обычному урону боевой брони")) {
+        return;
+    }
+
+    if (!Testing::Expect(ctx, combatArmor.Armor.CrTypeMale == "art/critters/hmcmbt".hstr(), "Мужская модель боевой брони")) {
+        return;
+    }
+
+    if (!Testing::Expect(ctx, Game.GetProtoItem(Content::Item::default_armor).HasArmor, "Броня по умолчанию default_armor должна иметь компонент Armor")) {
+        return;
+    }
+
+    ProtoItem jhp = Game.GetProtoItem(Content::Item::_10mm_jhp);
+    if (!Testing::Expect(ctx, jhp.HasAmmo && !jhp.HasArmor && !jhp.HasDrug, "Патроны _10mm_jhp: только компонент Ammo")) {
+        return;
+    }
+
+    if (!Testing::ExpectEq(ctx, int(jhp.Ammo.Caliber), int(Caliber::Bullet_10mm), "Калибр патронов _10mm_jhp")) {
+        return;
+    }
+
+    if (!Testing::ExpectEq(ctx, jhp.Ammo.DrMod, 25, "Модификатор сопротивления патронов _10mm_jhp")) {
+        return;
+    }
+
+    if (!Testing::ExpectEq(ctx, jhp.Ammo.DmgMult, 2, "Множитель урона патронов _10mm_jhp")) {
+        return;
+    }
+
+    if (!Testing::ExpectEq(ctx, jhp.Ammo.DmgDiv, 1, "Делитель урона патронов _10mm_jhp")) {
+        return;
+    }
+
+    ProtoItem antidote = Game.GetProtoItem(Content::Item::antidote);
+    if (!Testing::Expect(ctx, antidote.HasDrug && !antidote.HasArmor && !antidote.HasAmmo, "Противоядие antidote: только компонент Drug")) {
+        return;
+    }
+
+    ProtoItem brain = Game.GetProtoItem(Content::Item::abnormal_brain);
+    Testing::Expect(ctx, !brain.HasArmor && !brain.HasAmmo && !brain.HasDrug, "Мозг abnormal_brain не имеет компонентов Armor, Ammo и Drug");
+}
+
+// Предмет без компонента Armor в слоте брони (обмен слотами через ChangeItemSlot не проверяет вид предмета):
+// производные защиты считаются как без брони, бонус брони сброшен, исключений нет
+void NonArmorPaths(Testing::TestContext ctx)
+{
+    Critter? npc = SpawnTestCritter(ctx, Content::Critter::MasterTrader);
+    if (npc == null) {
+        return;
+    }
+
+    if (!Testing::Expect(ctx, npc.GetItem(ItemProperty::CritterSlot, CritterItemSlot::Armor) == null, "У тестового NPC слот брони пуст")) {
+        return;
+    }
+
+    int baseAc = npc.ArmorClass;
+    int[] baseResistance = npc.DamageResistance;
+    int[] baseThreshold = npc.DamageThreshold;
+
+    Item brain = ItemStacks::AddItem(npc, Content::Item::abnormal_brain, 1);
+    npc.ChangeItemSlot(brain.Id, CritterItemSlot::Main);
+    Item armor = ItemStacks::AddItem(npc, Content::Item::combat_armor, 1);
+    npc.ChangeItemSlot(armor.Id, CritterItemSlot::Armor);
+    if (!Testing::Expect(ctx, npc.DamageResistance[DamageTypes::Normal] > baseResistance[DamageTypes::Normal], "Надетая боевая броня повышает сопротивление")) {
+        return;
+    }
+
+    // Броня уходит в руку, а занимавший руку мозг по обмену попадает в слот брони
+    npc.ChangeItemSlot(armor.Id, CritterItemSlot::Main);
+    Item? slotItem = npc.GetItem(ItemProperty::CritterSlot, CritterItemSlot::Armor);
+    if (!Testing::Expect(ctx, slotItem != null && slotItem.Id == brain.Id, "Мозг должен оказаться в слоте брони")) {
+        return;
+    }
+
+    if (!Testing::ExpectEq(ctx, npc.ArmorClass, baseAc, "Класс брони с предметом без Armor в слоте брони")) {
+        return;
+    }
+
+    if (!ExpectArraysEq(ctx, npc.DamageResistance, baseResistance, "Сопротивления с предметом без Armor в слоте брони")) {
+        return;
+    }
+
+    if (!ExpectArraysEq(ctx, npc.DamageThreshold, baseThreshold, "Пороги урона с предметом без Armor в слоте брони")) {
+        return;
+    }
+
+    if (!Testing::ExpectEq(ctx, npc.CurrentArmorPerk, 0, "Бонус брони с предметом без Armor в слоте брони")) {
+        return;
+    }
+
+    // Прежнее поведение сохранено: пустое имя модели брони даёт модель "aa.frm"
+    Testing::Expect(ctx, npc.ModelName == "aa.frm".hstr(), "Модель с предметом без Armor в слоте брони (прежнее aa.frm), получено " + npc.ModelName);
+}
+
+// Перезарядка предметом без компонента Ammo отклоняется на сервере: AmmoPid оружия всегда называет патроны
+void ReloadRejectsNonAmmo(Testing::TestContext ctx)
+{
+    Critter? npc = SpawnTestCritter(ctx, Content::Critter::MasterTrader);
+    if (npc == null) {
+        return;
+    }
+
+    Item pistol = ItemStacks::AddItem(npc, Content::Item::_10mm_pistol, 1);
+    pistol.AmmoPid = Content::Item::_10mm_jhp;
+    pistol.AmmoCount = 5;
+    Item brain = ItemStacks::AddItem(npc, Content::Item::abnormal_brain, 1);
+    npc.CurrentAp = npc.ActionPoints * Tla::AP_DIVIDER;
+
+    bool rejected = false;
+    try {
+        CritterActions::ReloadWeapon(npc, pistol.Id, brain.Id);
+    }
+    catch {
+        rejected = GetExceptionInfo().find("Ammo item isn't ammo") >= 0;
+    }
+
+    if (!Testing::Expect(ctx, rejected, "Перезарядка мозгом abnormal_brain должна отклоняться")) {
+        return;
+    }
+
+    if (!Testing::Expect(ctx, pistol.AmmoPid == Content::Item::_10mm_jhp, "AmmoPid оружия не меняется, получено " + pistol.AmmoPid)) {
+        return;
+    }
+
+    if (!Testing::ExpectEq(ctx, pistol.AmmoCount, 5, "AmmoCount оружия не меняется")) {
+        return;
+    }
+
+    Testing::ExpectEq(ctx, ItemStacks::CountItem(npc, Content::Item::abnormal_brain), 1, "Мозг остаётся в инвентаре");
+}
+
+// Компонент Weapon: поля оружия читаются через компонент; безоружный удар по умолчанию тоже оружие
+void WeaponComponent(Testing::TestContext ctx)
+{
+    ProtoItem pistol = Game.GetProtoItem(Content::Item::_10mm_pistol);
+    if (!Testing::Expect(ctx, pistol.HasWeapon && !pistol.HasAmmo && !pistol.HasArmor, "Пистолет _10mm_pistol: только компонент Weapon")) {
+        return;
+    }
+
+    if (!Testing::ExpectEq(ctx, pistol.Weapon.MaxAmmoCount, 12, "Ёмкость магазина пистолета")) {
+        return;
+    }
+
+    if (!Testing::ExpectEq(ctx, int(pistol.Weapon.Caliber), int(Caliber::Bullet_10mm), "Калибр пистолета")) {
+        return;
+    }
+
+    if (!Testing::Expect(ctx,
+                         pistol.Weapon.DefaultAmmoPid == Content::Item::_10mm_jhp,
+                         "Патроны по умолчанию пистолета, получено " + pistol.Weapon.DefaultAmmoPid)) {
+        return;
+    }
+
+    if (!Testing::ExpectEq(ctx, int(pistol.Weapon.StateAnim), int(CritterStateAnim::Pistol), "Стойка пистолета")) {
+        return;
+    }
+
+    if (!Testing::ExpectEq(ctx, int(pistol.Weapon.Skill_0), int(CritterProperty::SkillSmallGuns), "Навык основного режима пистолета")) {
+        return;
+    }
+
+    if (!Testing::ExpectEq(ctx, pistol.Weapon.DmgMin_0, 5, "Минимальный урон пистолета")) {
+        return;
+    }
+
+    if (!Testing::ExpectEq(ctx, pistol.Weapon.DmgMax_0, 12, "Максимальный урон пистолета")) {
+        return;
+    }
+
+    ProtoItem unarmed = Game.GetProtoItem(Content::Item::default_weapon);
+    if (!Testing::Expect(ctx, unarmed.HasWeapon && unarmed.Weapon.IsUnarmed, "Удар по умолчанию default_weapon: безоружное оружие")) {
+        return;
+    }
+
+    Testing::Expect(ctx, !Game.GetProtoItem(Content::Item::abnormal_brain).HasWeapon, "Мозг abnormal_brain не имеет компонента Weapon");
+}
+
+// Предмет без компонента Weapon в руке (слот Main принимает любой предмет): стойка безоружная,
+// режимы применения недоступны, атаки нет, исключений нет
+void NonWeaponActiveItemPaths(Testing::TestContext ctx)
+{
+    Critter? npc = SpawnTestCritter(ctx, Content::Critter::MasterTrader);
+    if (npc == null) {
+        return;
+    }
+
+    if (!Testing::Expect(ctx, npc.GetItem(ItemProperty::CritterSlot, CritterItemSlot::Main) == null, "У тестового NPC рука пуста")) {
+        return;
+    }
+
+    // Пустая рука даёт прототип удара по умолчанию default_weapon
+    if (!Testing::ExpectEq(ctx, int(Animation::GetStateAnim(npc)), int(CritterStateAnim::Unarmed), "Стойка с пустой рукой")) {
+        return;
+    }
+
+    if (!Testing::Expect(ctx, WeaponHelpers::IsWeaponPrimaryAvailable(CritterItem::GetActive(npc)), "У удара по умолчанию есть основной режим")) {
+        return;
+    }
+
+    Item pistol = ItemStacks::AddItem(npc, Content::Item::_10mm_pistol, 1);
+    npc.ChangeItemSlot(pistol.Id, CritterItemSlot::Main);
+    if (!Testing::ExpectEq(ctx, int(Animation::GetStateAnim(npc)), int(CritterStateAnim::Pistol), "Стойка с пистолетом в руке")) {
+        return;
+    }
+
+    npc.ChangeItemSlot(pistol.Id, CritterItemSlot::Inventory);
+    Item brain = ItemStacks::AddItem(npc, Content::Item::abnormal_brain, 1);
+    npc.ChangeItemSlot(brain.Id, CritterItemSlot::Main);
+    AbstractItem active = CritterItem::GetActive(npc);
+    Item? realActive = cast<Item?>(active);
+    if (!Testing::Expect(ctx, realActive != null && realActive.Id == brain.Id, "Активный предмет — мозг в руке")) {
+        return;
+    }
+
+    if (!Testing::ExpectEq(ctx, int(Animation::GetStateAnim(npc)), int(CritterStateAnim::Unarmed), "Стойка с предметом без Weapon в руке")) {
+        return;
+    }
+
+    if (!Testing::Expect(ctx, !WeaponHelpers::IsWeaponPrimaryAvailable(active), "Основной режим предмета без Weapon недоступен")) {
+        return;
+    }
+
+    if (!Testing::Expect(ctx, !WeaponHelpers::IsWeaponSecondaryAvailable(active), "Второй режим предмета без Weapon недоступен")) {
+        return;
+    }
+
+    if (!Testing::Expect(ctx, !WeaponHelpers::IsWeaponThirdAvailable(active), "Третий режим предмета без Weapon недоступен")) {
+        return;
+    }
+
+    if (!Testing::ExpectEq(ctx, Parameters::GetActiveItemAttackDistance(npc), 0, "Дистанция атаки предметом без Weapon")) {
+        return;
+    }
+
+    if (!Testing::ExpectEq(ctx, Parameters::GetItemUseApCost(npc, active, WeaponHelpers::USE_PRIMARY), 1, "Стоимость атаки предметом без Weapon")) {
+        return;
+    }
+
+    // Мозг применяется на что-либо, поэтому режим атаки заменяется применением (прицел ветка не-оружия не трогает)
+    Parameters::SetWeaponMode(brain, WeaponHelpers::MakeWeaponMode(WeaponHelpers::USE_PRIMARY, 0));
+    Testing::ExpectEq(ctx, int(brain.Mode), WeaponHelpers::MakeWeaponMode(WeaponHelpers::USE_USE, 0), "Режим предмета без Weapon");
+}
+
+// Категории ItemKinds разбивают прототипы так же, как прежние диапазоны вида предмета:
+// переносимые товары (бывший диапазон Armor..Key), прочее (Misc), объекты сценерии (Generic и Grid) и чистая сценерия
+void ItemKindsPartition(Testing::TestContext ctx)
+{
+    hstring[] portable = {Content::Item::_10mm_pistol,
+                          Content::Item::combat_armor,
+                          Content::Item::_10mm_jhp,
+                          Content::Item::antidote,
+                          Content::Item::blue_pass_key,
+                          Content::Item::abnormal_brain};
+    for (int i = 0; i < portable.length(); i++) {
+        if (!ExpectKind(ctx, ItemKinds::IsPortableGoods(Game.GetProtoItem(portable[i])), true, "IsPortableGoods", portable[i])) {
+            return;
+        }
+    }
+
+    hstring[] notPortable = {Content::Item::chest,
+                             Content::Item::door_2002,
+                             Content::Item::hummer,
+                             Content::Item::Entrance,
+                             Content::Item::generic_2692,
+                             Content::Item::wall_5001,
+                             Content::Item::tile_ADB001};
+    for (int i = 0; i < notPortable.length(); i++) {
+        if (!ExpectKind(ctx, ItemKinds::IsPortableGoods(Game.GetProtoItem(notPortable[i])), false, "IsPortableGoods", notPortable[i])) {
+            return;
+        }
+    }
+
+    // Прочее (Misc) — только переносимый предмет без компонентов Armor, Drug, Weapon, Ammo и Key
+    for (int i = 0; i < portable.length(); i++) {
+        bool expected = portable[i] == Content::Item::abnormal_brain;
+        if (!ExpectKind(ctx, ItemKinds::IsMisc(Game.GetProtoItem(portable[i])), expected, "IsMisc", portable[i])) {
+            return;
+        }
+    }
+
+    for (int i = 0; i < notPortable.length(); i++) {
+        if (!ExpectKind(ctx, ItemKinds::IsMisc(Game.GetProtoItem(notPortable[i])), false, "IsMisc", notPortable[i])) {
+            return;
+        }
+    }
+
+    hstring[] scenery = {Content::Item::generic_2692, Content::Item::Entrance, Content::Item::grid_2068};
+    for (int i = 0; i < scenery.length(); i++) {
+        if (!ExpectKind(ctx, ItemKinds::IsSceneryObject(Game.GetProtoItem(scenery[i])), true, "IsSceneryObject", scenery[i])) {
+            return;
+        }
+    }
+
+    hstring[] notScenery = {Content::Item::wall_5001, Content::Item::tile_ADB001, Content::Item::_10mm_pistol};
+    for (int i = 0; i < notScenery.length(); i++) {
+        if (!ExpectKind(ctx, ItemKinds::IsSceneryObject(Game.GetProtoItem(notScenery[i])), false, "IsSceneryObject", notScenery[i])) {
+            return;
+        }
+    }
+
+    if (!ExpectKind(ctx, ItemKinds::IsGenericScenery(Game.GetProtoItem(Content::Item::generic_2692)), true, "IsGenericScenery", Content::Item::generic_2692)) {
+        return;
+    }
+
+    ExpectKind(ctx, ItemKinds::IsGenericScenery(Game.GetProtoItem(Content::Item::Entrance)), false, "IsGenericScenery", Content::Item::Entrance);
+}
+
+// Восстанавливаются только переносимые предметы без компонента Ammo (бывший список Armor, Drug, Weapon, Misc, Key);
+// проверка идёт на предметах, созданных на тестовой карте
+void RespawnValidity(Testing::TestContext ctx)
+{
+    Location? loc = Testing::CreateTestLocation(ctx, Content::Location::desert_12);
+    if (loc == null) {
+        Testing::Fail(ctx, "Тестовая локация должна создаваться");
+        return;
+    }
+
+    Map map = loc.GetMapByIndex(0);
+    mpos hex = mpos(map.Size.width / 2, map.Size.height / 2);
+    if (!ExpectRespawnValid(ctx, map, hex, Content::Item::_10mm_pistol, true)) {
+        return;
+    }
+
+    if (!ExpectRespawnValid(ctx, map, hex, Content::Item::abnormal_brain, true)) {
+        return;
+    }
+
+    if (!ExpectRespawnValid(ctx, map, hex, Content::Item::_10mm_jhp, false)) {
+        return;
+    }
+
+    ExpectRespawnValid(ctx, map, hex, Content::Item::chest, false);
+}
+
+// Проверяет наличие компонента Grid у прототипа и его подтип
+bool ExpectGridType(Testing::TestContext ctx, hstring protoId, GridType expected, string message)
+{
+    ProtoItem proto = Game.GetProtoItem(protoId);
+    if (!Testing::Expect(ctx, proto.HasGrid, message + ": нужен компонент Grid")) {
+        return false;
+    }
+
+    return Testing::ExpectEq(ctx, int(proto.Grid.Type), int(expected), message);
+}
+
+// Сверяет категорию прототипа с ожидаемой
+bool ExpectKind(Testing::TestContext ctx, bool actual, bool expected, string predicate, hstring protoId)
+{
+    return Testing::Expect(ctx, actual == expected, predicate + "(" + protoId + ") должно быть " + (expected ? "true" : "false"));
+}
+
+// Создаёт предмет на карте и сверяет решение RespawnItem::CheckItemValidToRespawn
+bool ExpectRespawnValid(Testing::TestContext ctx, Map map, mpos hex, hstring protoId, bool expected)
+{
+    Item item = ItemStacks::AddItem(map, hex, protoId, 1);
+    bool actual = RespawnItem::CheckItemValidToRespawn(item);
+    return Testing::Expect(ctx, actual == expected, "CheckItemValidToRespawn(" + protoId + ") должно быть " + (expected ? "true" : "false"));
+}
+
+// Сравнивает массивы производных характеристик поэлементно
+bool ExpectArraysEq(Testing::TestContext ctx, int[] actual, int[] expected, string message)
+{
+    if (!Testing::ExpectEq(ctx, actual.length(), expected.length(), message + ": длина")) {
+        return false;
+    }
+
+    for (int i = 0; i < actual.length(); i++) {
+        if (!Testing::ExpectEq(ctx, actual[i], expected[i], message + ": индекс " + i)) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+// Криттер для проверок: NPC на проходимом гексе тестовой локации
+Critter? SpawnTestCritter(Testing::TestContext ctx, hstring proto)
+{
+    Location? loc = Testing::CreateTestLocation(ctx, Content::Location::desert_12);
+    if (loc == null) {
+        Testing::Fail(ctx, "Тестовая локация должна создаваться");
+        return null;
+    }
+
+    Map map = loc.GetMapByIndex(0);
+    mpos center = mpos(map.Size.width / 2, map.Size.height / 2);
+    for (int radius = 0; radius < 15; radius++) {
+        for (int dx = -radius; dx <= radius; dx++) {
+            for (int dy = -radius; dy <= radius; dy++) {
+                mpos probe = mpos(center.x + dx, center.y + dy);
+                if (probe.x > 0 && probe.y > 0 && int(probe.x) < map.Size.width - 1 && int(probe.y) < map.Size.height - 1 && map.IsHexMovable(probe)) {
+                    return Testing::SpawnTestNpc(ctx, map, proto, probe);
+                }
+            }
+        }
+    }
+
+    Testing::Fail(ctx, "На карте должен найтись проходимый гекс");
+    return null;
+}
+
+#endif
+
+}

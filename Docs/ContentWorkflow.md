@@ -138,6 +138,17 @@ Validators: `Tools/ContentQuality`
 guards text-pack parity; the property registrar rejects malformed `///@`
 declarations at bake time.
 
+A [property component](Scripts.md#property-components) is authored on the item
+proto as its marker plus qualified fields, for example `Radio = True` and
+`Radio.Channel = 5`. Markers belong only on prototypes: a map item instance may
+override `<Comp>.<Field>` of a component its proto enables, never the marker.
+An item's kind is its component marker (`Weapon = True`, `Door = True` with
+`Locker = True`, …) with `<Comp>.<Field>` keys; there is no `Type` key and no flat
+`<Kind>_<Field>` key. A non-static proto without a kind marker is Misc; scenery
+is static and walls and tiles use the Engine `IsWall`/`IsTile` flags
+([categories](Items.md#item-kinds)). `Analyze :: Item Components`
+([checks](../Tools/ContentQuality/README.md#item-property-components)) enforces this.
+
 ## Configuration and secure channel
 
 `TLA.fomain` owns runtime defaults, bake settings and named subconfigs. Preserve

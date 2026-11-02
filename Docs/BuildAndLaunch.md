@@ -52,6 +52,7 @@ require the explicit configure step shown above.
 | `Format :: Prototypes` / `Format :: Main Config` / `Format :: All` | Format the selected authored inputs. |
 | `Analyze :: Script Quality (Ratchet)` | No new violations against the existing baseline. |
 | `Analyze :: Nullable All` | Script markers, focused validator tests, ABI/handler parity and coverage. |
+| `Analyze :: Item Components` | Item property-component content and migration-rule contract; [checks](../Tools/ContentQuality/README.md#item-property-components). |
 | `Test :: Python Tools` | `py -3 -m pytest Tools -q`. |
 | `Verify :: All` | Sequential full local integration chain below. |
 

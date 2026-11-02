@@ -24,7 +24,7 @@ syncs it to the client on every change and on global-map entry.
 
 ## Entrances and transfers — [Scripts/Entrance.fos](../Scripts/Entrance.fos)
 
-Map "entries" are `Entrance` grid static items whose `Grid_ToMapEntry` names
+Map "entries" are `Entrance` static items (`Grid` component) whose `Grid.ToMapEntry` names
 an entry (numeric strings are the convention: `"0"` arrival, `"242"` the
 replication entry, city exits, event entries `"33".."36"`). API:
 `ParseEntries`, `GetEntry(map, name, skip)`, `GetEntryFreeHex` (entry hex,
@@ -93,13 +93,15 @@ The largest content system (~11.5k lines, almost entirely data). Structure:
 
 ## Vehicles — [Scripts/Car.fos](../Scripts/Car.fos)
 
-Cars are `ItemType::Car` items: energy cells work for either engine, while
-the listed alcoholic fuels additionally require `CarIsBioEngine` (octane
+Cars are items with the `Car` component (`item.HasCar`; fields `item.Car.*`): energy cells work for either engine, while
+the listed alcoholic fuels additionally require `Car.IsBioEngine` (octane
 acts as fuel density); lock/key checks
-(`CarIsNoLockpick`), skill inspection/repair (repair skill reduces
-`Deterioration` measured against `Car_MaxDeterioration`), and taking the car
+(`Car.IsNoLockpick`), skill inspection/repair (repair skill reduces
+`Deterioration` measured against `Car.MaxDeterioration`), and taking the car
 to the global map (`cr.TransferToGlobal()` moves the car with the group;
-`Car_MovementType` selects movement speed/relief). Car ownership interacts
+`Car.MovementType` selects movement speed/relief). The remaining fields are `Car.Speed`, `Car.Passability`,
+`Car.DeteriorationRate`, `Car.CrittersCapacity`, `Car.TankVolume`, `Car.FuelConsumption` and `Car.Entrance`;
+they are declared in [ItemProps](../Scripts/ItemProps.fos). Car ownership interacts
 with death/replication (see [PlayerLifecycle](PlayerLifecycle.md)) — the
 replicator handles cars before choosing the player/NPC respawn branch,
 attempting to transfer the dead car owner into an empty encounter or destroying

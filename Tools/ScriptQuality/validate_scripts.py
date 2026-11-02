@@ -14,6 +14,8 @@ Checks (severity):
   ERROR   preprocessor-guard-balance #if/#ifdef/#ifndef balance with #endif
   ERROR   component-null-probe       `.Comp == null` instead of `!HasComp`
   ERROR   item-static-signature      ItemStatic must match its engine callback ABI
+  ERROR   legacy-item-kind           retired `ItemType`/`ItemProperty::Type` or a flat
+                                     `<Comp>_<Field>` property of a declared component
   WARNING banner-tags               `// Author:` / `// ver x.y` header banners
   WARNING textpack-magic-id         `"" + (1234)` magic text-pack ids
   WARNING hand-rolled-utils         calls to helpers that duplicate engine APIs
@@ -177,15 +179,124 @@ def line_of(text: str, offset: int) -> int:
 
 
 # --------------------------------------------------------------------------
-# Component-accessor set: derive from `.HasXxx` usage across all scripts so
-# the component-null-probe check knows which `.Xxx == null` are real probes.
+# Component-accessor set: `///@ Property <Entity> <side> bool <Name> Component`
+# declarations plus `.HasXxx` usage across all scripts (engine-provided
+# Has-accessors such as HasChosen are known only from usage), so the
+# component-null-probe check knows which `.Xxx == null` can be real probes.
 # --------------------------------------------------------------------------
 
 HAS_FLAG_RE = re.compile(r"\.Has([A-Z][A-Za-z0-9_]*)\b")
+COMPONENT_DECLARATION_RE = re.compile(
+    r"^[ \t]*///@[ \t]+Property[ \t]+\w+[ \t]+\w+[ \t]+bool[ \t]+([A-Za-z_]\w*)[ \t]+Component\b",
+    re.MULTILINE,
+)
 
 
-def derive_component_names(all_text: str) -> set[str]:
-    return set(HAS_FLAG_RE.findall(all_text))
+def derive_component_names(code_text: str, source_text: str = "") -> set[str]:
+    """Names from `.HasXxx` usage in code and from Component declarations in source."""
+    return set(HAS_FLAG_RE.findall(code_text)) | set(COMPONENT_DECLARATION_RE.findall(source_text))
+
+
+ENTITY_COMPONENT_DECLARATION_RE = re.compile(
+    r"^[ \t]*///@[ \t]+Property[ \t]+(\w+)[ \t]+\w+[ \t]+bool[ \t]+([A-Za-z_]\w*)[ \t]+Component\b",
+    re.MULTILINE,
+)
+
+
+def derive_entity_components(source_text: str) -> dict[str, set[str]]:
+    """Declared component markers per entity: `///@ Property <Entity> <side> bool <Name> Component`."""
+    out: dict[str, set[str]] = {}
+    for entity, name in ENTITY_COMPONENT_DECLARATION_RE.findall(source_text):
+        out.setdefault(entity, set()).add(name)
+    return out
+
+
+# A probe receiver that is a plain identifier declared in the same file with a
+# type outside these entity handle types (e.g. `Gui::Object? obj`, whose `Grid`
+# is the GUI cell grid) is not a component probe. Undeclared, `auto` and
+# compound receivers (`a.b.Comp`, `f().Comp`) stay reported.
+ENTITY_HANDLE_TYPES = frozenset({
+    "Item", "AbstractItem", "ProtoItem", "StaticItem",
+    "Critter", "AbstractCritter", "ProtoCritter",
+    "Map", "AbstractMap", "ProtoMap",
+    "Location", "AbstractLocation", "ProtoLocation",
+    "Player", "AbstractPlayer",
+})
+UNKNOWN_DECLARATION_TYPES = frozenset({"auto"})
+# Words that can precede an identifier without declaring it (`return obj`, `not obj`).
+NON_TYPE_WORDS = frozenset({
+    "abstract", "and", "break", "case", "cast", "catch", "class", "const", "continue", "default",
+    "delete", "do", "else", "enum", "explicit", "external", "false", "final", "for", "funcdef",
+    "if", "import", "in", "inout", "interface", "is", "mixin", "namespace", "new", "not", "null",
+    "or", "out", "override", "private", "property", "protected", "return", "shared", "super",
+    "switch", "this", "throw", "true", "try", "typedef", "while", "xor",
+})
+
+
+def plain_receiver(code: str, dot: int) -> str | None:
+    """Identifier directly before `code[dot] == '.'`, or None for a compound receiver."""
+    start = dot
+    while start > 0 and (code[start - 1].isalnum() or code[start - 1] == "_"):
+        start -= 1
+    ident = code[start:dot]
+    if not ident or ident[0].isdigit() or ident in NON_TYPE_WORDS:
+        return None
+    if start > 0 and code[start - 1] in ".:)]>":
+        return None
+    return ident
+
+
+FOREACH_HEAD_RE = re.compile(r"\b(?:for|foreach)[ \t]*\($")
+
+
+def declaration_head(code: str, start: int) -> str:
+    """Same-line text before a declaration candidate, without a trailing `const`."""
+    head = code[code.rfind("\n", 0, start) + 1:start].rstrip()
+    if head.endswith("const") and (len(head) == 5 or not (head[-6].isalnum() or head[-6] == "_")):
+        head = head[:-5].rstrip()
+    return head
+
+
+def declared_type(code: str, ident: str, before: int) -> str | None:
+    """Type of the nearest declaration of `ident` before offset `before` (scope approximation).
+
+    A candidate counts only at a declaration position (line start or after `( , ; { }`,
+    optionally `const`) and before a declaration terminator (`=`, `;`, `,`, `)`, foreach `:`).
+    That rejects operands such as `flag ? item : x`, `mask & item` and `x = flag ? item : y`.
+    """
+    declaration_re = re.compile(
+        r"(?<![\w.:])((?:[A-Za-z_]\w*::)*[A-Za-z_]\w*)"  # type, optionally namespace-qualified
+        r"((?:[ \t]*<[^<>;{}()]*>)?"  # template arguments: array<Item@>
+        r"(?:[ \t]*\[[ \t]*\])*"  # array suffix: Item[]
+        r"(?:[ \t]*[?@])*"  # nullable / handle: Item?, Item ?, Item@
+        # Reference: `Item& x`, `Item &in x`, `Item[] & x`; a spaced `a & b` is a bitwise operand.
+        r"(?:&[ \t]*(?:in|out|inout)\b|&|[ \t]+&[ \t]*(?:in|out|inout)\b|(?<=[\]>])[ \t]*&)?)"
+        r"[ \t]*(?<=[ \t?@&>\]])" + re.escape(ident) + r"\b"
+        r"(?=[ \t]*(?:=(?!=)|;|,|\)|:(?!:)))"  # declaration terminator
+    )
+    found = None
+    for match in declaration_re.finditer(code, 0, before):
+        type_name, suffix = match.group(1), match.group(2)
+        if type_name in NON_TYPE_WORDS:
+            continue
+        head = declaration_head(code, match.start())
+        if head and head[-1] not in "(,;{}":
+            continue
+        # `(flag ? item : other)`: a `?` before `<ident> :` is a ternary unless this is a foreach head.
+        if "?" in suffix and code[match.end():].lstrip(" \t").startswith(":") and not FOREACH_HEAD_RE.search(head):
+            continue
+        found = type_name
+    return found
+
+
+def is_non_entity_receiver(code: str, dot: int) -> bool:
+    ident = plain_receiver(code, dot)
+    if ident is None:
+        return False
+    type_name = declared_type(code, ident, dot)
+    if type_name is None or type_name in UNKNOWN_DECLARATION_TYPES:
+        return False
+    return type_name not in ENTITY_HANDLE_TYPES
 
 
 # --------------------------------------------------------------------------
@@ -288,6 +399,8 @@ def check_component_null_probe(rel: str, code: str, text: str, components: set[s
     alt = "|".join(sorted(re.escape(c) for c in components))
     rx = re.compile(r"\.(" + alt + r")[ \t]*(==|!=)[ \t]*null\b")
     for m in rx.finditer(code):
+        if is_non_entity_receiver(code, m.start()):
+            continue
         comp = m.group(1)
         op = m.group(2)
         fix = f"!{'.'}Has{comp}" if op == "==" else f".Has{comp}"
@@ -295,6 +408,43 @@ def check_component_null_probe(rel: str, code: str, text: str, components: set[s
                              f".{comp} {op} null — use {'!x.Has' if op == '==' else 'x.Has'}{comp} (component accessors are guarded by Has{comp})",
                              SEVERITY_ERROR))
     return out
+
+
+# Retired item-kind spellings: the kind enum and its property were replaced by
+# property components (`Has<Comp>`, ItemKinds predicates). Code is matched
+# outside comments and strings; `///@` metadata lines are matched as source.
+LEGACY_ITEM_KIND_CODE_RE = re.compile(r"\bItemType\b|\bItemProperty[ \t]*::[ \t]*Type\b")
+METADATA_LINE_RE = re.compile(r"^[ \t]*///@[^\n]*", re.MULTILINE)
+LEGACY_ITEM_KIND_METADATA_RE = re.compile(r"\bItemType\b")
+# `///@ Property <Entity> <side> <type> <name> ...`; the type may contain spaces (`dict<a, b>`).
+PROPERTY_DECLARATION_RE = re.compile(r"^[ \t]*///@[ \t]+Property[ \t]+(\w+)[ \t]+\w+[ \t]+.+?[ \t]+([A-Za-z_][\w.]*)(?=[ \t]|$)")
+
+
+def check_legacy_item_kind(rel: str, code: str, text: str, entity_components: dict[str, set[str]]) -> list[Violation]:
+    out: list[Violation] = []
+    for m in LEGACY_ITEM_KIND_CODE_RE.finditer(code):
+        out.append(Violation("legacy-item-kind", rel, line_of(text, m.start()),
+                             f"{m.group(0)} is retired — test kind components (`item.Has<Comp>`) or ItemKinds predicates",
+                             SEVERITY_ERROR))
+    for meta in METADATA_LINE_RE.finditer(text):
+        line = meta.group(0)
+        if LEGACY_ITEM_KIND_METADATA_RE.search(line):
+            out.append(Violation("legacy-item-kind", rel, line_of(text, meta.start()),
+                                 "ItemType is retired — model item kinds as property components",
+                                 SEVERITY_ERROR))
+            continue
+        decl = PROPERTY_DECLARATION_RE.match(line)
+        if decl is None:
+            continue
+        entity, name = decl.groups()
+        for comp in sorted(entity_components.get(entity, ())):
+            if name.startswith(comp + "_") and len(name) > len(comp) + 1:
+                field = name[len(comp) + 1:]
+                out.append(Violation("legacy-item-kind", rel, line_of(text, meta.start()),
+                                     f"flat {entity} property {name} of component {comp} — declare {comp}.{field}",
+                                     SEVERITY_ERROR))
+                break
+    return sorted(out, key=lambda v: v.line)
 
 
 def check_item_static_signature(rel: str, code: str, text: str) -> list[Violation]:
@@ -414,6 +564,7 @@ def analyze() -> list[Violation]:
     files = collect_files()
     # Build component set from the whole tree first.
     all_text = []
+    all_source = []
     cache: dict[Path, tuple[str, bytes, str]] = {}
     for f in files:
         raw = f.read_bytes()
@@ -421,7 +572,9 @@ def analyze() -> list[Violation]:
         kinds = classify(text)
         cache[f] = (text, raw, kinds)
         all_text.append(mask_to(text, kinds, "c"))
-    components = derive_component_names("\n".join(all_text))
+        all_source.append(text)
+    components = derive_component_names("\n".join(all_text), "\n".join(all_source))
+    entity_components = derive_entity_components("\n".join(all_source))
 
     violations: list[Violation] = []
     for f in files:
@@ -433,6 +586,7 @@ def analyze() -> list[Violation]:
         violations += check_guard_balance(rel, code)
         violations += check_component_null_probe(rel, code, text, components)
         violations += check_item_static_signature(rel, code, text)
+        violations += check_legacy_item_kind(rel, code, text, entity_components)
         violations += check_banner_tags(rel, text, kinds)
         violations += check_textpack_magic(rel, text, kinds)
         violations += check_hand_rolled(rel, code, text)
@@ -559,6 +713,9 @@ def fix_file(path: Path, components: set[str]) -> int:
 
         def repl(m: re.Match) -> str:
             nonlocal fixes
+            # Same receiver rule as the check: a non-entity receiver stays as written.
+            if is_non_entity_receiver(code, m.start(2) - 1):
+                return text[m.start():m.end()]
             fixes += 1
             recv, comp, op = m.group(1), m.group(2), m.group(3)
             return (f"!{recv}.Has{comp}" if op == "==" else f"{recv}.Has{comp}")
@@ -589,11 +746,13 @@ def fix_file(path: Path, components: set[str]) -> int:
 def cmd_fix() -> int:
     files = collect_files()
     all_text = []
+    all_source = []
     for f in files:
         raw = f.read_bytes()
         text = raw.decode("utf-8", errors="replace").replace("\r\n", "\n").replace("\r", "\n")
         all_text.append(mask_to(text, classify(text), "c"))
-    components = derive_component_names("\n".join(all_text))
+        all_source.append(text)
+    components = derive_component_names("\n".join(all_text), "\n".join(all_source))
     total = 0
     touched = 0
     for f in files:

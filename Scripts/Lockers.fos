@@ -1,4 +1,5 @@
 // Lockers — двери, контейнеры и замки: открытие/закрытие, проверка ключей, взлом.
+// Объявляет компоненты Container, Door и Locker (Locker есть у каждой двери и контейнера).
 // SERVER: реакция на использование предмета/навыка по запертому объекту (дверь, контейнер),
 //   логика ключей и взлома замка, переключение состояния и показ содержимого контейнера.
 // CLIENT: анимация дверей/контейнеров при появлении на карте и при смене состояния Opened.
@@ -12,23 +13,33 @@ namespace Lockers
 ///@ Property Item Common bool IsCanOpen
 ///@ Property Item Common int64 LockerId Mutable OwnerSync Persistent
 ///@ Property Item Server int32 LockerComplexity Mutable Persistent
-///@ Property Item Common bool Locker_Locked Mutable PublicSync Persistent
-///@ Property Item Common bool Locker_Jammed Mutable PublicSync Persistent
-///@ Property Item Common bool Locker_Broken Mutable PublicSync Persistent
-///@ Property Item Common bool Locker_NoOpen Mutable PublicSync Persistent
-///@ Property Item Common bool Locker_IsElectro Mutable PublicSync Persistent
-///@ Property Item Common bool Door_NoBlockMove Mutable PublicSync Persistent
-///@ Property Item Common bool Door_NoBlockShoot Mutable PublicSync Persistent
-///@ Property Item Common bool Door_NoBlockLight Mutable PublicSync Persistent
-///@ Property Item Common int32 Container_Volume Mutable PublicSync Persistent
-///@ Property Item Common bool Container_Changeble Mutable PublicSync Persistent
-///@ Property Item Common bool Container_CannotPickUp Mutable PublicSync Persistent
 
+// Компонент Container — контейнер с вместимостью (сундук, шкаф, могила, тайник).
+///@ Property Item Common bool Container Component
+///@ Property Item Common int32 Container.Volume Mutable PublicSync Persistent
+///@ Property Item Common bool Container.Changeble Mutable PublicSync Persistent
+///@ Property Item Common bool Container.CannotPickUp Mutable PublicSync Persistent
+///@ Property Item Common bool Container.MagicHandsGrnd Mutable PublicSync Persistent
+
+// Компонент Door — дверь, ворота; блокировки движения, стрельбы и света в открытом состоянии.
+///@ Property Item Common bool Door Component
+///@ Property Item Common bool Door.NoBlockMove Mutable PublicSync Persistent
+///@ Property Item Common bool Door.NoBlockShoot Mutable PublicSync Persistent
+///@ Property Item Common bool Door.NoBlockLight Mutable PublicSync Persistent
 // MultihexDoors не используется нигде.
-///@ Property Item Server bool Door_IsMultyHex Mutable Persistent
-///@ Property Item Server uint8[] Door_MultyHexLine1 Mutable Persistent
-///@ Property Item Server uint8[] Door_MultyHexLine2 Mutable Persistent
-///@ Property Item Server int32[] Door_BlockerIds Mutable Persistent
+///@ Property Item Server bool Door.IsMultyHex Mutable Persistent
+///@ Property Item Server uint8[] Door.MultyHexLine1 Mutable Persistent
+///@ Property Item Server uint8[] Door.MultyHexLine2 Mutable Persistent
+///@ Property Item Server int32[] Door.BlockerIds Mutable Persistent
+
+// Компонент Locker — состояние замка; есть у каждой двери и каждого контейнера.
+// LockerId, LockerComplexity, LockerCondition, Opened и IsCanOpen остаются плоскими: LockerId делят и ключи.
+///@ Property Item Common bool Locker Component
+///@ Property Item Common bool Locker.Locked Mutable PublicSync Persistent
+///@ Property Item Common bool Locker.Jammed Mutable PublicSync Persistent
+///@ Property Item Common bool Locker.Broken Mutable PublicSync Persistent
+///@ Property Item Common bool Locker.NoOpen Mutable PublicSync Persistent
+///@ Property Item Common bool Locker.IsElectro Mutable PublicSync Persistent
 
 // Точка входа модуля: на клиенте подписываемся на появление предметов на карте
 // и на установку свойства Opened, чтобы проигрывать анимацию дверей/контейнеров.
@@ -61,9 +72,9 @@ bool UseSkillOnLocker(Critter cr, Item locker, CritterProperty skill)
     }
 
     if (skill == CritterProperty::SpecialSkillPickOnGround) {
-        if (locker.Type == ItemType::Door) {
+        if (locker.HasDoor) {
             // Объект помечен как неоткрываемый
-            if (locker.Locker_NoOpen) {
+            if (locker.Locker.NoOpen) {
                 Messaging::Info(cr, TextPackKey(TextPackName::Game, "" + (MsgStr::StrUseNothing)));
                 return true;
             }
@@ -75,7 +86,7 @@ bool UseSkillOnLocker(Critter cr, Item locker, CritterProperty skill)
             }
 
             // Закрытая дверь с замком требует подходящего ключа (если не сломана)
-            if (!locker.Opened && locker.LockerId != 0 && !locker.Locker_Broken && !IsKeyAvailable(cr, locker.LockerId)) {
+            if (!locker.Opened && locker.LockerId != 0 && !locker.Locker.Broken && !IsKeyAvailable(cr, locker.LockerId)) {
                 Messaging::Info(cr, TextPackKey(TextPackName::Game, "" + (MsgStr::StrItemLockerNeedKey)));
                 return true;
             }
@@ -83,21 +94,21 @@ bool UseSkillOnLocker(Critter cr, Item locker, CritterProperty skill)
             // Переключаем состояние двери на противоположное
             SwitchLocker(locker, !locker.Opened);
         }
-        else if (locker.Type == ItemType::Container) {
+        else if (locker.HasContainer) {
             // Объект помечен как неоткрываемый
-            if (locker.Locker_NoOpen) {
+            if (locker.Locker.NoOpen) {
                 Messaging::Info(cr, TextPackKey(TextPackName::Game, "" + (MsgStr::StrUseNothing)));
                 return true;
             }
 
             // Закрытый контейнер с замком требует подходящего ключа (если не сломан)
-            if (!locker.Opened && locker.LockerId != 0 && !locker.Locker_Broken && !IsKeyAvailable(cr, locker.LockerId)) {
+            if (!locker.Opened && locker.LockerId != 0 && !locker.Locker.Broken && !IsKeyAvailable(cr, locker.LockerId)) {
                 Messaging::Info(cr, TextPackKey(TextPackName::Game, "" + (MsgStr::StrItemLockerNeedKey)));
                 return true;
             }
 
             // Контейнер можно открывать/закрывать
-            if (locker.Container_Changeble) {
+            if (locker.Container.Changeble) {
                 // Переключаем состояние; при открытии сразу показываем содержимое
                 if (locker.Opened) {
                     SwitchLocker(locker, !locker.Opened);
@@ -115,7 +126,7 @@ bool UseSkillOnLocker(Critter cr, Item locker, CritterProperty skill)
         }
     }
     else if (skill == CritterProperty::SkillSteal) {
-        if (locker.Type == ItemType::Container && locker.Opened) {
+        if (locker.HasContainer && locker.Opened) {
             ShowContainer(cr, null, locker, locker.GroundLevel ? TransferTypes::HexContDown : TransferTypes::HexContUp);
         }
         else {
@@ -124,7 +135,7 @@ bool UseSkillOnLocker(Critter cr, Item locker, CritterProperty skill)
     }
     else if (skill == CritterProperty::SkillLockpick) {
         // Объект помечен как неоткрываемый
-        if (locker.Locker_NoOpen) {
+        if (locker.Locker.NoOpen) {
             Messaging::Info(cr, TextPackKey(TextPackName::Game, "" + (MsgStr::StrUseNothing)));
             return true;
         }
@@ -165,7 +176,7 @@ bool UseSkillOnLocker(Critter cr, Item locker, CritterProperty skill)
         int value = Game.Random(1, 100);
         if (base >= value) {
             SwitchLocker(locker, true);
-            if (locker.Type == ItemType::Container) {
+            if (locker.HasContainer) {
                 ShowContainer(cr, null, locker, locker.GroundLevel ? TransferTypes::HexContDown : TransferTypes::HexContUp);
             }
 
@@ -202,7 +213,7 @@ bool IsKeyAvailable(Critter cr, int lockerId)
         return true;
     }
 
-    Item[] keys = cr.GetItems(ItemProperty::Type, ItemType::Key);
+    Item[] keys = cr.GetItems(ItemProperty::Key, 1);
     for (int i = 0; i < keys.length(); i++) {
         if (keys[i].LockerId == lockerId) {
             return true;
@@ -220,7 +231,7 @@ ident GetKeyId(Critter cr, int lockerId)
         return ZERO_IDENT;
     }
 
-    Item[] keys = cr.GetItems(ItemProperty::Type, ItemType::Key);
+    Item[] keys = cr.GetItems(ItemProperty::Key, 1);
     for (int i = 0; i < keys.length(); i++) {
         if (keys[i].LockerId == lockerId) {
             return keys[i].Id;
@@ -234,7 +245,7 @@ ident GetKeyId(Critter cr, int lockerId)
 bool SwitchLocker(Item locker, bool toOpen)
 {
     locker.Opened = toOpen;
-    if (locker.Type == ItemType::Door) {
+    if (locker.HasDoor) {
         locker.ShootThru = toOpen;
         locker.LightThru = toOpen;
         locker.NoBlock = toOpen;
@@ -280,7 +291,9 @@ void ShowContainer(Critter cr, Critter? crFrom, Item? container, TransferTypes t
 
     // Просмотр обычного контейнера: игроку показываем содержимое, NPC забирает предметы себе
     if (container != null) {
-        if (!CritterActions::IsContainerAccessOpen(container.Container_Changeble, container.Opened) ||
+        // Сюда приходят и двери (ElectronicLock): без компонента Container содержимое не переключается
+        bool changeable = container.HasContainer && container.Container.Changeble;
+        if (!CritterActions::IsContainerAccessOpen(changeable, container.Opened) ||
             ((typeShow == TransferTypes::HexContUp || typeShow == TransferTypes::HexContDown) &&
              !CritterActions::IsMapContainerAccessValid(container.Ownership,
                                                         cr.MapId,
@@ -312,7 +325,7 @@ void ShowContainer(Critter cr, Critter? crFrom, Item? container, TransferTypes t
 [[Event]]
 void OnItemMapIn(Item item)
 {
-    if (item.Type != ItemType::Door && item.Type != ItemType::Container) {
+    if (!item.HasLocker) {
         return;
     }
 

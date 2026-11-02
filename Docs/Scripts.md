@@ -106,6 +106,42 @@ stack adapter. Its regression owner is `Scripts/Tests/Test_ItemStacks.fos`;
 day tint is covered by `Scripts/Tests/Test_DayColor.fos`. Add server `Game.Log`
 only where it diagnoses meaningful positive/negative behavior.
 
+## Property components
+
+Model an optional capability with a presence test and related data as an Engine
+[property component](../Engine/Docs/en/how-to/content/prototype-format.md#property-components),
+not as a kind enum value or flat prefixed properties. Examples: `Radio` on Item
+([Radio.fos](../Scripts/Radio.fos)), `DialogContext` on Critter
+([Dialogs.fos](../Scripts/Dialogs.fos)). Item kinds are components too: Armor,
+Drug, Weapon, Ammo, Key, Container, Door, Grid and Car, plus Locker and Lockpick.
+The former kind enum, the `Item.Type` property and the flat `<Kind>_<Field>` Item
+properties are removed; their names survive only as rules in
+[Migration.fos](../Scripts/Migration.fos) and are never reused. Categories without
+a capability of their own come from the Common [ItemKinds](../Scripts/ItemKinds.fos)
+predicates: `IsPortableGoods` (non-static, not Container, Door or Car), `IsMisc`
+(portable without Armor, Drug, Weapon, Ammo or Key), `IsSceneryObject` (static,
+not `IsWall`, not `IsTile`) and `IsGenericScenery` (scenery object without Grid).
+Do not add kind enums or kind range checks.
+
+- Declare an immutable marker `///@ Property <Entity> <Common|Server> bool <Comp> Component`
+  without `Mutable`, `Persistent` or sync tags, then fields `<Comp>.<Field>`, each
+  with its own side, `Mutable`, sync and `Persistent` flags.
+- Test presence with `item.Has<Comp>`, never `item.<Comp> == null`. Reading
+  `item.<Comp>.<Field>` without the component throws: guard only where other items
+  legitimately reach the code, otherwise rely on a proven invariant.
+- Filter by marker: `GetItems(ItemProperty::<Comp>, 1)` and the `ItemProperty`
+  overloads of `GetItemOnHex`, `GetItemInRadius` and `GetStaticItems`. The enum
+  entry of a field is `ItemProperty::<Comp>_<Field>`; its content and storage key
+  is `<Comp>.<Field>`.
+- Moving a persisted flat property into a component renames it: add
+  `///@ MigrationRule Property Item Rename <Old> <Comp>.<Field>` (or `Remove <Old>`
+  for data that is not kept) to `Scripts/Migration.fos` in the same change.
+- `Analyze :: Item Components` enforces the content and migration side
+  ([checks](../Tools/ContentQuality/README.md#item-property-components)); the
+  Script Quality check `legacy-item-kind`
+  ([checks](../Tools/ScriptQuality/README.md#checks)) rejects the retired kind
+  spellings and flat `<Comp>_<Field>` declarations of a declared component.
+
 ## Contracts and tests
 
 Map previews are owned by `Scripts/MapPreview.fos`: `Player.ViewMapArea` uses an

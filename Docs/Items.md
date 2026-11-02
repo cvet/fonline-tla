@@ -52,42 +52,63 @@ returns null for combat-relevant slots: an empty Armor slot yields the
 `WeaponHelpers` on an unarmed critter.
 
 Slot-move rules (`ItemMovement::OnCritterCheckMoveItem`,
-`Scripts/ItemMovement.fos`): dropping is always allowed; **Main** weapon
-must match the critter model's `Weapon_StateAnim` capability; **Armor** only
-accepts `ItemType::Armor` from Inventory and never when `IsNoArmor`; custom
-slots above Armor only accept an item already in that slot.
+`Scripts/ItemMovement.fos`): dropping is always allowed; **Main** accepts any
+item, and an item with the `Weapon` component must match the critter model's
+`Weapon.StateAnim` capability; **Armor** only
+accepts an item with the `Armor` component from Inventory and never when
+`IsNoArmor`; custom slots above Armor only accept an item already in that slot.
+These rules run only on the client path: the server `CritterActions::MoveInvItem`
+(RemoteCall `MoveInvItem`) calls `Critter.ChangeItemSlot` without them, so any
+item can reach Armor directly. `ChangeItemSlot` also swaps the previous occupant
+of the target slot into the source slot, so moving worn armor into an occupied
+hand leaves the hand item in Armor.
 `ItemMovement::RefreshArmorAppearance` derives the model and `CurrentArmorPerk`
 from the item actually in Armor (including removal/destruction and replication),
-using `Armor_CrTypeMale/Female` + `aa.frm` and the long-haired male special case.
+using `Armor.CrTypeMale/Female` + `aa.frm` and the long-haired male special case.
+Armor readers guard with `HasArmor` and treat a non-armor item as no armor (no
+DR/DT/AC, perk 0, empty model name, so the model stays the old `aa.frm` result).
+Readers of the active hand item (`CritterItem::GetActive`, `Tla::GetCritterHandItem`)
+likewise guard with `HasWeapon` or reach it only behind a weapon check: a
+non-weapon in hand gives the `Unarmed` stance, no available use modes, attack
+distance 0 and a zero to-hit chance, and is never treated as an unarmed attack.
 Ground pickup fills a weapon only when
-`Weapon_MaxAmmoCount > 0 && AmmoCount == 0`; a configured `AmmoPid`
-is retained, with `Weapon_DefaultAmmoPid` used only when the pid is empty.
+`Weapon.MaxAmmoCount > 0 && AmmoCount == 0`; a configured `AmmoPid`
+is retained, with `Weapon.DefaultAmmoPid` used only when the pid is empty.
 The free swap is Main↔Secondary
 (`CritterActions::MoveInvItem` costs 0 AP, everything else
 `Movement.RtApCostMoveItemInventory`).
 
 ## Containers and transfers
 
-Container capacity is `Container_Volume` in the same abstract units as item
-`Volume`; `CritterActions::CanPutItemsInContainer` (`Scripts/CritterActions.fos`)
-sums existing root-section stacks plus the moving batch in saturation-safe
-int64 math. Cycles are prevented (`WouldCreateContainerCycle`, depth 256).
+Containers carry the `Container` component (`item.HasContainer`). Capacity is
+`Container.Volume` in the same abstract units as item `Volume`;
+`CritterActions::CanPutItemsInContainer` (`Scripts/CritterActions.fos`) sums
+existing root-section stacks plus the moving batch in saturation-safe int64
+math. Cycles are prevented (`WouldCreateContainerCycle`, depth 256).
 The unified server operation is `CritterActions::OperateContainer`
 (`Scripts/CritterActions.fos`), driven by the critter's active
 `TransferType`/`TransferContainerId`/`TransferSession`; it re-validates
-container existence, openness (`Container_Changeble`/`Opened`), distance
-(including multihex), visibility (`IsNoLoot`/`IsNoSteal` filtering), weight
-limits (`Parameters::CritterGetItemsWeightLimited` vs `CarryWeight`, int64
+container existence (`HasContainer`), openness
+(`Container.Changeble`/`Opened`), distance (including multihex), visibility
+(`IsNoLoot`/`IsNoSteal` filtering), weight limits
+(`Parameters::CritterGetItemsWeightLimited` vs `CarryWeight`, int64
 saturating), cycles, volume, and only then spends AP and moves through
 `ItemMovement`. Stale client ids/counts return a fresh authoritative snapshot
 instead of an exception. NPC barter is deliberately **not** a transfer type —
 it must go through `Barter::ProcessBarterNpcOffer` (see [Economy](Economy.md)).
 
-Doors and lockable containers live in [Scripts/Lockers.fos](../Scripts/Lockers.fos):
-`LockerId`/`LockerComplexity` (keys are `ItemType::Key` items with matching
-`LockerId`, or the bio "keys" `CritterFingersDoorId`/`EyesDoorId`, or
-`KnownLockerId` on the critter), `Opened` toggling passability flags
-(`SwitchLocker`), lockpicking roll
+Doors and lockable containers live in [Scripts/Lockers.fos](../Scripts/Lockers.fos),
+which declares the `Container`, `Door` and `Locker` components. Every door
+and container also carries `Locker` (lock state
+`Locker.Locked/Jammed/Broken/NoOpen/IsElectro`). The `Door.*` fields (the
+`Door.NoBlock*` flags and the multihex data) have no authored values and no
+readers. `SwitchLocker` sets `Opened` and, for doors only, the engine
+`NoBlock`/`ShootThru`/`LightThru` flags (and `IsGag` while closed). `LockerId`,
+`LockerComplexity`, `LockerCondition`, `Opened` and `IsCanOpen` stay flat because
+keys share `LockerId` (keys are items with the `Key`
+component and a matching `LockerId`, or the bio "keys"
+`CritterFingersDoorId`/`EyesDoorId`, or `KnownLockerId` on the critter).
+The lockpicking roll is
 `Clamp(SkillLockpick + toolBonus − LockerComplexity, 0, 95)` vs
 `Random(1,100)` — `lockpicks` +25 / `exp_lockpick_set` +50, each consumed at
 1/31 per use; success opens and grants 50 XP; `TimeoutSkLockpick` (2 real
@@ -156,22 +177,55 @@ by `Baking.AllowRepeatedProtoParents`; cycles remain errors.
 `$Text russ/engl [Desc]` embed localized name/description (baked by the
 `ProtoText` baker into client text packs). Representative contracts:
 
-- Weapon (`Items/_10mm_pistol.foitem`): per-use-slot indexed props
-  (`Weapon_Skill_0..2`, `Weapon_DmgMin/Max_0`, `Weapon_MaxDist_0`,
-  `Weapon_Round_0`, `Weapon_ApCost_0`, `Weapon_Aim_0`, …; `Weapon_ActiveUses`
-  counts live slots), `Weapon_Caliber`/`DefaultAmmoPid`/`MaxAmmoCount`,
-  `Weapon_CriticalFailture` selects the critical-miss table row,
-  `Weapon_StateAnim` gates equipping by critter model, `Deteriorable`.
-- Armor (`Items/combat_armor.foitem`): `Armor_AC`, `Armor_Perk`,
-  `Armor_DR*/DT*` per damage type (these feed the virtual DR/DT properties —
-  see [Character](Character.md)), `Armor_CrTypeMale/Female` model bases.
-- Ammo (`Items/_10mm_jhp.foitem`): `Ammo_AcMod` modifies the to-hit AC term,
-  while `Ammo_DrMod` modifies damage resistance;
-  `Ammo_DmgMult/DmgDiv` (damage multipliers), proto-level `Count` seeds new
-  stacks.
+- Weapon (`Items/_10mm_pistol.foitem`): `Weapon = True` marker and per-use-slot
+  indexed fields (`Weapon.Skill_0..2`, `Weapon.DmgMin/Max_0`, `Weapon.MaxDist_0`,
+  `Weapon.Round_0`, `Weapon.ApCost_0`, `Weapon.Aim_0`, …; `Weapon.ActiveUses`
+  counts live slots), `Weapon.Caliber`/`DefaultAmmoPid`/`MaxAmmoCount`,
+  `Weapon.CriticalFailture` selects the critical-miss table row,
+  `Weapon.StateAnim` gates equipping by critter model, `Weapon.IsUnarmed` and
+  `Weapon.Unarmed*` describe unarmed blows (`default_weapon`, `unarmed_*`),
+  `Deteriorable`. `AmmoPid`, `AmmoCount`, `Mode` and `IsBigGun` stay flat.
+- Armor (`Items/combat_armor.foitem`): `Armor = True` marker, `Armor.AC`,
+  `Armor.Perk`, `Armor.DR*/DT*` per damage type (these feed the virtual DR/DT
+  properties — see [Character](Character.md)), `Armor.CrTypeMale/Female` model
+  bases.
+- Ammo (`Items/_10mm_jhp.foitem`): `Ammo = True` marker, `Ammo.Caliber`;
+  `Ammo.AcMod` modifies the to-hit AC term, while `Ammo.DrMod` modifies damage
+  resistance; `Ammo.DmgMult/DmgDiv` (damage multipliers), proto-level `Count`
+  seeds new stacks. Weapon `AmmoPid`/`AmmoCount` stay flat instance data.
+- Drug (`Items/antidote.foitem`): field-less `Drug = True` marker;
+  `Main` dispatches use to `Drugs` by `HasDrug`, effects are keyed by proto id.
 - Misc/container: `Stackable`, `Cost`, `Weight` (grams by convention),
   `Volume`, `IsCanPickUp/IsCanUse/IsCanUseOnSmth/IsCanOpen`,
-  `Container_Volume`, `GroundLevel` (which hex-container transfer type opens).
+  `Container.Volume`, `GroundLevel` (which hex-container transfer type opens).
+
+### Item kinds
+
+An item's kind is its component marker, never a `Type` key: the former kind
+enum and `Item.Type` were removed, and `Scripts/Migration.fos` drops a saved
+`Type`. At most one of the nine kind markers Armor, Drug, Weapon, Ammo, Key,
+Container, Door, Grid and Car is enabled; Door and Container also carry
+`Locker`; Grid is static only and every other kind non-static
+(`Analyze :: Item Components`). Walls (`IsWall`) and tiles (`IsTile`) are Engine
+flags without a kind component. Categories without a capability come from
+[ItemKinds](../Scripts/ItemKinds.fos):
+
+- `IsPortableGoods` — non-static and not Container, Door or Car (the former
+  Armor..Key range). NPC collectors and corpse looters (`Collector`,
+  `EncounterNpc`, `MapBarterGround`) take only these;
+  `RespawnItem::CheckItemValidToRespawn` accepts them except Ammo.
+- `IsMisc` — portable goods without Armor, Drug, Weapon, Ammo or Key. **A
+  non-static item without any kind marker is Misc**: new content with no
+  marker is looted, collected and accepted for respawn like Misc (before, an item without
+  `Type` was None and fell outside every category). At the 2026-11-01 content
+  baseline all 343 such protos were the former Misc ones.
+- `IsSceneryObject` — static and neither wall nor tile (the former Generic and
+  Grid). A skill cursor on such an object uses the scenery skill action.
+- `IsGenericScenery` — a scenery object without Grid (the former Generic); the
+  Mapper inspector shows its `StaticScript` and `SceneryParams` only when
+  `IsTrigger` is false; any `IsTrigger` item shows `TriggerScript`, `TriggerNum`
+  and `SceneryParams` instead. A static proto without a marker that is neither
+  wall nor tile is generic scenery.
 
 Families at the source baseline: `Items/` root — 813 files/813 sections;
 `Items/Static/` — 3848 files/7386 `[ProtoItem]` sections

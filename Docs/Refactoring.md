@@ -41,6 +41,13 @@ hand-edit (see [AGENTS.md](../AGENTS.md)).
 2. **Serialized-name alignment** to a single TLA standard and typo fixes, packaged through
    `///@ MigrationRule`. Cross-project-sensitive renames are confirmed case by case.
 3. **Process:** validators → full audit → phased implementation.
+4. **Item kinds are property components** (owner decision 2026-10-31,
+   [plan](Plans/2026-10-31-item-type-components.md)): a kind is a `///@ Property Item ... Component`
+   marker with `<Comp>.<Field>` data, tested with `Has<Comp>`; categories without a capability
+   use [ItemKinds](../Scripts/ItemKinds.fos). The former kind enum, `Item.Type` and flat
+   `<Kind>_<Field>` names are retired: they remain only as `MigrationRule` entries in
+   [Migration.fos](../Scripts/Migration.fos) and are never reused for new properties or enums
+   ([contract](Scripts.md#property-components)).
 
 ## Phases
 

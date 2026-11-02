@@ -2,7 +2,9 @@
 
 These tests are static source audits for authored text packs. They ratchet known
 gaps without accepting new ones. A green run does not prove translated
-completeness, runtime text lookup, or quest-state reachability.
+completeness, runtime text lookup, or quest-state reachability. The
+[item component validator](#item-property-components) statically audits item
+prototypes, map item instances and Item migration rules.
 
 ## English text surface
 
@@ -97,6 +99,62 @@ and exact language/property/key tuples remove those escapes.
 - Baseline data and known-gap constants are historical evidence. Shrink them as
   defects are fixed; do not expand them to obtain green tests.
 
+## Item property components
+
+`validate_item_components.py` checks the
+[property-component convention](../../Docs/Scripts.md#property-components) in
+`Items/**/*.foitem`, item instances (`[.../Item]` sections with `$Proto`) of
+`Maps/*.fomap` and `Scripts/Migration.fos`. It reads `///@ Property Item`
+declarations from `Scripts/**/*.fos` except `Scripts/Generated/`. Prototype
+values resolve like the baker: ancestors depth first, direct parents left to
+right, the child last, a repeated ancestor only at its first reach. Map
+instances take markers from their prototype. Static means effective
+`Static = True` or the legacy `IsStatic = True`.
+
+A rule that involves an undeclared component is inactive, so declaring a kind
+marker activates its checks. The kind components are Armor, Drug, Weapon, Ammo,
+Key, Container, Door, Grid and Car. Every finding is an error:
+
+| Code | Reported when |
+| --- | --- |
+| `legacy-prefixed-key` | A key `<C>_<F>` names a declared component `<C>`; author `<C>.<F>`. |
+| `legacy-type-key` | A `Type` key remains after `Item.Type` is no longer declared. |
+| `transition-mismatch` | While `Type` is declared, effective `Type = X` and marker `X` disagree for a declared kind component. |
+| `field-without-marker` | `<C>.<F>` is authored where the effective prototype marker `<C>` is not true. |
+| `marker-on-instance` | A map item instance authors a component marker. |
+| `exclusive-kind` | More than one kind marker is enabled. |
+| `locker-mismatch` | `Locker` without `Door` or `Container`, or the reverse; active once all three are declared. |
+| `static-mismatch` | `Grid` on a non-static prototype, or another kind on a static one. |
+| `missing-migration-rule` | A manifest name is no longer declared and `Scripts/Migration.fos` lacks `MigrationRule Property Item Rename` or `Remove` for it. |
+| `dangling-migration-target` | A project `Property Item Rename` target is neither a script-declared Item property nor an Engine `ItemProperties` field. |
+
+`Item.Type` is no longer declared (2026-11-01), so `legacy-type-key` is active
+and `transition-mismatch` is inactive; the transition check stays for older trees.
+
+Key findings point at the authored key line. `exclusive-kind`, `locker-mismatch`,
+`static-mismatch` and `transition-mismatch` are reported per resolved prototype at
+its section line, so a parent defect repeats on each child.
+
+`item_component_legacy_names.txt` is the frozen manifest of legacy Item names
+captured on 2026-10-31 before the component migration: 111 flat
+`<Kind>_<Field>` properties plus `Type`, `CarIsBioEngine`, `CarIsNoLockpick`
+and `IsLockpick`. Never edit or regenerate it to silence a finding; add the
+migration rule. Only the project rule file counts for `missing-migration-rule`;
+Engine rules and `Transform` actions are not consulted.
+
+Limits: missing parents, cycles, duplicate ids and unknown instance prototypes
+are left to the baker. `+=` lines are not parsed, and backslash-continued lines are not joined.
+A clean run does not prove that saved documents migrate at runtime or that
+scripts guard component access.
+
+```text
+py -3 Tools/ContentQuality/validate_item_components.py --summary
+py -3 Tools/ContentQuality/validate_item_components.py --root <project-root>
+```
+
+Without `--summary` each finding is printed as `path:line: [code] message`. The
+exit code is 1 when anything is reported. VS Code task: `Analyze :: Item Components`.
+
 ## Commands
 
 Run from the repository root:
@@ -106,6 +164,7 @@ python -m pytest Tools/ContentQuality
 python -m pytest Tools/ContentQuality/test_english_text_surface.py
 python -m pytest Tools/ContentQuality/test_quest_text_coverage.py
 python -m pytest Tools/ContentQuality/test_content_quality_regressions.py
+python -m pytest Tools/ContentQuality/test_validate_item_components.py
 ```
 
 `test_content_quality_regressions.py` builds owned temporary full-shape roots

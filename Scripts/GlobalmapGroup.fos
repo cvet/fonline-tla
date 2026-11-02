@@ -1,7 +1,7 @@
 // GlobalmapGroup — управление группами путешественников на глобальной карте: движение по миру, столкновения (энкаунтеры), вход в локации и командование группой.
 // SERVER: авторитетная логика перемещения и следования, приглашение/высадка спутников, обработка команд глобальной карты и генерация встреч (GlobalProcess, GroupMove, ProcessGlobalMapCommand).
 // CLIENT: локальное состояние движущейся группы для отрисовки маршрута на карте и отправка команд лидера на сервер через удалённые вызовы (RemoteCall).
-// Глобальное состояние хранит реестр серверных групп и единственную отображаемую группу клиента.
+// Глобальные AllGlobalGroups и CurrentGroup живут всё время работы: реестр серверных групп путешественников и единственная отображаемая группа клиента.
 namespace GlobalmapGroup
 {
 
@@ -287,7 +287,7 @@ void OnGlobalMapCritterOut(Critter cr)
 void GlobalProcess(int processType, Critter cr, Item? car, float& curX, float& curY, float& toX, float& toY, float& speed, int& encounterDescriptor,
                     bool& waitForAnswer)
 {
-    int movementType = (car != null ? car.Car_MovementType : Tla::GmWalkGround);
+    int movementType = (car != null ? car.Car.MovementType : Tla::GmWalkGround);
     int curXi = int(curX);
     int curYi = int(curY);
 
@@ -361,7 +361,7 @@ void GlobalProcess(int processType, Critter cr, Item? car, float& curX, float& c
         }
 
         if (car != null && speedMod != 1.0f) {
-            float pass = float(car.Car_Passability);
+            float pass = float(car.Car.Passability);
             if (pass > 100.0f && speedMod < 1.0f) {
                 speedMod += (1.0f - speedMod) * (pass - 100.0f) / 100.0f;
             }
@@ -480,7 +480,7 @@ void GlobalProcess(int processType, Critter cr, Item? car, float& curX, float& c
             int fuel = car.Charge;
             int deterioration = car.Deterioration;
 
-            if (fuel <= 0 || deterioration >= int(car.Car_MaxDeterioration)) {
+            if (fuel <= 0 || deterioration >= int(car.Car.MaxDeterioration)) {
                 int str = (fuel <= 0 ? MsgStr::StrCarFuelEmpty : MsgStr::StrCarBroken);
                 Messaging::Info(cr, TextPackKey(TextPackName::Game, "" + (str)));
                 speed = 0.0f;
@@ -488,14 +488,14 @@ void GlobalProcess(int processType, Critter cr, Item? car, float& curX, float& c
             }
 
             // Значения транспорта рассчитаны на вызов каждые 500 мс
-            fuel -= car.Car_FuelConsumption * Settings.GlobalMap.GlobalMapMoveTime / 500;
-            deterioration += car.Car_DeteriorationRate * Settings.GlobalMap.GlobalMapMoveTime / 500;
+            fuel -= car.Car.FuelConsumption * Settings.GlobalMap.GlobalMapMoveTime / 500;
+            deterioration += car.Car.DeteriorationRate * Settings.GlobalMap.GlobalMapMoveTime / 500;
             if (fuel < 0) {
                 fuel = 0;
             }
 
-            if (deterioration > int(car.Car_MaxDeterioration)) {
-                deterioration = int(car.Car_MaxDeterioration);
+            if (deterioration > int(car.Car.MaxDeterioration)) {
+                deterioration = int(car.Car.MaxDeterioration);
             }
 
             if (fuel != int(car.Charge) || deterioration != int(car.Deterioration)) {
@@ -568,13 +568,13 @@ void GlobalProcess(int processType, Critter cr, Item? car, float& curX, float& c
         if (car != null) {
             // Проверяем транспорт
             int strNum = 0;
-            if (group.length() > car.Car_CrittersCapacity) {
+            if (group.length() > car.Car.CrittersCapacity) {
                 strNum = MsgStr::StrCarCritOverload;
             }
             else if (car.Charge == 0) {
                 strNum = MsgStr::StrCarFuelEmpty;
             }
-            else if (car.Deterioration >= car.Car_MaxDeterioration) {
+            else if (car.Deterioration >= car.Car.MaxDeterioration) {
                 strNum = MsgStr::StrCarBroken;
             }
 
@@ -585,11 +585,11 @@ void GlobalProcess(int processType, Critter cr, Item? car, float& curX, float& c
                 return;
             }
 
-            speed = car.Car_Speed * Tla::GLOBAL_MAP_BASE_SPEED / 20.0f;
+            speed = car.Car.Speed * Tla::GLOBAL_MAP_BASE_SPEED / 20.0f;
 
             // Ищем ближайшую воду для лодок
             // В радиусе одной зоны (слева, сверху, справа, снизу)
-            if (car.Car_MovementType == Tla::GmWalkWater) {
+            if (car.Car.MovementType == Tla::GmWalkWater) {
                 if (Worldmap::GetGlobalMapRelief(curXi, curYi) != 0) {
                     const int maxx = Settings.GlobalMap.GlobalMapWidth * Settings.GlobalMap.GlobalMapZoneLength;
                     const int maxy = Settings.GlobalMap.GlobalMapHeight * Settings.GlobalMap.GlobalMapZoneLength;
@@ -724,7 +724,7 @@ void CheckForLocationWithoutParking(Critter cr, Item car, float& curX, float& cu
         Map map = loc.GetMapByIndex(0);
 
         bool placeFounded = false;
-        Entrance::Entry[] entries = Entrance::ParseEntries(map, car.Car_Entrance);
+        Entrance::Entry[] entries = Entrance::ParseEntries(map, car.Car.Entrance);
         for (int i = 0; i < entries.length(); i++) {
             if (map.CheckPlaceForItem(entries[i].Hex, car.ProtoId)) {
                 placeFounded = true;
@@ -803,7 +803,7 @@ class GlobalMapGroup
 
     Item? GetCar()
     {
-        Item[] items = Rule.GetItems(ItemProperty::Type, ItemType::Car);
+        Item[] items = Rule.GetItems(ItemProperty::Car, 1);
         if (!items.isEmpty()) {
             return items.first();
         }

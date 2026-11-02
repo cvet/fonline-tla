@@ -55,15 +55,15 @@ EventResult OnCritterCheckMoveItem(Critter cr, Item item, CritterItemSlot toSlot
 
     // Оружие в активный слот: модель криттера должна поддерживать анимацию этого оружия
     if (toSlot == CritterItemSlot::Main) {
-        if (item.Type == ItemType::Weapon && !CritterAnims::IsCritterStateAnim(cr, int(item.Weapon_StateAnim))) {
-            Game.Log("Can not use weapon: Critter " + cr.ModelName + "; anim: " + item.Weapon_StateAnim);
+        if (item.HasWeapon && !CritterAnims::IsCritterStateAnim(cr, int(item.Weapon.StateAnim))) {
+            Game.Log("Can not use weapon: Critter " + cr.ModelName + "; anim: " + item.Weapon.StateAnim);
             return EventResult::StopChain;
         }
     }
 
     // Слот брони: только предмет-броня, только из инвентаря и только если криттеру вообще разрешена броня
     if (toSlot == CritterItemSlot::Armor) {
-        if (item.Type != ItemType::Armor) {
+        if (!item.HasArmor) {
             return EventResult::StopChain;
         }
 
@@ -103,7 +103,7 @@ void RefreshArmorAppearance(Critter cr)
     }
 
     if (item != null) {
-        string name = isMale ? item.Armor_CrTypeMale : item.Armor_CrTypeFemale;
+        string name = GetArmorModelName(item, isMale);
         crModel = (name + "aa.frm").hstr();
     }
 
@@ -112,7 +112,7 @@ void RefreshArmorAppearance(Critter cr)
         crModel = Tla::CRTYPE_LHD_JUMPSUIT;
 
         if (item != null) {
-            crModel = (item.Armor_CrTypeMale + "aa.frm").hstr();
+            crModel = (GetArmorModelName(item, true) + "aa.frm").hstr();
 
             if (crModel == Tla::CRTYPE_DW_LEATHER_ARMOR_M) {
                 crModel = Tla::CRTYPE_LHD_LEATHER_ARMOR;
@@ -132,14 +132,25 @@ void RefreshArmorAppearance(Critter cr)
     }
 
     // Модификатор от брони: активен только пока броня надета
-    cr.CurrentArmorPerk = item != null ? item.Armor_Perk : 0;
+    cr.CurrentArmorPerk = item != null && item.HasArmor ? item.Armor.Perk : 0;
+}
+
+// Имя модели брони по полу. Предмет без компонента Armor попадает в слот брони обменом через ChangeItemSlot
+// (броню перекладывают в занятую руку); для него, как и прежде с нулевыми полями, имя пустое.
+string GetArmorModelName(Item item, bool isMale)
+{
+    if (!item.HasArmor) {
+        return "";
+    }
+
+    return isMale ? item.Armor.CrTypeMale : item.Armor.CrTypeFemale;
 }
 
 // Реакция на состоявшийся перенос предмета: подбор модели криттера под броню, авто-снаряжение оружия и рассылка событий.
 [[Event]]
 void OnCritterItemMoved(Critter cr, Item item, CritterItemSlot fromSlot)
 {
-    if (item.Type == ItemType::Armor && (fromSlot == CritterItemSlot::Armor || item.CritterSlot == CritterItemSlot::Armor)) {
+    if (item.HasArmor && (fromSlot == CritterItemSlot::Armor || item.CritterSlot == CritterItemSlot::Armor)) {
         RefreshArmorAppearance(cr);
     }
 
@@ -149,21 +160,21 @@ void OnCritterItemMoved(Critter cr, Item item, CritterItemSlot fromSlot)
     }
 
     // Оружие подняли с земли (извне): автоматически снаряжаем боезапасом по умолчанию
-    if (item.Type == ItemType::Weapon && fromSlot == CritterItemSlot::Outside) {
-        if (item.Weapon_MaxAmmoCount > 0 && item.AmmoCount == 0) {
+    if (item.HasWeapon && fromSlot == CritterItemSlot::Outside) {
+        if (item.Weapon.MaxAmmoCount > 0 && item.AmmoCount == 0) {
             if (item.AmmoPid == EMPTY_HSTRING) {
-                item.AmmoPid = item.Weapon_DefaultAmmoPid;
+                item.AmmoPid = item.Weapon.DefaultAmmoPid;
             }
 
-            item.AmmoCount = item.Weapon_MaxAmmoCount;
+            item.AmmoCount = item.Weapon.MaxAmmoCount;
         }
     }
 
-    // Todo: модификаторы слотов, Armor_Perk
-    // SLOT_PERK_MIRROR_SHADES // +1 charisma
-    // SLOT_PERK_COSMETIC_CASE // +1 charisma to female
-    // SLOT_PERK_MOTION_SENSOR // +20 outdoorsman
-    // SLOT_PERK_STEALTH_BOY   // +20 sneak
+    // Todo: модификаторы слотов, Armor.Perk
+    // SLOT_PERK_MIRROR_SHADES // +1 к харизме
+    // SLOT_PERK_COSMETIC_CASE // +1 к харизме у женщин
+    // SLOT_PERK_MOTION_SENSOR // +20 к навыку скитальца
+    // SLOT_PERK_STEALTH_BOY   // +20 к скрытности
 
     // Рассылка событий о перемещении/выбрасывании предмета владельцу, самому предмету и окружающим очевидцам
     bool isDrop = item.CritterId == ZERO_IDENT;

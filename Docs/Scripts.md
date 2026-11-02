@@ -145,7 +145,9 @@ Do not add kind enums or kind range checks.
 ## Contracts and tests
 
 Map previews are owned by `Scripts/MapPreview.fos`: `Player.ViewMapArea` uses an
-inclusive hex radius with live subject updates. Global-map previews retain the
+inclusive hex radius with live subject updates and passes an explicit null
+context — TLA implements no view-map admission hooks, so the Engine fallback
+admits every subject within its lifetime/radius bounds. Global-map previews retain the
 controlled critter; local quest cameras temporarily `Player.SwitchCritter(null)`
 and restore the same critter without moving it. TownView returns through
 `Player.ReturnFromViewMap` or `Player.SwitchCritter`; city entry repeats normal

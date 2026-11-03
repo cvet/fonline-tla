@@ -105,7 +105,7 @@ DefinePackage(Dev
 
 DefinePackage(Test
     CONFIG LocalTest
-    BINARY Client Windows win64 TotalProfiling+OGL+Raw
+    BINARY Client Windows win64 TotalProfiling+Raw
     BINARY Server Windows win64 TotalProfiling+Raw)
 
 DefinePackage(LinuxTest

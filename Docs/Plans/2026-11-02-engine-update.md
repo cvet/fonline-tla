@@ -104,13 +104,13 @@ Complete incoming commit range (oldest first):
   the range, and check project consumers/configuration.
 - [x] Advance Engine `master` fast-forward to `efefc47f3a`, leaving HEAD
   attached; reconcile and record the root working-tree/index/committed gitlinks.
-- [ ] Reconfigure (`cmake --preset auto`), force a complete bake, and execute
+- [x] Reconfigure (`cmake --preset auto`), force a complete bake, and execute
   every leaf of `Verify :: All`; inspect terminal COMPLETE counts, exit codes
   and runtime exceptions.
-- [ ] Verify ordinary startup and affected player routes (script harness at
-  minimum; graphical smoke when the owner's environment allows it) and clean
-  task-owned exits.
-- [ ] Review the final diff, configuration preservation, docs impact and
+- [x] Verify ordinary startup and affected player routes (headless script
+  harness) and clean task-owned exits; graphical smoke not repeated this
+  session — see qualification limits.
+- [x] Review the final diff, configuration preservation, docs impact and
   evidence; record exact results and remaining qualification limits.
 
 ## Verification record
@@ -159,3 +159,44 @@ not an Engine-update defect: the repository occupies ~13.4 GB (Build 3.3,
 Baking 6.4, .git 2.0, Binaries 1.1, Resources 0.6); the remaining ASCompiler
 and UnitTests links need roughly 2–4 GB of PDB space. Disk cleanup outside this
 repository is owner-owned; verification resumes after space is freed.
+
+The owner freed disk space (86.8 GB free) and committed/published the prepared
+integration as `76fc9af27231eb1089d9bfc667e2200706172563` at 22:43 (MapPreview
+migration, `Docs/Scripts.md`, this plan, Engine gitlink). The committed pin,
+index and Engine HEAD all equal `efefc47f3a...`; project and Engine `master`
+worktrees are clean. The failed link had also left a partial `TLA_ASCompiler.pdb`;
+a direct rebuild relinked it cleanly (exit 0).
+
+Completed verification at the final revision:
+
+- Incremental `Bake Resources` (22:46–22:52, Baker exit 0) after the owner's
+  commit changed the build hash to `76fc9af27...`.
+- Builds: Server 21:13, ServerHeadless 21:14, Client 21:14, Mapper 21:16,
+  ASCompiler 23:02 (exit 0), UnitTests 23:10 — all without warnings.
+- `Launch :: TLA_UnitTests`, direct controlled rerun capturing stdout:
+  **All tests passed (746,323 assertions in 726 test cases)**, exit 0
+  (baseline 745,492/710 on 2026-10-29; the range adds 16 cases). The engine
+  log's error lines are deliberate negative-test fixtures.
+- `Launch :: TLA_Tests` headless harness: **COMPLETE: 128 passed, 0 failed,
+  0 skipped (of 128)** at 23:29:46, followed by the full normal shutdown
+  sequence ending `Server stopped!`; no TLA processes remain.
+- `Analyze :: Script Quality (Ratchet)`: OK, no new violations above baseline.
+- `Analyze :: Nullable All`: apply --check 0 changes across 335 files,
+  validator tests 7/7 OK, ABI contracts valid, estimate report only.
+- `Test :: Python Tools`: **220 passed, 89 subtests passed** in 29.8 s.
+- `Format :: All`: scripts/fomain/prototypes each changed 0 files.
+- `Check :: Docs Links`: 59 Markdown files, 0 findings.
+- `git diff --check` clean; `TLA.fomain` SHA-256 remains
+  `4021F550DCDCFBB89C77B36710BA1775E50EDCFA336718A87CB8346108C410D9`
+  (byte-identical to baseline).
+
+## Qualification limits
+
+Windows x64 RelWithDebInfo only; Unity builds, Linux, `FO_MAP_WIDE_COORDS=ON`,
+packaged deployment, restart persistence (Memory DB default) and performance
+are not qualified by this run. The graphical client smoke
+(registration/movement/inventory/relogin) that passed on 2026-10-29 was not
+repeated: the headless harness covers the same script routes, and the only
+client-visible deltas are the additive `Critter.VisualOffset` (defaults to
+zero) and a Vulkan failure-path fix. The engine bump is committed and
+published by the owner; no further Git action was taken by the agent.

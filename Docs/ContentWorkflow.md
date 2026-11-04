@@ -157,6 +157,14 @@ single-threaded logic. Pass task-only overrides with isolated runtime paths;
 do not make them permanent incidentally. Engine settings are read-only runtime
 configuration; project-owned state and saved options follow [Scripts](Scripts.md).
 
+Startup applies the authored config to zero, with no `Settings.inc` defaults
+beneath it, so `TLA.fomain` must author every declared setting, including
+intentional zeros and empty values; the bake rejects a missing one. Resource,
+cache and platform-binary locations are `Common.ResourcesPath`,
+`Common.CachePath` and `Common.PlatformBinariesPath`; the former `Baking.*`
+directory keys are rejected. A server package keeps its own packs at the resource
+root and the client distribution in its `Client` child.
+
 Every connection uses Noise. The server requires `ServerNetwork.ChannelSecretKey`
 and the client pins its public half in `ClientNetwork.ChannelServerKeys`.
 The base config's development pair is intentionally public and only suitable for

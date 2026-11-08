@@ -128,6 +128,15 @@ the `DropMenuHandler` menu over a critter or item when the left button is held (
 
 `Dialogs` is the engine-facing core (contexts, demands, results); `Dialog` is the library of authored
 demand/result handlers that content calls by name. Content lives in `Dialogs/*.fodlg`.
+Server `Dialogs::IsCrittersCanTalk` takes the talk distance from the NPC being addressed plus the
+initiator's `Multihex`, matching `ChosenActions::ChosenTalkNpc` on the client.
+
+Held-item use goes through `Parameters::UseMainItem` and `CritterItem::GetActiveMode`: a non-weapon
+derives its use mode from `IsCanUse`/`IsCanUseOnSmth`, so the default weapon `Mode` zero does not hide
+the use action. `CritterActions::UseItemOn` admits self-treatment with medical kits, and
+`Main::CritterUseItem` routes them through the ordinary First Aid/Doctor event after the item-use
+notifications; the item-use AP cost is charged once and the skill handler owns kit bonuses, consumption,
+healing and cooldowns.
 
 ### Infrastructure
 

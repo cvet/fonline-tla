@@ -16,7 +16,7 @@ English dialog localization from `T4lus` is prepared separately in
 
 ## Branch and repository state
 
-- Project base: `master` @ `8ba3c0b14` (`0.3.22`), clean before branching.
+- Project base: `master` @ `59e32f720` (`0.3.22`), clean before branching.
 - Engine base: `master` @ `c5101d149a` (`2026.1.116-dev`), which includes the
   owner's `de3dfb6c8c -> c5101d149a` pull; the project gitlink still names
   `de3dfb6c8c` until the engine branch is ready.

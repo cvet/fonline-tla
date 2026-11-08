@@ -54,19 +54,48 @@ be positive; TLA sets 1000 (`TLA.fomain:417`).
 
 ## Steps and acceptance
 
-- [ ] Fast-forward the Engine submodule `master` to `de3dfb6c8c`; verify the
+- [x] Fast-forward the Engine submodule `master` to `de3dfb6c8c`; verify the
   worktree is clean and the root working-tree gitlink names the new revision.
-- [ ] Regenerate `VERSION` with `Generate :: Version` (0.3.21 → 0.3.22).
-- [ ] `cmake --preset auto`; build Server, ServerHeadless, Client, Mapper,
+- [x] Regenerate `VERSION` with `Generate :: Version` (0.3.21 → 0.3.22).
+- [x] `cmake --preset auto`; build Server, ServerHeadless, Client, Mapper,
   ASCompiler and UnitTests warning-free.
-- [ ] Force a complete bake; warning-free.
-- [ ] Execute `TLA_UnitTests.exe`; expect a full pass and the two new tests.
-- [ ] Execute the AngelScript harness under `LocalTest`; record `COMPLETE`
+- [x] Force a complete bake; warning-free.
+- [x] Execute `TLA_UnitTests.exe`; expect a full pass and the two new tests.
+- [x] Execute the AngelScript harness under `LocalTest`; record `COMPLETE`
   counts and exit code.
-- [ ] Run the script-quality ratchet, nullable chain, `pytest Tools` and
+- [x] Run the script-quality ratchet, nullable chain, `pytest Tools` and
   `Format :: All`; formatters must change nothing.
-- [ ] Review the final diff; record actual results and qualification limits.
+- [x] Review the final diff; record actual results and qualification limits.
 
 ## Verification record
 
-To be filled after the chain runs.
+Evidence root: ignored `Workspace/engine-update-20261108/`.
+
+Engine advanced `0d1a56de63 → de3dfb6c8c` (fast-forward). The local `master`
+branch had been left 22 commits behind the detached pin; it now matches
+`origin/master`. The Engine worktree is clean.
+
+The root gitlink, `VERSION` 0.3.22 and this plan were committed and pushed by
+the owner as `8ba3c0b14` after the checks below ran; the committed tree is the
+verified tree (formatters changed nothing, so only those three paths differ
+from the baseline).
+
+- `cmake --preset auto`: exit 0.
+- Server, ServerHeadless, Client, Mapper, ASCompiler, UnitTests: exit 0, no
+  warnings.
+- `ForceBakeResources`: exit 0, "Baking complete!", no warnings; 550 map files
+  baked.
+- `TLA_UnitTests.exe`: exit 0, `test cases: 845 | 841 passed | 4 skipped`,
+  `assertions: 1326950 | 1326950 passed`. The two incoming lock-order tests do
+  not print on success; the case count rose from the previous 843 by exactly
+  two.
+- `TLA_ServerHeadless.exe --ApplySubConfig LocalTest --Testing.Enabled True`:
+  exit 0, `COMPLETE: 128 passed, 0 failed, 0 skipped (of 128)`.
+- Script-quality ratchet, nullable markers/validator/placement/coverage,
+  `pytest Tools` (220 passed, 89 subtests), the three formatters (0 changed):
+  exit 0. `git diff --check` clean.
+
+Qualification limits: Windows x64 MSVC only; no Linux build or run, no GUI or
+restart-persistence run. The lock-order fix is proven by the Engine's native
+tests; TLA runs `Server.SingleThreadedLogic=True`, so the concurrent scenario
+itself is not reproduced in the project runtime.

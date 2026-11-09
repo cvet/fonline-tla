@@ -85,8 +85,8 @@ same at every map distance.
   `Format :: All`; formatters must change nothing.
 - [x] Review the final diff; commit the Engine gitlink, `VERSION` and this plan;
   push to `origin/master`.
-- [ ] Watch the pushed CI run to green and record it below.
-- [ ] Record actual results and qualification limits.
+- [x] Watch the pushed CI run to green and record it below.
+- [x] Record actual results and qualification limits.
 
 ## Verification record
 
@@ -112,8 +112,17 @@ worktree is clean and the root working-tree gitlink names the new revision.
   changed), validator tests, placement and coverage: exit 0. `pytest Tools`:
   220 passed, 89 subtests. The three formatters: exit 0 and changed no files.
 
-Qualification limits: Windows x64 MSVC only; the Linux/clang failure is fixed
-by Engine `c5101d149a` and is proven by the pushed CI run, not by a local Linux
-build. No GUI or restart-persistence run; hex boundary resolution at
-million-pixel distances does not occur on TLA's map sizes and is covered by the
-Engine native test instead.
+CI run `42659073265` (push `6af83c982`, the commit containing this plan's
+first revision): `success`, 21 jobs green, `release` skipped as expected for a
+push event. The two jobs that failed in run `42489693470` now pass:
+`unit-tests` (28m38s, builds and runs the project native tests on Linux) and
+`linux-build (linux server Release)` (13m56s). `validate`, `quality-gates`,
+`compile-scripts`, `bake-resources`, every Windows/Linux/macOS/Android/web
+build and `package` also pass.
+
+Qualification limits: local verification is Windows x64 MSVC only; the
+Linux/clang failure is fixed by Engine `c5101d149a` and proven by CI. No GUI or
+restart-persistence run; hex boundary resolution at million-pixel distances
+does not occur on TLA's map sizes and is covered by the Engine native test
+instead. Local `TLA_UnitTests` runs the project test configuration; CI repeats
+that route on Linux.

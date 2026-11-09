@@ -83,7 +83,7 @@ struct AiControlClientData
 static void StopAiControlBridge(AiControlClientData& data) noexcept;
 static void RunAiControlBridge(AiControlClientData& data);
 static auto HandleAiControlLine(AiControlClientData& data, string_view line, bool& authorized) -> string;
-static auto WriteAiControlResponse(asio::ip::tcp::socket& socket, string_view response) -> std::error_code;
+static auto WriteAiControlResponse(const AiControlClientData& data, asio::ip::tcp::socket& socket, string_view response) -> std::error_code;
 static auto BuildAiControlResponse(const nlohmann::json& id, nlohmann::json result) -> string;
 static auto BuildAiControlError(const nlohmann::json& id, int32_t code, string_view message) -> string;
 static auto BuildAiControlStatus(AiControlClientData& data) -> nlohmann::json;
@@ -331,12 +331,12 @@ static void RunAiControlBridge(AiControlClientData& data)
             if (input.size() > 1024 * 1024) {
                 string error_response = BuildAiControlError(nullptr, -32600, "Request too large");
                 error_response += "\n";
-                ignore_unused(WriteAiControlResponse(*socket, error_response));
+                ignore_unused(WriteAiControlResponse(data, *socket, error_response));
                 drop_connection(strex("AiControl input exceeded 1 MiB cap ({} bytes); dropping connection", input.size()).str());
                 continue;
             }
 
-            while (socket) {
+            while (socket && !data.StopRequested.load(std::memory_order_acquire)) {
                 const size_t line_end = input.find('\n');
 
                 if (line_end == string::npos) {
@@ -362,7 +362,7 @@ static void RunAiControlBridge(AiControlClientData& data)
                 if (!response.empty()) {
                     response += "\n";
 
-                    if (std::error_code write_error = WriteAiControlResponse(*socket, response)) {
+                    if (std::error_code write_error {WriteAiControlResponse(data, *socket, response)}) {
                         drop_connection(strex("AiControl write failed: {}", write_error.message()).str());
                     }
                 }
@@ -377,20 +377,37 @@ static void RunAiControlBridge(AiControlClientData& data)
     data.Running.store(false, std::memory_order_release);
 }
 
-// Writes the whole response on a blocking socket and puts the socket back to non-blocking; the error is returned
-// rather than thrown, so a client that went away costs only its own connection
-static auto WriteAiControlResponse(asio::ip::tcp::socket& socket, string_view response) -> std::error_code
+// Keep writes non-blocking so shutdown never waits for the peer to drain its socket; the deadline releases the
+// single connection slot when a consumer stops reading
+static auto WriteAiControlResponse(const AiControlClientData& data, asio::ip::tcp::socket& socket, string_view response) -> std::error_code
 {
-    std::error_code error;
-    socket.non_blocking(false, error);
+    FO_TRACE_ZONE(Network);
 
-    if (!error) {
-        asio::write(socket, asio::buffer(response.data(), response.size()), error);
+    auto deadline {std::chrono::steady_clock::now() + std::chrono::seconds(5)};
+
+    while (!response.empty()) {
+        if (data.StopRequested.load(std::memory_order_acquire)) {
+            return asio::error::operation_aborted;
+        }
+        if (std::chrono::steady_clock::now() >= deadline) {
+            return asio::error::timed_out;
+        }
+
+        std::error_code error {};
+        size_t written {socket.write_some(asio::buffer(response.data(), response.size()), error)};
+
+        if (error == asio::error::would_block || error == asio::error::try_again) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            continue;
+        }
+        if (error) {
+            return error;
+        }
+
+        response.remove_prefix(written);
     }
 
-    std::error_code mode_error;
-    socket.non_blocking(true, mode_error);
-    return error ? error : mode_error;
+    return {};
 }
 
 static auto HandleAiControlLine(AiControlClientData& data, string_view line, bool& authorized) -> string

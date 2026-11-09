@@ -29,10 +29,12 @@ Routes: [wire protocol](#native-bridge-protocol), [observation](#observation-sch
 | `act` | command object | Enqueues a command for the next client loop |
 
 The bridge serves one connection at a time; the next adapter is accepted once the current one
-closes. A connection that fails (a read or write error, typically a client that went away before its
-response was written) is closed and reported as `lastError` in `status`, and the bridge keeps
-listening. A request whose handling throws is answered with error `-32603` instead. Only a failure
-to open the listener stops the bridge.
+closes. Response writes stay non-blocking, handle partial output, and have a fixed five-second
+deadline for the whole response. A stalled reader is disconnected on timeout; shutdown cancels
+pending output through the stop flag without waiting for the reader. A connection that fails
+(including a response timeout) is closed and reported as `lastError` in `status`, and the bridge
+keeps listening. A request whose handling throws is answered with error `-32603` instead. Listener
+setup failures stop the bridge.
 
 If `AiControl.Token` is non-empty, call `auth` first on every connection. The MCP adapter does this
 automatically when `TLA_AI_TOKEN` / `--token` is supplied.

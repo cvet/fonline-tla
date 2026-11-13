@@ -131,7 +131,72 @@ Actual checks:
 Limitation: no graphical client session was launched, so cursor, main-hand plate,
 drop animation, item use and dialog distance remain owner-visible checks.
 
+## Review pass (2026-11-12)
 
+Both branches are already pushed, so the review is added as new commits on top of
+`1078d617` (project) and `300b768790` (Engine); no history rewrite.
+
+Owner decisions:
+
+- Drop all three `breakdovvn` runtime changes. Occupied-hex rejection ran in the
+  generic `ProcessCritterMovingBySteps` for every critter (not only client paths, as
+  the changelog claimed), counted corpses through `CritterFindType::Any`, and
+  contradicted the Engine rule that critters are passable. `Map.UpdateCritterOccluders`
+  and `Item.MoveToHexVisual*` have no TLA consumer; the fade API cannot be cleared,
+  and the fly-delta clamp only delays catch-up after a stall. Source equals the
+  `c5101d149a` base again; changelog, API model, references and the RU description
+  catalog no longer list them. The written-output spelling fix stays.
+- Self-use: `IsUseItemCapabilityAllowed` (since Refactoring #49) rejected self-use of
+  `IsCanUseOnSmth`-only items, i.e. every drug except via special cases. The rule now
+  admits `IsCanUse || IsCanUseOnSmth` for a self target; the stimpak `IsCanUse`
+  prototype edits and the medical-kit exception are reverted.
+- Empty main hand shows the unarmed attack (use picture, AP, aim) from
+  `HandsProtoItemId`/`HandsItemMode` instead of a blank panel.
+- Medical-kit use stays routed through First Aid/Doctor.
+
+Refactoring kept with the adopted fixes:
+
+- `Dialogs::GetTalkDistance` is the single talk-range rule for the client approach,
+  the server check and the QA talk diagnostic (the diagnostic used the player's range).
+- `MsgStr::InjuryTextOffset` replaces two duplicated switches.
+- `LastWeaponNotFound` became write-only after the weapon-search fix; the property is
+  removed with `///@ MigrationRule Property Critter Remove LastWeaponNotFound`.
+- `CritterItem::GetItemActiveMode`/`GetUsePic` feed `UseMainItem`, the main-hand panel,
+  the cursor hit chance and AP cost; `SwitchMainItemMode` no longer writes an unused
+  `Mode` to non-weapons. `GetMedicalKitSkill` moved next to its only caller in `Main`.
+- Comments corrected in `EnergyBarier` (no `grow`) and `ClientMain` (only drop is
+  confirmed by the server; pick-up is animated locally).
+- Engine: redundant null re-checks removed from the SDL_GPU upload ring, its idle wait
+  is now checked; redundant target guard removed from the `ContentShowcase` example.
+
+Kept as is after review: energy-barrier array construction, injury text ids, female
+sound selection, cursor without a map, empty-hand cell reset point, chosen drop
+animation, non-weapon active mode, `UseMainItem` cursor data, AI bridge
+non-blocking writes; Engine SDL_GPU upload fixes, high-DPI mouse, equipment slots
+and empty snapshots, oplog cleanup order, baker output spelling, lazy config
+outputs, examples, `IsModel` warning fix.
+
+Not possible without force-push: squashing the three intermediate SDL_GPU commits
+and moving the non-chosen snapshot hunk from the oplog commit to the equipment
+commit. The review is committed as Engine `ddc89d58b3`/`f5a37d9fc9` (tip `f5a37d9fc9`, still
+`2026.1.117-dev`) and one project commit with the gitlink; nothing is pushed.
+
+Review verification (on the same tree before committing):
+
+| Check | Result |
+| --- | --- |
+| Engine docs: `docs_reference`/`docs_api`/`docs_public_api` `--write`, `docs_prepare.py`, `test_docs_validate.py`, `docs_validate.py`, `docs_engine_version.py` | generated API docs equal `c5101d149a` again; 50 tests OK; 414 entries pass; `2026.1.117-dev` pass |
+| `cmake --preset auto`, `ForceBakeResources`, then incremental bake | exit 0, no warnings or errors |
+| Build Server, ServerHeadless, Client, Mapper, ASCompiler, UnitTests | all exit 0, no warnings or errors |
+| `TLA_UnitTests` | 843 passed, 4 skipped, 1,326,943 assertions, exit 0 |
+| AngelScript harness | `128 passed, 0 failed, 0 skipped`, exit 0 |
+| GUI generator vs paired `GuiScreens.fos` edit | identical |
+| Script-quality ratchet, nullable chain, item components, `Tools` pytest (220) | pass |
+| Project formatters, `git diff --check` (project and Engine) | no changes, clean |
+
+Still owner-visible: empty-hand panel (fist icon, AP, aim), drug self-use from inventory
+and the main hand, medical kits on self/others, dialog approach distance, chosen drop
+animation, cursor in the main menu.
 
 ## Risks and review focus
 

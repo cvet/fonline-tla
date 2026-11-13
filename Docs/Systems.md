@@ -128,15 +128,20 @@ the `DropMenuHandler` menu over a critter or item when the left button is held (
 
 `Dialogs` is the engine-facing core (contexts, demands, results); `Dialog` is the library of authored
 demand/result handlers that content calls by name. Content lives in `Dialogs/*.fodlg`.
-Server `Dialogs::IsCrittersCanTalk` takes the talk distance from the NPC being addressed plus the
-initiator's `Multihex`, matching `ChosenActions::ChosenTalkNpc` on the client.
+`Dialogs::GetTalkDistance` is the single talk-range rule: the addressed NPC's `TalkDistance` (or
+`Dialog.TalkDistance`) plus the initiator's `Multihex`. The client approach in
+`ChosenActions::ChosenTalkNpc`, the server check in `Dialogs::IsCrittersCanTalk` and the QA talk
+diagnostic in `DropMenuHandler::StartDialog` all use it.
 
 Held-item use goes through `Parameters::UseMainItem` and `CritterItem::GetActiveMode`: a non-weapon
-derives its use mode from `IsCanUse`/`IsCanUseOnSmth`, so the default weapon `Mode` zero does not hide
-the use action. `CritterActions::UseItemOn` admits self-treatment with medical kits, and
-`Main::CritterUseItem` routes them through the ordinary First Aid/Doctor event after the item-use
-notifications; the item-use AP cost is charged once and the skill handler owns kit bonuses, consumption,
-healing and cooldowns.
+derives its use mode from `IsCanUse`/`IsCanUseOnSmth` (`CritterItem::GetItemActiveMode`), so the default
+weapon `Mode` zero does not hide the use action and only weapons and empty hands switch modes. The
+main-hand panel draws the same mode; with an empty hand it shows the unarmed attack from
+`HandsProtoItemId`/`HandsItemMode`. `CritterActions::IsUseItemCapabilityAllowed` admits a self target
+for `IsCanUse` or `IsCanUseOnSmth` (drugs and medical kits target the user too); an external target
+needs `IsCanUseOnSmth`. `Main::CritterUseItem` routes medical kits through the ordinary First Aid/Doctor
+event after the item-use notifications; the item-use AP cost is charged once and the skill handler owns
+kit bonuses, consumption, healing and cooldowns.
 
 ### Infrastructure
 

@@ -2381,7 +2381,7 @@
 {
     {
         {
-            // Пустая рука не вызывает OnDrawItem: сбрасываем панель независимо от предмета.
+            // Пустая рука не вызывает OnDrawItem: показываем безоружную атаку (HandsProtoItemId/HandsItemMode).
             if (!HasChosen) {
                 return;
             }
@@ -2389,14 +2389,24 @@
             if (chosen.GetItem(ItemProperty::CritterSlot, CritterItemSlot::Main) != null) {
                 return;
             }
+            ProtoItem? hands = ::CritterItem::GetSlotItemProto(chosen);
+            int mode = chosen.HandsItemMode;
             SetBackgroundImage(EMPTY_HSTRING, SpriteLayout::Zoom);
             ::GuiScreensExt::NeedText(FindText("AmmoCount")).SetText("");
             ::GuiScreensExt::NeedText(FindText("DeteriorationValue")).SetText("");
-            ::GuiScreensExt::NeedText(FindText("ApCostValue")).SetText("");
-            ::GuiScreensExt::NeedPanel(FindPanel("ApCost")).SetActive(false);
+            int apCost = ::Parameters::GetItemUseApCost(chosen, hands, mode);
+            ::GuiScreensExt::NeedPanel(FindPanel("ApCost")).SetActive(apCost > 0);
+            ::GuiScreensExt::NeedText(FindText("ApCostValue")).SetText(apCost > 0 ? "" + apCost : "");
             Gui::Panel usePanel = ::GuiScreensExt::NeedPanel(FindPanel("UsePic"));
-            ::GuiScreensExt::NeedSprite(usePanel.BackgroundImage).Load(EMPTY_HSTRING);
-            ::GuiScreensExt::NeedSprite(::GuiScreensExt::NeedPanel(FindPanel("AimPic")).BackgroundImage).Hidden = true;
+            Sprite::Sprite usePic = ::GuiScreensExt::NeedSprite(usePanel.BackgroundImage);
+            hstring usePicName;
+            if (hands != null) {
+                usePicName = ::CritterItem::GetUsePic(hands, mode);
+            }
+            usePic.Load(usePicName);
+            usePanel.SetPosition(180 - usePic.Size.width, usePanel.Pos.y);
+            ::GuiScreensExt::NeedSprite(::GuiScreensExt::NeedPanel(FindPanel("AimPic")).BackgroundImage).Hidden =
+                (::WeaponHelpers::WeaponModeAim(mode) == HitLocations::LocationNone);
         }
     }
 }
@@ -2619,42 +2629,7 @@
 {
     {
         {
-            hstring usePic;
-
-            if (!HasChosen) {
-                return;
-            }
-            Critter chosen = Chosen;
-
-            Item? useItem;
-            @useItem = item;
-            if (useItem == null) {
-                @useItem = chosen.GetItem(ItemProperty::CritterSlot, CritterItemSlot::Main);
-            }
-            ProtoItem? proto = ::CritterItem::GetSlotItemProto(chosen);
-            int mode = (useItem == null ? chosen.HandsItemMode : useItem.Mode);
-            if (proto != null) {
-                int use = ::WeaponHelpers::WeaponModeUse(mode);
-                if (proto.HasWeapon) {
-                    if (use == ::WeaponHelpers::USE_RELOAD) {
-                        usePic = "art/intrface/RELOAD.FRM".hstr();
-                    }
-                    else if (use == ::WeaponHelpers::USE_USE) {
-                        usePic = "art/intrface/USEON.FRM".hstr();
-                    }
-                    else if (use < ::WeaponHelpers::MAX_USES) {
-                        usePic = ::WeaponHelpers::WeaponPicUse(proto, use);
-                    }
-                }
-                if (usePic == EMPTY_HSTRING && proto.IsCanUseOnSmth) {
-                    usePic = "art/intrface/USEON.FRM".hstr();
-                }
-                if (usePic == EMPTY_HSTRING && proto.IsCanUse) {
-                    usePic = "art/intrface/uset.frm".hstr();
-                }
-            }
-
-            ::GuiScreensExt::NeedSprite(BackgroundImage).Load(usePic);
+            ::GuiScreensExt::NeedSprite(BackgroundImage).Load(::CritterItem::GetUsePic(item, ::CritterItem::GetItemActiveMode(item)));
             SetPosition(180 - ::GuiScreensExt::NeedSprite(BackgroundImage).Size.width, Pos.y);
         }
     }
@@ -2722,14 +2697,7 @@
         {
             int apCost = 0;
             if (item.Ownership == ItemOwnership::CritterInventory) {
-                apCost = ::Parameters::GetItemUseApCost(Game.GetCritter(item.CritterId), item, item.Mode);
-            }
-            else if (false) {
-                if (HasChosen) {
-                    Critter chosen = Chosen;
-                    auto item2 = ::CritterItem::GetSlotItemProto(chosen);
-                    apCost = ::Parameters::GetItemUseApCost(chosen, item2, chosen.HandsItemMode);
-                }
+                apCost = ::Parameters::GetItemUseApCost(Game.GetCritter(item.CritterId), item, ::CritterItem::GetItemActiveMode(item));
             }
 
             SetActive(apCost > 0);
@@ -2911,14 +2879,7 @@
 {
     {
         {
-            uint8 mode = 0;
-            if (true) {
-                mode = item.Mode;
-            }
-            else if (HasChosen) {
-                mode = Chosen.HandsItemMode;
-            }
-
+            int mode = ::CritterItem::GetItemActiveMode(item);
             ::GuiScreensExt::NeedSprite(BackgroundImage).Hidden = (::WeaponHelpers::WeaponModeAim(mode) == HitLocations::LocationNone);
         }
     }

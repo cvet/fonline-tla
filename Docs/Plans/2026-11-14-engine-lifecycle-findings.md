@@ -446,9 +446,10 @@ session (registration, equipment, world map walk, combat).
 0.3.24, two plans) is merged into this branch. Conflicts were the Engine gitlink
 (kept at the branch's own `ef89118d2e`, so the merge does not pick the older 2026.1.118
 pin; the coordinator moves it) and `VERSION`, which was regenerated with
-`Tools/GenerateVersion` (0.3.25) instead of being hand-edited. `GuiScreens.fos` merged
-without a conflict; the generator was not rerun because neither side changed the
-`.fogui` inputs it derives from in the same hunks.
+`Tools/GenerateVersion` (0.3.24 to 0.3.25) instead of being hand-edited.
+`GuiScreens.fos` merged without a conflict and was checked by running
+`generate_gui_screens.py` and `format_project.py scripts` over the merged tree:
+the result is byte-identical to the merged file.
 
 ## Verification (2026-11-15, static only)
 

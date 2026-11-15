@@ -55,6 +55,15 @@ py -3 Tools/ScriptQuality/validate_scripts.py --fix
 VS Code tasks: **Analyze :: Script Quality** (summary) and
 **Analyze :: Script Quality (Ratchet)**.
 
+`check_engine_scripts.py` runs the Engine-owned `check_script_bindings.py` and
+`check_angelscript_hygiene.py` with this project's scopes (task **Analyze :: Engine
+Script Checks**). `script_bindings_baseline.tsv` accepts the event-handler `?` mismatches
+found when the Engine tool was adopted (the declaration is non-null while a handler
+accepts null); each row only goes down, and fixing a declaration means reviewing every
+handler of that event. `angelscript_hygiene.json` carries the `ColorExt.fos` namespace
+exception. The overlapping rules of `validate_nullable.py` and `validate_scripts.py`
+stay until an owner decides to retire them in favor of the Engine tools.
+
 ## Ratchet workflow
 
 `baseline.json` records per-`(check, file)` violation counts. `--ratchet`

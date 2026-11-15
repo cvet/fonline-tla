@@ -52,7 +52,8 @@ require the explicit configure step shown above.
 | `Format :: Prototypes` / `Format :: Main Config` / `Format :: All` | Format the selected authored inputs. |
 | `Analyze :: Script Quality (Ratchet)` | No new violations against the existing baseline. |
 | `Analyze :: Nullable All` | Script markers, focused validator tests, ABI/handler parity and coverage. |
-| `Analyze :: Native Source Layout` | Engine `check_native_source_layout.py` over `SourceExt` (first include, blank line, EOF); [rules](NativeExtensions.md#binding-and-review). |
+| `Analyze :: Native Source Layout` | Engine `check_native_source_layout.py --comments` over `SourceExt` (first include, blank line, EOF, comment length and final period); [rules](NativeExtensions.md#binding-and-review). |
+| `Analyze :: Engine Script Checks` | `Tools/ScriptQuality/check_engine_scripts.py`: Engine `check_script_bindings.py` (handler/declaration `?` parity against `script_bindings_baseline.tsv`, `ptr<T>`/`nptr<T>` signatures) and `check_angelscript_hygiene.py` (module conventions, `angelscript_hygiene.json`). Needs the Engine pin that ships these tools. |
 | `Analyze :: Item Components` | Item property-component content and migration-rule contract; [checks](../Tools/ContentQuality/README.md#item-property-components). |
 | `Test :: Python Tools` | `py -3 -m pytest Tools -q`. |
 | `Verify :: All` | Sequential full local integration chain below. |

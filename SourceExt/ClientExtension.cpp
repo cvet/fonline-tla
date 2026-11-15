@@ -156,10 +156,8 @@ static auto FormatTags(ptr<ClientEngine> client, string_view text, string_view t
                 string key2;
 
                 if (itag >> pack_name_str >> key1) {
-                    // Two forms: `@text <pack> <key>@` (collection + single key) and the three-token
-                    // `@text <pack> <subkey> <key>@` (collection + two keys) needed for dialog text, which
-                    // the baker stores under [Dialogs, <dialogName>, <key>]. The second key is optional, so
-                    // existing two-token tags keep their exact behaviour.
+                    // Forms: `@text <pack> <key>@` and `@text <pack> <subkey> <key>@` (dialog text stored as [Dialogs, <dialogName>, <key>])
+                    // The second key is optional, so two-token tags keep their behaviour
                     const bool has_key2 = static_cast<bool>(itag >> key2);
                     const auto text_key = has_key2 ? TextPackKey::FromPack(client->Hashes, pack_name_str, key1, key2) : TextPackKey::FromPack(client->Hashes, pack_name_str, key1);
                     const auto& text_pack = client->GetCurLang();

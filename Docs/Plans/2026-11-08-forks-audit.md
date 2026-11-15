@@ -10,9 +10,9 @@ same-named branch in the project (script/content fixes plus the gitlink bump).
 English dialog localization from `T4lus` is prepared separately in
 `content/engl-dialogs-20261108`; it is content for owner review, not a bug fix.
 
-**Requirements:** [Engine instructions](../Engine/AGENTS.md) for native work,
-[BuildAndLaunch](../BuildAndLaunch.md), [Scripts](Scripts.md),
-[ContentWorkflow](ContentWorkflow.md), [Nullability](Nullability.md).
+**Requirements:** [Engine instructions](../../Engine/AGENTS.md) for native work,
+[BuildAndLaunch](../BuildAndLaunch.md), [Scripts](../Scripts.md),
+[ContentWorkflow](../ContentWorkflow.md), [Nullability](../Nullability.md).
 
 ## Branch and repository state
 

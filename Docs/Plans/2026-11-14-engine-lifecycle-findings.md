@@ -28,7 +28,7 @@ the round): `Docs/en/how-to/scripting/lifecycle-and-concurrency.md`,
   parallel. Everything below is static; the runtime routes are listed at the end.
 - The Engine contracts come from the integration Engine checkout (branch
   `lifecycle-docs-and-tooling`, 2026.1.123-dev). The recorded pin of this branch
-  stays at `ef89118d2e`; the coordinator moves the gitlink to `<ENGINE_HEAD>`.
+  moves from `ef89118d2e` to `a540d23f22` in a separate gitlink commit.
 
 ## A1. Removed Engine events
 
@@ -387,9 +387,9 @@ relative-path rule does not apply. `MapSpriteHolder` (Mapper) gains
 | --- | --- |
 | Project repository | `fix/forks-audit-20261108`, HEAD before this round `2646c933` (published); `origin/master` `2fce2ba8` merged, see below |
 | Old Engine (gitlink at HEAD) | `ef89118d2e8777c51d6adec277498821d5833a03`, `2026.1.117-dev`, Engine branch `fix/forks-audit-20261108` (the pin before the owner's commit was `f5a37d9fc9`; the first round of this plan worked against `657bcff4c2`, a commit of the same branch) |
-| New Engine | `<ENGINE_HEAD>` (verified against `d99b9b5193dc012091744eb7bdfc7a71e09fd654`, `2026.1.123-dev`, branch `lifecycle-docs-and-tooling`) |
+| New Engine | `a540d23f22eba22fe838979daafd9eba7b44472d` (`2026.1.129-dev`, branch `lifecycle-docs-and-tooling`; merged with `origin/master` `ee6b3e3031`, `2026.1.128-dev`; the first audit was done against `d99b9b5193`, the later range adds the merged fork-audit branch, persistent time events, `Mapper.SparkEditorSource`, tool fixes and the master steps 2026.1.124 to 2026.1.128) |
 | Common ancestor | `c5101d149a7f0d9b37df34ce59c8c661f9aa8841`, `2026.1.116-dev` |
-| Ancestry | the old pin is NOT an ancestor of the new one (`engine_upgrade_report.py` reports a different history line) |
+| Ancestry | the old pin is an ancestor of the new one: the fork-audit Engine branch `fix/forks-audit-20261108` (`ef89118d2e`) is merged into the integration branch (`git -C Engine merge-base --is-ancestor ef89118d2e 732b6b6a48`); `engine_upgrade_report.py` may still match master's unrelated `2026.1.117-dev` entry by number, apply the master entries 117 through 123 by hand |
 | Incoming range | 141 commits `c5101d149a..d99b9b5193`, 786 files (Source 152, BuildTools 240, Docs 278, Examples 109), master steps 2026.1.117-dev to 2026.1.123-dev |
 | Safety refs | none created; the old pin stays reachable as `origin/fix/forks-audit-20261108` of the Engine repository, and the project commit `2646c933` is published |
 
@@ -415,24 +415,19 @@ project defines none); Python 3.12 floor for BuildTools (CI runners already prov
 it); and `Game.MoveItem` refusing before detaching (no project code repairs an
 orphaned item).
 
-Fork-audit Engine commits that the new pin does NOT contain (21 commits,
-`git log d99b9b5193..ef89118d2e` of the Engine): the SDL_GPU texture-upload ring
-(`0d0c6e6a99`, `27c50e1f58`, `5d7fe24264`, `f5a37d9fc9`, `ef89118d2e`), mouse
-coordinates scaled by the window pixel density (`220cd635d0`), authoritative
-equipment slots applied before the client view refresh (`fa313ab4b0`), database
-recovery log cleanup (`160067e7f5`), the lazy `ConfigBaker` output and written-spelling
-tracking of the baker (`3cdf83e726`, `5409935446`), the compile fix for 3D-off
-builds (`38315f51b6`) and the refreshed examples (`0ad16ad176`), with their tests
-and the version bump (`fe3d6eb676`); the occupied-hex rejection, occluder fade and
-visual item movement were added and dropped again inside the same branch
-(`96dc621b82`, `d8b488df97`, `877f910802`, `4842c17404`, `300b768790`,
-`ddc89d58b3`). The net Engine source effect against the common ancestor is 12 files
-(`Client.cpp`, `Application.cpp`, `Rendering-SDLGpu.cpp`, `DataBase.cpp`, `Baker.cpp`,
-`ConfigBaker.cpp` and tests). A bare move of the gitlink to the integration Engine
-drops these project-visible fixes (equipment display, 2x-display mouse input, SDL_GPU
-uploads, recovery cleanup) unless they are merged into the integration Engine
-first: this is the coordinator's decision before the gitlink moves, and the reason
-this branch's Engine pin is left unchanged here.
+Later master steps checked against the project: `2026.1.124-dev` adds `FO_MAX_CALL_ARGS` (default 16) and makes a native export with more parameters a compile error; the longest native export of the project has 5 parameters (`SourceExt/ServerExtension.cpp`), so nothing changes. `2026.1.125-dev` and `2026.1.126-dev` remove critter lifetime guards from the client inventory-move handler (client action callbacks do not destroy the critter) and restores a Russian anchor; no project change. Scissor and blending guards in the sprite and ImGui paths need a client rebuild only.
+
+`2026.1.127-dev` defers destruction of client entities to the moments between script calls (the project's client scripts never relied on in-call destruction; `Game.Disconnect` now takes effect after the current call). `2026.1.128-dev` makes critter transfers validate the destination before leaving the source and lets property-lock acquisition propagate cancellation: no project change. The project registers no native AiControl command handlers, so the handler-dispatch change does not affect it.
+
+The fork-audit Engine commits (21 commits, `git log c5101d149a..ef89118d2e`: the SDL_GPU
+texture-upload ring, mouse coordinates scaled by the window pixel density,
+authoritative equipment slots applied before the client view refresh, database
+recovery log cleanup, lazy `ConfigBaker` output and baker spelling tracking, the
+3D-off compile fix and the refreshed examples) were merged into the integration
+Engine before the gitlink moved; the occupied-hex rejection, occluder fade and visual
+item movement that the branch added and dropped again stay out. The merge also
+fixed a transfer-buffer leak in `SDLGpu_Texture::UpdateTextureRegion`. A bare move of
+the gitlink therefore keeps every project-visible fix of the old pin.
 
 Verification of the migration is static only (below). Before the pin moves and the
 branch is used: reconfigure, rebuild all roles, force a rebake of metadata and

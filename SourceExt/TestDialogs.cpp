@@ -1,3 +1,5 @@
+#include "Common.h"
+
 #include "catch_amalgamated.hpp"
 
 #include "Dialogs.h"

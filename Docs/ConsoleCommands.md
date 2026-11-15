@@ -25,6 +25,14 @@ sets `AllowEveryone = True` at the owner's request; set it to False to restrict
 mutations to the account list. Successful mutation commands are logged with the
 account name. Client-side changes cannot bypass the server authorization check.
 
+With `AllowEveryone = True` every connected player can run `~additemself` (up to
+1000000 units of any item prototype in their own inventory, 100 of a
+non-stackable one) and `~prop` (set a mutable property on any loaded critter by
+id, including other players), so the setting is a development convenience, not a
+production configuration. `ExecuteConsoleCommand` accepts at most 512 characters.
+The debug RemoteCalls in `Scripts/Test.fos` are gated separately by
+`AiControl.AllowQaCommands` (default `False`), not by this setting.
+
 Implementation: `Scripts/ConsoleCommands.fos`, called by `Messaging.fos`.
 No engine modifications are required. Legacy references: `Access.cpp` command
 names and `Server.cpp` handlers in `C:/work/foclassic/Source`.

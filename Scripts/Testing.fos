@@ -3,6 +3,7 @@
 //  Expect/Fail/Pass, фикстуры (тестовая локация, спавн NPC) с автоочисткой и проверкой утечек.
 // Сьюты (Scripts/Test_*.fos) подписываются на Game.OnTestingInit и регистрируются через RegisterTest.
 // Включается настройкой Testing.Enabled (см. задачу "Launch :: TLA_Tests [windows]"); в обычной игре молчит.
+// Глобальные реестр тестов, текущий контекст и счётчики живут один прогон харнесса в процессе сервера.
 namespace Testing
 {
 
@@ -254,6 +255,46 @@ Critter? SpawnTestNpc(TestContext ctx, Map map, hstring protoId, mpos hex)
     Critter cr = map.AddCritter(protoId, hex, HDIR_Random);
     ctx.TrackedCritters.insertLast(cr.Id);
     return cr;
+}
+
+// Один проходимый гекс рядом с центром карты.
+bool FindMovableHex(Map map, mpos& hex)
+{
+    mpos center = mpos(map.Size.width / 2, map.Size.height / 2);
+
+    for (int radius = 0; radius < 15; radius++) {
+        for (int dx = -radius; dx <= radius; dx++) {
+            for (int dy = -radius; dy <= radius; dy++) {
+                mpos probe = mpos(center.x + dx, center.y + dy);
+                if (probe.x > 0 && probe.y > 0 && int(probe.x) < map.Size.width - 1 && int(probe.y) < map.Size.height - 1 && map.IsHexMovable(probe)) {
+                    hex = probe;
+                    return true;
+                }
+            }
+        }
+    }
+
+    return false;
+}
+
+// NPC на проходимом гексе новой тестовой локации: для тестов, которым не важна конкретная карта.
+// При неудаче сам фиксирует провал теста, вызывающему остаётся вернуться.
+Critter? SpawnTestNpcOnNewLocation(TestContext ctx, hstring locPid, hstring protoId)
+{
+    Location? loc = CreateTestLocation(ctx, locPid);
+    if (loc == null) {
+        Fail(ctx, "Тестовая локация должна создаваться");
+        return null;
+    }
+
+    Map map = loc.GetMapByIndex(0);
+    mpos hex;
+    if (!FindMovableHex(map, hex)) {
+        Fail(ctx, "На карте должен найтись проходимый гекс");
+        return null;
+    }
+
+    return SpawnTestNpc(ctx, map, protoId, hex);
 }
 
 // Уничтожает созданные тестом сущности; возвращает описание утечек (пусто = чисто)

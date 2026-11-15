@@ -1,7 +1,8 @@
 #pragma once
 
-#include "Client.h"
 #include "Common.h"
+
+#include "Client.h"
 
 FO_USING_NAMESPACE();
 

@@ -2,9 +2,14 @@
 // Начисляет дозу с учётом сопротивления радиации, ведёт RadiationLevel/IsRadiated и по достижении порогов запускает
 // таймерное событие Radiation, которое временно снижает статы/HP по таблице стадий, а при смертельной дозе убивает.
 // Только SERVER (#if SERVER); AffectRadiation/DropRadiation вызывают внешние механики урона и окружения.
+// Тайм-евент в базе не хранится: действующая стадия и срок следующей лежат в свойствах криттера и взводятся заново в OnCritterInit.
 
 namespace Radiation
 {
+
+// Действующая стадия лучевой болезни (данные тайм-евента) и абсолютный срок её следующей обработки.
+///@ Property Critter Server int32 RadiationStage Mutable Persistent
+///@ Property Critter Server synctime RadiationDue Mutable Persistent
 
 #if SERVER
 
@@ -24,6 +29,13 @@ int RadiationStageTextId(int stage)
 }
 const int STR_RADIATION_DIE = 12806;
 const int STR_RADIATION_HIGH_DOSE = 12807;
+
+// Радиация восстанавливается при загрузке из базы: тайм-евент не хранится, а штрафы стадии уже записаны в базовые статы.
+[[ModuleInit]]
+void InitRadiation()
+{
+    Game.OnCritterInit.Subscribe(OnCritterInit);
+}
 
 // clang-format off
 
@@ -96,20 +108,22 @@ void AffectRadiation(Critter cr, int value)
         }
     }
 
-    if (isActive) // Событие уже идёт — обновляем стадию под новый уровень
+    if (isActive) // Событие уже идёт — при смене стадии обрабатываем его сразу
     {
-        /*int stage = rates[0];
-        int newStage = GetRadiationStage(levelVal);
-        if (stage != newStage) {
-            cr.ChangeTimeEvent(indexes[0], 0, stage);
-        }*/
-        cr.SetTimeEventData(Radiation, {GetRadiationStage(levelVal)});
+        // В данных события остаётся действующая стадия: обработка снимет её штрафы и наложит штрафы новой.
+        // Запись новой стадии в данные без обработки оставляла штрафы старой стадии в базовых статах навсегда
+        if (GetRadiationStage(levelVal) != cr.RadiationStage) {
+            cr.RepeatTimeEvent(Radiation, ZERO_TIMESPAN);
+            cr.RadiationDue = Game.SynchronizedTime;
+        }
     }
     else // Событие ещё не запущено — стартуем с первой стадии
     {
         int stage1Val = RadiationStageValue(1);
         if (levelVal >= stage1Val) {
             cr.StartTimeEvent(ZERO_TIMESPAN, Radiation, {1});
+            cr.RadiationStage = 1;
+            cr.RadiationDue = Game.SynchronizedTime;
         }
     }
 
@@ -128,12 +142,15 @@ void DropRadiation(Critter cr)
         cr.StopTimeEvent(Radiation);
     }
 
+    cr.RadiationStage = 0;
+    cr.RadiationDue = ZERO_SYNCTIME;
     cr.RadiationLevel = 0;
     if (cr.IsRadiated) {
         cr.IsRadiated = false;
     }
 }
 
+// Repeat делает событие периодическим, поэтому финальная обработка обязана вызвать Stop: иначе снятые эффекты стадии вернутся в статы каждую неделю.
 [[TimeEvent]]
 void Radiation(Critter cr, TimeEventContext event)
 {
@@ -141,6 +158,7 @@ void Radiation(Critter cr, TimeEventContext event)
     if (cr.IsDead()) {
         timespan delayTicks = Time::Minutes(5);
         if (delayTicks != ZERO_TIMESPAN) {
+            cr.RadiationDue = Game.SynchronizedTime + delayTicks;
             event.Repeat(delayTicks);
         }
 
@@ -156,6 +174,7 @@ void Radiation(Critter cr, TimeEventContext event)
         ChangeStage(cr, stage, false);
         ChangeStage(cr, newStage, true);
         cr.SetTimeEventData(Radiation, {newStage});
+        cr.RadiationStage = newStage;
     }
     else // Уровень не изменился — снимаем эффекты стадии
     {
@@ -165,8 +184,27 @@ void Radiation(Critter cr, TimeEventContext event)
 
     timespan delayTicks = GameTime::GameSeconds(duration);
     if (delayTicks != ZERO_TIMESPAN) {
+        cr.RadiationDue = Game.SynchronizedTime + delayTicks;
         event.Repeat(delayTicks);
+        return;
     }
+
+    cr.RadiationStage = 0;
+    cr.RadiationDue = ZERO_SYNCTIME;
+    event.Stop();
+}
+
+// Криттер из базы с ожидающей обработкой радиации взводит её по сохранённому сроку и стадии, не более одного раза.
+[[Event]]
+void OnCritterInit(Critter cr, bool firstTime)
+{
+    if (firstTime || cr.RadiationDue == ZERO_SYNCTIME || cr.CountTimeEvent(Radiation) != 0) {
+        return;
+    }
+
+    // Срок мог пройти, пока криттер был выгружен: тогда обработка срабатывает сразу
+    timespan remaining = cr.RadiationDue - Game.SynchronizedTime;
+    cr.StartTimeEvent(remaining > ZERO_TIMESPAN ? remaining : ZERO_TIMESPAN, Radiation, {cr.RadiationStage});
 }
 
 int GetRadiationStage(int level)

@@ -57,11 +57,13 @@ item, and an item with the `Weapon` component must match the critter model's
 `Weapon.StateAnim` capability; **Armor** only
 accepts an item with the `Armor` component from Inventory and never when
 `IsNoArmor`; custom slots above Armor only accept an item already in that slot.
-These rules run only on the client path: the server `CritterActions::MoveInvItem`
-(RemoteCall `MoveInvItem`) calls `Critter.ChangeItemSlot` without them, so any
-item can reach Armor directly. `ChangeItemSlot` also swaps the previous occupant
-of the target slot into the source slot, so moving worn armor into an occupied
-hand leaves the hand item in Armor.
+The client checks them before sending the move, and the server repeats the check
+for the player's RemoteCall `MoveInvItem` (`CritterActions::IsInvItemMoveAllowed`
+fires the same event; a forged call is rejected with an exception). NPC AI moves
+through `CritterActions::MoveInvItem` directly and skips the rule; covered by
+`critter_actions.inv_item_move_slot_rule`. `ChangeItemSlot` also swaps the
+previous occupant of the target slot into the source slot, so moving worn armor
+into an occupied hand leaves the hand item in Armor.
 `ItemMovement::RefreshArmorAppearance` derives the model and `CurrentArmorPerk`
 from the item actually in Armor (including removal/destruction and replication),
 using `Armor.CrTypeMale/Female` + `aa.frm` and the long-haired male special case.

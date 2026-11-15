@@ -46,7 +46,7 @@ Declared in `Scripts/AiControl.fos` (`///@ Setting Client ...`) with defaults in
 | `AiControl.Host` | `127.0.0.1` | Bind address for the TCP listener |
 | `AiControl.Port` | `43011` | TCP port used by external adapters |
 | `AiControl.PortStride` | `1` | Port spacing for embedded multi-client launches: client index N binds `Port + (N-1)*PortStride` |
-| `AiControl.Token` | empty | Optional shared token required before non-auth bridge calls |
+| `AiControl.Token` | empty | Shared token required before non-auth bridge calls; mandatory for a non-loopback `AiControl.Host` (the bridge start throws without it) |
 | `AiControl.MaxQueuedCommands` | `64` | Back-pressure limit for queued commands |
 | `AiControl.MaxEvents` | `512` | Ring-buffer size for the client event history |
 | `AiControl.ObservationInterval` | `250` | Milliseconds between observation snapshots |

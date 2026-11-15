@@ -58,12 +58,6 @@ FO_SCRIPT_API void Server_Game_RunSayScript(ptr<ServerEngine> server, ptr<Dialog
 FO_SCRIPT_API bool Server_Game_DialogScriptDemand(ptr<ServerEngine> server, ptr<DialogAnswerReq> demand, ptr<Critter> master, nptr<Critter> slave);
 ///@ ExportMethod
 FO_SCRIPT_API int32_t Server_Game_DialogScriptResult(ptr<ServerEngine> server, ptr<DialogAnswerReq> result, ptr<Critter> master, nptr<Critter> slave);
-///@ ExportMethod
-FO_SCRIPT_API bool Server_Critter_IsFree(ptr<Critter> server);
-///@ ExportMethod
-FO_SCRIPT_API bool Server_Critter_IsBusy(ptr<Critter> server);
-///@ ExportMethod
-FO_SCRIPT_API void Server_Critter_Wait(ptr<Critter> server, int32_t ms);
 FO_END_NAMESPACE
 
 void FO_NAMESPACE ServerInitHook(ptr<ServerEngine> server)
@@ -386,21 +380,4 @@ int32_t FO_NAMESPACE Server_Game_DialogScriptResult(ptr<ServerEngine> server, pt
     }
 
     return 0;
-}
-
-bool FO_NAMESPACE Server_Critter_IsFree(ptr<Critter> server)
-{
-    ignore_unused(server);
-    return true;
-}
-
-bool FO_NAMESPACE Server_Critter_IsBusy(ptr<Critter> server)
-{
-    ignore_unused(server);
-    return false;
-}
-
-void FO_NAMESPACE Server_Critter_Wait(ptr<Critter> server, int32_t ms)
-{
-    ignore_unused(server, ms);
 }

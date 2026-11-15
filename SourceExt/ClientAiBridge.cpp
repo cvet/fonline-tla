@@ -1,3 +1,5 @@
+#include "Common.h"
+
 #include "ClientExtension.h"
 
 #if !FO_WEB && !FO_IOS && !FO_ANDROID
@@ -33,6 +35,9 @@ FO_SCRIPT_API ident_t Client_Game_AiControlGetEntityId(ptr<ClientEngine> client,
 FO_END_NAMESPACE
 
 #if !FO_WEB && !FO_IOS && !FO_ANDROID
+
+static constexpr std::chrono::seconds AI_CONTROL_WRITE_TIMEOUT {5};
+static constexpr std::chrono::milliseconds AI_CONTROL_WRITE_POLL_INTERVAL {10};
 
 struct AiControlCommand
 {
@@ -118,6 +123,14 @@ bool FO_NAMESPACE Client_Game_AiControlStart(ptr<ClientEngine> client, bool enab
 
     if (port <= 0 || port > std::numeric_limits<uint16_t>::max()) {
         throw ScriptException("Invalid AiControl port", port);
+    }
+
+    // A routable listener without a token would let any peer on the network drive the client; an unparsable host fails at bind
+    std::error_code address_error {};
+    asio::ip::address bind_address {asio::ip::make_address(host.empty() ? string("127.0.0.1") : string(host), address_error)};
+
+    if (!address_error && !bind_address.is_loopback() && token.empty()) {
+        throw ScriptException("AiControl on a non-loopback host requires a token", host);
     }
 
     data.StopRequested.store(false, std::memory_order_release);
@@ -383,13 +396,13 @@ static auto WriteAiControlResponse(const AiControlClientData& data, asio::ip::tc
 {
     FO_TRACE_ZONE(Network);
 
-    auto deadline {std::chrono::steady_clock::now() + std::chrono::seconds(5)};
+    nanotime deadline {nanotime::now() + timespan {AI_CONTROL_WRITE_TIMEOUT}};
 
     while (!response.empty()) {
         if (data.StopRequested.load(std::memory_order_acquire)) {
             return asio::error::operation_aborted;
         }
-        if (std::chrono::steady_clock::now() >= deadline) {
+        if (nanotime::now() >= deadline) {
             return asio::error::timed_out;
         }
 
@@ -397,7 +410,7 @@ static auto WriteAiControlResponse(const AiControlClientData& data, asio::ip::tc
         size_t written {socket.write_some(asio::buffer(response.data(), response.size()), error)};
 
         if (error == asio::error::would_block || error == asio::error::try_again) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            coarse_sleep(AI_CONTROL_WRITE_POLL_INTERVAL);
             continue;
         }
         if (error) {

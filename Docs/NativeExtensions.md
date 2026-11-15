@@ -82,6 +82,11 @@ or rare expensive paths. Accessors, tiny/per-element helpers, tests and
 The removed stack-entry macros are not needed for stack traces. See
 [profiling policy](../Engine/Docs/en/how-to/quality/profiling.md#placing-zones).
 Native source prose stays English; edited C++ follows the Engine EOF convention.
+Each header includes `Common.h` first and each `.cpp` its same-stem header (or
+`Common.h` when it has none), followed by a blank line. `Analyze :: Native Source
+Layout` and the CI `validate` job check both with the Engine's
+`check_native_source_layout.py --root . --source-dir SourceExt --shallow`;
+`--shallow` keeps the third-party `SourceExt/SHA` sources out.
 
 Build affected targets and execute covered native regressions, then compile/bake
 script consumers and run the changed player path. The project Client target

@@ -1,4 +1,5 @@
 #include "DialogBaker.h"
+
 #include "AngelScriptScripting.h"
 #include "Dialogs.h"
 #include "ScriptSystem.h"

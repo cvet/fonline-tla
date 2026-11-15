@@ -34,7 +34,6 @@ SetOptionValues(
     FO_BUILD_CLIENT ON
     FO_BUILD_SERVER ON
     FO_BUILD_MAPPER ON
-    FO_BUILD_EDITOR ON
     FO_BUILD_ASCOMPILER ON
     FO_BUILD_BAKER ON
     FO_UNIT_TESTS ON
@@ -61,13 +60,13 @@ AddThirdPartyLibraries()
 # SHA — small in-tree hash lib used by CommonExtension.cpp.
 StatusMessage("Add SHA library")
 AddIncludeDirectories("SourceExt/SHA")
-SetValue(FO_SHA_SOURCE
+SetValue(TLA_SHA_SOURCE
     "SourceExt/SHA/sha1.h"
     "SourceExt/SHA/sha1.c"
     "SourceExt/SHA/sha2.h"
     "SourceExt/SHA/sha2.c")
 AddStaticThirdPartyLibrary(SHA
-    SOURCE_LIST FO_SHA_SOURCE
+    SOURCE_LIST TLA_SHA_SOURCE
     APPEND_TO FO_COMMON_LIBS)
 DisableLibWarnings(SHA)
 

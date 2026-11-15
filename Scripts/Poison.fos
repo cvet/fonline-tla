@@ -2,6 +2,7 @@
 // Держит уровень яда (PoisoningLevel), периодически наносит урон и шлёт игроку сообщения
 // через таймерное событие Poison; AffectPoison/DropPoison наносят и снимают отравление
 // (яд, антидот). Работает только на стороне SERVER (#if SERVER).
+// Тайм-евент в базе не хранится: уровень яда персистентен, поэтому OnCritterInit взводит его заново по текущему уровню.
 namespace Poison
 {
 
@@ -16,6 +17,13 @@ const int STR_POISON_GAIN = 12810;
 const int STR_POISON_PROCESS = 12811;
 const int STR_POISON_REDUCE = 12812;
 const int STR_POISON_FREE = 12813;
+
+// Яд восстанавливается при загрузке из базы: следующий тик отсчитывается заново от полной длительности по текущему уровню.
+[[ModuleInit]]
+void InitPoison()
+{
+    Game.OnCritterInit.Subscribe(OnCritterInit);
+}
 
 void AffectPoison(Critter cr, int value)
 {
@@ -125,18 +133,32 @@ void Poison(Critter cr, TimeEventContext event)
         }
     }
 
+    // Repeat делает событие периодическим, поэтому после выздоровления нужен Stop: иначе сообщение об избавлении от яда повторяется бесконечно
     if (cr.PoisoningLevel == 0) {
         Messaging::Info(cr, TextPackKey(TextPackName::Game, "" + (STR_POISON_FREE)));
         if (cr.IsPoisoned) {
             cr.IsPoisoned = false;
         }
 
+        event.Stop();
         return;
     }
 
     timespan delayTicks = GetPoisonDuration(cr);
     if (delayTicks != ZERO_TIMESPAN) {
         event.Repeat(delayTicks);
+        return;
+    }
+
+    event.Stop();
+}
+
+// Тайм-евент отравления не хранится в базе: криттер из базы с ядом взводит его заново, не более одного.
+[[Event]]
+void OnCritterInit(Critter cr, bool firstTime)
+{
+    if (!firstTime && cr.PoisoningLevel > 0 && cr.CountTimeEvent(Poison) == 0) {
+        cr.StartTimeEvent(GetPoisonDuration(cr), Poison);
     }
 }
 

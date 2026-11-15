@@ -2,7 +2,7 @@
 
 Detailed TLA bridge reference. Start at [AiControl](AiControl.md) for configuration,
 launch, MCP tools, screenshots and acceptance. The implementation owners are
-`SourceExt/ClientAiBridge.cpp` and `Scripts/AiControl.fos`; check current dispatch
+the Engine `AiControlListener` (transport) and `Scripts/AiControl.fos` (observation and commands); check current dispatch
 and observation code before extending this table. Privileged QA commands require
 `AiControl.AllowQaCommands=True` on the relevant sides and are test setup, not
 ordinary player acceptance.
@@ -13,7 +13,7 @@ Routes: [wire protocol](#native-bridge-protocol), [observation](#observation-sch
 
 ## Native bridge protocol
 
-`ClientAiBridge.cpp` listens for newline-delimited JSON-RPC-like messages. Request shape:
+The Engine `AiControlListener` listens for newline-delimited JSON-RPC-like messages. Request shape:
 
 ```json
 {"jsonrpc":"2.0","id":1,"method":"observe","params":{}}
@@ -38,6 +38,12 @@ setup failures stop the bridge.
 
 If `AiControl.Token` is non-empty, call `auth` first on every connection. The MCP adapter does this
 automatically when `TLA_AI_TOKEN` / `--token` is supplied.
+
+The standard slots of `act` (`targetId`, `itemId`, `auxId`, `x`, `y`, `screenX`, `screenY`, `intArg`,
+`stringArg`, `append`) are type-checked by the Engine: identifiers are JSON integers or decimal strings,
+coordinates and `intArg` are 32-bit JSON integers (a string such as `"5"` is rejected with `-32602`), and
+`append` is a boolean. Project fields outside the slots (`sceneryProtoId` for `use_skill`) arrive in
+`paramsJson` and are read by `Scripts/AiControl.fos`. Observations and events must be JSON objects.
 
 ## Observation (schemaVersion 1)
 

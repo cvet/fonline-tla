@@ -501,12 +501,12 @@ class BridgeContractSourceTests(unittest.TestCase):
         event_body = source[event_start : event_start + 300]
         self.assertIn('IntMember("context", int(contextParam))', event_body)
 
-    def test_scenery_proto_has_end_to_end_native_transport(self) -> None:
+    def test_scenery_proto_reaches_the_skill_call_through_params_json(self) -> None:
         script_source = (REPO_ROOT / "Scripts" / "AiControl.fos").read_text(encoding="utf-8")
-        native_source = (REPO_ROOT / "SourceExt" / "ClientAiBridge.cpp").read_text(encoding="utf-8")
 
-        self.assertIn('command.SceneryProtoId = GetJsonString(params, "sceneryProtoId")', native_source)
-        self.assertIn("sceneryProtoId = command.SceneryProtoId", native_source)
+        self.assertFalse((REPO_ROOT / "SourceExt" / "ClientAiBridge.cpp").exists())
+        self.assertIn("stringArg, append, paramsJson)", script_source)
+        self.assertIn('ReadParamsString(paramsJson, "sceneryProtoId")', script_source)
         self.assertIn("CurPlayer.ServerCall.UseSkill(skill, skillTargetCr, itemId, sceneryPid", script_source)
 
     def test_barter_observation_serializes_int64_pricing_metadata(self) -> None:

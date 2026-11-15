@@ -39,6 +39,12 @@ SetOptionValues(
     FO_UNIT_TESTS ON
     FO_OUTPUT_PATH ${CMAKE_CURRENT_SOURCE_DIR})
 
+# The Engine AiControl listener (Game.AiControl* script API) is a development tool. Every package
+# defined below is a development or test package, so it stays on by default; a release or store
+# build must configure with -DTLA_AI_CONTROL=OFF so the binary carries no listening-socket code.
+option(TLA_AI_CONTROL "Compile the AiControl listener into development clients" ON)
+SetOption(FO_AI_CONTROL ${TLA_AI_CONTROL})
+
 # ---------------------------------------------------------------------------
 # Stage 1: Init — options, platform detection, compiler/link flags.
 # ---------------------------------------------------------------------------
@@ -70,8 +76,6 @@ AddStaticThirdPartyLibrary(SHA
     APPEND_TO FO_COMMON_LIBS)
 DisableLibWarnings(SHA)
 
-AddIncludeDirectories("Engine/ThirdParty/Asio/include")
-
 # ---------------------------------------------------------------------------
 # Stage 4: EngineSources — register native extensions before the engine
 # aggregates the source lists.
@@ -83,7 +87,6 @@ AddEngineSources(
     COMMON SourceExt/Dialogs.cpp
     SERVER SourceExt/ServerExtension.cpp
     CLIENT SourceExt/ClientExtension.cpp
-    CLIENT SourceExt/ClientAiBridge.cpp
     BAKER SourceExt/BakerExtension.cpp
     BAKER SourceExt/DialogBaker.h
     BAKER SourceExt/DialogBaker.cpp
@@ -114,11 +117,11 @@ DefinePackage(LinuxTest
     BINARY Mapper Linux x64 Raw)
 
 # ---------------------------------------------------------------------------
-# Per-target post-build steps (BakerLib runtime sync) need the targets to
-# already exist, so they go into a Finalize-Pre hook. Without TLA_BakerLib.dll
-# next to each app exe, the engine's PrebakeResources step on startup can
-# only fall back to using the existing baked output (warning popup) — adding
-# the dll here makes the engine auto-bake on launch when sources changed.
+# Per-target post-build steps need the targets to already exist, so they go
+# into a Finalize-Pre hook. The Applications stage copies TLA_BakerLib next to
+# the Client, Server, ServerService and ServerHeadless executables; the Mapper
+# and ASCompiler are not in its list, so the project copies it for them (the
+# engine's PrebakeResources step on startup can then auto-bake on launch).
 # ---------------------------------------------------------------------------
 
 function(_tla_post_target_setup)
@@ -128,10 +131,6 @@ function(_tla_post_target_setup)
         add_dependencies(${FO_DEV_NAME}_Client ${FO_DEV_NAME}_ClientLib)
     endif()
 
-    CopyTargetRuntimeToTarget(${FO_DEV_NAME}_Client ${FO_DEV_NAME}_BakerLib)
-    CopyTargetRuntimeToTarget(${FO_DEV_NAME}_Server ${FO_DEV_NAME}_BakerLib)
-    CopyTargetRuntimeToTarget(${FO_DEV_NAME}_ServerHeadless ${FO_DEV_NAME}_BakerLib)
-    CopyTargetRuntimeToTarget(${FO_DEV_NAME}_ServerService ${FO_DEV_NAME}_BakerLib)
     CopyTargetRuntimeToTarget(${FO_DEV_NAME}_Mapper ${FO_DEV_NAME}_BakerLib)
     CopyTargetRuntimeToTarget(${FO_DEV_NAME}_ASCompiler ${FO_DEV_NAME}_BakerLib)
 endfunction()

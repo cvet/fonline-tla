@@ -3,7 +3,7 @@
 // Скрипт строит структурированные наблюдения (observation), отдаёт события и исполняет
 // семантические команды через обычные пути управления игроком (ChosenActions / ServerCall),
 // поэтому сервер по-прежнему валидирует каждый итоговый запрос. Нативная часть моста
-// (SourceExt/ClientAiBridge.cpp) поднимает локальный TCP-сокет и обменивается JSON-строками;
+// (Engine AiControlListener, сборка с FO_AI_CONTROL) поднимает локальный TCP-сокет и обменивается JSON-строками;
 // Python-адаптер из Tools/AiControlMcp оборачивает это в MCP. См. Docs/AiControl.md.
 //
 // Это первая (foundation) версия порта из родственного проекта: покрыты observation, события и
@@ -129,7 +129,9 @@ void OnStart()
     int stride = Settings.AiControl.PortStride > 0 ? Settings.AiControl.PortStride : 1;
     int port = basePort + (clientIndex > 1 ? (clientIndex - 1) * stride : 0);
 
-    BridgeStarted = Game.AiControlStart(true, host, port, Settings.AiControl.Token, maxQueuedCommands, maxEvents);
+    // Старт бросает исключение, если слушатель не собран (FO_AI_CONTROL), порт занят или нет токена для не-loopback хоста.
+    Game.AiControlStart(host, port, Settings.AiControl.Token, maxQueuedCommands, maxEvents);
+    BridgeStarted = true;
     PushEvent(Object({StringMember("type", "bridge_started"),
                       BoolMember("success", BridgeStarted),
                       StringMember("host", host),
@@ -452,17 +454,28 @@ void ProcessCommands()
         int screenY = 0;
         int intArg = 0;
         string stringArg;
-        string sceneryProtoId;
         bool append = false;
+        string paramsJson;
 
-        if (!Game.AiControlPullCommand(commandSeq, type, targetId, itemId, auxId, hexX, hexY, screenX, screenY, intArg, stringArg, sceneryProtoId, append)) {
+        if (!Game.AiControlPullCommand(commandSeq, type, targetId, itemId, auxId, hexX, hexY, screenX, screenY, intArg, stringArg, append, paramsJson)) {
             return;
         }
 
         string message;
-        bool success = ExecuteCommand(type, targetId, itemId, auxId, hexX, hexY, screenX, screenY, intArg, stringArg, sceneryProtoId, append, message);
+        bool success = ExecuteCommand(type, targetId, itemId, auxId, hexX, hexY, screenX, screenY, intArg, stringArg, append, paramsJson, message);
         Game.AiControlCompleteCommand(commandSeq, success, message);
     }
+}
+
+// Поле команды вне стандартных слотов протокола лежит только в paramsJson; отсутствующее или не строковое поле читается как пустое.
+string ReadParamsString(string paramsJson, string name)
+{
+    string value;
+    Json::JSON params = Json::JSONParse(paramsJson);
+    if (params.isObject() && params.hasProperty(name) && params[name].isString()) {
+        params[name] >> value;
+    }
+    return value;
 }
 
 // Открывает параметризованные окна на реальных клиентских сущностях. Это QA-вход в тот же
@@ -736,7 +749,7 @@ bool TryParseTimerUseMode(string value, int& seconds)
 }
 
 bool ExecuteCommand(string type, ident targetId, ident itemId, ident auxId, int hexX, int hexY, int screenX, int screenY, int intArg, string stringArg,
-                    string sceneryProtoId, bool append, string& message)
+                    bool append, string paramsJson, string& message)
 {
     // Команды, не требующие управляемого персонажа / карты.
     if (type == "clear_actions") {
@@ -1030,7 +1043,7 @@ bool ExecuteCommand(string type, ident targetId, ident itemId, ident auxId, int 
     if (type == "use_skill") {
         // Механика навыков: применить навык (stringArg = имя CritterProperty, напр. SkillFirstAid/
         // SkillLockpick/SkillSteal/SkillRepair/SkillScience/SkillDoctor) ровно к одной цели:
-        // криттеру (targetId), предмету (itemId), сценерию (sceneryProtoId + hexX/hexY) либо,
+        // криттеру (targetId), предмету (itemId), сценерию (sceneryProtoId из paramsJson + hexX/hexY) либо,
         // если цель не задана, к собственному криттеру.
         if (!HasCurPlayer) {
             message = "not_connected";
@@ -1044,6 +1057,7 @@ bool ExecuteCommand(string type, ident targetId, ident itemId, ident auxId, int 
         }
         bool hasCritterTarget = targetId != ZERO_IDENT;
         bool hasItemTarget = itemId != ZERO_IDENT;
+        string sceneryProtoId = ReadParamsString(paramsJson, "sceneryProtoId");
         bool hasSceneryTarget = !sceneryProtoId.isEmpty();
         int targetModes = (hasCritterTarget ? 1 : 0) + (hasItemTarget ? 1 : 0) + (hasSceneryTarget ? 1 : 0);
         if (targetModes > 1 || (!hasSceneryTarget && (hexX != 0 || hexY != 0))) {

@@ -138,10 +138,13 @@ Classification of the 140 `SavedDeferredCall` markers
 Decision (2026-11-15): only the stat-changing player effects (drugs, radiation,
 poison) are fixed. The lost-timer chains above (`NcrSiege`, `SfInvasion`,
 `NcrInvasion`, `NrWriKidnap`, the deferred deletes, respawns and auto-close calls)
-are left as they are: the Engine is adding persistent time events (documented in
-`Engine/Docs/en/how-to/scripting/lifecycle-and-concurrency.md` when it lands), and
-the durable-timer migration of these call sites follows that API instead of a
-per-feature deadline property now. Engine facts that changed meanwhile: snapshot
+are left as they are. The Engine does not persist time events on purpose (a saved
+callback name can stop resolving between launches; see
+`Engine/Docs/en/how-to/scripting/lifecycle-and-concurrency.md`), so a durable timer
+is a project manager: a stored deadline and timer kind, a mapping from each kind to
+a current callback, and a re-arm on the restore path. Building that manager for
+these call sites is an owner follow-up, not part of this round. Engine facts that
+changed meanwhile: snapshot
 time events are restored before the init events, so a `CountTimeEvent(...) == 0`
 guard sees them (this round's Drugs/Radiation/Poison re-arm needs no change), and
 `Entity.EnsureTimeEvent` / `Game.EnsureTimeEvent` replace that guard in one call
@@ -255,8 +258,8 @@ Remaining dead events with subscribers (nothing changed):
 Taken (no owner input needed):
 
 1. Dead events: keep every declaration and subscriber, wire nothing (A5).
-2. Lost-timer chains: leave the code; migrate to the Engine persistent time events
-   when that API ships (A3).
+2. Lost-timer chains: leave the code; the Engine does not persist time events, so
+   a project-owned durable timer manager is the owner follow-up (A3).
 3. Removed dead gameplay stays removed (list below).
 4. `MapGeckCityTraderSkillBarter`: removed with a migration rule (A6).
 5. Chat and radio input cap: added on the client (A4).
@@ -265,7 +268,9 @@ Owner follow-ups:
 
 - Wiring of the 15 dead events in the A5 table, in particular `Item.OnCritterUseSkill`
   (33 subscribers) and `Critter.OnAttacked` (30), each with a playtest.
-- Durable timers for the lost-timer groups of A3 once the Engine API exists.
+- A project-owned durable timer manager for the lost-timer groups of A3 (stored
+  deadline and kind, kind-to-callback mapping, re-arm on restore, explicit drop or
+  migration of a kind when its callback goes away).
 - Reinstating any of the gameplay below needs a project dialog or barter hook that
   fires from the code owning the action (the Engine has no dialog runtime hooks any
   more; a project that wants one declares its own `///@ Event` and fires it).
@@ -387,7 +392,7 @@ relative-path rule does not apply. `MapSpriteHolder` (Mapper) gains
 | --- | --- |
 | Project repository | `fix/forks-audit-20261108`, HEAD before this round `2646c933` (published); `origin/master` `2fce2ba8` merged, see below |
 | Old Engine (gitlink at HEAD) | `ef89118d2e8777c51d6adec277498821d5833a03`, `2026.1.117-dev`, Engine branch `fix/forks-audit-20261108` (the pin before the owner's commit was `f5a37d9fc9`; the first round of this plan worked against `657bcff4c2`, a commit of the same branch) |
-| New Engine | `a540d23f22eba22fe838979daafd9eba7b44472d` (`2026.1.129-dev`, branch `lifecycle-docs-and-tooling`; merged with `origin/master` `ee6b3e3031`, `2026.1.128-dev`; the first audit was done against `d99b9b5193`, the later range adds the merged fork-audit branch, persistent time events, `Mapper.SparkEditorSource`, tool fixes and the master steps 2026.1.124 to 2026.1.128) |
+| New Engine | `a540d23f22eba22fe838979daafd9eba7b44472d` (`2026.1.129-dev`, branch `lifecycle-docs-and-tooling`; merged with `origin/master` `ee6b3e3031`, `2026.1.128-dev`; the first audit was done against `d99b9b5193`, the later range adds the merged fork-audit branch, `Mapper.SparkEditorSource`, tool fixes and the master steps 2026.1.124 to 2026.1.128) |
 | Common ancestor | `c5101d149a7f0d9b37df34ce59c8c661f9aa8841`, `2026.1.116-dev` |
 | Ancestry | the old pin is an ancestor of the new one: the fork-audit Engine branch `fix/forks-audit-20261108` (`ef89118d2e`) is merged into the integration branch (`git -C Engine merge-base --is-ancestor ef89118d2e 732b6b6a48`); `engine_upgrade_report.py` may still match master's unrelated `2026.1.117-dev` entry by number, apply the master entries 117 through 123 by hand |
 | Incoming range | 141 commits `c5101d149a..d99b9b5193`, 786 files (Source 152, BuildTools 240, Docs 278, Examples 109), master steps 2026.1.117-dev to 2026.1.123-dev |

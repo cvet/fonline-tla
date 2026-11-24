@@ -12,7 +12,7 @@ FO_DECLARE_EXCEPTION(DialogBakerException);
 class DialogBaker final : public BaseBaker
 {
 public:
-    static constexpr string_view_nt NAME = "Dialog";
+    static constexpr string_view NAME = "Dialog";
 
     explicit DialogBaker(shared_ptr<BakingContext> ctx);
     DialogBaker(const DialogBaker&) = delete;
@@ -30,7 +30,7 @@ public:
 class DialogTextBaker final : public BaseBaker
 {
 public:
-    static constexpr string_view_nt NAME = "DialogText";
+    static constexpr string_view NAME = "DialogText";
 
     explicit DialogTextBaker(shared_ptr<BakingContext> ctx);
     DialogTextBaker(const DialogTextBaker&) = delete;

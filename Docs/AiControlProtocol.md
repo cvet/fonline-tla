@@ -2,7 +2,7 @@
 
 Detailed TLA bridge reference. Start at [AiControl](AiControl.md) for configuration,
 launch, MCP tools, screenshots and acceptance. The implementation owners are
-`SourceExt/ClientAiBridge.cpp` and `Scripts/AiControl.fos`; check current dispatch
+the Engine `AiControlListener` (transport) and `Scripts/AiControl.fos` (observation and commands); check current dispatch
 and observation code before extending this table. Privileged QA commands require
 `AiControl.AllowQaCommands=True` on the relevant sides and are test setup, not
 ordinary player acceptance.
@@ -13,7 +13,7 @@ Routes: [wire protocol](#native-bridge-protocol), [observation](#observation-sch
 
 ## Native bridge protocol
 
-`ClientAiBridge.cpp` listens for newline-delimited JSON-RPC-like messages. Request shape:
+The Engine `AiControlListener` listens for newline-delimited JSON-RPC-like messages. Request shape:
 
 ```json
 {"jsonrpc":"2.0","id":1,"method":"observe","params":{}}
@@ -29,13 +29,21 @@ Routes: [wire protocol](#native-bridge-protocol), [observation](#observation-sch
 | `act` | command object | Enqueues a command for the next client loop |
 
 The bridge serves one connection at a time; the next adapter is accepted once the current one
-closes. A connection that fails (a read or write error, typically a client that went away before its
-response was written) is closed and reported as `lastError` in `status`, and the bridge keeps
-listening. A request whose handling throws is answered with error `-32603` instead. Only a failure
-to open the listener stops the bridge.
+closes. Response writes stay non-blocking, handle partial output, and have a fixed five-second
+deadline for the whole response. A stalled reader is disconnected on timeout; shutdown cancels
+pending output through the stop flag without waiting for the reader. A connection that fails
+(including a response timeout) is closed and reported as `lastError` in `status`, and the bridge
+keeps listening. A request whose handling throws is answered with error `-32603` instead. Listener
+setup failures stop the bridge.
 
 If `AiControl.Token` is non-empty, call `auth` first on every connection. The MCP adapter does this
 automatically when `TLA_AI_TOKEN` / `--token` is supplied.
+
+The standard slots of `act` (`targetId`, `itemId`, `auxId`, `x`, `y`, `screenX`, `screenY`, `intArg`,
+`stringArg`, `append`) are type-checked by the Engine: identifiers are JSON integers or decimal strings,
+coordinates and `intArg` are 32-bit JSON integers (a string such as `"5"` is rejected with `-32602`), and
+`append` is a boolean. Project fields outside the slots (`sceneryProtoId` for `use_skill`) arrive in
+`paramsJson` and are read by `Scripts/AiControl.fos`. Observations and events must be JSON objects.
 
 ## Observation (schemaVersion 1)
 

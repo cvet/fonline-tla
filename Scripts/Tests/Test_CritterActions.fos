@@ -25,6 +25,31 @@ void OnTestingInit()
     Testing::RegisterTest("critter_actions", "use_item_target_mode", UseItemTargetMode);
     Testing::RegisterTest("critter_actions", "use_item_capability", UseItemCapability);
     Testing::RegisterTest("critter_actions", "use_item_timer", UseItemTimer);
+    Testing::RegisterTest("critter_actions", "inv_item_move_slot_rule", InvItemMoveSlotRule);
+}
+
+// Серверный MoveInvItem-RPC повторяет клиентское правило слота: подделанный вызов не кладёт в слот брони то, что бронёй не является.
+void InvItemMoveSlotRule(Testing::TestContext ctx)
+{
+    Critter? npc = Testing::SpawnTestNpcOnNewLocation(ctx, Content::Location::desert_12, Content::Critter::Brahmin);
+    if (npc == null) {
+        return;
+    }
+
+    Critter cr = npc;
+    Item stimpak = ItemStacks::AddItem(cr, Content::Item::stimpak, 1);
+
+    if (!Testing::Expect(ctx,
+                         !CritterActions::IsInvItemMoveAllowed(cr, stimpak.Id, CritterItemSlot::Armor),
+                         "Предмет без компонента Armor не кладётся в слот брони")) {
+        return;
+    }
+
+    if (!Testing::Expect(ctx, CritterActions::IsInvItemMoveAllowed(cr, stimpak.Id, CritterItemSlot::Inventory), "Перенос в инвентарь разрешён")) {
+        return;
+    }
+
+    Testing::Expect(ctx, !CritterActions::IsInvItemMoveAllowed(cr, ZERO_IDENT, CritterItemSlot::Inventory), "Несуществующий предмет не проходит проверку");
 }
 
 void TransferTypeAllowlist(Testing::TestContext ctx)
@@ -189,10 +214,13 @@ void UseItemTargetMode(Testing::TestContext ctx)
 
 void UseItemCapability(Testing::TestContext ctx)
 {
-    if (!Testing::Expect(ctx, CritterActions::IsUseItemCapabilityAllowed(true, true, false), "Self-use требует IsCanUse")) {
+    if (!Testing::Expect(ctx, CritterActions::IsUseItemCapabilityAllowed(true, true, false), "IsCanUse разрешает self-use")) {
         return;
     }
-    if (!Testing::Expect(ctx, !CritterActions::IsUseItemCapabilityAllowed(true, false, true), "IsCanUseOnSmth не разрешает self-use")) {
+    if (!Testing::Expect(ctx, CritterActions::IsUseItemCapabilityAllowed(true, false, true), "IsCanUseOnSmth разрешает self-use")) {
+        return;
+    }
+    if (!Testing::Expect(ctx, !CritterActions::IsUseItemCapabilityAllowed(true, false, false), "Self-use без capability отклоняется")) {
         return;
     }
     if (!Testing::Expect(ctx, CritterActions::IsUseItemCapabilityAllowed(false, false, true), "Внешняя цель требует IsCanUseOnSmth")) {

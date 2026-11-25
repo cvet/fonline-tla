@@ -1,7 +1,6 @@
 // Hunter — серверная логика цепочки квестов "Лучший охотник Пустоши".
-// Отвечает за: торговцев Хьюза и Лоуренса (выдача дудки/токсина по таймауту,
-// барные ограничения), счётчик убитых крыс, ультразвуковой свисток для ловли
-// крыс, приманку Лоуренса (спавн и наведение крыс на игрока), вертиберд-заглушку.
+// Отвечает за: торговцев Хьюза и Лоуренса (барные ограничения), счётчик убитых крыс,
+// ультразвуковой свисток для ловли крыс, приманку Лоуренса (спавн и наведение крыс на игрока), вертиберд-заглушку.
 // Сторона исполнения: только SERVER.
 // Связи: Trader, LimitedBarter, NpcPlanes, RatGrenade, Explode, Messaging,
 // SendMessage, Entrance, EnemyStack, диалоги Хьюза/Лоуренса.
@@ -88,11 +87,10 @@ void Comment(Critter cr)
     return;
 }
 
-// Инициализация торговца Хьюза: торговля только за наличные, без кражи/лута/дропа, подписки на барт и планы.
+// Инициализация торговца Хьюза: торговля только за наличные, без кражи/лута/дропа, подписки на сообщения и планы.
 void HoughInit(Critter cr, bool firstTime)
 {
     Trader::TraderInit(cr, firstTime);
-    cr.OnBarter.Subscribe(HoughBarter);
     cr.MaxTalkers = 1;
     cr.IsBarterOnlyCash = true;
     cr.IsNoBarter = false;
@@ -127,94 +125,6 @@ EventResult HoughPlaneEnd(Critter cr, int planeId, int reason, Critter someCr, I
     }
 
     return EventResult::StopChain;
-}
-
-// Барт у Хьюза: при выкладке предметов по таймаутам подкидывает игроку дудку и токсины,
-// чтобы продвигать квесты; выданное добивается отложенным уничтожением, если не куплено.
-[[Event]]
-EventResult HoughBarter(Critter cr, Critter barterCr, bool attach, int barterCount)
-{
-    if (attach) {
-        any[] values = {cr.Id};
-        // Подкидываем в обмен различные девайсы по таймаутам.
-        // 1. Дудка
-        Item? flute = cr.GetItem(Content::Item::lourence_flute);
-        Item? fluteBarter = barterCr.GetItem(Content::Item::lourence_flute);
-        if (flute == null && fluteBarter == null) {
-            if (barterCr.ModHoughRatsFluteTimeout < Game.SynchronizedTime && barterCr.ModHoughRatsFluteTimeout != ZERO_SYNCTIME) {
-                barterCr.ModHoughRatsFluteTimeout = Game.SynchronizedTime + Time::Hours(Game.Random(12, 28) - barterCr.Luck);
-                Item newFlute = ItemStacks::AddItem(cr, Content::Item::lourence_flute, 1);
-                values.insertLast(newFlute.Id);
-            }
-        }
-
-        // 2. Cупертоксин
-        if (barterCr.ModLourenceFloater > 0) {
-            if (barterCr.ModLourenceToxinTimeout < Game.SynchronizedTime && barterCr.ModLourenceToxinTimeout != ZERO_SYNCTIME) {
-                if (barterCr.ModLourenceToxinRecipe == 1) {
-                    Item? toxine = cr.GetItem(Content::Item::danton_poison);
-                    Item? toxineBarter = barterCr.GetItem(Content::Item::danton_poison);
-                    if (toxine == null && toxineBarter == null) {
-                        barterCr.ModLourenceToxinTimeout = Game.SynchronizedTime + Time::Hours(Game.Random(12, 28) - barterCr.Luck);
-                        Item newToxine = ItemStacks::AddItem(cr, Content::Item::danton_poison, 5);
-                        values.insertLast(newToxine.Id);
-                    }
-                }
-
-                Item? sToxine = cr.GetItem(Content::Item::supertoxine);
-                Item? sToxineBarter = barterCr.GetItem(Content::Item::supertoxine);
-                if (sToxine == null && sToxineBarter == null) {
-                    barterCr.ModLourenceToxinTimeout = Game.SynchronizedTime + Time::Hours(Math::Clamp(Game.Random(10, 15) - barterCr.Luck, 1, 30));
-                    Item newSToxine = ItemStacks::AddItem(cr, Content::Item::supertoxine, 1);
-                    values.insertLast(newSToxine.Id);
-                }
-            }
-        }
-
-        // После всех проверок
-        if (values.length() > 1) {
-            Game.StartTimeEvent(Time::GameMinutes(10), DestroyItemsHough, values);
-        }
-    }
-    else {
-        Item? money = cr.GetItem(Content::Item::bottle_caps);
-        if (money != null) {
-            Game.DestroyItem(money);
-        }
-    }
-
-    return EventResult::StopChain;
-}
-
-// Удаляет у владельца ранее выданные при барте предметы, если он их так и не забрал (values[0] — id криттера).
-[[TimeEvent]]
-void DestroyItemsHough(any[] values)
-{
-    if (values.length() < 2) {
-        return;
-    }
-
-    Critter? cr = Game.GetCritter(values[0]);
-    if (cr == null) {
-        return;
-    }
-
-    Item[] items = {};
-    for (int i = 1; i < values.length(); i++) {
-        Item? item = Game.GetItem(values[i]);
-        if (item != null) {
-            items.insertLast(item);
-        }
-    }
-
-    Item[] ownedItems = {};
-    for (int i = 0; i < items.length(); i++) {
-        if (items[i].CritterId == cr.Id) {
-            ownedItems.insertLast(items[i]);
-        }
-    }
-
-    Game.DestroyItems(ownedItems);
 }
 
 // Инициализация торговца Лоуренса: только наличные, без кражи/лута/дропа, плюс лимиты на покупку/продажу.

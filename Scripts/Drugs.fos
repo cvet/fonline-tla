@@ -1,6 +1,8 @@
 // Drugs — система препаратов и химии (порт системы Fallout 2).
 // SERVER: применение наркотиков, стадии эффект/ломка/привыкание, тайм-евенты, привязки. CLIENT/SERVER: чтение DrugEffects.
+// Тайм-евенты в базе не хранятся: ожидающие стадии лежат в DrugTimeline с абсолютным сроком и взводятся заново в OnCritterInit.
 // Связи: Poison, Radiation, Messaging, CritterState, Flags, MsgStr, Addictions, Content.
+// Глобальный реестр AllActiveDrugEffects живёт до перезапуска сервера и пересобирается из DrugTimeline при загрузке криттера.
 namespace Drugs
 {
 
@@ -8,6 +10,10 @@ const int STR_DOUGHNUTS_BUFF = 70061;
 
 ///@ Property Critter Common CritterProperty=>int32 DrugEffects Mutable OwnerSync Persistent
 ///@ Property Critter Common uint8 DoughnutsCounter Mutable OwnerSync Persistent Max = 20
+
+// Ожидающие стадии активных препаратов, по DrugTimelineStride чисел на эффект:
+// слот препарата в таблице, следующая стадия, флаги черт и срок стадии (мс Game.SynchronizedTime).
+///@ Property Critter Server int64[] DrugTimeline Mutable Persistent
 
 int PoundsToGrams(int lbs)
 {
@@ -257,7 +263,8 @@ const int[] DrugEffects =
 
 // clang-format on
 
-// Один активный эффект препарата на криттере: текущая стадия, флаги черт и id тайм-евента.
+// Один активный эффект препарата на криттере: следующая стадия, флаги черт, id тайм-евента
+// и срок этой стадии (ZERO_SYNCTIME — стадий больше нет, в DrugTimeline запись не попадает).
 class ActiveDrugEffect
 {
     int Id;
@@ -265,12 +272,21 @@ class ActiveDrugEffect
     int Stage;
     int Flags;
     int TimeEventId;
+    synctime Due;
 }
 
+// Размер записи DrugTimeline: слот препарата, стадия, флаги, срок в миллисекундах.
+const int DrugTimelineStride = 4;
+
 // Рантайм-реестр активных эффектов по криттерам (не персистентный, живёт в памяти сервера).
-dict<ident, ActiveDrugEffect[]>
-    AllActiveDrugEffects = {};
+dict<ident, ActiveDrugEffect[]> AllActiveDrugEffects = {};
 int LastDrugEffectId = 0;
+
+[[ModuleInit]]
+void InitDrugs()
+{
+    Game.OnCritterInit.Subscribe(OnCritterInit);
+}
 
 bool RemoveActiveDrugEffect(Critter cr, int effectId)
 {
@@ -412,6 +428,8 @@ void SetDrug(Critter cr, hstring drugPid)
             RemoveActiveDrugEffect(cr, effects[i].Id);
         }
 
+        SaveDrugTimeline(cr);
+
         if (count > 0 && cr.Addictions[Addictions::Jet]) {
             bool[] addictions = cr.Addictions.clone();
             addictions[Addictions::Jet] = false;
@@ -499,13 +517,24 @@ void SetDrug(Critter cr, hstring drugPid)
     }
 
     effect.TimeEventId = eventId;
+
+    // Первая стадия срабатывает сразу, но срок сохраняем сейчас: перезапуск до неё не должен потерять препарат
+    effect.Due = Game.SynchronizedTime;
+    SaveDrugTimeline(cr);
 }
 
 // Базовое смещение блока препарата в таблице DrugEffects по его прото-id.
-// Порядок drugPids обязан совпадать с раскладкой таблицы (см. комментарии-маркеры в DrugEffects).
+// Порядок DrugTableOrder обязан совпадать с раскладкой таблицы (см. комментарии-маркеры в DrugEffects).
 int GetDrugTableIndex(hstring drugPid)
 {
-    hstring[] drugPids = {
+    int slot = DrugTableOrder().find(drugPid);
+    return slot != -1 ? slot * 30 : 0;
+}
+
+// Препараты в порядке блоков таблицы DrugEffects; слот (индекс/30) сохраняется в DrugTimeline, поэтому новые препараты только в конец.
+hstring[] DrugTableOrder()
+{
+    hstring[] order = {
         Content::Item::stimpak,
         Content::Item::radaway,
         Content::Item::antidote,
@@ -536,8 +565,7 @@ int GetDrugTableIndex(hstring drugPid)
         Content::Item::hypo,
         Content::Item::box_of_doughnuts,
     };
-    int index = drugPids.find(drugPid);
-    return index != -1 ? index * 30 : 0;
+    return order;
 }
 
 // Обработчик одной стадии эффекта: применяет дельты свойств, считает длительность следующей
@@ -717,13 +745,106 @@ void DropDrug(Critter cr, hstring drugPid, int& stage)
 }
 
 // Тайм-евент стадийной обработки препарата: повторяется, пока ProcessDrug возвращает ненулевую задержку.
+// Repeat делает событие периодическим, поэтому последняя стадия обязана вызвать Stop, иначе стадии пойдут по кругу.
 [[TimeEvent]]
 void Drug(Critter cr, TimeEventContext event)
 {
     any rate = event.GetData();
-    timespan delayTicks = ProcessDrug(cr, rate);
+    int effectId = rate;
+    timespan delayTicks = ProcessDrug(cr, effectId);
+    ActiveDrugEffect? effect = GetActiveDrugEffect(cr, effectId);
+
     if (delayTicks != ZERO_TIMESPAN) {
+        if (effect != null) {
+            effect.Due = Game.SynchronizedTime + delayTicks;
+        }
+
+        SaveDrugTimeline(cr);
         event.Repeat(delayTicks);
+        return;
+    }
+
+    if (effect != null) {
+        effect.Due = ZERO_SYNCTIME;
+    }
+
+    SaveDrugTimeline(cr);
+    event.Stop();
+}
+
+// Записывает в DrugTimeline стадии, которые ещё ждут своего срока; завершённые эффекты в базу не попадают.
+void SaveDrugTimeline(Critter cr)
+{
+    int64[] timeline = {};
+    ActiveDrugEffect[]? effects = AllActiveDrugEffects.get(cr.Id, null);
+    if (effects != null) {
+        for (int i = 0; i < effects.length(); i++) {
+            ActiveDrugEffect effect = effects[i];
+            if (effect.Due == ZERO_SYNCTIME) {
+                continue;
+            }
+
+            timeline.insertLast(GetDrugTableIndex(effect.DrugProtoId) / 30);
+            timeline.insertLast(effect.Stage);
+            timeline.insertLast(effect.Flags);
+            timeline.insertLast(effect.Due.milliseconds);
+        }
+    }
+
+    cr.DrugTimeline = timeline;
+}
+
+// Взводит заново тайм-евенты стадий из DrugTimeline: после перезапуска сервера или загрузки криттера их нет, а модификаторы
+// в DrugEffects остались. Гард по CountTimeEvent не даёт завести второй набор, если события уже есть.
+void RestoreDrugTimeline(Critter cr)
+{
+    if (cr.CountTimeEvent(Drug) != 0) {
+        return;
+    }
+
+    // Реестр в памяти мог пережить выгрузку криттера; истина — сохранённый таймлайн
+    AllActiveDrugEffects.remove(cr.Id);
+
+    int64[] timeline = cr.DrugTimeline.clone();
+    hstring[] order = DrugTableOrder();
+    int restored = 0;
+
+    for (int i = 0; i + DrugTimelineStride <= timeline.length(); i += DrugTimelineStride) {
+        int slot = int(timeline[i]);
+        if (slot < 0 || slot >= order.length()) {
+            Game.Log("Drug timeline of critter " + cr.Id.value + " names unknown drug slot " + slot);
+            continue;
+        }
+
+        int id = CreateActiveDrugEffect(cr, order[slot], int(timeline[i + 2]));
+        ActiveDrugEffect? effect = GetActiveDrugEffect(cr, id);
+        if (effect == null) {
+            continue;
+        }
+
+        effect.Stage = int(timeline[i + 1]);
+        effect.Due = synctime(timeline[i + 3], Time::MillisecondsPlace);
+
+        // Срок мог пройти, пока криттер был выгружен: тогда стадия срабатывает сразу
+        timespan remaining = effect.Due - Game.SynchronizedTime;
+        effect.TimeEventId = cr.StartTimeEvent(remaining > ZERO_TIMESPAN ? remaining : ZERO_TIMESPAN, Drug, {id});
+        restored++;
+    }
+
+    // Без ожидающих стадий накопленные модификаторы никто не снимет: они остались от сохранений, где таймлайн не писался
+    if (restored == 0 && !cr.DrugEffects.isEmpty()) {
+        auto drugEffects = cr.DrugEffects.clone();
+        drugEffects.clear();
+        cr.DrugEffects = drugEffects;
+    }
+}
+
+// Криттер из базы восстанавливает отложенные стадии препаратов; новые криттеры препаратов не имеют.
+[[Event]]
+void OnCritterInit(Critter cr, bool firstTime)
+{
+    if (!firstTime) {
+        RestoreDrugTimeline(cr);
     }
 }
 
@@ -757,6 +878,7 @@ void DropDrugEffects(Critter cr)
     // Удаляем запись, а не пишем в неё null: со следующим препаратом get вернул бы null
     // и insertLast разыменовал бы его (падение на первом же приёме после респауна)
     AllActiveDrugEffects.remove(cr.Id);
+    SaveDrugTimeline(cr);
 
     // Снять все привыкания
     bool[] addictions = cr.Addictions.clone();

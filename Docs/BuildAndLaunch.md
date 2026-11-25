@@ -52,6 +52,8 @@ require the explicit configure step shown above.
 | `Format :: Prototypes` / `Format :: Main Config` / `Format :: All` | Format the selected authored inputs. |
 | `Analyze :: Script Quality (Ratchet)` | No new violations against the existing baseline. |
 | `Analyze :: Nullable All` | Script markers, focused validator tests, ABI/handler parity and coverage. |
+| `Analyze :: Native Source Layout` | Engine `check_native_source_layout.py --comments` over `SourceExt` (first include, blank line, EOF, comment length and final period); [rules](NativeExtensions.md#binding-and-review). |
+| `Analyze :: Engine Script Checks` | `Tools/ScriptQuality/check_engine_scripts.py`: Engine `check_script_bindings.py` (handler/declaration `?` parity against `script_bindings_baseline.tsv`, `ptr<T>`/`nptr<T>` signatures) and `check_angelscript_hygiene.py` (module conventions, `angelscript_hygiene.json`). Needs the Engine pin that ships these tools. |
 | `Analyze :: Item Components` | Item property-component content and migration-rule contract; [checks](../Tools/ContentQuality/README.md#item-property-components). |
 | `Test :: Python Tools` | `py -3 -m pytest Tools -q`. |
 | `Verify :: All` | Sequential full local integration chain below. |
@@ -75,7 +77,8 @@ that is distinct from compiler warnings.
 
 `Verify :: All` currently runs bake; builds Server, ServerHeadless, Client, Mapper,
 ASCompiler and UnitTests; executes native tests and the script harness; runs the
-script-quality ratchet, nullable chain, Python tools and `Format :: All`.
+script-quality ratchet, nullable chain, native source layout, Python tools and
+`Format :: All`.
 It does not itself exercise ordinary GUI play or every package/platform, and is a
 VS Code task, not a CMake target. If its final formatting changes source, inspect
 the diff and repeat affected checks on the formatted result.
@@ -161,8 +164,9 @@ redirect them. Save task-specific copies and reports under `Workspace/<task-id>/
 
 `DefinePackage` in CMake owns the combinations: `Dev` contains Windows win64
 server/client/mapper and BakerLib; `Test` profiling client/server; `LinuxTest`
-Linux x64 client/server/mapper. Do not list Editor as a shipped payload merely
-because `FO_BUILD_EDITOR` is enabled.
+Linux x64 client/server/mapper. The Engine has no generic Editor target
+(`FO_BUILD_EDITOR` was removed; `FO_BUILD_MAPPER` builds the Mapper,
+AnimationViewer and ParticleViewer); packages list the Mapper, never an Editor.
 
 The workflow collects baked output and binaries into `TLA-Dev`, `TLA-Test` and
 `TLA-Release` artifacts. Release bundles are `TLA-Dev.zip`, `TLA-Server.zip` and

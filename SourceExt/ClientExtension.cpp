@@ -1,7 +1,6 @@
-#include "Common.h"
+#include "ClientExtension.h"
 
 #include "Client.h"
-#include "ClientExtension.h"
 
 FO_USING_NAMESPACE();
 
@@ -14,12 +13,6 @@ FO_SCRIPT_API int32_t Client_Game_GetEmbeddedClientIndex(ptr<ClientEngine> clien
 FO_SCRIPT_API string Client_Game_FormatTags(ptr<ClientEngine> client, string_view text, string_view textArgs);
 ///@ ExportMethod
 FO_SCRIPT_API string Client_Game_FormatTags(ptr<ClientEngine> client, string_view text, string_view textArgs, nptr<CritterView> talker);
-///@ ExportMethod
-FO_SCRIPT_API bool Client_Critter_IsFree(ptr<CritterView> self);
-///@ ExportMethod
-FO_SCRIPT_API bool Client_Critter_IsBusy(ptr<CritterView> self);
-///@ ExportMethod
-FO_SCRIPT_API void Client_Critter_Wait(ptr<CritterView> self, int32_t ms);
 FO_END_NAMESPACE
 
 static std::atomic<int32_t> ClientEngineSpawnCounter {};
@@ -163,10 +156,8 @@ static auto FormatTags(ptr<ClientEngine> client, string_view text, string_view t
                 string key2;
 
                 if (itag >> pack_name_str >> key1) {
-                    // Two forms: `@text <pack> <key>@` (collection + single key) and the three-token
-                    // `@text <pack> <subkey> <key>@` (collection + two keys) needed for dialog text, which
-                    // the baker stores under [Dialogs, <dialogName>, <key>]. The second key is optional, so
-                    // existing two-token tags keep their exact behaviour.
+                    // Forms: `@text <pack> <key>@` and `@text <pack> <subkey> <key>@` (dialog text stored as [Dialogs, <dialogName>, <key>])
+                    // The second key is optional, so two-token tags keep their behaviour
                     const bool has_key2 = static_cast<bool>(itag >> key2);
                     const auto text_key = has_key2 ? TextPackKey::FromPack(client->Hashes, pack_name_str, key1, key2) : TextPackKey::FromPack(client->Hashes, pack_name_str, key1);
                     const auto& text_pack = client->GetCurLang();
@@ -241,21 +232,4 @@ string FO_NAMESPACE Client_Game_FormatTags(ptr<ClientEngine> client, string_view
 string FO_NAMESPACE Client_Game_FormatTags(ptr<ClientEngine> client, string_view text, string_view textArgs, nptr<CritterView> talker)
 {
     return FormatTags(client, text, textArgs, talker);
-}
-
-bool FO_NAMESPACE Client_Critter_IsFree(ptr<CritterView> self)
-{
-    ignore_unused(self);
-    return true;
-}
-
-bool FO_NAMESPACE Client_Critter_IsBusy(ptr<CritterView> self)
-{
-    ignore_unused(self);
-    return false;
-}
-
-void FO_NAMESPACE Client_Critter_Wait(ptr<CritterView> self, int32_t ms)
-{
-    ignore_unused(self, ms);
 }

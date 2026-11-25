@@ -8,8 +8,8 @@ namespace Parameters
 
 #if SERVER || CLIENT
 
-///@ RemoteCall Server ProcessSkillsUp(any[] params)
-///@ RemoteCall Server ProcessPerkUp(int32 perkIndex)
+///@ RemoteCall Server ProcessSkillsUp(any[] params) MaxBytes 436 MaxCollectionSize 36
+///@ RemoteCall Server ProcessPerkUp(int32 perkIndex) MaxBytes 4
 
 [[ModuleInit]]
 void InitParameters()
@@ -740,13 +740,14 @@ void UseMainItem()
 
     Critter chosen = Chosen;
 
-    if (Gui::Cursor == CursorType::UseWeapon) {
+    if (Gui::Cursor == CursorType::UseWeapon || Gui::Cursor == CursorType::UseItem) {
         Gui::Cursor = CursorType::Default;
+        Gui::CursorData = ZERO_IDENT;
         return;
     }
 
     AbstractItem item = CritterItem::GetActive(chosen);
-    int mode = item.Mode;
+    int mode = CritterItem::GetActiveMode(chosen);
     int use = WeaponHelpers::WeaponModeUse(mode);
     int aim = WeaponHelpers::WeaponModeAim(mode);
     Item? realItem = cast<Item?>(item);
@@ -760,8 +761,8 @@ void UseMainItem()
         Gui::Cursor = CursorType::UseWeapon;
     }
     else if (use == WeaponHelpers::USE_USE && item.IsCanUseOnSmth) {
-        // Self->CurUseItem = 0;
-        // Self->SetCurMode( CUR_USE_ITEM );
+        // Выбираем именно предмет из руки, а не оставшиеся данные курсора предыдущего навыка.
+        Gui::CursorData = itemId;
         Gui::Cursor = CursorType::UseItem;
     }
     else if (use == WeaponHelpers::USE_USE && item.IsCanUse) {
@@ -783,96 +784,87 @@ void SwitchMainItemMode(bool next)
 
     Critter chosen = Chosen;
 
+    // Переключаем режимы рук и оружия; режим обычного предмета выводится из IsCanUse/IsCanUseOnSmth (CritterItem::GetItemActiveMode)
     AbstractItem item = CritterItem::GetActive(chosen);
-    if (item.ProtoId == "default_weapon".hstr() || item.ProtoId == "") {
+    if (cast<Item?>(item) == null) {
         SwitchUnarmedWeapon(chosen, next);
     }
-    else {
-        if (!item.HasWeapon) {
-            if (item.IsCanUseOnSmth && item.IsCanUse) {
-                SetWeaponMode(item, WeaponHelpers::USE_USE);
-            }
-            else {
-                SetWeaponMode(item, WeaponHelpers::USE_NONE);
-            }
-        }
-        else {
-            int use = WeaponHelpers::WeaponModeUse(item.Mode);
-            int aim = WeaponHelpers::WeaponModeAim(item.Mode);
+    else if (item.HasWeapon) {
+        int use = WeaponHelpers::WeaponModeUse(item.Mode);
+        int aim = WeaponHelpers::WeaponModeAim(item.Mode);
 
-            while (true) {
-                if (next) {
-                    if (WeaponHelpers::WeaponAim(item, use) && aim == 0 && !chosen.IsNoAim) // && CritType::IsCanAim( GetCrType() )
-                    {
-                        aim = HitLocations::LocationTorso;
-                        break;
-                    }
-                    else {
-                        use = use + 1;
-                        aim = HitLocations::LocationNone;
-                    }
+        while (true) {
+            if (next) {
+                if (WeaponHelpers::WeaponAim(item, use) && aim == 0 && !chosen.IsNoAim) // && CritType::IsCanAim( GetCrType() )
+                {
+                    aim = HitLocations::LocationTorso;
+                    break;
                 }
                 else {
-                    if (aim > 0 && WeaponHelpers::WeaponAim(item, use)) {
-                        aim = HitLocations::LocationNone;
-                        break;
-                    }
-
-                    if (use == 0) {
-                        use = (item.IsCanUseOnSmth ? WeaponHelpers::USE_USE : WeaponHelpers::USE_RELOAD);
-                    }
-                    else {
-                        use = use - 1;
-                    }
-
-                    if (WeaponHelpers::WeaponAim(item, use) && aim == 0 && !chosen.IsNoAim) // && CritType::IsCanAim( GetCrType() )
-                    {
-                        aim = HitLocations::LocationTorso;
-                        break;
-                    }
+                    use = use + 1;
+                    aim = HitLocations::LocationNone;
                 }
-
-                switch (use) {
-                case WeaponHelpers::USE_PRIMARY:
-                    if (WeaponHelpers::IsWeaponPrimaryAvailable(item)) {
-                        break;
-                    }
-
-                    continue;
-                case WeaponHelpers::USE_SECONDARY:
-                    if (WeaponHelpers::IsWeaponSecondaryAvailable(item)) {
-                        break;
-                    }
-
-                    continue;
-                case WeaponHelpers::USE_THIRD:
-                    if (WeaponHelpers::IsWeaponThirdAvailable(item)) {
-                        break;
-                    }
-
-                    continue;
-                case WeaponHelpers::USE_RELOAD:
-                    if (item.Weapon.MaxAmmoCount > 0) {
-                        break;
-                    }
-
-                    continue;
-                case WeaponHelpers::USE_USE:
-                    if (item.IsCanUseOnSmth) {
-                        break;
-                    }
-
-                    continue;
-                default:
-                    use = WeaponHelpers::USE_PRIMARY;
+            }
+            else {
+                if (aim > 0 && WeaponHelpers::WeaponAim(item, use)) {
+                    aim = HitLocations::LocationNone;
                     break;
                 }
 
+                if (use == 0) {
+                    use = (item.IsCanUseOnSmth ? WeaponHelpers::USE_USE : WeaponHelpers::USE_RELOAD);
+                }
+                else {
+                    use = use - 1;
+                }
+
+                if (WeaponHelpers::WeaponAim(item, use) && aim == 0 && !chosen.IsNoAim) // && CritType::IsCanAim( GetCrType() )
+                {
+                    aim = HitLocations::LocationTorso;
+                    break;
+                }
+            }
+
+            switch (use) {
+            case WeaponHelpers::USE_PRIMARY:
+                if (WeaponHelpers::IsWeaponPrimaryAvailable(item)) {
+                    break;
+                }
+
+                continue;
+            case WeaponHelpers::USE_SECONDARY:
+                if (WeaponHelpers::IsWeaponSecondaryAvailable(item)) {
+                    break;
+                }
+
+                continue;
+            case WeaponHelpers::USE_THIRD:
+                if (WeaponHelpers::IsWeaponThirdAvailable(item)) {
+                    break;
+                }
+
+                continue;
+            case WeaponHelpers::USE_RELOAD:
+                if (item.Weapon.MaxAmmoCount > 0) {
+                    break;
+                }
+
+                continue;
+            case WeaponHelpers::USE_USE:
+                if (item.IsCanUseOnSmth) {
+                    break;
+                }
+
+                continue;
+            default:
+                use = WeaponHelpers::USE_PRIMARY;
                 break;
             }
 
-            SetWeaponMode(item, WeaponHelpers::MakeWeaponMode(use, aim));
+            break;
         }
+
+        SetWeaponMode(item, WeaponHelpers::MakeWeaponMode(use, aim));
     }
 }
 
@@ -1542,7 +1534,7 @@ int GetItemAttackDistance(Critter cr, AbstractItem? item, int mode)
 int GetActiveItemAttackDistance(Critter cr)
 {
     AbstractItem item = CritterItem::GetActive(cr);
-    return GetItemAttackDistance(cr, item, item.Mode);
+    return GetItemAttackDistance(cr, item, CritterItem::GetActiveMode(cr));
 }
 
 int GetCritterAttackDistance(Critter cr, AbstractItem? item, int mode)

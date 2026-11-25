@@ -18,6 +18,7 @@ void InitTestPlayerRegistration()
 void OnTestingInit()
 {
     Testing::RegisterTest("player_registration", "name_reservation_transaction", NameReservationTransaction);
+    Testing::RegisterTest("player_registration", "start_choices_validation", StartChoicesValidation);
 }
 
 void NameReservationTransaction(Testing::TestContext ctx)
@@ -46,6 +47,42 @@ void NameReservationTransaction(Testing::TestContext ctx)
     Testing::Expect(ctx, PlayerRegistration::IsPlayerNameClaimed(TestPlayerName), "Чужой откат не должен удалять подтверждённое имя");
     PlayerRegistration::RemovePlayerNameReservation(TestPlayerName, crId);
     Testing::Expect(ctx, !PlayerRegistration::IsPlayerNameClaimed(TestPlayerName), "Откат владельца должен удалить резерв целиком");
+}
+
+// Сервер повторяет ограничения окна регистрации: подделанный запрос не получает повторных тег-навыков,
+// лишних черт или возраста и пола вне выбора окна.
+void StartChoicesValidation(Testing::TestContext ctx)
+{
+    dict<CritterProperty, int> props = {};
+    props[CritterProperty::TagSkill1] = int(CritterProperty::SkillSmallGuns);
+    props[CritterProperty::TagSkill2] = int(CritterProperty::SkillFirstAid);
+    props[CritterProperty::TagSkill3] = int(CritterProperty::None);
+    props[CritterProperty::Age] = Tla::AgeMin;
+    props[CritterProperty::Gender] = int(GenderType::Female);
+    props[CritterPropertyGroup::Traits[0]] = 1;
+    props[CritterPropertyGroup::Traits[1]] = 1;
+
+    if (!Testing::Expect(ctx, PlayerRegistration::AreStartTagSkillsValid(props), "Два разных тег-навыка допустимы") ||
+        !Testing::Expect(ctx, PlayerRegistration::AreStartTraitsAndLooksValid(props), "Две черты, крайний возраст и женский пол допустимы")) {
+        return;
+    }
+
+    props[CritterProperty::TagSkill3] = int(CritterProperty::SkillSmallGuns);
+    Testing::Expect(ctx, !PlayerRegistration::AreStartTagSkillsValid(props), "Повтор тег-навыка отклоняется");
+    props[CritterProperty::TagSkill3] = int(CritterProperty::StrengthBase);
+    Testing::Expect(ctx, !PlayerRegistration::AreStartTagSkillsValid(props), "Тег не на навыке отклоняется");
+
+    props[CritterPropertyGroup::Traits[2]] = 1;
+    Testing::Expect(ctx, !PlayerRegistration::AreStartTraitsAndLooksValid(props), "Третья черта отклоняется");
+    props[CritterPropertyGroup::Traits[2]] = 0;
+
+    props[CritterProperty::Age] = Tla::AgeMax + 1;
+    Testing::Expect(ctx, !PlayerRegistration::AreStartTraitsAndLooksValid(props), "Возраст вне окна отклоняется");
+    props[CritterProperty::Age] = Tla::AgeMax;
+
+    props[CritterProperty::Gender] = int(GenderType::It);
+    Testing::Expect(ctx, !PlayerRegistration::AreStartTraitsAndLooksValid(props), "Пол вне выбора окна отклоняется");
+    Testing::Pass(ctx);
 }
 
 #endif

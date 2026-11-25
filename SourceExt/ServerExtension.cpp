@@ -2,16 +2,8 @@
 
 #include "Dialogs.h"
 #include "Server.h"
-#include "SpriteResource.h"
 
 FO_USING_NAMESPACE();
-
-struct ServerImage
-{
-    vector<ucolor> Data {};
-    int32_t Width {};
-    int32_t Height {};
-};
 
 struct ServerExtData
 {
@@ -21,7 +13,6 @@ struct ServerExtData
     nptr<const Property> IsAlwaysView {};
     nptr<const Property> IsTrap {};
     nptr<const Property> TrapValue {};
-    vector<unique_nptr<ServerImage>> ServerImages {};
     unique_nptr<DialogManager> DialogMngr {};
 };
 
@@ -45,10 +36,6 @@ FO_SCRIPT_API CritterVisibilityMode CheckCritterVisibilityHook(ptr<const ServerE
 ///@ EngineHook
 FO_SCRIPT_API bool CheckItemVisibilityHook(ptr<const ServerEngine> server, ptr<const Map> map, ptr<const Critter> cr, ptr<const Item> item);
 ///@ ExportMethod
-FO_SCRIPT_API isize32 Server_Game_LoadImage(ptr<ServerEngine> server, uint32_t imageSlot, string_view imageName);
-///@ ExportMethod
-FO_SCRIPT_API ucolor Server_Game_GetImageColor(ptr<ServerEngine> server, uint32_t imageSlot, ipos32 pos);
-///@ ExportMethod
 FO_SCRIPT_API nptr<DialogPack> Server_Game_GetDialogPack(ptr<ServerEngine> server, hstring packId);
 ///@ ExportMethod
 FO_SCRIPT_API string Server_Game_RunSpeechScript(ptr<ServerEngine> server, ptr<DialogSpeech> speech, ptr<Critter> cr, nptr<Critter> talker);
@@ -58,12 +45,6 @@ FO_SCRIPT_API void Server_Game_RunSayScript(ptr<ServerEngine> server, ptr<Dialog
 FO_SCRIPT_API bool Server_Game_DialogScriptDemand(ptr<ServerEngine> server, ptr<DialogAnswerReq> demand, ptr<Critter> master, nptr<Critter> slave);
 ///@ ExportMethod
 FO_SCRIPT_API int32_t Server_Game_DialogScriptResult(ptr<ServerEngine> server, ptr<DialogAnswerReq> result, ptr<Critter> master, nptr<Critter> slave);
-///@ ExportMethod
-FO_SCRIPT_API bool Server_Critter_IsFree(ptr<Critter> server);
-///@ ExportMethod
-FO_SCRIPT_API bool Server_Critter_IsBusy(ptr<Critter> server);
-///@ ExportMethod
-FO_SCRIPT_API void Server_Critter_Wait(ptr<Critter> server, int32_t ms);
 FO_END_NAMESPACE
 
 void FO_NAMESPACE ServerInitHook(ptr<ServerEngine> server)
@@ -152,71 +133,6 @@ bool FO_NAMESPACE CheckItemVisibilityHook(ptr<const ServerEngine> server, ptr<co
 
     look_dist = std::max(look_dist, ext_data.LookMinimum);
     return look_dist >= dist;
-}
-
-isize32 FO_NAMESPACE Server_Game_LoadImage(ptr<ServerEngine> server, uint32_t imageSlot, string_view imageName)
-{
-    if (IsTestingInProgress) {
-        ignore_unused(server, imageSlot, imageName);
-        return {};
-    }
-
-    auto& ext_data = GetServerExtData(server);
-
-    if (imageSlot >= numeric_cast<uint32_t>(ext_data.ServerImages.size())) {
-        ext_data.ServerImages.resize(imageSlot + 1);
-    }
-    if (ext_data.ServerImages[imageSlot]) {
-        ext_data.ServerImages[imageSlot] = nullptr;
-    }
-
-    if (imageName.empty()) {
-        return {};
-    }
-
-    const auto file = server->Resources.ReadFile(imageName);
-
-    if (!file) {
-        throw ScriptException("File not found", imageName);
-    }
-
-    // Читаем спрайт через движковый парсер: движок сменил бинарный формат
-    // (SPRITE_RESOURCE_MAGIC/VERSION, помимо старого одиночного байта 42), поэтому ручной разбор
-    // больше не подходит. Берём первый кадр первого направления и разворачиваем его в логическое изображение.
-    const auto file_data = file.GetData();
-    auto resource = ReadSpriteResource(file_data);
-
-    FO_VERIFY_AND_THROW(!resource.Directions.empty(), "Image contains no directions", imageName);
-    FO_VERIFY_AND_THROW(!resource.Directions.front().Frames.empty(), "Image contains no frames", imageName);
-
-    auto image = ExtractSpriteResourceFrameImage(std::move(resource.Directions.front().Frames.front()));
-
-    auto simg = safe_alloc::make_unique<ServerImage>();
-    simg->Width = image.Size.width;
-    simg->Height = image.Size.height;
-    simg->Data = std::move(image.Pixels);
-
-    ext_data.ServerImages[imageSlot] = std::move(simg);
-
-    return image.Size;
-}
-
-ucolor FO_NAMESPACE Server_Game_GetImageColor(ptr<ServerEngine> server, uint32_t imageSlot, ipos32 pos)
-{
-    auto& ext_data = GetServerExtData(server);
-
-    if (imageSlot >= numeric_cast<uint32_t>(ext_data.ServerImages.size()) || !ext_data.ServerImages[imageSlot]) {
-        throw ScriptException("Image not loaded");
-    }
-
-    auto& simg = ext_data.ServerImages[imageSlot];
-
-    if (pos.x < 0 || pos.y < 0 || pos.x >= simg->Width || pos.y >= simg->Height) {
-        throw ScriptException("Invalid coords arg");
-    }
-
-    const auto result = simg->Data[pos.y * simg->Width + pos.x];
-    return result;
 }
 
 nptr<DialogPack> FO_NAMESPACE Server_Game_GetDialogPack(ptr<ServerEngine> server, hstring packId)
@@ -386,21 +302,4 @@ int32_t FO_NAMESPACE Server_Game_DialogScriptResult(ptr<ServerEngine> server, pt
     }
 
     return 0;
-}
-
-bool FO_NAMESPACE Server_Critter_IsFree(ptr<Critter> server)
-{
-    ignore_unused(server);
-    return true;
-}
-
-bool FO_NAMESPACE Server_Critter_IsBusy(ptr<Critter> server)
-{
-    ignore_unused(server);
-    return false;
-}
-
-void FO_NAMESPACE Server_Critter_Wait(ptr<Critter> server, int32_t ms)
-{
-    ignore_unused(server, ms);
 }

@@ -8,12 +8,16 @@ namespace PlayerRegistration
 
 ///@ Property Game Common CritterProperty[] RegProperties Mutable OwnerSync Persistent
 ///@ Property Critter Common bool IsGenerated Mutable OwnerSync Persistent
-///@ RemoteCall Server LoginExistingPlayer(string name)
-///@ RemoteCall Server RegisterNewPlayer(string name, CritterProperty=>int32 props)
+///@ RemoteCall Server LoginExistingPlayer(string name) MaxBytes 52
+///@ RemoteCall Server RegisterNewPlayer(string name, CritterProperty=>int32 props) MaxBytes 248 MaxCollectionSize 32
 
 #if SERVER
 
 const hstring PlayerNamesCollectionName = "PlayerNames".hstr();
+
+// Не больше двух черт при создании персонажа, как в окне регистрации
+const int MaxStartTraits = 2;
+
 ident ResolveStoredMainCritterId(ident playerId)
 {
     dict<string, string> playerData = Game.DbGetPlayerData(playerId);
@@ -375,18 +379,59 @@ bool ValidateRegistrationProps(Player player, string name, dict<CritterProperty,
         return false;
     }
 
-    if ((props.get(CritterProperty::TagSkill1, CritterProperty::None) != CritterProperty::None &&
-         CritterPropertyGroup::Skills.find(CritterProperty(props.get(CritterProperty::TagSkill1, CritterProperty::None))) == -1) ||
-        (props.get(CritterProperty::TagSkill2, CritterProperty::None) != CritterProperty::None &&
-         CritterPropertyGroup::Skills.find(CritterProperty(props.get(CritterProperty::TagSkill2, CritterProperty::None))) == -1) ||
-        (props.get(CritterProperty::TagSkill3, CritterProperty::None) != CritterProperty::None &&
-         CritterPropertyGroup::Skills.find(CritterProperty(props.get(CritterProperty::TagSkill3, CritterProperty::None))) == -1)) {
+    if (!AreStartTagSkillsValid(props)) {
         Messaging::Info(player, TextPackKey(TextPackName::Game, "" + (MsgStr::StrNetWrongTagskill)));
         Game.Log("Player registration rejected due to invalid tag skills");
         return false;
     }
 
+    if (!AreStartTraitsAndLooksValid(props)) {
+        Messaging::Info(player, TextPackKey(TextPackName::Game, "" + (MsgStr::STR_NET_WRONG_DATA)));
+        Game.Log("Player registration rejected due to invalid traits, age or gender");
+        return false;
+    }
+
     return true;
+}
+
+// Тег-навыки: каждый выбранный — навык, без повторов и не больше Player.StartTagSkillPoints.
+// Окно регистрации этого не допускает, но повтор в подделанном запросе дал бы навыку +20 за каждую копию
+bool AreStartTagSkillsValid(dict<CritterProperty, int> props)
+{
+    CritterProperty[] tagProps = {CritterProperty::TagSkill1, CritterProperty::TagSkill2, CritterProperty::TagSkill3};
+    CritterProperty[] tagged = {};
+
+    for (int i = 0; i < tagProps.length(); i++) {
+        CritterProperty skill = CritterProperty(props.get(tagProps[i], int(CritterProperty::None)));
+        if (skill == CritterProperty::None) {
+            continue;
+        }
+
+        if (CritterPropertyGroup::Skills.find(skill) == -1 || tagged.find(skill) != -1) {
+            return false;
+        }
+
+        tagged.insertLast(skill);
+    }
+
+    return tagged.length() <= Settings.Player.StartTagSkillPoints;
+}
+
+// Черты, возраст и пол в тех же пределах, что даёт окно регистрации
+bool AreStartTraitsAndLooksValid(dict<CritterProperty, int> props)
+{
+    int traits = 0;
+    for (int i = 0; i < CritterPropertyGroup::Traits.length(); i++) {
+        if (props.get(CritterPropertyGroup::Traits[i], 0) != 0) {
+            traits++;
+        }
+    }
+
+    int age = props.get(CritterProperty::Age, 0);
+    int gender = props.get(CritterProperty::Gender, -1);
+    bool isGenderValid = gender == int(GenderType::Male) || gender == int(GenderType::Female);
+
+    return traits <= MaxStartTraits && age >= Tla::AgeMin && age <= Tla::AgeMax && isGenderValid;
 }
 
 [[ServerRemoteCall]]

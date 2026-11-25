@@ -25,8 +25,8 @@ total motion from the second part's first delta on both axes. Client QA in
 `Scripts/Tests/Test_FalloutAnimation.fos` checks actual assets, directions and joins.
 
 `Animation.SelectPlayback` chooses idle, movement, knockout and death playback.
-`OnCritterAnimationInit` receives the neutral context and authoritative movement speed;
-scripts return state/action, flags, normalized time and playback speed. `Movement`
+`OnCritterAnimationPlaybackInit` receives the neutral context and authoritative movement speed;
+scripts return state/action, flags, normalized position and playback speed. `Movement`
 enables alignment with world movement for any action; `Freeze` takes precedence and
 selects an inclusive normalized pose. TLA owns animation identifiers and the configured
 preview pair in `TLA.fomain`.

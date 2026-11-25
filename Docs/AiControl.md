@@ -25,9 +25,12 @@ Two layers:
 
 - `Scripts/AiControl.fos` (CLIENT) builds structured observation snapshots, records client-side events,
   and executes semantic commands through normal player-control paths (`ChosenActions`, `CurPlayer.ServerCall`).
-- `SourceExt/ClientAiBridge.cpp` (CLIENT) exposes a localhost TCP line protocol (one JSON object per line).
-  It is enabled per client and stores its state in `ClientExtData` (`SourceExt/ClientExtension.h`), which is
-  allocated in the `ClientInitHook` engine hook.
+- The Engine `AiControlListener` (native, compiled in by the CMake option `TLA_AI_CONTROL`, which sets
+  `FO_AI_CONTROL`) exposes a localhost TCP line protocol (one JSON object per line) through the
+  `Game.AiControl*` script API. The project has no native listener code. `TLA_AI_CONTROL` is `ON` by default
+  because every package in `CMakeLists.txt` is a development or test package; a release or store build
+  configures with `-DTLA_AI_CONTROL=OFF`, which leaves no listening-socket code in the binary and makes
+  `Game.AiControlStart` throw. Engine contract: `Engine/Docs/en/how-to/project/native-ai-bridge.md`.
 
 `Tools/AiControlMcp/ai_control_mcp.py` wraps that TCP protocol as a stdio MCP server for model hosts. The
 embedded-client index used for multi-client port spacing comes from `Game.GetEmbeddedClientIndex()`
@@ -46,7 +49,7 @@ Declared in `Scripts/AiControl.fos` (`///@ Setting Client ...`) with defaults in
 | `AiControl.Host` | `127.0.0.1` | Bind address for the TCP listener |
 | `AiControl.Port` | `43011` | TCP port used by external adapters |
 | `AiControl.PortStride` | `1` | Port spacing for embedded multi-client launches: client index N binds `Port + (N-1)*PortStride` |
-| `AiControl.Token` | empty | Optional shared token required before non-auth bridge calls |
+| `AiControl.Token` | empty | Shared token required before non-auth bridge calls; mandatory for a non-loopback `AiControl.Host` (`Game.AiControlStart` throws without it) |
 | `AiControl.MaxQueuedCommands` | `64` | Back-pressure limit for queued commands |
 | `AiControl.MaxEvents` | `512` | Ring-buffer size for the client event history |
 | `AiControl.ObservationInterval` | `250` | Milliseconds between observation snapshots |
@@ -199,7 +202,7 @@ desktop compositor, or a renderer diagnostic); it is Windows-only and is not the
 
 ## Running it locally
 
-Build once: `Build :: TLA_Client` (compiles the native bridge) and `Bake Resources`.
+Build once: `Build :: TLA_Client` (compiles the Engine listener when `TLA_AI_CONTROL` is `ON`) and `Bake Resources`.
 
 ### Recommended: persistent server + windowed client
 
@@ -231,8 +234,8 @@ for a single scripted run, not long iterative sessions. Use the persistent-serve
 
 ## Validation
 
-1. `Build :: TLA_Client` — native bridge compiles/links (rebuilds the generated script API for the new
-   `///@ ExportMethod` / `///@ EngineHook`). For headless smoke also build `TLA_ServerHeadless`.
+1. `Build :: TLA_Client` — the client links with the Engine listener (rebuilds the generated script API after
+   an Engine update or a new `///@ ExportMethod` / `///@ EngineHook`). For headless smoke also build `TLA_ServerHeadless`.
 2. `Compile AngelScript` (or `Bake Resources`) — `Scripts/AiControl.fos` sees the generated client exports.
 3. `python Tools/AiControlMcp/smoke_ai_control_mcp.py --static-only` — schema/tool/resource/prompt discovery.
 4. `python -m unittest Tools/AiControlMcp/test_ai_control_screenshot.py` — path confinement, raw TGA validation,

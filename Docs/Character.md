@@ -129,8 +129,26 @@ withdrawal/addiction stages update the `Addictions` array. Separate legacy
 flags such as `IsJetAddicted` still have dialog consumers, but this drug
 pipeline does not update them. Jet's exit stage requires the Jet Antidote.
 
+Time events are not stored in the database, so the pending stages live in the
+persistent `Critter.DrugTimeline` (drug table slot, next stage, trait flags and
+an absolute `Game.SynchronizedTime` deadline per effect). `Game.OnCritterInit`
+with `firstTime == false` re-arms them behind a `CountTimeEvent(Drug) == 0`
+guard, and the last stage ends the event with `TimeEventContext.Stop`. Radiation
+(`RadiationStage`, `RadiationDue`) and poison (re-armed from `PoisoningLevel`)
+follow the same pattern. Append new drugs only at the end of `DrugTableOrder`,
+because the slot is persisted. A critter loaded with drug modifiers but no saved
+timeline (older saves) has the modifiers cleared, because no stage would ever
+remove them. A dose that changes the radiation stage fires the radiation event at
+once with the old stage still in its data, so the old penalties come off before
+the new ones apply; penalties already left in base stats by a timer lost in an
+older save cannot be recognized and stay.
+
 ## Verification
 
+`Scripts/Tests/Test_Drugs.fos` covers the drug timeline: a pending stage is saved,
+a simulated restart re-arms exactly one timer, and modifiers without a timeline are
+cleared. A real restart against a persistent database (not the default Memory DB)
+is still needed to prove the restore path end to end.
 `Scripts/Tests/Test_Parameters.fos` currently covers `timed_item_contract`,
 not getters or generation parity. A formula change needs focused coverage
 on **both sides** (the

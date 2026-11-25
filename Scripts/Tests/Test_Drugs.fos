@@ -1,0 +1,101 @@
+// Test_Drugs — тесты сохранения таймлайна препаратов: тайм-евенты стадий в базу не пишутся,
+// поэтому после перезапуска их обязан взвести заново RestoreDrugTimeline по DrugTimeline.
+namespace Test_Drugs
+{
+
+#if SERVER
+
+[[ModuleInit]]
+void InitTestDrugs()
+{
+    Game.OnTestingInit.Subscribe(OnTestingInit);
+}
+
+[[Event]]
+void OnTestingInit()
+{
+    Testing::RegisterTest("drugs", "timeline_saved_for_pending_stage", TimelineSavedForPendingStage);
+    Testing::RegisterTest("drugs", "restore_rearms_from_timeline", RestoreRearmsFromTimeline);
+    Testing::RegisterTest("drugs", "restore_clears_leaked_modifiers", RestoreClearsLeakedModifiers);
+}
+
+// Только что принятый препарат ждёт первую стадию: она уже записана в DrugTimeline как запись
+// (слот препарата, стадия 0, флаги, срок), чтобы перезапуск до первого срабатывания его не потерял.
+void TimelineSavedForPendingStage(Testing::TestContext ctx)
+{
+    Critter? npc = Testing::SpawnTestNpcOnNewLocation(ctx, Content::Location::desert_12, Content::Critter::Brahmin);
+    if (npc == null) {
+        return;
+    }
+
+    Critter cr = npc;
+    Drugs::SetDrug(cr, Content::Item::mentats);
+
+    int64[] timeline = cr.DrugTimeline.clone();
+    if (!Testing::ExpectEq(ctx, timeline.length(), Drugs::DrugTimelineStride, "Один препарат — одна запись таймлайна")) {
+        return;
+    }
+
+    Testing::ExpectEq(ctx, int(timeline[0]) * 30, Drugs::GetDrugTableIndex(Content::Item::mentats), "Запись ссылается на блок таблицы препарата");
+    Testing::ExpectEq(ctx, int(timeline[1]), 0, "Первая стадия ещё не обработана");
+    Testing::ExpectEq(ctx, cr.CountTimeEvent(Drugs::Drug), 1, "Для стадии взведён один тайм-евент");
+    Testing::Pass(ctx);
+}
+
+// Имитация перезапуска: тайм-евенты и реестр в памяти пропали, таймлайн остался в свойстве.
+// Восстановление взводит ровно один тайм-евент на запись, а повторный вызов ничего не удваивает.
+void RestoreRearmsFromTimeline(Testing::TestContext ctx)
+{
+    Critter? npc = Testing::SpawnTestNpcOnNewLocation(ctx, Content::Location::desert_12, Content::Critter::Brahmin);
+    if (npc == null) {
+        return;
+    }
+
+    Critter cr = npc;
+    Drugs::SetDrug(cr, Content::Item::mentats);
+    cr.StopTimeEvent(Drugs::Drug);
+    Drugs::AllActiveDrugEffects.remove(cr.Id);
+
+    if (!Testing::ExpectEq(ctx, cr.CountTimeEvent(Drugs::Drug), 0, "После имитации перезапуска тайм-евентов нет")) {
+        return;
+    }
+
+    Drugs::RestoreDrugTimeline(cr);
+    if (!Testing::ExpectEq(ctx, cr.CountTimeEvent(Drugs::Drug), 1, "Восстановление взвело тайм-евент стадии")) {
+        return;
+    }
+
+    Drugs::ActiveDrugEffect[] effects = {};
+    if (!Testing::ExpectEq(ctx, Drugs::GetActiveDrugEffects(cr, Content::Item::mentats, effects), 1, "Реестр эффектов восстановлен")) {
+        return;
+    }
+
+    Testing::ExpectEq(ctx, effects[0].Stage, 0, "Стадия восстановлена из таймлайна");
+
+    Drugs::RestoreDrugTimeline(cr);
+    Testing::ExpectEq(ctx, cr.CountTimeEvent(Drugs::Drug), 1, "Повторное восстановление не заводит второй тайм-евент");
+    Testing::Pass(ctx);
+}
+
+// Модификаторы без ожидающих стадий остались от сохранений, где таймлайн не писался: снять их некому, и они сбрасываются.
+void RestoreClearsLeakedModifiers(Testing::TestContext ctx)
+{
+    Critter? npc = Testing::SpawnTestNpcOnNewLocation(ctx, Content::Location::desert_12, Content::Critter::Brahmin);
+    if (npc == null) {
+        return;
+    }
+
+    Critter cr = npc;
+    Drugs::SetDrugEffect(cr, CritterProperty::StrengthBase, 3);
+    if (!Testing::ExpectEq(ctx, Drugs::GetDrugEffect(cr, CritterProperty::StrengthBase), 3, "Модификатор записан")) {
+        return;
+    }
+
+    Drugs::RestoreDrugTimeline(cr);
+    Testing::ExpectEq(ctx, Drugs::GetDrugEffect(cr, CritterProperty::StrengthBase), 0, "Модификатор без таймлайна сброшен");
+    Testing::Pass(ctx);
+}
+
+#endif
+
+}

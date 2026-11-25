@@ -12,11 +12,11 @@ FO_DECLARE_EXCEPTION(DialogParseException);
 FO_DECLARE_EXCEPTION(DialogException);
 
 // Preserve the legacy generic-value spelling used by authored dialog script arguments while storing them
-// as textual any_t values. A leading '@' denotes a hashed string; Content::* tokens denote their final id.
+// as textual any_t values. A leading '@' denotes a hashed string; Content::* tokens denote their final id
 [[nodiscard]] auto NormalizeDialogScriptValue(string value) -> any_t;
 
 // Property comparisons operate on integer storage. Preserve the legacy ResolveGenericValue spelling for
-// authored boolean literals so any equality compares "0"/"1" rather than "false"/"true" text.
+// authored boolean literals so any equality compares "0"/"1" rather than "false"/"true" text
 [[nodiscard]] auto NormalizeDialogPropertyValue(string value) -> any_t;
 
 // Types

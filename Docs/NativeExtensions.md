@@ -10,9 +10,8 @@ TLA keeps project policy here; a Markdown link is not automatic instruction load
 | Source | Responsibility |
 | --- | --- |
 | `CommonExtension.cpp` | Shared SHA helpers; bundled `SHA/` is a static library. |
-| `ServerExtension.cpp` | Server image checks, dialog plumbing, visibility hooks and busy/free stubs. |
-| `ClientExtension.cpp` / `.h` | `Game.FormatTags`, busy/free stubs, `ClientInitHook`, `ClientExtData` and embedded-client index. |
-| `ClientAiBridge.cpp` | Localhost TCP automation protocol paired with `Scripts/AiControl.fos` and `Tools/AiControlMcp/`; [AiControl](AiControl.md). |
+| `ServerExtension.cpp` | Dialog plumbing and visibility hooks. |
+| `ClientExtension.cpp` / `.h` | `Game.FormatTags`, `ClientInitHook`, `ClientExtData` and embedded-client index. |
 | `BakerExtension.cpp`, `DialogBaker.*` | Project dialog baking and baker setup. |
 | `Dialogs.*` | Dialog parsing/runtime representation shared by game roles. |
 | `TestDialogs.cpp` | Native dialog regressions in the project UnitTests target. |
@@ -56,8 +55,8 @@ active in release builds; actions must stay visible outside the checks.
 
 `///@ EngineHook` names/signatures come from Engine codegen. `///@ ExportMethod`
 binds methods: the receiver is the first argument, and `Server_`/`Client_`/`Common_`
-mapping determines the script name (for example `Server_Game_LoadImage` → server
-`Game.LoadImage`). Use `FO_SCRIPT_API` on exported hooks/methods and exact current
+mapping determines the script name (for example `Server_Game_GetDialogPack` → server
+`Game.GetDialogPack`). Use `FO_SCRIPT_API` on exported hooks/methods and exact current
 handle types. Script-facing borrows use `ptr<T>`/`nptr<T>`, not a bare entity `T*`;
 ordinary internal or foreign-ABI pointers have their owning contract. Project
 validation: [Nullability](Nullability.md).
@@ -82,6 +81,11 @@ or rare expensive paths. Accessors, tiny/per-element helpers, tests and
 The removed stack-entry macros are not needed for stack traces. See
 [profiling policy](../Engine/Docs/en/how-to/quality/profiling.md#placing-zones).
 Native source prose stays English; edited C++ follows the Engine EOF convention.
+Each header includes `Common.h` first and each `.cpp` its same-stem header (or
+`Common.h` when it has none), followed by a blank line. `Analyze :: Native Source
+Layout` and the CI `validate` job check both with the Engine's
+`check_native_source_layout.py --root . --source-dir SourceExt --shallow`;
+`--shallow` keeps the third-party `SourceExt/SHA` sources out.
 
 Build affected targets and execute covered native regressions, then compile/bake
 script consumers and run the changed player path. The project Client target

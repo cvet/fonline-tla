@@ -1,4 +1,5 @@
 #include "Dialogs.h"
+
 #include "Application.h"
 #include "ConfigFile.h"
 #include "FileSystem.h"

@@ -1,16 +1,14 @@
 #pragma once
 
-#include "Client.h"
 #include "Common.h"
 
-FO_USING_NAMESPACE();
+#include "Client.h"
 
-struct AiControlClientData;
+FO_USING_NAMESPACE();
 
 struct ClientExtData
 {
     int32_t EmbeddedClientIndex {};
-    unique_del_nptr<AiControlClientData> AiControl {};
 };
 
 inline auto GetClientExtData(ptr<ClientEngine> client) -> ClientExtData&
